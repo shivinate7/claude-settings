@@ -194,11 +194,17 @@ NONE_DIRECTION_RULE = (
 # A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
 # NONE_DIRECTION_RULE, only for such a call. The mark's key comes from question_form, the one home, so the text is built
 # where it is used: the light-import exit paths never import question_form for it.
+# The widening sentences below are the one home for both model judges: hooks/reply_judge.py imports them. None holds a `%`.
+WIDENING_ACCEPTS_CLAUSE = "it accepts a second form, an allow-list entry or an exception for that repo's sake."
+WIDENING_SAME_CHANGE_SENTENCE = "A change made the same way for every repo, for every repo's sake, is not widening."
+WIDENING_UNMARKED_SENTENCE = ("An unmarked option that adds to a shared allow-list or a second accepted form counts as "
+                              "widening unless it says it applies to every repo.")
 WIDENING_TEMPLATE = (
-    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
-    "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
-    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
-    "option passes this rule. When unsure, allow."
+    "This call sets options. Widening is when the shared tool changes to fit one repo: " + WIDENING_ACCEPTS_CLAUSE
+    + " An option that widens carries `%s: true`, the JSON boolean true, not the string \"true\"; block an unmarked "
+    "widening option, and name its option key in the reason. " + WIDENING_UNMARKED_SENTENCE + " "
+    + WIDENING_SAME_CHANGE_SENTENCE + " An option that names a repo and changes nothing in the tool, or changes a "
+    "repo to fit the shared tool, is not widening. A marked option passes this rule. When unsure, allow."
 )
 
 

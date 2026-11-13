@@ -94,9 +94,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
-  - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
-    that differs from a shared format changes to match it. `recommended` never names such an option, and a list `recommended` never holds its key (the old name `pick` is read the same way). The writer refuses
+  - `widens: true` on an option marks one that widens what a shared tool accepts. Widening means the shared tool
+    changes to fit one repo: it accepts a second form, an allow-list entry or an exception for that repo's sake.
+    A change made the same way for every repo, for every repo's sake, is not widening. Its card shows "Goes
+    against your ruling: a repo should change to fit the shared tool, rather than the tool change to fit a repo":
+    a repo that differs from a shared format should change to match it. `recommended` should not name such an option, and a list `recommended` should not hold its key (the old name `pick` is read the same way). The writer refuses
     it (guard rule `uniform-pick`). An update that sets `recommended` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
     asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
