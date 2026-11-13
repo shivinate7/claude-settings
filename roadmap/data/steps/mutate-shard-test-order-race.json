@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "hooks/test_mutate_shared.py ShardTests.test_no_shard_runs_all asserts ran == [\"a\",\"b\",\"c\"], but mutate_shared.run_mutants runs entries on a ThreadPoolExecutor, so ran fills in finish order. Under a loaded lane-lint run it failed twice for lane mail-read-receipt (#3137, 10:26 CST Nov 13) with [\"a\",\"c\",\"b\"]. Alone it passes (6 of 6 on main). It is a flaky test, not red on main.",
  "source": "lane mail-read-receipt 10:26 CST Nov 13; triage read of main 7dd44c41c",
- "note": "Fix: compare sorted(ran) to the entries, as test_shards_together_run_each_mutant_once already does. A test-author changes the test; product code is unchanged. Done when: the test passes with run_one made to finish in reverse order. Lane shard-order-test-flake (session_013NEJL3evMsAfVyfowLBaoK), started by the coordinator 10:42 CST Nov 13. Also seen in the lane lint of #3147.",
- "updatedAt": "2026-11-13T10:42:03-06:00"
+ "note": "Fix: compare sorted(ran) to the entries, as test_shards_together_run_each_mutant_once already does. A test-author changes the test; product code is unchanged. Done when: the test passes with run_one made to finish in reverse order. Lane shard-order-test-flake (session_013NEJL3evMsAfVyfowLBaoK), started by the coordinator 10:42 CST Nov 13. Also seen in the lane lint of #3147. Sighting 14:14 CST Nov 13 (lane rebuilds, session_013NEJL3kA8HbgXsjRdKMb5n): `merge --lane-lint 3199` failed \"Mutation verdict fixture suite\" once with [a,c,b]; same file passes on #3199 head; on origin/main with MUTATE_JOBS=8 it failed 1 run in 6. #3199 touches neither file. Lane's reading, unread by triage. Fix is the one already in this step.",
+ "updatedAt": "2026-11-13T14:14:19-06:00"
 }
