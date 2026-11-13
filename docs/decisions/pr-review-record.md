@@ -69,7 +69,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - With a `Grant` line, round 4 is the final round. The round 3 rules above run on it unchanged, and their reason names round 4.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
-- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open after round 1 until round 2 passes. A fix check PASS does not close it before round 3 is done (item 402 a, owner, 2026-11-08 06:08 CST). Round 1 finding a safety hole owes round 2, and round 3 when round 2 fails or a fix check ran.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 The review a changed head owes. The first three bullets are the owner's ruling of 2026-11-10 14:07 CST, above. The other bullets are a coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads them instead of asking.
@@ -89,7 +89,7 @@ The review a changed head owes. The first three bullets are the owner's ruling o
   - it runs on Sonnet;
   - it reads the whole diff against main;
   - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
-- Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
+- Round 2 runs first when it is missing. Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
 - Free text goes only below `---`. A record is never edited or deleted.
 - A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
 - A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.

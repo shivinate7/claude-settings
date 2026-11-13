@@ -32,11 +32,13 @@ Before it works, the lane re-runs on main the check behind each dated Finding or
 step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
 
-Batch-join check (repos with claude-settings' `bin/ci-job`): the lane runs `~/.claude/bin/merge <pr> --review-record ...`.
-It runs the lane lint on the reviewed head and prints the review record only on a PASS, so a red lane has no record and does not hand off.
-The lint runs `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
-among them, and no full suite. Run the record command as a background command: the lint can run for minutes.
+Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
+`~/.claude/bin/merge <pr> --review-record ...` once and report its verdict. It runs the lane lint on the reviewed head
+and prints the review log only on a PASS. The lint runs `bin/ci-job checks --lint` at the PR head: the fast lint steps
+of the checks job, the STE lint among them, and no full suite. A red lane prints no review log and does not hand off.
+Run it as a background command: the lint can run for minutes.
 `~/.claude/bin/merge --lane-lint <pr>` is the same lint as an early check; report its verdict when you run it.
+Order at the end of a lane: open the draft PR early; wait for `--lane-lint <pr> --touched-tests`; post the review log; then hand in to the batch runner. Run the four-point check (work landed or handed off, no unpushed branch, no owner question waiting, handoff written). Commit the handoff to the record branch at `roadmap/outbox/<slug>-handoff.md`, and tag the lane archive-ready (ruling R46). The owner never reads a lane: send each owner act and question to the parent with the exact line. Mark each part that is ruled but not built "ruled, not built".
 Run `merge --review-record` and `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
