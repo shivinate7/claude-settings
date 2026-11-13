@@ -126,7 +126,7 @@ SPAWN_PROMPT = (
     "tells a lane to write, post or add a waiting-page item: the lane puts its question in its report, and "
     "the orchestrator writes the item (questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
-    "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
+    "{\"ok\": false, \"reason\": \"<rule id, then `Remedy:` and the fix, one line>\"}."
 )
 # Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
 # question). The candidate rulings follow the reply line, built by question_form.candidates_block.
@@ -217,7 +217,7 @@ def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no im
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
-              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap "
+              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap. Remedy: fix the brief "
               "(an audit Explore: model sonnet or opus with effort high, and `" + EXPLORE_AUDIT_MARKER
               + "` on the brief's first non-blank line)."),
     "AskUserQuestion": (QUESTION_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
@@ -350,8 +350,14 @@ def refuse(payload, tool, args, rule, reason):
     return 0
 
 
+# The way out of a question the judge refuses. The judge's own reason names the item that missed; these name the act.
+QUESTION_REMEDY = ("Remedy: change the question to meet the item named above, then send it again; "
+                   "a page item is written again with its `context`, `options` or `pick` changed.")
+PAST_RULING_REMEDY = ("Remedy: do not ask; act on the cited ruling. A re-ask that ruling allows passes when a "
+                      "`Based on (ruling): <the id above>` line names it.")
+
 UNVETTED_REMEDY = (
-    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Add the line "
+    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Remedy: add the line "
     "`Unvetted: <why it could not be checked>` to the question (a page item: to `context`) and send it again. "
     "The owner then reads it marked as unchecked.")
 
@@ -437,7 +443,10 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
-        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
+        if rule == SPAWN_RULE:
+            return refuse(payload, tool, args, SPAWN_RULE, reason)
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else QUESTION_RULE,
+                      reason + " " + (PAST_RULING_REMEDY if cite else QUESTION_REMEDY))
     return 0
 
 

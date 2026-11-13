@@ -177,6 +177,9 @@ jobs:
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
+      - name: Guard remedy suite
+        run: python3 hooks/test_guard_remedies.py
+
       - name: Question form fixture suite
         run: python3 hooks/test_question_form.py
 

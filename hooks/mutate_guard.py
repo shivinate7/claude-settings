@@ -2312,7 +2312,7 @@ MUTATIONS = [
      '    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS', '    return norm(rel).lstrip("/") in AUTHOR_MUTATION_TESTS', "guard",
      "builder-test: Edit of HOOKS/mutate_guard.py is refused (case folds)"),
     ("role-diff: the builder reason drops the remedy",
-     '"report. The orchestrator assigns it to a test-author."', '"report."', "guard",
+     '"Report the needed test change to your orchestrator, who hands it to a test-author."', '"Report."', "guard",
      "builder-test: Write of a test file is refused"),
     ("role-diff: the author reason drops the remedy",
      '"report. The orchestrator assigns it to a builder."', '"report."', "guard",

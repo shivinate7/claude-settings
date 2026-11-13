@@ -8,7 +8,7 @@ Rule `sendmessage-session-id` in `hooks/guard.py` refuses a `SendMessage` call w
 - The harm: the hand-off could go missing, so the receiving session never hears it and the sender may believe it did. Whether `SendMessage` would deliver to such an id is unmeasured. The tool's own text says a bare name that matches one live agent or session delivers directly, even in the cloud.
 - A hit: `tool_name` is `SendMessage` and `to` is a string that starts `session_`. The match is on the start of the value, so a name with `session_` mid-name passes.
 - Passes: an agent name, `@parent`, an empty, missing or non-string `to`, and the `mcp__claude-code-remote__send_message` tool, whatever its `session_id`.
-- Steer: the reason names `mcp__claude-code-remote__send_message` and its `session_id` argument, the sure route.
+- Steer: the reason carries a `Remedy:`. A session is told to send with `send_message` and the id as `session_id`, the sure route. An agent (`agent_id` set) cannot call that tool, so it is told to put the message in its final report.
 - An owner override lifts it (`owner-override`). A form that only an attacker would write is not read (`guard-guards-mistakes-only`).
 - Matcher: `settings.json` adds `SendMessage` to the guard's PreToolUse matcher. The separate `SendMessage` matcher for the state judge is unchanged.
 - Cost, per `SendMessage` call: one guard process start, from the PreToolUse matcher (unmeasured). The rule is a string prefix test. The new matcher also runs the guard's other per-call rules on each `SendMessage`. Measured 2026-11-08 in a temporary clone, with a spy on process starts and file writes:

@@ -103,12 +103,12 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
-PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
+PAGE_FORM_REASON = FORM_REASON + (" Remedy: On the waiting page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
                                   "stands: true.")
-CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
+CHAT_FORM_REASON = FORM_REASON + (" Remedy: In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
-STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
+STAKE_REASON = ("A decision is the owner's only when he can judge it. Remedy: Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                 "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
                 "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
@@ -185,7 +185,7 @@ NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no differenc
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
                   "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
-                  "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
+                  "differs from main. Remedy: add the line with both sides filled. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
 # The hint that departs_hit adds to the placeholder miss. A Stop refusal (lint/report_guard.py) shows the miss
@@ -234,7 +234,7 @@ def departs_hit(text) -> str:
 PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|redesign(?:s|ed|ing)?"
                        r"|rewrite\s+of|rebuild\s+of)\b", re.I)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
-               "departs from the app, and it never holds work. Add a line to context that starts "
+               "departs from the app, and it never holds work. Remedy: Add a line to context that starts "
                "\"Departs from: <file>:<symbol> — <what changes>\" (or \"Departs from: main — adds <X>\" "
                "for a new thing), leave out holds, or set port to false if this is not a port.")
 
@@ -313,10 +313,10 @@ def _write_data(entry, cwd=""):
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. Remedy: Make the pick an option "
                  "where the repo changes to match the shared format, or leave pick out.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
-                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. Remedy: Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
@@ -360,13 +360,13 @@ def widens_pick_hit(data) -> str:
 # carries a link to that exact page, and a step never sends him to a file for a command. Both are
 # read at the same ArtifactData call. In the chat box a link is an https:// url in the option's description.
 PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web app carries a link to "
-                     "that exact page. Put links: [{label, url}] on that option (a task: on the item), "
+                     "that exact page. Remedy: Put links: [{label, url}] on that option (a task: on the item), "
                      "with the url of the page where he presses; for a pull request or an issue, the "
                      "url of that number.")
 CHAT_PRESS_LINK_REASON = ("An option that asks the owner to press in a web app carries a link to that exact "
-                          "page. Put an https:// url of the page where he presses in that option's "
+                          "page. Remedy: Put an https:// url of the page where he presses in that option's "
                           "description; for a pull request or an issue, the url of that number.")
-COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Put the "
+COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Remedy: Put the "
                   "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
                   "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
                   "Say \"paste the command below\" in the step.")
@@ -679,7 +679,7 @@ def command_in_item_hit(data) -> str:
 # the record): a task's `command` runs on the owner's computer as whichever gh login is active there.
 GH_LOGINS = (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN)
 GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login is active on his computer. "
-                   "Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
+                   "Remedy: Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
                    "Switch to %s instead only for a repo %s cannot reach."
                    % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 GH_NO_SWITCH = "gh command with no gh auth switch before it"
@@ -815,14 +815,13 @@ def gh_login_hit(data) -> str:
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
 WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
-TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
-               "act, ask a session on the owner's computer first (list_computer_folders, then "
-               "request_computer_folder). Then add a line to context that starts \"Why yours: "
-               "<the check that showed no session could do it>\".")
+TASK_REASON = ("A task is yours to hand over only when no session can do it. Remedy: If the cloud refused the "
+               "act, ask the owner, or hand the task to a session that carries no cs-build tag. "
+               "Then add a line to context that starts \"Why yours: <the check that showed no session could do it>\".")
 
 
 WHY_RULE = "task-why-cited"
-WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. End the line with "
+WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. Remedy: End the line with "
                     "\"(route <id>)\", an id from the route rows file whose row on this surface says refused or asks, or "
                     "with \"(measured <YYYY-MM-DD>, <the check and its result>)\". A row that says the act works, an "
                     "id no row holds, and a measurement with no date do not count. The page reads no refusals file, so "
@@ -1206,7 +1205,7 @@ OPTION_NONE_KEY = "none"
 # c188 live on the roadmap branch, so a cell like A1, a lowercase id like c188 or a key like d4 reads as a key.
 KEY_NAMED = re.compile(
     r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
-LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
+LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Remedy: Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
                       "item's text by that letter (option A, pick b), never by any other key. An option's "
                       "label carries no letter of its own: the page's key is the only letter, so a label "
@@ -1297,7 +1296,7 @@ def option_letter_hit(op: str, data) -> str:
 # to change. Any item text counts, and a str_replace is judged on the text it adds.
 REWORKED = re.compile(r"\b(?:being\s+re-?worked|under\s+re-?work)\b", re.I)
 REWORK_REASON = ("An open item is for the owner to answer now, so it never says its options are being "
-                 "reworked. Close the item with a home that names the rework, and add a fresh item when the "
+                 "reworked. Remedy: Close the item with a home that names the rework, and add a fresh item when the "
                  "options are ready.")
 
 
@@ -1326,7 +1325,7 @@ def rework_off_page_hit(data) -> str:
 ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
 ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html")
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
-                     "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
+                     "lists (skills/waiting-page/page.html). Remedy: Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
                      "with {\"__delete__\": true}. "
                      "(decision item-field-rendered, a waiting item names only fields the page draws)")
@@ -1368,7 +1367,7 @@ def _item_fields(path):
 PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
 PAGE_ONLY_MARK = " (the page's Mark read writes it)"
 PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's press sets it, and Mark unread clears it. "
-                    "A session write never names it, on any route: leave it out of the write. "
+                    "A session write never names it, on any route. Remedy: leave it out of the write. "
                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
@@ -1454,6 +1453,7 @@ CROSS_REPO_RULE = "question-checked-with-repo"
 CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
                      "the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
                      "owner's-computer session that said the owner has not ruled. "
+                     "Remedy: add `repo`, and for another repo add `checked_with` with that session id. "
                      "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
 _WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
 
@@ -1515,7 +1515,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
-CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
+CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Remedy: Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))

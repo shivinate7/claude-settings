@@ -1421,7 +1421,8 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project. "
+    "Remedy: drop the model keys from this write, or approve it only when a model above Sonnet is wanted "
+    "for this project. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
@@ -1960,21 +1961,21 @@ def disables_tests(new_lines, old_lines) -> bool:
             return True
     return False
 BUILDER_TEST_REASON = (
-    "A builder does not change tests or test config. Report the needed test change in your "
-    "report. The orchestrator assigns it to a test-author."
+    "A builder does not change tests or test config. Remedy: do not write the test by another route. "
+    "Report the needed test change to your orchestrator, who hands it to a test-author."
     " A merge conflict in a test file takes the same route."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
-    "A test-author changes only tests and test config. Report the needed product change in your "
+    "A test-author changes only tests and test config. Remedy: write only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
 )
 WRITER_SCOPE_REASON = (
-    "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
+    "A record-writer changes only Markdown (*.md) files. Remedy: change only *.md files. Report the needed change to any other "
     "file in your report. The orchestrator assigns it to a builder."
 )
 DESIGNER_SCOPE_REASON = (
-    "A designer changes only files in the repo's design folder. Report the needed change to any "
+    "A designer changes only files in the repo's design folder. Remedy: change only files in that folder. Report the needed change to any "
     "other file in your report. The orchestrator assigns it to a builder."
 )
 
@@ -2875,25 +2876,25 @@ LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
-    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "that. Remedy: finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
 from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
-    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
+    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Remedy: set the "
     "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Remedy: add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
     "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
-    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Remedy: pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
@@ -2901,12 +2902,11 @@ FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
-    "or name no model and let the default apply."
+    "Sonnet is the floor for this role. Remedy: start the agent or session with model sonnet."
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Remedy: start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3200,7 +3200,7 @@ BRIEF_CLAIM_COMMAND = re.compile(
     r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
 BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
 BRIEF_CLAIM_REASON = (
-    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Remedy: add the probe, "
     "or drop the claim. The probe is the command you ran, on a line of its own, that holds the input in quotes (in a "
     "fence, in backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
     "`verdict ...`; and its result line right under it. Each input with no probe: %s. "
@@ -3423,7 +3423,7 @@ BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
     "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
-    "Drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
+    "Remedy: drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
     "(rule shared-trees-no-destructive-git; decision guard-guards-mistakes-only, a guard stops Claude's mistakes)"
 )
 
@@ -3565,13 +3565,13 @@ def step_up_reason(prompt: str, role, model) -> str:
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
-            return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
+            return "Reviewer round 2 runs on Sonnet. Remedy: spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
-            return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
+            return "Reviewer round 3 runs on Sonnet. Remedy: spawn it with model sonnet."
     if role == "reviewer" and ("fixcheck", None) in marker_hits(prompt) and (not model or "haiku" in model):
-        return "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
+        return "Reviewer fix verifier runs on Sonnet. Remedy: spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
-        return "Builder round 3 runs on Opus. Spawn it with model opus."
+        return "Builder round 3 runs on Opus. Remedy: spawn it with model opus."
     return ""
 
 
@@ -3890,9 +3890,10 @@ GIB = 2 ** 30
 LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
 LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
+LOAD_BUSY_REMEDY = "Remedy: "
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: A lane ends its turn now and waits for the load to drop. Any other session waits with `bin/wait-until <time>` until the load drops, then retries. " + LOAD_CITE
 
 
 def _read_memory():
@@ -3987,8 +3988,8 @@ def load_hit(tool: str, tool_input) -> tuple:
         waits = [t for t in busy if not t.startswith("disk")]
         remedy = " and ".join((["wait until the load drops"] if waits else [])
                               + (["free disk space"] if len(waits) < len(busy) else []))
-        text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
-                else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
+        text = (LOAD_BUSY_NO_FOREGROUND + LOAD_BUSY_REMEDY + remedy.capitalize() if tool == "Workflow"
+                else LOAD_BUSY_REMEDY + remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
 
@@ -3999,7 +4000,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
 RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
-LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now. Remedy: End your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
@@ -4018,7 +4019,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
-LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane. Remedy: End your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
                             "load to drop. " + LOAD_LANE_CITE)
 
@@ -4110,7 +4111,7 @@ def opus_without_grant(tool_input) -> bool:
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
-                    "other commands. Run that command alone, in its own call, or drop it. "
+                    "other commands. Remedy: Run that command alone, as the only command of its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
@@ -4723,15 +4724,15 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 PAGE_TOOL = "Artifact"
 # Rule `page-thread-reply` (decision questions-go-to-owner, "Answer on the page, not in a comment thread"). A reply into a
 # comment thread on this repo's waiting page is refused; reads, watches, resolves and other artifacts pass.
-PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread: rewrite the item the comment is about, "
+PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread. Remedy: rewrite the item the comment is about, "
                             "and say in one line in the session what changed. "
                             "(decision questions-go-to-owner, the answer goes on the page)")
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
-                     "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
+                     "waiting page. Remedy: Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
                      "(decision page-stale-publish, a waiting page behind main is not published)")
 PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
-                     "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
+                     "data. Remedy: Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
                      "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
                      "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Cockpit\" "
                      "and publish it to the same url. "
@@ -4816,7 +4817,7 @@ def page_stale_hit(tool_input, cwd):
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
-PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Remedy: Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
 def _page_check_module():
@@ -4849,7 +4850,8 @@ def _run_check_designs(page_file, item):
 # a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
 # node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
 # has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
-MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
+MOCKUP_HOME_FIX = (" Remedy: write the item again with each design's `file` set to a mockup committed in that folder. "
+                   "(decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)")
 
 
 def mockup_home_hit(writes, tool_input, cwd):
@@ -4936,10 +4938,13 @@ def page_design_hit(writes, tool_input, cwd):
 #
 # SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
 # the hand-off could go missing. Whether it would deliver is unmeasured.
-SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Send it with "
-                      "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
-                      "Rule sendmessage-session-id "
-                      "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
+SENDMESSAGE_CITE = ("Rule sendmessage-session-id "
+                    "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
+# An agent never calls the remote send tool (rule agent-no-remote-tools), so its remedy is its report.
+SENDMESSAGE_AGENT_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Remedy: put the "
+                            "message in your final report, which reaches the session that spawned you. " + SENDMESSAGE_CITE)
+SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Remedy: send it with "
+                      "send_message, passing the id as session_id, the sure route. " + SENDMESSAGE_CITE)
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -4947,8 +4952,9 @@ SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage m
 # docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
-IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
-                     "screens; make any change to the design by hand.")
+IMPECCABLE_REASON = ("impeccable is for a design review only. Remedy: Run the skill with `audit` or "
+                     "`critique` as the first word of its args, on the rendered screens; make any change "
+                     "to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
 # The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
@@ -5151,7 +5157,7 @@ def sim_bypass_hit(segment: str) -> str:
 
 SIM_BYPASS_REASON = (
     "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
-    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "tests and shuts down. Remedy: Run `sim-test -scheme <scheme>` instead. "
     "(decision sim-test-is-the-one-boot-path)"
 )
 
@@ -5256,7 +5262,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
         booted = [d for d in devices if d["state"] == "Booted"]
         if len(booted) >= SIM_BOOT_CAP:
             refuse(tool, "deny", "simulator-boot-cap",
-                   "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
+                   "%d simulators are already booted: %s. Remedy: Use one of them, with "
+                   "`-destination 'platform=iOS Simulator,id=<its id above>'`, or ask the owner to stop one, "
                    "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
                    name)
         boots, table, now = (sweep.sim_read_boots(os.path.join(guard_core.config_dir(), "state", "sim-boots.jsonl")),
@@ -5266,8 +5273,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                     and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
                     and sweep.sim_keep_code(twin, boots, table, now) is None):
                 refuse(tool, "deny", "simulator-boot-twin",
-                       "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
-                       "instead of booting another." % (twin["name"], twin["udid"]), name)
+                       "An idle booted simulator of the same type and runtime exists: %s (%s). Remedy: Use it "
+                       "instead of booting another, with `-destination 'platform=iOS Simulator,id=<its id>'`." % (twin["name"], twin["udid"]), name)
         shut_down.append((name, [h["udid"] for h in hits]))
     for name, udids in shut_down:
         if tool == SIM_MCP:
@@ -5275,12 +5282,12 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                 continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
-                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Remedy: Run `sim-test`, "
                    "which boots it under the lock, or launch a simulator that is already booted. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
-                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
+                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. Remedy: %s "
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
@@ -6023,7 +6030,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
 WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
 WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
 WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
-                        "Replace it with the real value, then start the Workflow again. "
+                        "Remedy: Replace it with the real value, then start the Workflow again. "
                         "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
 
 
@@ -6233,7 +6240,8 @@ def judge(payload) -> None:
     if tool == "SendMessage":
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
-            refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+            refuse(tool, "deny", "sendmessage-session-id",
+                   SENDMESSAGE_AGENT_REASON if payload.get("agent_id") else SENDMESSAGE_REASON, target[:120])
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)

@@ -3,13 +3,13 @@ FAMILY = "sendmessage-session-id"
 #
 # Rule sendmessage-session-id. SendMessage addresses an agent by name. A `session_` id is no agent name, and auto mode
 # refused a SendMessage that named one. So a SendMessage whose `to` starts `session_` is refused: its hand-off could go
-# missing, and whether SendMessage delivers to such an id is unmeasured. The refusal names the right tool,
-# mcp__claude-code-remote__send_message, and its session_id argument. Only SendMessage with such a `to` is refused.
+# missing, and whether SendMessage delivers to such an id is unmeasured. The refusal names the right tool, send_message,
+# and its session_id argument. Only SendMessage with such a `to` is refused.
 # An agent name, @parent, an empty, missing or non-string `to`, and the right tool itself all pass.
 # The allows are as load-bearing as the refusals: a false alarm here stops a hand-off to a reviewer or the parent.
 SENDMESSAGE_RULE = "sendmessage-session-id"
 SENDMESSAGE_TOOL = "SendMessage"
-SENDMESSAGE_STEER = (SEND_MESSAGE, "session_id")  # the remedy names the right tool and the argument that takes the id
+SENDMESSAGE_STEER = ("send_message", "session_id")  # a session's remedy names the right tool and the argument that takes the id
 SENDMESSAGE_BODY = "Review the diff and report back."
 
 

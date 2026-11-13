@@ -1540,12 +1540,15 @@ PUSH_REASON = (
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
-    "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
+    "(rule git-main-only-by-pr, decision plain-push-asks). "
+    "Remedy: push the lane's own branch by name, `git push origin HEAD:<lane-branch>`, and let a pull request move main. "
+    "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch, and no such branch exists on the remote yet (rule push-stray-branch, "
-    "decision plain-push-asks). Name the destination: `git push origin HEAD:<branch>`. "
+    "decision plain-push-asks). "
+    "Remedy: name the destination: `git push origin HEAD:<branch>`. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ALL_REASON = (
@@ -1565,6 +1568,8 @@ PUSH_AGENT_REASON = (
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
+    "Remedy: push the lane's own branch by name with a lease: "
+    "`git push --force-with-lease --force-if-includes origin HEAD:<lane-branch>`. "
     "The click in this prompt is the grant."
 )
 

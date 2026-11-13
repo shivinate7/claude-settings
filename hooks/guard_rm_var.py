@@ -275,15 +275,17 @@ def rm_var_reason(hits) -> str:
     if literal:
         return (
             "a recursive delete under $HOME, $PWD, ~ or a variable set from them can remove the "
-            "home or working folder, and a ${NAME:?} guard does not clear it. Retry with a "
-            "literal path: name the one directory you mean." +
+            "home or working folder, and a ${NAME:?} guard does not clear it. Remedy: run the "
+            "delete with a literal path that names the one directory you mean, such as "
+            "rm -rf /srv/build/out." +
             (" The other targets need every expansion written ${NAME:?}, which stops the "
              "command when the variable is empty: " + "; ".join(hits) if hits else "")
         )
     return (
         "a recursive delete with an unguarded variable in its path can remove far more than "
-        "intended when the variable is empty. Retry with every expansion written ${NAME:?}, "
-        "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
+        "intended when the variable is empty. Remedy: write every expansion as ${NAME:?}, "
+        "which stops the command when the variable is empty, such as rm -rf \"${OUT_DIR:?}/old\". "
+        "Retry with: " + "; ".join(hits)
     )
 
 # A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path: a recursive `rm` with a relative
@@ -356,8 +358,8 @@ def rm_after_cd_reason(hits) -> str:
     return (
         "a recursive delete that follows a cd names its target relative to a folder the "
         "permission prompt cannot see, and when the cd fails the delete runs in the working "
-        "folder. Retry with no cd: give the target as a full path, or as a quoted variable that "
-        "holds one. Retry with: " + "; ".join(hits)
+        "folder. Remedy: run the delete with no cd before it, and give the target as a full "
+        "path, or as a quoted ${NAME:?} variable that holds one. Retry with: " + "; ".join(hits)
     )
 
 
