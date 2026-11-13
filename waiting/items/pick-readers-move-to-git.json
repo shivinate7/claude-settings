@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T18:15:00Z",
+  "context": "Goal: your answers reach sessions from the place you ruled is home.\nProblem (rule): the answer check (page_grant.py) and the settings.json Relayed Grant entry read answers fetched from the page database today. With git as home (your 730 a), they should read git. A settings entry takes your word.\nBased on (ruling): page-git-is-home; decision waiting-data-in-repo (your Nov 2 14:58 CST words).\nDeparts from: main \u2014 readers fetch answers from the page database; a moves them to git. Degen and Home copies refresh last (your 12:12 CST words).\nMeanwhile: step page-one-store-answers stays blocked; nothing else waits.",
+  "home": "step page-one-store-answers",
+  "id": "pick-readers-move-to-git",
+  "kind": "decision",
+  "n": 734,
+  "options": [
+    {
+      "gain": "One source of truth that matches the ruling; works from any account.",
+      "how": "page_grant.py and the Relayed Grant entry read the git copy of the answers.",
+      "id": "to-git",
+      "key": "a",
+      "label": "Move the readers to git (recommended)",
+      "lose": "A session must write your answer to git first, so a reader can see it a little later than the database shows it."
+    },
+    {
+      "gain": "A reader sees an answer the moment you save it.",
+      "how": "Readers keep fetching answers from the page database; git stays a backup.",
+      "id": "keep-db",
+      "key": "b",
+      "label": "Keep reading the page database",
+      "lose": "The readers keep depending on one account's page, against git being home."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:14 CST Nov 13, retrospective's git-home plan",
+  "repo": "shivinate7/claude-settings",
+  "short": "Read answers from git, not the page database?",
+  "shown": [
+    {
+      "id": "to-git",
+      "key": "a",
+      "label": "Move the readers to git (recommended)"
+    },
+    {
+      "id": "keep-db",
+      "key": "b",
+      "label": "Keep reading the page database"
+    }
+  ],
+  "status": "open",
+  "title": "Should the answer check and the Relayed Grant entry read your answers from git instead of from the page database?",
+  "why": "A settings entry and the answer check change; both need your word."
+}

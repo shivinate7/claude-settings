@@ -8,15 +8,16 @@
   "options": [
     {
       "gain": "Push runs stop replaying tested trees in every repo.",
-      "how": "A claude-settings lane adds the skip to the shared CI form: a push to main skips its suites when the pushed tree equals the tree the PR tested. Direct pushes still run them. joyous #87 then follows the shared form.",
+      "how": "A claude-settings lane adds the skip to the shared CI form: a push to main skips its suites when the pushed tree equals the tree the PR tested. Direct pushes still run them. joyous #87 then follows the shared form. It also covers your 722 a and 723 a: q_max and degen use the same form.",
       "id": "shared",
       "key": "a",
-      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it (recommended)",
-      "lose": "One claude-settings lane comes first; joyous waits for it."
+      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it",
+      "lose": "One claude-settings lane comes first; joyous waits for it. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. (The guard flags this as widening a shared tool; the coordinator thinks that is a false alarm, not yet judged.)",
+      "widens": true
     },
     {
       "gain": "No change.",
-      "how": "Ruling 176 b stays as it is; joyous #87 stays held.",
+      "how": "Ruling 176 b stays as it is; joyous #87 stays held. This is the option that keeps each repo as it is.",
       "id": "keep",
       "key": "b",
       "label": "Keep all push suites until the red-main check changes",
@@ -34,14 +35,14 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 12:05 CST Nov 13 (corrected)",
-  "reply": "Your answer a was recorded at 12:11 CST against the OLD wording: the item then said 'Allow the tree-equal skip in joyous'. I rewrote it at 12:06 CST: a is now 'put the skip in claude-settings' shared CI form for every repo', and the joyous-only skip is option c, which goes against your rule that a repo changes to fit a shared tool. The page you answered from showed the old text. I have NOT acted on it. Please confirm: a (shared form, every repo), b (keep all push suites), or c (joyous-only).",
+  "reply": "Closed 12:23 CST Nov 13: you chose a in the coordinator's session at 12:18 CST ('Skip that re-run in every repo when the pushed code is identical to what the PR tested'). Filed as ruling push-skip-proven-tree; step push-skip-proven-tree is doing. A direct push still runs its suites. q_max and degen use the same shared form.",
   "repo": "shivinate7/claude-settings",
   "short": "Shared tree-equal push skip",
   "shown": [
     {
       "id": "shared",
       "key": "a",
-      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it (recommended)"
+      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it"
     },
     {
       "id": "keep",
@@ -54,7 +55,7 @@
       "label": "Joyous-only skip (not recommended)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Put the tree-equal push skip in the shared CI form for every repo, or keep all push suites?",
   "why": "A narrowing of your ruling 176 b needs your word; runner 11 waits on joyous only."
 }

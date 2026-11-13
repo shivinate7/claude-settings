@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T18:15:00Z",
+  "context": "Goal: every artifact, on both accounts, lives in git and works anywhere.\nProblem (goal): a claude.ai page cannot call out (item 593, 12:35 CST Nov 12), so git is written only by a session. You asked at 12:03 CST for 'multiple accounts iwht their own artifacts and design work each having to be merged in super artifacts'. Today `export_page.py --merge` joins two accounts' pages for one repo (step page-merge-two-accounts, #2424).\nBased on (ruling): page-git-is-home (your Nov 2 words and 730 a).\nBased on (read): blind Opus review 12:13 CST Nov 13, relayed by the retrospective.\nDeparts from: main \u2014 each account keeps its own page, merged into git by a session; b adds one live page across both accounts.\nMeanwhile: the git-home lane builds the parts both options need.",
+  "home": "step page-merge-two-accounts (#2424); ruling page-git-is-home",
+  "id": "pick-accounts-merge-in-git",
+  "kind": "decision",
+  "n": 733,
+  "options": [
+    {
+      "gain": "No host and no token; builds on what exists.",
+      "how": "Each account's pages export to git, and any page rebuilds from git on either account.",
+      "id": "git-merge",
+      "key": "a",
+      "label": "Git is the meeting point (retrospective's pick, recommended)",
+      "lose": "Two live pages, one per account, synced through git at each writer wake."
+    },
+    {
+      "gain": "One page; git written at the click, no session needed.",
+      "how": "A small host (a Cloudflare Worker holding a repo-scoped GitHub token) writes git at the click.",
+      "id": "one-page",
+      "key": "b",
+      "label": "One live page across both accounts, served by a host",
+      "lose": "A host to run, a token that cannot be limited to one branch, and an access gate."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:14 CST Nov 13",
+  "reply": "Closed 12:23 CST Nov 13: already ruled. Decision waiting-data-in-repo (your Nov 2 14:58 CST words) says git is each artifact's home and each claude.ai link is one account's view; you leaned the same way at 12:17 CST. The retrospective withdrew the question. Reopen if you want a host that serves both accounts live.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Two accounts: merge in git, or one live page?",
+  "shown": [
+    {
+      "id": "git-merge",
+      "key": "a",
+      "label": "Git is the meeting point (retrospective's pick, recommended)"
+    },
+    {
+      "id": "one-page",
+      "key": "b",
+      "label": "One live page across both accounts, served by a host"
+    }
+  ],
+  "status": "closed",
+  "title": "To bring your two accounts' pages together, should git be the meeting point, or should one live page serve both accounts through a host?",
+  "why": "Both options cost something you would have to live with; the retrospective picks a."
+}

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T18:24:00Z",
+  "context": "Goal: the silent-undo check reads the PR body the same way everywhere.\nProblem (rule): your 411 a option said 'env PR_BODY in CI, --pr-body locally'. The old lane #1969 moved CI to the event file (GITHUB_EVENT_PATH) and a UTF-8 body file because an env string past 128 KB does not run on Linux, and a lint with no body source reads unknown. No owner word says that, so the lane asks. Your grant covers the act you named; a different mechanism is a variant.\nBased on (read): old commits 60668a132 and a9dc07b7f (lane #1969 round 2) and the rebuild lane's report.\nDeparts from: your 411 a option \u2014 a reads the body from the event file in CI, with --pr-body locally, and the PR says so in a 'Departs from' line.\nMeanwhile: the lane builds PR2 to a; PR1 and PR3 go on. Undo: change CI back to the env.",
+  "home": "ruling drops-lines-body-411a; step silent-undo-cli-ignores-pr-body",
+  "id": "pick-411a-body-event-file",
+  "kind": "decision",
+  "n": 738,
+  "options": [
+    {
+      "gain": "Works for a body of any size, and CI never reads a stale body.",
+      "how": "CI reads the body from its event file; locally the check takes --pr-body. Every reader still takes the body, as you picked.",
+      "id": "event-file",
+      "key": "a",
+      "label": "Read the PR body from the event file in CI (triage's pick, stands)",
+      "lose": "CI does not use the env PR_BODY your option named."
+    },
+    {
+      "gain": "Follows the option's words literally.",
+      "how": "CI sets PR_BODY; the lane rewrites its test cases.",
+      "id": "env-literal",
+      "key": "b",
+      "label": "Pass the body as the env PR_BODY in CI, exactly as your option said",
+      "lose": "An env string past 128 KB does not run on Linux, so a long body breaks the check."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "rebuild lane #2826/#2892, 12:25 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "411 a: PR body from event file, not env",
+  "shown": [
+    {
+      "id": "event-file",
+      "key": "a",
+      "label": "Read the PR body from the event file in CI (triage's pick, stands)"
+    },
+    {
+      "id": "env-literal",
+      "key": "b",
+      "label": "Pass the body as the env PR_BODY in CI, exactly as your option said"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "For your 411 a (CI reads the PR body), read it from the event file instead of the env PR_BODY?",
+  "why": "Triage took this pick (undoable); it stands unless you choose b."
+}

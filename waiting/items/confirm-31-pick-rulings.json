@@ -25,7 +25,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 11:52 CST Nov 13",
-  "reply": "You cannot review 31 like this, and you should not have to. I asked the retrospective to check each of the 31 against main's decisions and the other rulings: which are new, which repeat something already ruled, which conflict. I will bring you only the ones that conflict or change a rule, in a few lines. The rest stand as filed; none of them blocks work. This item stays open until that check is back.",
+  "reply": "The retrospective checked the 33 rulings with your 11:47 CST Nov 12 source against main (12:21 CST Nov 13): 16 are new, 6 are already ruled, 9 change a rule, 2 conflict with main. You do not need to review all 31. The 2 conflicts are now item 737; the 9 changes wait and I bring them one at a time if you want. The item also missed 2 rulings: close-replaced-at-open and dead-host-lock-keeps-tree.",
   "repo": "shivinate7/claude-settings",
   "short": "Confirm 31 filed picks",
   "shown": [

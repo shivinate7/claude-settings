@@ -26,7 +26,7 @@
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "coordinator 12:02 CST Nov 13, lane R67-drain",
-  "reply": "Retrospective has not seen this one: it is the coordinator's pick on your 714 b, not a retrospective pick. I am asking it now. Its earlier reading of 714 b: lane lint resolves the same moving ref CI uses (R42 part 2's stable branch), never a sha copied into the child. Option a keeps `pin_tree`, a git archive of one pinned tree; if that is a copied sha, it clashes with the retrospective's reading. This stays open until it answers.",
+  "reply": "The retrospective agrees with a (12:15 CST Nov 13), with one addition: `pin_tree` must first resolve a moving ref (714 b's stable branch, the same one CI uses) to its commit, then archive that commit. Today only a sha pin works in `pinned_file`. The addition goes on step lane-lint-runs-local-tools and to the lane. This stays open for your veto.",
   "repo": "shivinate7/claude-settings",
   "short": "#1938: one pinned path, drop --pinned",
   "shown": [

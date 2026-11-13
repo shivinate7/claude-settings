@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T18:23:00Z",
+  "context": "Goal: you review only what needs your word, not all 31.\nProblem (rule): the retrospective checked the 33 rulings that carry your 11:47 CST Nov 12 source against main. 16 are new, 6 are already ruled, 9 change a rule and 2 conflict. Only the 2 conflicts need a pick now. (1) merge-lock-gitlock-on-mac says GitLock on a Mac; decision merge-lock says GitLock only in the cloud, GhLock otherwise. (2) sim-drive-needs-lease says a sim drive takes a lease; sim-lease-tool item 4 and sim-test-is-the-one-boot-path rule 5 say the reuse path takes no lease.\nThe 9 that change a rule (not asked here, the retrospective's reading in brackets): close-replaced-at-open [owner words; may be narrowed by your 11:45 'batch runner closes']; guard-imports-fail-closed [ruling looks right]; dead-host-lock-keeps-tree [unclear; ruling says owner pick, PR 2783 says coordinator pick]; past-head-fail-own-commit [ruling looks right]; record-first-needs-shas and record-own-rounds-withdrawn [coordinator pick, not owner]; pr-ledger-stack-by-base-ref [every limit unmeasured, your R37]; retire-run-lane-tip-deferred [loosens a check]; page-tests-served-font [a lane CI run main forbids]. Two rulings the item missed: close-replaced-at-open, dead-host-lock-keeps-tree.\nBased on (read): retrospective audit, main fccff95e, roadmap 5da6664b.\nDeparts from: main \u2014 a keeps main on both; b changes main to match the rulings.\nMeanwhile: the 9 changes wait; I bring them one at a time if you want.",
+  "home": "item 725 (confirm-31-pick-rulings)",
+  "id": "pick-725-two-conflicts",
+  "kind": "decision",
+  "n": 737,
+  "options": [
+    {
+      "gain": "No change to main; the two rulings stop contradicting it.",
+      "how": "The two rulings are rewritten to match main: GitLock only in the cloud for the merge lock, and the reuse path takes no lease for the sim drive.",
+      "id": "main-wins",
+      "key": "a",
+      "label": "Main's decisions win on both (retrospective's reading, recommended)",
+      "lose": "Your 11:47 words on these two are narrowed."
+    },
+    {
+      "gain": "Your words stand as given.",
+      "how": "Main's decisions merge-lock and sim-lease-tool change to match the rulings.",
+      "id": "rulings-win",
+      "key": "b",
+      "label": "Your 11:47 rulings win on both",
+      "lose": "Main changes, and the retrospective says the rulings cite a 'ruling 12' that main lacks."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:21 CST Nov 13 (audit of 33 rulings, main fccff95e)",
+  "repo": "shivinate7/claude-settings",
+  "short": "725: two rulings conflict with main",
+  "shown": [
+    {
+      "id": "main-wins",
+      "key": "a",
+      "label": "Main's decisions win on both (retrospective's reading, recommended)"
+    },
+    {
+      "id": "rulings-win",
+      "key": "b",
+      "label": "Your 11:47 rulings win on both"
+    }
+  ],
+  "status": "open",
+  "title": "Of the 31 rulings in item 725, two conflict with main's decisions. Should main win on both?",
+  "why": "A ruling that conflicts with a main decision needs your word."
+}

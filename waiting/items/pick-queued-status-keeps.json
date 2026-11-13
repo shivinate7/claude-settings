@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T18:21:00Z",
+  "context": "Goal: one name per step status in GLOSSARY.md.\nProblem (rule): your 583 a asked for one name per thing, and my brief said to drop 'queued' as an alias of todo. The lane read the code: the roadmap build accepts 'queued' and treats it differently from todo (ready-not-started reads only todo and ready). Dropping it would make the 3 queued steps on the roadmap branch show as an unknown status and fail the build.\nBased on (read): KNOWN_STATUS, LISTED_STATUS and TODO_STATUS in skills/roadmap/build.py.\nDeparts from: main has no step-status rows in the glossary \u2014 a adds rows and keeps 'queued' as its own status; b retires it.\nMeanwhile: draft PR #3195 waits on the lane lint.",
+  "home": "step glossary-step-statuses (draft PR #3195)",
+  "id": "pick-queued-status-keeps",
+  "kind": "decision",
+  "n": 735,
+  "options": [
+    {
+      "gain": "No build break; the glossary matches the code.",
+      "how": "#3195 adds glossary rows for blocked, folded and queued, each with its own meaning.",
+      "id": "keep-queued",
+      "key": "a",
+      "label": "Keep 'queued' as its own status (triage's pick, stands)",
+      "lose": "One more status name."
+    },
+    {
+      "gain": "Fewer names.",
+      "how": "Re-set the 3 queued steps to todo, then a second lane changes build.py with a red test first.",
+      "id": "retire-queued",
+      "key": "b",
+      "label": "Retire 'queued'",
+      "lose": "A second lane for a small gain."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "lane glossary-step-statuses, 12:17 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Keep 'queued' as its own step status?",
+  "shown": [
+    {
+      "id": "keep-queued",
+      "key": "a",
+      "label": "Keep 'queued' as its own status (triage's pick, stands)"
+    },
+    {
+      "id": "retire-queued",
+      "key": "b",
+      "label": "Retire 'queued'"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "In the glossary, should 'queued' stay as its own step status, or be retired into 'todo'?",
+  "why": "Triage took this pick (undoable: a later lane can retire the name); it stands unless you choose b."
+}
