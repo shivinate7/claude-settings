@@ -132,7 +132,8 @@ for the guard test file split.
   the owner's computer only, and a lane the owner starts that cannot merge on the cloud yet
   (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build phase (owner 14:37 CST,
   "can be targeted after/later"): the details of forced splits, mainly a team that mixes local and
-  cloud sessions while the mailbox bridge (MAILBOX_REPO) is off.
+  cloud sessions. The mailbox (MAILBOX_REPO) now links them: Windows to cloud passed 1 of 1 and the
+  Mac round trip passed 1 of 1 (Nov 12, 11:42 and 20:30 CST).
 - **G9. Triage always writes the waiting page.** Owner 14:32 CST Nov 10: "yea triage always writes the
   waiting page". Replaces the three definitions ("where triage runs", "a project with a triage thread",
   "when no triage lives").
