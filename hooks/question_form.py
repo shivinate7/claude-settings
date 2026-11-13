@@ -467,8 +467,9 @@ SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
 # An edit verb in the step text before a span, back to the last sentence break: the span is a line the owner
 # finds or replaces, so it is quoted text, not a command to run. A run verb in the same sentence wins (see
-# command_in_item_hit), and a fence is never quoted.
-SPAN_EDIT_VERB = re.compile(r"\b(?:find|locate|replace|swap|search\s+for|look\s+for|edit|delete|remove)\b"
+# command_in_item_hit), and a fence is never quoted. Delete and remove are left out: "Delete the lane with
+# `merge --drop 5`" runs the span.
+SPAN_EDIT_VERB = re.compile(r"\b(?:find|locate|replace|swap|search\s+for|look\s+for|edit)\b"
                             r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
 # A run verb in the step text after a span, up to the next sentence break: "Find `x --y` and run it" runs it.
 SPAN_RUN_AFTER = re.compile(r"(?:(?![.;!?](?:\s|$)).)*?" + _RUN_VERB, re.I | re.S)
