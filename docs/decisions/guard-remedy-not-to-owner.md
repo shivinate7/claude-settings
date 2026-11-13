@@ -62,14 +62,9 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 - A mention of the word, not a claim, can go in an inline code span.
 - Lines inside a code fence, and lines that end in a question mark, are not checked.
 
-### Recovered guard (any reply whose report shape holds)
+### Recovered and Handoff gave (no check)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only.
-
-- If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
-  - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
-  - `Handoff gave: <facts the handoff supplied that the summary did not>`, or `Handoff gave: none`.
-- If a Recovered item names no source, end it with git, page or digest. Items split on ";" outside parentheses. An item that starts with "none" or "nothing" needs no source.
+The Recovered guard is removed (the guard cull ruling, owner R5, relayed by the coordinator at 11:22 CST Nov 12; decision cull-guard-wrong-refusals gives the rule: fix or delete, whichever costs less). No check asks for a `Recovered:` or `Handoff gave:` line. `LABEL_RE` in `lint/report_guard.py` still reads a bold **Recovered:** or **Handoff gave:** label as no report label.
 
 ### Departs-from guard (any reply with a pick)
 
@@ -78,7 +73,7 @@ Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line
 - Write one line: "Departs from: <what on main> — <what changes>". Fill both sides. The change must differ from main.
 - If the change is new, write "Departs from: main — adds <X>".
 - If the change only restates what main does, do not ask. Act on main's behaviour.
-- The refusal names the miss. It may be: no Departs from line; no separator (an em dash, " - " or " -- ") between the two sides; an empty side; a placeholder side; or a change side that says no change. It names the word that says so.
+- The refusal names the miss. It may be: no Departs from line; an empty side; a placeholder side; or a change side that says no change. It names the word that says so. A line with no dash is not refused for that: its first word is the main side and the rest is the change side.
 
 ### Mistake guard (landed turns with a valid report)
 
