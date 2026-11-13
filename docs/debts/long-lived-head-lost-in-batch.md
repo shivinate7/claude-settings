@@ -1,9 +1,9 @@
-# A long-lived head is lost in a batch
+# A long-lived branch is deleted with its merged pull request
 
-**What.** `cut_lanes` deletes any origin head whose sha is a lane tip. Only `merge.keepBranches` keeps such a head. A long-lived branch merged into a batch loses its name. Its commits stay on main. Restoring the branch is one push.
+**What.** `cut_branch` deletes the merged pull request's own origin branch. It does not read `merge.keepBranches`, so a long-lived branch merged as a pull request loses its name. Its commits stay on main. Restoring the branch is one push.
 
-**Where.** `merge/merge.py`, `cut_lanes`.
+**Where.** `merge/merge.py`, `cut_branch`, called after a merge when `merge.deleteBranch` is true.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+**Decision.** `merge-deletes-batch-lanes` (a merge deletes its own branch only).
 
-**Retire.** Find a rule that tells a lane of this batch from a long-lived branch at the same tip, and keep the long-lived one. Check: a fixture test with a long-lived branch at a lane tip. It survives the cut. Red on the current code, green after the fix.
+**Retire.** Make the own-branch delete read `merge.keepBranches`, and keep a name listed there. Check: a fixture test with a keepBranches name that is a merged pull request's own branch. It survives the delete. Red on the current code, green after the fix.
