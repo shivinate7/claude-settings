@@ -120,8 +120,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 The owner is already working in degen and home. The coordinator starts fix lanes for the other five repos (joyous,
 ios-adblock, mailaudit, banchi, q_max). For degen and home, the lists below are what each needs to get on board, and the
 coordinator passes them to the owner. No lane starts in either repo. The lanes are the R44 one-time sweep, so each runs
-through skill compliance-check (R44 item 2, restart-plan.md:731-733), so there is no separate sweep list. Whether R44 is the owner's plan for moving child pins that decision
-action-pins-follow-sessions clause (c) waits on (step c76) is unknown; the coordinator or the owner rules on it.
+through skill compliance-check (R44 item 2, restart-plan.md:731-733), so there is no separate sweep list. The plan that decision action-pins-follow-sessions clause (c) waits on (step c76) was given by the owner on Oct 28 at 02:31 CDT (waiting-page item 2 a: "yes to the one plan; the other-repo part lands through PRs in each repo"). R44 point 1 (owner 14:05 CST Nov 11) moves child CI to the stable branch for all child repos (triage, 21:49 CST Nov 12). So pin moves start once lane-stable-mover lands. The clause (c) text in that decision is stale and is not edited here.
 
 ## What waits on the stable branch
 
