@@ -893,7 +893,7 @@ def case_origin_only_store_is_read():
           reason is not None and SLUG in reason and "r44" in reason, detail(r))
 
 
-def case_override_lifts_a_past_ruling_deny():
+def case_override_lifts_a_past_ruling_refusal():
     r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full", override=(SID_A, TIMED))
     check("past-ruling override: the send lands (exit 0, no output)", r.code == 0 and r.out == "", detail(r))
     check("past-ruling override: one override line for past-ruling, no deny line",
@@ -981,7 +981,7 @@ def case_prefix_slug_does_not_match():
     check("prefix slug %s: the store is read by one git start" % PREFIX, len(r.rulings_reads) == 1, detail(r))
 
 
-# ---- round 2 of the past-ruling check: a later slug in a list, the slug-first ref shape, more settling
+# ---- past-ruling check: a later slug in a list, the slug-first ref shape, more settling
 # phrases, negations, a payload with no cwd, a stale local ref, and the refusal's remedy text.
 
 
@@ -1061,7 +1061,7 @@ def case_refusal_remedy_is_generic():
           "re-check" in reason.lower() and "override" in reason.lower(), detail(r) + " reason=%r" % reason)
 
 
-# ---- round 3: a quoted sentence refuses a reply only when the two share at least two key words. Key words:
+# ---- A quoted sentence refuses a reply only when the two share at least two key words. Key words:
 # lowercase words of 5+ letters in the sentence, minus question_form.STOPWORDS and minus the words of the
 # decision's own slug. A ref with no quoted sentence (a bare slug, or a docs path with nothing after) refuses
 # any settling cite of that decision.
@@ -1125,7 +1125,7 @@ def case_sentence_matches_case_and_punctuation_blind():
           reason.startswith("past-ruling: ") and "punct-case-decision" in reason and "r48" in reason, detail(r))
 
 
-# ---- round 3 of the cite parsing: every slug in a cite list counts, whatever separates them, and a code-style
+# ---- Cite parsing: every slug in a cite list counts, whatever separates them, and a code-style
 # ref that names a decision mid-text (no usable sentence after the cite) refuses no reply per decision.
 
 
@@ -1180,7 +1180,7 @@ def case_hook_runs():
                  case_settled_superseded_is_denied,
                  case_two_cited_ids_read_the_store_once,
                  case_origin_only_store_is_read,
-                 case_override_lifts_a_past_ruling_deny,
+                 case_override_lifts_a_past_ruling_refusal,
                  case_settled_citing_an_unsuperseded_decision_is_allowed,
                  case_unsettled_citing_a_superseded_decision_is_allowed_with_no_git,
                  case_settled_citing_nothing_is_allowed_with_no_git,
