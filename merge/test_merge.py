@@ -16224,13 +16224,13 @@ class ReviewedList(ReviewEnv):
         """Pull request 7 at REVIEW_HEAD, with the PR body `body` (None is an empty body, as GitHub gives one)."""
         return dict(batch_pull(7, REVIEW_HEAD), body=body)
 
-    def test_an_open_line_names_the_lane_session_from_the_footer(self):
+    def test_an_open_line_names_the_footer_session_from_the_footer(self):
         host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], [review_comment(1, 7, record_text(rounds=OPEN_ROUNDS))])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: .*; CI .* lane {LANE_ID}$",
                          "the open line does not name the lane session its footer holds")
 
-    def test_a_bad_line_names_the_lane_session_from_the_footer(self):
+    def test_a_bad_line_names_the_footer_session_from_the_footer(self):
         host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], [bad_record(7)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: .*; CI .* lane {LANE_ID}$",
@@ -17595,7 +17595,7 @@ class ReviewedRoots(ReviewEnv):
 
     def setUp(self):
         super().setUp()
-        self.alpha, self.bravo = self.checkout("alpha"), self.checkout("bravo")
+        self.fresh_roots()
 
     def checkout(self, name):
         """A root: a checkout with its own origin and base config, in a folder of its own. -> its path."""
@@ -17605,8 +17605,38 @@ class ReviewedRoots(ReviewEnv):
             build_repos(t)
         return os.path.join(t, "co")
 
+    def fresh_roots(self):
+        """Two roots, alpha and bravo, with no pull request heads yet. A subtest whose heads or base differ calls this first, so one subtest's
+        heads and moved base never carry into the next."""
+        self.alpha, self.bravo = self.checkout("alpha"), self.checkout("bravo")
+        self.pr_heads = {}
+
+    def origin_of(self, root):
+        """The origin of root's checkout: the bare repo beside it in the root's folder."""
+        return os.path.join(os.path.dirname(root), "origin.git")
+
+    def pr_head(self, label, parent=None):
+        """-> the sha of the pull request head `label`: one commit made in the test's clone and pushed to refs/pull/<label>/head of each root's
+        origin, where GitHub keeps a pull request head, so each root's clone fetches it. `parent` None or "main" makes a child of the base, which
+        holds no other head and is held by none. Another label makes a child of that head, which then holds it. A label keeps its first commit."""
+        if label not in self.pr_heads:
+            below = sh(self.co, "git", "rev-parse", "origin/main") if parent in (None, "main") else self.pr_head(parent)
+            sha = self.git_commit(below, {f"{label}.txt": f"{label}\n"})
+            for root in (self.alpha, self.bravo):
+                sh(self.co, "git", "push", "-q", self.origin_of(root), f"{sha}:refs/pull/{label}/head")
+            self.pr_heads[label] = sha
+        return self.pr_heads[label]
+
+    def set_base(self, root, sha):
+        """Move the base of root, its origin's main, forward to `sha`, so the base holds every commit behind `sha`."""
+        sh(self.co, "git", "push", "-q", self.origin_of(root), f"{sha}:refs/heads/main")
+
     def run_roots(self, *argv, hosts):
-        """-> (rc, out, err) of `merge` with `argv` and `hosts`. The parser must know --root, so a refusal of it fails here, named first."""
+        """-> (rc, out, err) of `merge` with `argv` and `hosts`. The parser must know --root, so a refusal of it fails here, named first. Each host
+        reads its own root's clone (Host.cwd, as a real Host(cwd=root) does), so the batch line's ancestry is read where the root's heads are."""
+        for root, host in (hosts or {}).items():
+            if host is not None:
+                host.cwd = root
         rc, out, err = self.run_args(*argv, hosts=hosts)
         self.assertNotIn("unrecognized arguments", err, "the parser refuses --root under --reviewed")
         return rc, out, err
@@ -17615,7 +17645,7 @@ class ReviewedRoots(ReviewEnv):
         # handin-cannot-drop (the cost behind runner 10's 12-minute --reviewed --root): the batch line's held check made one gh compare per
         # (done pull request, other open pull request on the base), so 8 done and 12 open cost 96 calls. Its held check reads the clone
         # instead, so this build makes none. Scope first: the eight done lines print, so the build read the list it counts.
-        heads = {n: "123456789abc"[n - 1] * 40 for n in range(1, 13)}  # twelve full heads, one per pull request
+        heads = {n: self.pr_head("123456789abc"[n - 1]) for n in range(1, 13)}  # twelve real heads, one per pull request
         pulls = [batch_pull(n, heads[n]) for n in range(1, 13)]
         comments, rows = [], {}
         for n in range(1, 9):  # the first eight are done, ready, with CI green
@@ -17631,8 +17661,8 @@ class ReviewedRoots(ReviewEnv):
     def roots_with_done(self, alpha_read=None, bravo_read=None):
         """Both roots, each with one done pull request, number 5. A read keyword (`pulls_error` or `comments_error`) fails that root's read."""
         def repo(name, read):
-            return root_host(name, pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
-                             check_rows={hex_head("5"): green()}, **(read or {}))
+            return root_host(name, pulls=[batch_pull(5, self.pr_head("5"))], comments=[record_of(5, self.pr_head("5")), lint_of(5, self.pr_head("5"))],
+                             check_rows={self.pr_head("5"): green()}, **(read or {}))
         return {self.alpha: repo("o/alpha", alpha_read), self.bravo: repo("o/bravo", bravo_read)}
 
     def gh_shim_for(self, root, default_branch="main"):
@@ -17697,7 +17727,7 @@ unexpected(method + " " + rel)
         test's own folder, self.co, which run_merge enters, is always one of them: o/self, with pull request 7."""
         install_gh_shim(self)  # PATH, FAKE_GH_DIR and the GraphQL check; the shim it puts in bin is replaced here
         put_shim(os.path.join(self.t, "bin", "gh"), self.PER_ROOT_GH)
-        roots = {self.co: self.root_state("o/self", pulls=[batch_pull(7, hex_head("7"))]), **roots}
+        roots = {self.co: self.root_state("o/self", pulls=[batch_pull(7, self.pr_head("7"))]), **roots}
         with open(os.path.join(self.state, "roots.json"), "w") as f:
             json.dump({os.path.realpath(k): v for k, v in roots.items()}, f)
         self.addCleanup(self.assert_no_unexpected_route)
@@ -17714,17 +17744,23 @@ unexpected(method + " " + rel)
                 "contexts": None if contexts is None else list(contexts), "compares": compares or {}}
 
     def base_hosts(self, status, busy=False):
-        """alpha: a done ready #5 at head 5, a done draft #6 at head 6, and with `busy`, a ready #8 with its CI running and no record. `status`
-        is the compare of head 5 with main, as holds_head reads it (head...main); its mirror, main...head 5, is the same fact. None: no compare."""
-        head5, head6, head8 = hex_head("5"), hex_head("6"), hex_head("8")
-        compares = {} if status is None else {(head5, "main"): status, ("main", head5): {"ahead": "behind", "behind": "ahead", "identical": "identical"}[status]}
+        """alpha: a done ready #5 at head 5, a done draft #6 at head 6, and with `busy`, a ready #8 with its CI running and no record. `status` is
+        how head 5 stands to main, as holds_head reads it (head...main). "ahead" moves alpha's base to a child of head 5, which then holds it;
+        "identical" moves the base to head 5. None and "behind" leave the base, and head 5 is a child of it, which holds nothing of head 5.
+        Call it on fresh_roots() for each status, since it moves the base."""
+        head5, head6 = self.pr_head("5"), self.pr_head("6")
+        if status == "ahead":
+            self.set_base(self.alpha, self.git_commit(head5, {"base.txt": "base\n"}))
+        elif status == "identical":
+            self.set_base(self.alpha, head5)
         pulls = [batch_pull(5, head5), batch_pull(6, head6, draft=True)]
         rows = {head5: green(), head6: green()}
         if busy:
+            head8 = self.pr_head("8")
             pulls.append(batch_pull(8, head8))
             rows[head8] = running()
         comments = [record_of(5, head5), record_of(6, head6), lint_of(5, head5), lint_of(6, head6)]
-        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows, compares=compares)}
+        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows)}
 
     def make_trunk_default(self, root, config=None):
         """Make `trunk` the default branch of `root`: a trunk branch on its origin, with `config` as its stamp.json (CONFIG with defaultBranch
@@ -17738,13 +17774,20 @@ unexpected(method + " " + rel)
         sh(root, "git", "fetch", "-q", "origin")
         sh(root, "git", "remote", "set-head", "origin", "trunk")
 
-    def held_hosts(self, compares, draft9):
-        """alpha: done lanes #5 and #6, both drafts with CI green, and integration #9 (a draft or ready, with no record) at head 9. `compares` is
-        the compare table: {(head 5, head 9): "ahead"} says #9 holds #5, as GitHub's compare of head 5 with head 9 reads."""
-        heads = {n: hex_head(str(n)) for n in (5, 6, 9)}
-        pulls = [batch_pull(5, heads[5], draft=True), batch_pull(6, heads[6], draft=True), batch_pull(9, heads[9], draft=draft9)]
-        comments = [record_of(5, heads[5]), record_of(6, heads[6]), lint_of(5, heads[5]), lint_of(6, heads[6])]
-        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in heads.values()}, compares=compares)}
+    def held_hosts(self, status, draft9):
+        """alpha: done lanes #5 and #6, both drafts with CI green, and integration #9 (a draft or ready, with no record) at head 9. `status` is how
+        head 9 stands to head 5, as GitHub's compare of head 5 with head 9 reads it. "ahead" makes head 9 a child of head 5, which holds it;
+        "identical" puts #9 on head 5's commit; None makes head 9 a child of the base, which holds nothing of head 5."""
+        head5, head6 = self.pr_head("5"), self.pr_head("6")
+        if status == "ahead":
+            head9 = self.pr_head("9", parent="5")
+        elif status == "identical":
+            head9 = head5
+        else:
+            head9 = self.pr_head("9")
+        pulls = [batch_pull(5, head5, draft=True), batch_pull(6, head6, draft=True), batch_pull(9, head9, draft=draft9)]
+        comments = [record_of(5, head5), record_of(6, head6), lint_of(5, head5), lint_of(6, head6)]
+        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in (head5, head6, head9)})}
 
     def batch_numbers(self, lines):
         """-> the pull request numbers named on the batch lines of `lines`, in the order printed."""
@@ -17798,7 +17841,7 @@ unexpected(method + " " + rel)
         self.assertEqual([name for name, _ in root_blocks(out)], ["o/alpha", "o/bravo"], out)
 
     def test_each_root_is_a_block_headed_by_its_repo_in_the_order_given(self):
-        head5, head7 = hex_head("5"), hex_head("7")
+        head5, head7 = self.pr_head("5"), self.pr_head("7")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(7, head7)], comments=[record_of(7, head7, rounds=OPEN_ROUNDS)],
                                        check_rows={head7: green()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()})}
@@ -17814,9 +17857,9 @@ unexpected(method + " " + rel)
     def test_a_done_pr_opens_its_batch_while_another_repo_has_one_running(self):
         # alpha has a ready integration pull request with its CI pending and no done pull request. bravo has one done pull request and nothing
         # running. bravo's batch opens: the running CI in alpha does not hold it.
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
-                                       check_rows={hex_head("5"): green()})}
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, self.pr_head("3"))], check_rows={self.pr_head("3"): running()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, self.pr_head("5"))], comments=[record_of(5, self.pr_head("5")), lint_of(5, self.pr_head("5"))],
+                                       check_rows={self.pr_head("5"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
@@ -17826,7 +17869,7 @@ unexpected(method + " " + rel)
 
     def test_a_repo_with_no_done_pr_prints_no_batch_line(self):
         # the number 5 is done in alpha and open in bravo: each block names only its own done pull requests
-        head5, head8 = hex_head("5"), hex_head("8")
+        head5, head8 = self.pr_head("5"), self.pr_head("8")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5), batch_pull(8, head8)],
                                        comments=[record_of(5, head5, rounds=OPEN_ROUNDS), record_of(8, head8, rounds=OPEN_ROUNDS)],
@@ -17838,7 +17881,7 @@ unexpected(method + " " + rel)
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "bravo has no done pull request:\n" + out)
 
     def test_a_busy_repo_builds_the_next_batch_and_an_idle_one_opens_its_own(self):
-        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        head5, head6, head9 = self.pr_head("5"), self.pr_head("6"), self.pr_head("9")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5), lint_of(5, head5)],
                                        check_rows={head5: green(), head6: running()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()})}
@@ -17849,10 +17892,10 @@ unexpected(method + " " + rel)
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
 
     def test_done_prs_are_listed_in_ascending_order_and_held_or_open_ones_are_left_out(self):
-        pulls = [batch_pull(n, hex_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
-        comments = [record_of(9, hex_head("9")), record_of(6, hex_head("6"), rounds=OPEN_ROUNDS), record_of(5, hex_head("5")),
-                    record_of(4, hex_head("4"), net="negative"), lint_of(9, hex_head("9")), lint_of(5, hex_head("5"))]
-        check_rows = {hex_head("9"): green(), hex_head("5"): green()}
+        pulls = [batch_pull(n, self.pr_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
+        comments = [record_of(9, self.pr_head("9")), record_of(6, self.pr_head("6"), rounds=OPEN_ROUNDS), record_of(5, self.pr_head("5")),
+                    record_of(4, self.pr_head("4"), net="negative"), lint_of(9, self.pr_head("9")), lint_of(5, self.pr_head("5"))]
+        check_rows = {self.pr_head("9"): green(), self.pr_head("5"): green()}
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
         rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -17860,7 +17903,7 @@ unexpected(method + " " + rel)
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5 #9"], out)
 
     def test_every_done_pr_of_a_full_repo_is_listed(self):
-        heads = {n: format(n, "x") * 40 for n in range(1, 13)}
+        heads = {n: self.pr_head(format(n, "x")) for n in range(1, 13)}
         pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
         comments = [record_of(n, heads[n]) for n in range(1, 13)] + [lint_of(n, heads[n]) for n in range(1, 13)]
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
@@ -17879,7 +17922,7 @@ unexpected(method + " " + rel)
 
     def test_a_draft_with_running_ci_does_not_block_the_batch(self):
         # a draft never counts as a running batch: only a ready pull request with CI pending holds the next one
-        head5, head6 = hex_head("5"), hex_head("6")
+        head5, head6 = self.pr_head("5"), self.pr_head("6")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
                                        comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
@@ -17917,11 +17960,11 @@ unexpected(method + " " + rel)
         # the control: without --root the output keeps its lines, so a done pull request gets no batch line, with a batch running or not
         for running_batch in (True, False):
             with self.subTest(running=running_batch):
-                pulls, rows = [batch_pull(5, hex_head("5"))], {hex_head("5"): green()}
+                pulls, rows = [batch_pull(5, self.pr_head("5"))], {self.pr_head("5"): green()}
                 if running_batch:
-                    pulls.append(batch_pull(6, hex_head("6")))
-                    rows[hex_head("6")] = running()
-                host = root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows=rows)
+                    pulls.append(batch_pull(6, self.pr_head("6")))
+                    rows[self.pr_head("6")] = running()
+                host = root_host("o/alpha", pulls=pulls, comments=[record_of(5, self.pr_head("5")), lint_of(5, self.pr_head("5"))], check_rows=rows)
                 rc, out, err = self.run_args("--reviewed", host=host)
                 self.assertEqual(rc, 0, out + err)
                 self.assertRegex(list_line(self, out, 5), r" done: ")  # the done line is printed before the batch lines are judged
@@ -17929,12 +17972,13 @@ unexpected(method + " " + rel)
 
 
     def test_a_done_pr_held_by_an_open_pr_head_is_not_named(self):
-        # #9's head holds #5's head: the compare of head 5 with head 9 reads ahead or identical, as holds_head reads it. #5 is not named.
+        # #9's head holds #5's head: head 9 is ahead of head 5 or identical to it, so holds_head reads #5 as held. #5 is not named.
         # #6 is held by nothing, so it is named.
         for status in ("ahead", "identical"):
             for draft9 in (True, False):
                 with self.subTest(status=status, draft=draft9):
-                    hosts = self.held_hosts({(hex_head("5"), hex_head("9")): status}, draft9)
+                    self.fresh_roots()
+                    hosts = self.held_hosts(status, draft9)
                     rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -17942,10 +17986,10 @@ unexpected(method + " " + rel)
                     self.assertEqual(self.batch_numbers(block), [6], "a done pull request whose head an open pull request holds is named:\n" + out)
 
     def test_a_done_draft_lane_no_open_pr_holds_is_named(self):
-        # The control for the held case: the same pull requests, with no compare that holds #5. Both done lanes are named.
+        # The control for the held case: the same pull requests, with no head that holds #5. Both done lanes are named.
         for draft9 in (True, False):
             with self.subTest(draft=draft9):
-                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts({}, draft9))
+                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts(None, draft9))
                 self.assertEqual(rc, 0, out + err)
                 block = by_repo(self, out, "o/alpha")["o/alpha"]
                 self.assert_done(block, 5, 6)
@@ -17953,9 +17997,9 @@ unexpected(method + " " + rel)
 
     def test_a_done_pr_that_is_ready_with_ci_running_is_not_named(self):
         # #5 is done and ready, with its CI running: it is not named. #6, a done draft with nothing running, is named.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): running(), hex_head("6"): green()})}
+        pulls = [batch_pull(5, self.pr_head("5")), batch_pull(6, self.pr_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, self.pr_head("5")), record_of(6, self.pr_head("6")), lint_of(5, self.pr_head("5")), lint_of(6, self.pr_head("6"))],
+                                       check_rows={self.pr_head("5"): running(), self.pr_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -17964,9 +18008,9 @@ unexpected(method + " " + rel)
 
     def test_a_done_ready_pr_with_green_ci_is_named(self):
         # The control for the running case: #5 ready with CI green is named, with #6.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
+        pulls = [batch_pull(5, self.pr_head("5")), batch_pull(6, self.pr_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, self.pr_head("5")), record_of(6, self.pr_head("6")), lint_of(5, self.pr_head("5")), lint_of(6, self.pr_head("6"))],
+                                       check_rows={self.pr_head("5"): green(), self.pr_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -17975,9 +18019,9 @@ unexpected(method + " " + rel)
 
     def test_a_done_pr_on_another_base_is_not_named(self):
         # #5 is done on release, not the repo's default main: no batch line names it. #6, done on main, is named.
-        pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
+        pulls = [batch_pull(5, self.pr_head("5"), base="release"), batch_pull(6, self.pr_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, self.pr_head("5")), record_of(6, self.pr_head("6")), lint_of(5, self.pr_head("5")), lint_of(6, self.pr_head("6"))],
+                                       check_rows={self.pr_head("5"): green(), self.pr_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -17988,8 +18032,8 @@ unexpected(method + " " + rel)
         # The root's default branch is trunk, and its one done pull request is on trunk. Its test host names main as its base, as every test
         # host does. The batch line still names the PR, because the root's base is its own default branch.
         self.make_trunk_default(self.alpha)
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
-                                       comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, self.pr_head("5"), base="trunk")],
+                                       comments=[record_of(5, self.pr_head("5")), lint_of(5, self.pr_head("5"))], check_rows={self.pr_head("5"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -18042,8 +18086,8 @@ unexpected(method + " " + rel)
         # The folder is never created. Today the read of its default branch raises OSError out of merge, so no line prints. The case fails on that
         # escape, named. In both orders the missing root is one `repo DIR: unknown (...)` line at its place, and the good root's block is whole.
         missing = os.path.join(os.path.dirname(self.alpha), "missing")
-        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, hex_head("5"))],
-                                                      comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
+        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, self.pr_head("5"))],
+                                                      comments=[record_of(5, self.pr_head("5")), lint_of(5, self.pr_head("5"))], check_rows={self.pr_head("5"): green()})})
         for failing_first in (True, False):
             order = (missing, self.alpha) if failing_first else (self.alpha, missing)
             with self.subTest(failing_first=failing_first):
@@ -18060,7 +18104,7 @@ unexpected(method + " " + rel)
         # No host is given, so each root gets a real Host(cwd=root), and gh answers for the folder each call runs in. alpha and bravo each name their
         # own repo and hold their own pull request. The folder the test runs in (o/self, #7) reaches neither block: a Host built from the process
         # cwd would read it.
-        head5, head9 = hex_head("5"), hex_head("9")
+        head5, head9 = self.pr_head("5"), self.pr_head("9")
         self.per_root_gh({
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()}),
             self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()}),
@@ -18079,10 +18123,11 @@ unexpected(method + " " + rel)
 
     def test_a_done_pr_whose_head_the_base_holds_is_named_in_neither_batch_line(self):
         # holds_head reads head...main: ahead or identical says main holds head 5, so #5 is already in the base, and no batch line names it. #6, a
-        # done draft that no compare holds, is still named. Both batch lines are covered: the open one, and the one built on a running head.
+        # done draft that no head holds, is still named. Both batch lines are covered: the open one, and the one built on a running head.
         for status in ("ahead", "identical"):
             for busy in (False, True):
                 with self.subTest(status=status, busy=busy):
+                    self.fresh_roots()
                     rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -18091,11 +18136,12 @@ unexpected(method + " " + rel)
                     self.assertEqual(batch_lines_of(block), [want], "a done pull request whose head the base holds is named in a batch line:\n" + out)
 
     def test_a_done_pr_whose_head_the_base_does_not_hold_is_named(self):
-        # The control. No compare says main holds head 5, or the compare reads "behind" on head...main, which says head 5 is ahead of main: neither
-        # holds head 5, so #5 and #6 are both named, in either batch line.
+        # The control. Main does not hold head 5: head 5 is a child of main, so main is behind it. Neither the base holds head 5, so #5 and #6 are
+        # both named, in either batch line. None and "behind" read the same fixture: each leaves head 5 a child of the base.
         for status in (None, "behind"):
             for busy in (False, True):
                 with self.subTest(status=status, busy=busy):
+                    self.fresh_roots()
                     rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -18106,7 +18152,7 @@ unexpected(method + " " + rel)
     def test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines(self):
         # alpha's base has no branch protection, so its required checks cannot be named. The stop comes from the batch line's CI read (ready_busy):
         # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
-        head5, head9 = hex_head("5"), hex_head("9")
+        head5, head9 = self.pr_head("5"), self.pr_head("9")
         self.per_root_gh({
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()},
                                         contexts=None),
@@ -21448,6 +21494,10 @@ class LeftOutHost(FakeHost):
 
     def commit_read(self, sha):
         raise merge.Stop("no commit read in this case")
+
+    def ready_busy(self, pulls, base):
+        """No ready pull request on `base` has CI running: head_state is green in this fake, so the batch line reads none busy."""
+        return []
 
     def holds_head(self, head, other):
         """True when `other` (a sha, or the base branch's name) contains `head`: the ancestry Host.holds_head's compare reads as ahead or identical."""
