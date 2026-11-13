@@ -62,3 +62,19 @@ sh("waiter-quote: a python apostrophe inside a double-quoted string holds a loop
    "python3 - <<'EOF'\ns = \"it's: while true; do sleep 3; done\"\nEOF", "allow", cwd=NOGIT)
 sh("waiter-quote: an escaped apostrophe then a hash inside a single-quoted string holds a loop, allowed",
    "python3 - <<'EOF'\ns = 'it\\'s # x: while true; do sleep 3; done'\nEOF", "allow", cwd=NOGIT)
+
+# A quote or a template literal left open at the body's end must not hide the command after EOF. The body
+# ends at EOF, so what follows it is a command. A comment opener inside a string is text, so a loop there is allowed.
+sh("waiter-quote: a python heredoc body leaving a quote open at its end, then gh pr create, is refused as draft-pr",
+   "python3 - <<'EOF'\nprint('C:\\Users\\')\nEOF\ngh pr create --title t --body b", "deny", "draft-pr", cwd=NOGIT)
+sh("waiter-quote: a python heredoc body leaving a quote open at its end, then a loop after EOF, is refused",
+   "python3 - <<'EOF'\nprint('C:\\Users\\')\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
+sh("waiter-quote: a node heredoc body leaving a single-quoted string open at its end, then a loop after EOF, is refused",
+   "node - <<'EOF'\nconst s = 'C:\\';\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
+# Pin, no red found: refused on fccff95e6 and b62c51f67 as well, so it guards the template reading and is not a red.
+sh("waiter-quote: pin, no red found: a node heredoc body with an open template literal, then a loop after EOF, is refused",
+   "node - <<'EOF'\nconst s = `open\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
+sh("waiter-quote: a node // opener inside a single-quoted string holding a loop is allowed",
+   "node - <<'EOF'\nconst s = '// while true; do sleep 3; done';\nEOF", "allow", cwd=NOGIT)
+sh("waiter-quote: a node /* opener inside a single-quoted string holding a loop is allowed",
+   "node - <<'EOF'\nconst s = '/* while true; do sleep 3; done';\nEOF", "allow", cwd=NOGIT)
