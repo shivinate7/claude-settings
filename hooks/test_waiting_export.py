@@ -101,14 +101,18 @@ def git(where, *args, env=None):
 
 # --------------------------------------------------------------------------- repo fixtures
 
-def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL):
-    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder."""
+def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL, page_writer=None):
+    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder;
+    `page_writer` is the session id under the "page-writer" key, which None leaves out."""
     page = {"id": page_id, "url": page_url, "role": "waiting-page", "account": "shivam"}
     if page_export is not None:
         page["export"] = page_export
     reference = {"id": REF_ID, "url": REF_URL, "role": "reference", "account": "shivam",
                  "collections": ["notes"]}
-    return json.dumps({"kinds": {}, "artifacts": [page, reference]})
+    keys = {"kinds": {}, "artifacts": [page, reference]}
+    if page_writer is not None:
+        keys["page-writer"] = page_writer
+    return json.dumps(keys)
 
 
 def make_repo(name, extras):
@@ -140,9 +144,11 @@ def roadmap_repo(name, commits, extras=None):
     return root
 
 
-def base_repo(name):
-    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder."""
-    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
+def base_repo(name, page_writer=None):
+    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder.
+    `page_writer` is the extras file's "page-writer" key; None leaves the key out."""
+    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})],
+                        extras=registry(page_writer=page_writer))
 
 
 def item(folder, n):
@@ -164,6 +170,18 @@ def newest_copy(root, folder):
 def copy_readable(root, folder):
     return git_run(root, "log", "-1", "--format=%ct", "refs/remotes/origin/" + BRANCH,
                    "--", folder + "/").returncode == 0
+
+
+def page_names(root, url):
+    """layout.is_waiting_page_url for `url` in `root`: the test a page write takes, read the same way."""
+    import layout
+    return layout.is_waiting_page_url(root, url)
+
+
+def key_writer(root):
+    """The session id under the extras key "page-writer" in `root`, as layout.page_writer_key reads it."""
+    import layout
+    return layout.page_writer_key(root)
 
 
 # --------------------------------------------------------------------------- transcript records
@@ -690,9 +708,22 @@ def case_n17_writer_write_by_path_to_items_blocks():
 # --------------------------------------------------------------------------- wake cases (a Send on the waiting page)
 
 WAKE_HEADER = "[Artifact comment sent to Claude]"  # the banner a Send opens its turn with
-WAKE = (WAKE_HEADER + "\nArtifact: " + PAGE_URL + "\nSent to Claude at: 2026-11-05T19:00:00Z\n\n"
-        "=== BEGIN ARTIFACT COMMENT 0123456789abcdef ===\n> Saved: pick-1 = a\n"
-        "=== END ARTIFACT COMMENT 0123456789abcdef ===\n")
+WAKE_BODY = ("Sent to Claude at: 2026-11-05T19:00:00Z\n\n"
+             "=== BEGIN ARTIFACT COMMENT 0123456789abcdef ===\n> Saved: pick-1 = a\n"
+             "=== END ARTIFACT COMMENT 0123456789abcdef ===\n")
+
+
+def wake_naming(url):
+    """A Send's wake whose Artifact line names `url`, with WAKE_BODY after the banner."""
+    return WAKE_HEADER + "\nArtifact: " + url + "\n" + WAKE_BODY
+
+
+def wake_without_artifact():
+    """A Send's wake whose banner has no Artifact line, with WAKE_BODY after it."""
+    return WAKE_HEADER + "\n" + WAKE_BODY
+
+
+WAKE = wake_naming(PAGE_URL)
 
 
 def case_w1_wake_blocks_when_copy_is_older_than_the_wake():
@@ -752,9 +783,11 @@ def case_w6_wake_by_a_session_that_is_not_the_writer_passes():
 
 
 def case_w7_wake_with_no_writer_named_and_no_export_run_passes():
-    """No meta/page writer is named. The control has an export run before the wake, which makes this session the
-    writer, and it blocks. The subject has no export run, so the writer is unknown and the wake passes."""
+    """No writer is named anywhere: no meta/page read, no "page-writer" key in the extras file, and no export run.
+    The control has an export run before the wake, which makes this session the writer, and it blocks. The subject
+    has none of the three, so the writer cannot be told and the wake passes. W14 covers a key that names the session."""
     root = base_repo("w7")
+    check("W7 scope: the extras file holds no page-writer key", key_writer(root) is None, key_writer(root))
     before = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1")
     expect_block("W7 control", run_stop("w7-run", root, before + [owner(at(19), WAKE)], writer=None), (SCRIPT,))
     expect_pass("W7", run_stop("w7", root, [owner(at(18, 50)), owner(at(19), WAKE)], writer=None))
@@ -793,6 +826,62 @@ def case_w11_copy_commit_older_than_the_wake_still_blocks():
     check("W11 scope: the newest copy commit is the 18:30 one", newest_copy(root, FOLDER) == at(18, 30),
           newest_copy(root, FOLDER))
     expect_block("W11", run_stop("w11", root, [owner(at(18, 50)), owner(at(19), WAKE)]), (SCRIPT,))
+
+
+def case_w12_wake_naming_another_artifact_passes():
+    """W1 with one change: the wake's Artifact line names the reference artifact, not the waiting page, and the
+    writer is named. The control names the waiting page, and it blocks. A wake for another artifact writes no page."""
+    root = base_repo("w12")
+    check("W12 scope: the reference url is not the waiting page's", not page_names(root, REF_URL), REF_URL)
+    check("W12 scope: the waiting page url is the waiting page's", page_names(root, PAGE_URL), PAGE_URL)
+    expect_block("W12 control", run_stop("w12-page", root, [owner(at(18, 50)), owner(at(19), wake_naming(PAGE_URL))]),
+                 (SCRIPT,))
+    expect_pass("W12", run_stop("w12", root, [owner(at(18, 50)), owner(at(19), wake_naming(REF_URL))]))
+
+
+def case_w13_wake_without_an_artifact_line_passes():
+    """W1 with one change: the banner has no Artifact line, so the wake names no artifact and counts for none. The
+    writer is named. The control has the line, naming the waiting page, and it blocks."""
+    root = base_repo("w13")
+    headless = wake_without_artifact()
+    check("W13 scope: the banner has no Artifact line", "Artifact:" not in headless, headless)
+    expect_block("W13 control", run_stop("w13-line", root, [owner(at(18, 50)), owner(at(19), WAKE)]), (SCRIPT,))
+    expect_pass("W13", run_stop("w13", root, [owner(at(18, 50)), owner(at(19), headless)]))
+
+
+def case_w14_writer_key_naming_this_session_blocks_a_wake():
+    """No meta/page read and no export run, so the transcript names no writer. The extras key "page-writer" names
+    this session, so the key decides and the wake blocks. The control names the same writer in meta/page instead;
+    the old code already blocks that, so the fixture reaches a block and the subject's red is the key's."""
+    root = base_repo("w14", page_writer=SESSION)
+    records = [owner(at(18, 50)), owner(at(19), WAKE)]
+    check("W14 scope: the extras key names this session", key_writer(root) == SESSION, key_writer(root))
+    check("W14 scope: the transcript has no ArtifactData call", ARTIFACT_TOOL not in json.dumps(records))
+    expect_block("W14 control", run_stop("w14-named", root, records, writer=SESSION), (SCRIPT,))
+    expect_block("W14", run_stop("w14", root, records, writer=None), (SCRIPT,))
+
+
+def case_w15_writer_key_naming_another_session_overrules_an_export_run():
+    """No meta/page read. An export run before the wake would make this session the writer, but the extras key
+    "page-writer" names another session, so the key decides and the wake passes. The control has no key, so the
+    export run decides and the wake blocks."""
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + [owner(at(19), WAKE)]
+    root = base_repo("w15", page_writer="session_other")
+    check("W15 scope: the extras key names another session", key_writer(root) == "session_other", key_writer(root))
+    expect_block("W15 control", run_stop("w15-nokey", base_repo("w15-nokey"), records, writer=None), (SCRIPT,))
+    expect_pass("W15", run_stop("w15", root, records, writer=None))
+
+
+def case_w16_writer_key_naming_the_remote_session_blocks_a_wake():
+    """No meta/page read and no export run. The extras key names session_9f, and this run's env names this session
+    as cse_9f, which override.remote_session_id maps back to session_9f, so the key decides and the wake blocks. The
+    control names the same writer in meta/page under the same env, which blocks on the old code too."""
+    root = base_repo("w16", page_writer="session_9f")
+    records = [owner(at(18, 50)), owner(at(19), WAKE)]
+    env = {REMOTE_ENV: "cse_9f"}
+    check("W16 scope: the extras key names session_9f", key_writer(root) == "session_9f", key_writer(root))
+    expect_block("W16 control", run_stop("w16-named", root, records, writer="session_9f", extra_env=env), (SCRIPT,))
+    expect_block("W16", run_stop("w16", root, records, writer=None, extra_env=env), (SCRIPT,))
 
 
 # --------------------------------------------------------------------------- unit cases
@@ -896,6 +985,11 @@ CASES.extend((
     case_w9_sidechain_wake_is_ignored,
     case_w10_full_size_transcript_with_a_wake_blocks,
     case_w11_copy_commit_older_than_the_wake_still_blocks,
+    case_w12_wake_naming_another_artifact_passes,
+    case_w13_wake_without_an_artifact_line_passes,
+    case_w14_writer_key_naming_this_session_blocks_a_wake,
+    case_w15_writer_key_naming_another_session_overrules_an_export_run,
+    case_w16_writer_key_naming_the_remote_session_blocks_a_wake,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
