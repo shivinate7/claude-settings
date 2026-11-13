@@ -2364,7 +2364,7 @@ def _spawn_events(reader, records):
                 launched[res["tool_use_id"]] = found.group(1)
         att = rec.get("attachment")
         text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else reader.owner_text(rec)
-        for part in (text or "").split("<task-notification>")[1:]:
+        for part in (text or "").split(TASK_NOTIFICATION_TAG)[1:]:
             task = _NOTICE_TASK.search(part)
             if task and _NOTICE_COMPLETED.search(part):
                 events.append(("done", task.group(1)))
