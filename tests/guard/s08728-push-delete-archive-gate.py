@@ -3,14 +3,17 @@ FAMILY = "push-delete"
 
 # Rule archive-push-gates-delete. A delete of a remote branch that follows an archive push of that branch runs
 # only when `&&` joins them, so the push's own exit status gates it. A `;`, a newline, `||`, or a pipe on the push
-# hides or breaks that status, so each is refused. A source of `HEAD`, `origin/<name>` or `<name>` is the branch
-# `<name>`, `${b}` and `$b` are one name, and a taken archive name `archive/<name>-N` is the branch `<name>`.
+# hides or breaks that status, so each is refused. An archive push from `HEAD` or `@` pairs `<name>` and `<name>`
+# without a `-N` suffix, for `archive/<name>`. An archive push from an explicit branch (`feat-2`, `origin/feat`)
+# pairs only that branch, minus `origin/`. `${b}` and `$b` are one name. An empty archive name pairs nothing and
+# must not crash the guard: a crash fails open for the whole command, so a gate after it never runs.
 ARCHIVE_GATE_RULE = "archive-push-gates-delete"
 ARCHIVE_GATE_REMEDY = "&&"
 ARCHIVE_GATE_PUSH = VCS + " push origin HEAD:archive/feat"
 ARCHIVE_GATE_REF_PUSH = VCS + " push origin feat:refs/heads/archive/feat"
 ARCHIVE_GATE_DELETE = VCS + " push --delete origin feat"
 ARCHIVE_GATE_COLON_DELETE = VCS + " push origin :feat"
+ARCHIVE_EMPTY_NAME = VCS + " push origin HEAD:archive/ ; " + VCS + " push origin --delete feat"
 
 
 def archive_gate_refused(name, command):
@@ -72,3 +75,57 @@ archive_gate_allowed("a delete with no archive push before it is allowed",
                      ARCHIVE_GATE_DELETE)
 archive_gate_allowed("a plain push, then --delete joined by ; is allowed: no archive push, so no gate",
                      VCS + " push origin HEAD:lane/x; " + ARCHIVE_GATE_DELETE)
+
+# Explicit source, and an empty archive name. An explicit source is the branch pushed, so the taken name
+# `archive/feat-2` pairs only `feat-2`, and `feat` is free. An empty name (`HEAD:archive/`) pairs nothing. A crash
+# in the pairing fails open for the whole command and allows silently, as a plain delete does, so a verdict alone
+# cannot show it: the deny after the empty name shows the gate that the crash would skip, and the log check reads
+# the crash line.
+archive_gate_allowed("archive push to an empty name, then --delete feat joined by ; is allowed",
+                     ARCHIVE_EMPTY_NAME)
+archive_gate_refused("archive push to an empty name, then archive/feat, then --delete feat joined by ; is refused",
+                     VCS + " push origin HEAD:archive/ ; " + VCS + " push origin HEAD:archive/feat ; "
+                     + VCS + " push origin --delete feat")
+archive_gate_allowed("archive push feat-2 to archive/feat-2 joined by &&, then --delete feat joined by ; is allowed",
+                     VCS + " push origin feat-2:archive/feat-2 && " + VCS + " push origin --delete feat-2; "
+                     + VCS + " push origin --delete feat")
+archive_gate_refused("archive push from origin/feat to archive/feat-2, then --delete feat joined by ; is refused",
+                     VCS + " push origin origin/feat:archive/feat-2 ; " + VCS + " push origin --delete feat")
+archive_gate_allowed("archive push from origin/feat to archive/feat-2, then --delete feat-2 joined by ; is allowed",
+                     VCS + " push origin origin/feat:archive/feat-2 ; " + VCS + " push origin --delete feat-2")
+archive_gate_refused("archive push from @ to archive/feat-2, then --delete feat joined by ; is refused",
+                     VCS + " push origin @:archive/feat-2 ; " + VCS + " push origin --delete feat")
+
+
+def _archive_run(folder, command):
+    """decide() on one Bash command from PUSHFEAT, with the guard's config, and so its guard.log, in folder."""
+    return decide({"raw": None, "tool": "Bash", "tool_input": {"command": command}, "cwd": PUSHFEAT,
+                   "session": None, "env_path": None, "config": folder, "agent_id": None,
+                   "transcript": None, "agent_type": None, "event": None, "stop_active": False,
+                   "no_root": False, "env": None, "temp": TEMP_DIR, "max_seconds": None, "guard": None})
+
+
+def archive_empty_name_log_case():
+    """The empty archive name writes no `crash` line. A refusal lands in the folder's guard.log first, so the
+    log is the one the run writes (scope); then the empty-name command is a silent allow with no crash row."""
+    folder = os.path.join(ROOT, "archive-empty-name")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    marker, _ = _archive_run(folder, "pkill -f node")   # a deny: one logged line
+    rows = _session_log_rows(folder) or []
+    if marker != "deny" or not rows or rows[0].split("\t")[2:3] != ["deny"]:
+        return False, "scope: the refusal marker did not land in the folder's guard.log"
+    got, reason = _archive_run(folder, ARCHIVE_EMPTY_NAME)
+    if got != "allow" or reason:
+        return False, "expected a silent allow, got %s %r" % (got, reason[:80])
+    crashes = [row for row in _session_log_rows(folder) or []
+               if row.split("\t")[2:4] == ["crash", "guard-crash"]]
+    if crashes:
+        error = " ".join(crashes[0].split("\t")[4:])
+        return False, "the guard crashed on the empty archive name: %s" % error[:120]
+    return True, "a silent allow and no crash line"
+
+
+# Registered in section 35537, the first push-delete section after LOG_CHECKS_EXTRA exists (section 21304).
