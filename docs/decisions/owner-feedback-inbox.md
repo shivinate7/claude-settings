@@ -33,8 +33,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   answer's closing quote). An empty answer and any other tool save nothing. A result that holds no
   `"<question>"="<answer>"` pair, or an answer in a form it cannot read, is not saved, and the session is told. The
   readable answers beside an unreadable one are still saved. Cost: one `local_time.py` process start per `AskUserQuestion` call
-  (pinned by `hooks/test_local_time.py`), from its PostToolUse
-  entry; the capture starts no further process. A relay of the owner's words from another session is
+  (the start itself is unpinned), from its PostToolUse
+  entry; the capture starts no further process (pinned by `hooks/test_feedback_inbox.py`, "question box cost"). A relay of the owner's words from another session is
   not saved: it comes in the `<cross-session-message` frame that a peer's own send uses, and no marker tells them apart.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
