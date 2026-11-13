@@ -623,7 +623,8 @@ def stood_closed(items, answers):
     held = []
     for doc_id, doc in sorted(items.items()):
         if (not isinstance(doc, dict) or doc.get("stands") is not True or doc.get("status") != "closed"
-                or doc.get("arbiter") is True or doc.get("group") or doc.get("kind") != "decision" or not doc.get("recommended")):
+                or doc.get("arbiter") is True or doc.get("group") or doc.get("kind") != "decision"
+                or not (doc["recommended"] if doc.get("recommended") is not None else doc.get("pick"))):  # page.html recOf
             continue
         reply = doc.get("reply")
         word = re.sub(r"^[\W_]+", "", reply).lower() if isinstance(reply, str) else ""

@@ -3348,6 +3348,16 @@ class StoodPickClosed(Copied):
         empty = self.check(self.stood(583, "stood-empty", lastAnswer={}))
         self.assertEqual([n for n, _ in held_lines(empty)], [583], "an empty lastAnswer was not held. Output:\n" + shown(empty))
 
+    def test_a_stood_pick_with_only_the_old_pick_field_is_held(self):
+        """Live closed picks carry `pick`, the old name of `recommended` (page.html recOf), and no `recommended`."""
+        old = self.stood(584, "stood-old-pick", pick="a")
+        del old["recommended"]
+        r = self.check(old)
+        self.assertEqual([n for n, _ in held_lines(r)], [584], "a stood pick with only `pick` was not held. Output:\n" + shown(r))
+        bare = self.stood(585, "stood-no-pick")
+        del bare["recommended"]
+        self.assertEqual(held_lines(self.check(bare)), [], "an item with no pick was held")
+
     def test_a_ruling_a_group_member_and_a_task_are_not_stood_picks(self):
         for i, change in enumerate(({"arbiter": True}, {"group": "g1"}, {"kind": "task"})):
             self.assertEqual(held_lines(self.check(self.stood(590 + i, "stood-other-%d" % i, **change))), [])
