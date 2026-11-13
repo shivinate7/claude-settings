@@ -8906,6 +8906,24 @@ class TwoStepConfirm(RecordsEnv):
         self.assertIn("moved", out, "the refusal does not say the head moved: %s" % out)
         self.assertFalse(getattr(self.host, "merged", False), out)
 
+    def test_a_relayed_yes_survives_a_page_only_rebuild_commit_on_the_claim_head(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit the first confirm pushes, on the relayed head
+        self.on("feat", {merge.RECORDS_PAGE: page()}, "Rebuild the records page")  # the resumed page commit: the records page alone, no trailer
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertNotIn("so that yes does not cover it", out, "the relayed yes was refused for a page-only rebuild commit: %s" % out)  # scope first: not refused as moved
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the relayed yes did not carry over the page-only rebuild commit: %s" % out)
+
+    def test_a_commit_with_the_page_subject_but_another_file_still_refuses_the_relayed_yes(self):  # control: green on the old code
+        relayed = self.head("feat")
+        self.claim_head()
+        self.on("feat", {"rival.txt": "someone else pushed\n"}, "Rebuild the records page")  # the subject alone does not make a page commit
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("so that yes does not cover it", out, "the refusal does not say the relayed yes is not covered: %s" % out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
 class ClaimCollision(RecordsEnv):
     """Two lanes claim the same record number between their confirms (per-lane merge, the coordinator's pick of Nov 12 2026). Lane B's first
     confirm pushes its claim D-002 and stops. Lane A then merges, and main holds D-002. Lane B's second confirm finds its own claim taken on main:
@@ -14474,6 +14492,19 @@ class ReviewEnv(Env):
             fx.on_main[(m, "main")] = "ahead"
         return heads[1:]
 
+    def base_tip(self, sha):
+        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
+        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def claim_over(self, parent, changes):
+        """-> the sha of a claim commit over `parent`: one parent, and the tree git_commit builds for `changes`, under the message a claim commit
+        carries (a Record-claim trailer, claim_only reads it). The tree is git_commit's, so the fixture stays one home; only the message differs."""
+        plain = self.git_commit(parent, changes)
+        tree = sh(self.co, "git", "rev-parse", f"{plain}^{{tree}}")
+        return sh(self.co, "git", "commit-tree", tree, "-p", parent, "-m", "Claim record numbers\n\nRecord-claim: D-002")
+
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
     --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
@@ -15827,12 +15858,6 @@ class ReleaseCheck(ReviewEnv):
 
     # A clean merge of main after the reviewed head (decision pr-review-record). --release-check reads the record as --reviewed does.
 
-    def base_tip(self, sha):
-        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
-        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
-        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
-        sh(self.co, "git", "fetch", "-q", "origin")
-
     def release_at(self, fx, head, record_head):
         """-> (rc, lines, err) of --release-check on pull request 7 at `head`, its one record for `record_head`, and the commits, trees and
         compares of fx. The lint is PASS on `head`."""
@@ -15892,6 +15917,43 @@ class ReleaseCheck(ReviewEnv):
                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
 
+    def claim_only_release(self, fx, claim, lint_head, record_head, lint=None):
+        """-> (rc, lines, err) of --release-check on pull request 7 at the claim commit `claim`: its lint PASS on `lint_head`, its one record for
+        `record_head`, and the commits, trees and compares of fx. `lint` replaces the lint flags."""
+        flags = self.lints([7], heads={7: lint_head}) if lint is None else lint
+        rc, lines, err, _ = self.release([7], lint=flags, pulls=[self.live(7, head=claim)], comments=[self.review(7, head=record_head)],
+                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        return rc, lines, err
+
+    def test_g_a_claim_only_head_carries_the_lint_of_the_reviewed_head_it_stacks_on(self):
+        # Catches: --release-check reading the lint only at the live head, so the PASS on the reviewed head that a one-parent claim commit carries
+        # reads as a lint that ran on another sha. lint_check carries it; release_check must carry it the same way.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)  # the record is done at the live head
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_h_a_record_done_at_the_reviewed_head_survives_a_claim_only_head(self):
+        # Catches: the clean-merge walk of the record refusing a one-parent claim commit, so the record done at the reviewed head reads stale on the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=claim, record_head=fx.fixed)  # the lint is PASS on the live head
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_i_a_claim_shaped_commit_that_writes_a_code_file_carries_no_lint(self):  # control: green on the old code
+        # A commit with a Record-claim trailer that writes a file no stamp kind holds is no claim: the lint on the head it stacks on is not carried.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"a.txt": "claimed\n"})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
@@ -15899,6 +15961,44 @@ GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/"
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
 # The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
 PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
+
+class ClaimOnlyReviewed(ReviewEnv):
+    """`merge --reviewed` reads a one-parent claim commit as the head it stacks on: the record done at the reviewed head survives the claim, and the
+    lane-lint PASS on the reviewed head carries to the claim head (claim_only, the rule lint_check already uses). A claim-shaped commit that
+    writes a code file carries neither, so the control reads not done."""
+
+    def claim_host(self, fx, claim, record_head, lint_head):
+        """The host of `merge --reviewed` for pull request 7 at `claim`: its one record for `record_head`, and a lane-lint PASS on `lint_head`."""
+        comments = [review_comment(1, 7, record_text(head=record_head, rounds=REVIEW_PASS)), lint_of(7, lint_head)]
+        return self.reviewed_host(fx, claim, comments=comments)
+
+    def test_j_a_record_done_at_the_reviewed_head_reads_done_on_a_claim_only_head(self):
+        # Catches: the clean-merge walk refusing a one-parent claim commit, so the record done at the reviewed head reads stale on the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.reviewed_line(self.claim_host(fx, claim, record_head=fx.fixed, lint_head=claim), claim, "done",
+                           "a claim-only head reads stale for a record done at the reviewed head")
+
+    def test_k_a_lint_pass_on_the_reviewed_head_carries_to_the_claim_only_head(self):
+        # Catches: lint_check's carry (claim_only) not reaching --reviewed, so the PASS on the reviewed head reads as no lint at the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.reviewed_line(self.claim_host(fx, claim, record_head=claim, lint_head=fx.fixed), claim, "done",
+                           "a lint PASS on the reviewed head does not carry to the claim-only head")
+
+    def test_l_a_claim_shaped_commit_that_writes_a_code_file_carries_no_lint(self):  # control: green on the old code
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"a.txt": "claimed\n"})
+        self.facts(fx, [claim])
+        rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, claim, record_head=claim, lint_head=fx.fixed))
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
+        self.assertIn("merge --lane-lint 7", out, out)
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
