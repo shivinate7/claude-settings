@@ -576,7 +576,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
-            ARCHIVE_GATE_REASON, archive_gate_hits,
+            ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
@@ -4689,9 +4689,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
     # 3b2. Before the push asks below, so a pending ask never pre-empts this denial. POSIX only: `&&` is shell syntax.
     if not POWERSHELL_CALL[0]:
-        hits = archive_gate_hits(nm_segments, ends)
+        hits = archive_guard_hits(nm_segments, ends)
         if hits:
-            refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GATE_REASON, "; ".join(hits))
+            refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.

@@ -1534,16 +1534,16 @@ def cmd_exe_delete_hit(segment: str) -> str:
     return ""
 
 
-# ARCHIVE PUSH GATES DELETE. Rule archive-push-gates-delete (rule shared-trees-archive-then-delete): a remote
+# ARCHIVE PUSH BEFORE DELETE. Rule archive-push-gates-delete (rule shared-trees-archive-then-delete): a remote
 # branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive push
 # of the same branch in one command runs only when `&&` joins every step from the push to the delete, so the
-# push's own exit status gates it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
+# push's own exit status decides it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
 # ends come from `split_segments`; each push is read by `_push_parse`. A push and a delete pair when they
 # name the same branch by text: `${b}` folds to `$b`, and `$b` pairs with `$b` by equality, with no expansion
 # read. An explicit source `origin/<name>` is `<name>` alone. A `HEAD` or `@` source takes its names from the
 # archive name, with and without `-N`. One push that carries both the archive refspec and the delete never
 # pairs. `bash -c` bodies, heredocs, script files and PowerShell are not read (`guard-guards-mistakes-only`).
-ARCHIVE_GATE = "&&"   # the join that gates, and the one word the remedy names
+ARCHIVE_JOIN = "&&"   # the join that keeps the push's exit status, and the one word the remedy names
 ARCHIVE_PREFIX = "archive/"
 ARCHIVE_COPY_SUFFIX = r"(-[0-9]+)?"   # a taken archive name: `archive/<branch>` or `archive/<branch>-<digits>`
 ARCHIVE_CURRENT_BRANCH = ("HEAD", "@")   # a source that names no branch
@@ -1587,7 +1587,7 @@ def _push_events(segment: str):
     return events
 
 
-def archive_gate_hits(segments, ends):
+def archive_guard_hits(segments, ends):
     """Each delete that follows an archive push of its branch with anything but `&&` between them, as
     `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
     of the text (contractions as text) follows the first in both lists, and each ends with an empty end
@@ -1600,25 +1600,25 @@ def archive_gate_hits(segments, ends):
         reading, closes = segments[start:stop], ends[start:stop]
         start = stop
         archives = []   # (segment number, names), in order
-        gated = []      # whether each segment's close still gates: `&&`, or the line break after one
+        chained = []    # whether each segment's close still keeps the push status: `&&`, or the line break after one
         for number, segment in enumerate(reading):
             # `a &&` newline `b` splits to an empty middle segment closed by the newline. The shell reads
-            # that line break as the rest of the `&&` chain, so it gates; a bare newline or `;` does not.
-            gated.append(closes[number] == ARCHIVE_GATE or (
-                closes[number] == "\n" and not segment.strip() and number > 0 and gated[number - 1]))
+            # that line break as the rest of the `&&` chain, so it keeps the status; a bare newline or `;` does not.
+            chained.append(closes[number] == ARCHIVE_JOIN or (
+                closes[number] == "\n" and not segment.strip() and number > 0 and chained[number - 1]))
             for kind, names in _push_events(segment):
                 if kind == "archive":
                     archives.append((number, names))
                     continue
                 for name in sorted(names):
                     paired = [at for at, found in archives if at < number and name in found]
-                    if paired and not all(gated[paired[-1]:number]):
+                    if paired and not all(chained[paired[-1]:number]):
                         hits.append(name + " deleted after its archive push")
     return hits
 
 
-ARCHIVE_GATE_REASON = (
-    "archive-push-gates-delete: this delete can run after its archive push failed, which loses the branch "
+ARCHIVE_GUARD_REASON = (
+    "archive-push-gates-delete: this delete can run after its archive push failed, which loses the branch "  # glossary-ok: the pinned rule id, the step slug
     "with no copy (rule shared-trees-archive-then-delete). "
     "Remedy: run the delete only when the archive push has succeeded, by joining the two with `&&` "
     "and nothing else between the push and the delete."
