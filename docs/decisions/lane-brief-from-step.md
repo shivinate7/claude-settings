@@ -2,16 +2,16 @@
 
 ## The ruling
 
-Owner, 2026-11-13 13:37 CST, relayed by the retrospective and sent to the coordinator at 13:40 CST (step brief-from-step, the roadmap step that builds the brief tool; field why): "we need briefs to be improved then, greatly, that cna be a huge lift"
+Owner, 2026-11-13 13:37 CST (step brief-from-step, the roadmap step that builds the brief tool). The step's source field reads "owner 13:37 CST Nov 13, via retrospective and coordinator 13:39 CST". Quote, from field why: "we need briefs to be improved then, greatly, that cna be a huge lift"
 
 - Unverified: "yes briefs need to be templatized and token efficient and good" reached the lane only by relay (coordinator, 13:44 CST). It came from the retrospective's report, not typed to the lane.
-- Owner, 13:53 CST (relayed): ruling own-747-role-layout (the role-layout ruling) covers the agent rows of `agent-model-cap` (the model-per-role table). (paraphrase, no owner quote)
-- Owner, 14:05 CST (relayed by the retrospective): the spawn marker rule. (paraphrase, no owner quote)
+- Owner, 13:53 CST Nov 13 (relayed by the retrospective), on ruling own-747-role-layout (the role-layout ruling, typed 13:51 CST): "for the sessions and not the subagents that sessions can have". The layout sets session rows only (coordinator, arbiter, consultant, triage, lane kinds). Agents keep their `agent-model-cap` rows (the model-per-role table) unchanged.
+- Owner, 14:05 CST (relayed by the retrospective): the rule on the round, audit and fix verifier markers. (paraphrase, no owner quote)
 - Owner, 14:30 CST (relayed by the coordinator at 14:46 CST; unverified): a check that only batch CI can prove is written "proved at batch CI", and the lane is not failed on it. The template carries no ruling id or measured figure. (paraphrase, no owner quote)
 
-Part 1, the brief tool `brief_from_step`, on this head. It builds one fixed template from a roadmap step. The template holds the Grant line, the Lane brief line, Task with Fences (Fences are the files the agent may not touch), Files, Rulings, Failure classes, Done-check, Report cap, then the block "Agent spawn brief head". The template follows rule roles-brief-contents (the rule for what a brief carries).
+Part 1, the brief tool `brief_from_step`, on this head. It builds one fixed template from a roadmap step. The template holds the Grant line, the Lane brief line, Task with Fences (Fences are the files the agent may not touch), Files, Rulings, Failure classes, Done-check, Report cap, then the block "Agent spawn brief head". The template follows rule roles-brief-contents (the rule for what a brief carries). It restores three lines no role file or guard carries: a fix round is a fresh isolated spawn; never rebase onto main after review; only triage publishes the page.
 
-- Rulings come from the step whose slug matches, open or closed, plus the ids or aliases that the step's note names. Each ruling is quoted verbatim, with its time and source. A ruling with no quote prints "(paraphrase, no owner quote)".
+- Rulings come from the step whose slug matches, open or closed, plus the ids or aliases that the step's note names. Each ruling is quoted verbatim, with its time and source. A ruling with no quote prints "(paraphrase, no owner quote)". The id and alias match is case-insensitive and whole-token at this head; 199 step files write ids in capitals (count unverified here).
 - The step has no files or topic field. It may carry an optional `done_check` text and an optional `ci_only` flag. A missing field prints a marker that the coordinator fills in. The tool invents nothing.
 - With `ci_only`, the Done-check line ends "(proved at batch CI)", and a template line says the lane does not fail on that check.
 - Size, at head 075aa670d2. Words, and characters with chars/4 as an estimate:
