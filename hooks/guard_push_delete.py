@@ -1538,36 +1538,49 @@ def cmd_exe_delete_hit(segment: str) -> str:
 # branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive push
 # of the same branch in one command runs only when `&&` joins every step from the push to the delete, so the
 # push's own exit status gates it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
-# ends come from `split_segments`; each push is read by `_push_parse`. A branch word with a `$` is not
-# paired, and `bash -c` bodies, heredocs, script files and PowerShell are not read (`guard-guards-mistakes-only`).
+# ends come from `split_segments`; each push is read by `_push_parse`. A push and a delete pair when they
+# name the same branch by text: `${b}` folds to `$b`, and `$b` pairs with `$b` by equality, with no expansion
+# read. A source `origin/<name>` is `<name>`, and a taken archive name `archive/<name>-N` is `<name>`. One push
+# that carries both the archive refspec and the delete never pairs. `bash -c` bodies, heredocs, script files
+# and PowerShell are not read (`guard-guards-mistakes-only`).
 ARCHIVE_GATE = "&&"   # the join that gates, and the one word the remedy names
 ARCHIVE_PREFIX = "archive/"
+ARCHIVE_COPY_SUFFIX = r"(-[0-9]+)?"   # a taken archive name: `archive/<branch>` or `archive/<branch>-<digits>`
+_BRACED_VARIABLE = re.compile(r"\$\{(\w+)\}")
 
 
 def _branch_name(text: str) -> str:
-    """A branch name as two spellings of it agree: no quotes, no `+`, no `refs/heads/`."""
-    return text.replace('"', "").replace("'", "").lstrip("+").removeprefix("refs/heads/")
+    """A branch name as two spellings of it agree: no quotes, no `+`, no `refs/heads/`, `${x}` as `$x`."""
+    text = _BRACED_VARIABLE.sub(r"$\1", text.replace('"', "").replace("'", ""))
+    return text.lstrip("+").removeprefix("refs/heads/")
+
+
+def _archive_names(source: str, dest: str):
+    """The branch names an archive push of `source` to `archive/<dest>` stands for: the source without an
+    `origin/` prefix, and the destination with and without its `-N` suffix."""
+    names = {source.removeprefix("origin/"), dest}
+    names.add(re.fullmatch(r"(.+?)" + ARCHIVE_COPY_SUFFIX, dest).group(1))
+    return names
 
 
 def _push_events(segment: str):
     """[(kind, names)] for each `git push` in one segment: 'archive' for a refspec whose destination is
-    `archive/<name>` (names: its source and its suffix), 'delete' for each deleted branch."""
+    `archive/<name>` (names: see `_archive_names`), 'delete' for each deleted branch."""
     events = []
-    for subcommand, args in guard_core.git_calls(push_text(segment)):
+    for subcommand, args in push_calls(segment):
         if subcommand != "push":
             continue
         _f, _m, _e, _i, _u, _l, delete, _up, _remote, plain = _push_parse(args)
-        deleted = {_branch_name(spec[1:] if spec.startswith(":") else spec)
-                   for spec in plain if spec.startswith(":") or delete}
+        deleted = {_branch_name(spec.removeprefix(":")) for spec in plain if _colon_delete(delete, [spec])}
         if deleted:
             events.append(("delete", deleted))
         if delete:
             continue
         for spec in plain:
             source, colon, dest = spec.lstrip("+").partition(":")
-            dest = _branch_name(dest if colon else source)
+            source, dest = _branch_name(source), _branch_name(dest if colon else source)
             if dest.startswith(ARCHIVE_PREFIX) and source:
-                events.append(("archive", {_branch_name(source), dest[len(ARCHIVE_PREFIX):]}))
+                events.append(("archive", _archive_names(source, dest[len(ARCHIVE_PREFIX):])))
     return events
 
 
