@@ -5322,12 +5322,12 @@ def idle_lanes_after_merge(root, commit):
     try:
         try:
             fetch_branch(root, "roadmap")
-        except Stop as e:
+        except Stop:
             # A fetch of a missing branch and a failed fetch both exit non-zero; only a listing that works and is empty proves the branch is absent.
             lc, listed = git(root, "ls-remote", "--heads", "origin", "refs/heads/roadmap")
             if lc == 0 and not listed.strip():
                 return
-            say(owed % f"unread ({str(e).splitlines()[0]})")
+            say(owed % "unread (the fetch of origin/roadmap failed)")
             return
         c, text = git(root, "show", f"refs/remotes/origin/roadmap:{LIVE_PATH}")
         c2, merged_at = git(root, "show", "-s", "--format=%cI", commit)
