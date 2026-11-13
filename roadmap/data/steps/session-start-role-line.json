@@ -1,0 +1,14 @@
+{
+ "id": "session-start-role-line",
+ "title": "The session-start hook's role line matches the role texts in the rulings",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 11:28 CST Nov 13, from lane role-texts-match-rulings: hooks/session_start.sh line 21 says \"pick solo, one lane or coordinator\", which no longer matches the role texts of rulings R22, R46 and R50 to R59. The lane dropped it from #3138 because the hook is a guard path.",
+ "source": "coordinator 11:28 CST Nov 13; lane role-texts-match-rulings",
+ "note": "Change the line in hooks/session_start.sh to the role names the rulings use (lane, coordinator; see rule roles-pick-mode-from-request in the root CLAUDE.md). It is a guard path, so it goes to a lane with a reviewer. Ready.",
+ "updatedAt": "2026-11-13T11:29:35-06:00"
+}
