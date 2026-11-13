@@ -282,14 +282,21 @@ class PrBodyEscape(unittest.TestCase):
     # Trailer rule for the body: drop fenced blocks and <!-- --> comments first, then only the last paragraph counts.
     LINE = "Drops-lines: app.txt -- the owner wants Card back"
 
+    def verdict_for(self, body):
+        """(problems, notes) of the check on this PR body. A crash in the body reader is one named failure, never a traceback."""
+        try:
+            return C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        except IndexError as e:
+            self.fail("the body reader raised IndexError on an empty paragraph left by a skipped block or a blank line: %s\n%r" % (e, body))
+
     def excused(self, body):
-        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        got, notes = self.verdict_for(body)
         return got == [] and notes == ["ALLOWED app.txt: the owner wants Card back"], (got, notes)
 
     def assert_nothing_excused(self, bodies):
         for body in bodies:
             with self.subTest(body=body):
-                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                got, notes = self.verdict_for(body)
                 self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
                 self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
 
@@ -495,8 +502,119 @@ class PrBodyEscape(unittest.TestCase):
         ok, why = self.excused("Summary.\n\n%s\n%s\n%s\n" % (L, A, S))
         self.assertTrue(ok, "a key line in the attribution's paragraph with the URL stopped excusing: %r" % (why,))
 
+    # A fenced block, a comment or a blank line between the trailer and the footer is dropped or read as blank, and that leaves
+    # an empty paragraph last. The reader must skip the empty paragraph and judge the last prose paragraph above it.
+    BLOCKS = ("<!-- reviewer note -->", "```\nlog output\n```", "   ", " ")
 
-BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
+    def test_a_trailer_above_a_skipped_block_or_blank_line_and_the_footer_excuses_its_path(self):
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        tails = (A, "%s\n\n%s" % (A, S), "---\n%s" % F, "---\n\n%s" % F)
+        for block in self.BLOCKS:
+            for tail in tails:
+                with self.subTest(block=block, tail=tail):
+                    ok, why = self.excused("Summary.\n\n%s\n\n%s\n\n%s\n" % (L, block, tail))
+                    self.assertTrue(ok, "a skipped block or blank line between the trailer and the footer hid the trailer: %r" % (why,))
+
+    # `<!--` inside a code span or double quotes is text, not a comment opener: the trailer below it still excuses its path.
+    def test_a_comment_opener_in_a_code_span_does_not_hide_the_trailer_below_it(self):
+        L = self.LINE
+        ok, why = self.excused("Summary: write the marker.\n\n%s\n" % L)  # premise: the same body without the opener excuses
+        self.assertTrue(ok, why)
+        ok, why = self.excused("Summary: write `<!--` to open.\n\n%s\n" % L)
+        self.assertTrue(ok, "a `<!--` inside a code span was read as a comment opener, so the Drops-lines line below it lost its excuse: %s" % (why,))
+
+    def test_a_comment_opener_in_double_quotes_does_not_hide_the_trailer_below_it(self):
+        L = self.LINE
+        ok, why = self.excused("Summary: write the marker.\n\n%s\n" % L)  # premise: the same body without the opener excuses
+        self.assertTrue(ok, why)
+        ok, why = self.excused('Summary: write "<!--" to open.\n\n%s\n' % L)
+        self.assertTrue(ok, "a `<!--` inside double quotes was read as a comment opener, so the Drops-lines line below it lost its excuse: %s" % (why,))
+
+    def test_an_unclosed_html_comment_still_hides_the_trailer_below_it(self):  # control: a real opener strips to the end
+        L = self.LINE
+        self.assert_nothing_excused(["Summary.\n\n<!-- open note\n\n%s\n" % L])
+
+    def test_a_lone_double_quote_does_not_stop_a_real_comment_from_hiding_its_lines(self):  # control
+        L = self.LINE
+        ok, why = self.excused("Summary: a lone \" mark.\n\n%s\n" % L)  # premise: the trailer excuses without a comment
+        self.assertTrue(ok, why)
+        self.assert_nothing_excused(['Summary: a lone " mark.\n\n<!--\n%s\n-->\n' % L])
+
+    # The CLI reads the PR body from `--pr-body <text>`, or from the event file that CI names in GITHUB_EVENT_PATH (the step gets
+    # no body env). Each positive case first shows the drop is a finding with no body.
+    def run_cli(self, argv, env=None, body=None):
+        """The CLI on this repo as CI runs it (--strict). `body`, when not None, is the pull request body in an event file.
+        -> (rc, printed text). The one home is PrintedFindings.run_main."""
+        env = dict(env or {})
+        if body is not None:
+            env["GITHUB_EVENT_PATH"] = self.event_file(body)
+        return PrintedFindings.run_main(self, ["--repo", self.r.dir, "--upstream", "origin/main", "--strict", *argv], "utf-8", env=env)
+
+    def event_file(self, body, text=None):
+        """An event file of the kind CI writes for a pull request, holding `body` as its body. Its path is in this run's folder.
+        `text`, when given, is the file's exact text instead (a file that is not a pull request event)."""
+        fd, path = tempfile.mkstemp(prefix="event-", suffix=".json", dir=RUN)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            if text is None:
+                json.dump({"pull_request": {"body": body}}, f)
+            else:
+                f.write(text)
+        return path
+
+    def assert_fails_on_app(self, rc, text):
+        self.assertEqual(rc, 1, "exit %s, want the drop to FAIL:\n%s" % (rc, text))
+        self.assertIn("FAIL: app.txt", text)
+        self.assertNotIn("ALLOWED", text, text)
+
+    def assert_unknown_on_the_cli(self, text):
+        """An event file that gives no readable body reads UNKNOWN: exit 1 under --strict, never a FAIL on an empty body."""
+        rc, out = self.run_cli([], env={"GITHUB_EVENT_PATH": self.event_file(None, text=text)})
+        self.assertIn("UNKNOWN", out, "an event file with no readable body did not read UNKNOWN (exit %s):\n%s" % (rc, out))
+        self.assertEqual(rc, 1, out)
+
+    def test_the_pr_body_flag_excuses_its_path_on_the_cli(self):
+        rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
+        rc, text = self.run_cli(["--pr-body", "Summary.\n\n%s\n" % self.LINE])
+        self.assertEqual(rc, 0, "the CLI did not excuse the drop from --pr-body (exit %s):\n%s" % (rc, text))
+        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
+
+    def test_the_event_file_body_excuses_its_path_on_the_cli(self):
+        """CI gives the check no body env: the CLI reads the pull request body from the event file that GITHUB_EVENT_PATH names."""
+        rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
+        rc, text = self.run_cli([], env={"GITHUB_EVENT_PATH": self.event_file("Summary.\n\n%s\n" % self.LINE)})
+        self.assertEqual(rc, 0, "the CLI did not read the body from GITHUB_EVENT_PATH (exit %s):\n%s" % (rc, text))
+        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
+
+    def test_an_event_file_with_no_pull_request_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli("{}")
+
+    def test_an_event_file_that_is_not_json_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli("not json")
+
+    def test_an_event_file_whose_body_is_not_text_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli(json.dumps({"pull_request": {"body": 5}}))
+
+    def test_a_pr_body_starts_no_process_a_run_without_one_does_not(self):  # cost pin: decision silent-undo-check-design
+        """The body costs one string read: no process starts for it. Its one line names a path this change does not touch, so
+        it excuses nothing. The diff reads are memoized in one process (C._hunks): a second run in the same process reads
+        fewer diffs, so each measured run starts with that memo empty."""
+        body = "Summary.\n\nDrops-lines: gone.txt -- the file is not in this change\n"
+        without, with_body = SpawnCount(every=True), SpawnCount(every=True)
+        with without.armed(), unittest.mock.patch.dict(C._hunks, clear=True):
+            rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)
+        with with_body.armed(), unittest.mock.patch.dict(C._hunks, clear=True), \
+                unittest.mock.patch.object(C, "last_paragraph", wraps=C.last_paragraph) as read:
+            rc, text = self.run_cli(["--pr-body", body])
+        self.assert_fails_on_app(rc, text)
+        self.assertIn(unittest.mock.call(body), read.call_args_list, "the run did not read the body, so the count proves nothing")
+        self.assertGreater(without.n, 0, "the spawn count saw no process start, so the count is not armed")
+        self.assertEqual(with_body.n, without.n, "a run with a PR body started %d processes, one without started %d" % (with_body.n, without.n))
+
+
+BLOCK ="alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 
 class Debt19(unittest.TestCase):
@@ -1921,13 +2039,18 @@ class PrintedFindings(unittest.TestCase):
         r.sh("update-ref", "refs/remotes/origin/main", main)
         return r, merged
 
-    def run_main(self, argv, encoding):
-        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+    def run_main(self, argv, encoding, env=None):
+        """main(argv) with stdout a strict stream of `encoding`, `env` set, and CI and GITHUB_EVENT_PATH unset (CI sets the
+        second). -> (rc, what was printed: stdout, then stderr, so an argparse refusal shows). A raise is a failure."""
         out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
-        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
-            os.environ.pop("CI", None)
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            for k in ("CI", "GITHUB_EVENT_PATH"):
+                os.environ.pop(k, None)
+            os.environ.update(env or {})
             try:
                 rc = C.main(argv)
+            except SystemExit as e:  # argparse refuses an argument the parser does not know: its exit code is the result
+                rc = e.code
             except Exception as e:  # the traceback is the failure
                 self.fail("main raised %s under %s: %s" % (type(e).__name__, encoding, e))
         out.flush()
@@ -1985,14 +2108,14 @@ class BodyReadFails:
 
 
 class SpawnCount:
-    """Counts the `git` processes started while the block is armed. Every spawn, `subprocess.run` too, goes through Popen,
-    so Popen is the one place counted. A count, never a clock."""
+    """Counts the processes started while the block is armed: the `git` ones, or every one when `every` is set. Every spawn,
+    `subprocess.run` too, goes through Popen, so Popen is the one place counted. A count, never a clock."""
 
-    def __init__(self):
-        self.n, self.real = 0, subprocess.Popen
+    def __init__(self, every=False):
+        self.n, self.real, self.every = 0, subprocess.Popen, every
 
     def popen(self, args, *a, **k):
-        if list(args)[:1] == ["git"]:
+        if self.every or list(args)[:1] == ["git"]:
             self.n += 1
         return self.real(args, *a, **k)
 

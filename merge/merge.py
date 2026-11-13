@@ -1918,6 +1918,26 @@ def records_proof(wt, base_ref):
         git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+CI_JOB_BODY_VARS = ("CI_JOB_PR_BODY_FILE", "GITHUB_EVENT_PATH")  # the two ways bin/ci-job reads the PR body; a caller's copy of either is never the PR's
+
+@contextlib.contextmanager
+def ci_job_env(env, pr_body):
+    """The env for one `bin/ci-job` run, the one home of how the PR body reaches it: `env` (default: this process's) without any inherited body
+    variable, plus CI_JOB_PR_BODY_FILE naming a UTF-8 temp file that holds `pr_body` (an env string past 128 KB does not exec on Linux, and
+    a 65536-character body can be 256 KB). bin/ci-job gives each lint step that body in its own event file (GITHUB_EVENT_PATH), as CI does.
+    The file is removed on exit. Cost: one small temp file per ci-job run."""
+    base = os.environ if env is None else env
+    out = {k: v for k, v in base.items() if k not in CI_JOB_BODY_VARS}
+    fd, path = tempfile.mkstemp(prefix="merge-body-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(pr_body.encode("utf-8", "surrogatepass"))  # a lone surrogate stays invalid UTF-8, so ci-job reads the file as unknown, never as another body
+        out["CI_JOB_PR_BODY_FILE"] = path
+        yield out
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_ROUTES = ("Return to draft in cloud by MCP update_pull_request draft=true; on a computer by `gh pr ready --undo` "
@@ -2548,17 +2568,20 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None):
+def ci_job_run(wt, *args, pr_body="", notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
+    `pr_body` reaches ci-job through `ci_job_env`, and each step gets it in an event file: a step that reads the PR body (silent-undo) sees what CI gives it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
-    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2 with at least one `unknown` line, none of which names the PR body
+    (a missing tool is a lift's business; an unread body says nothing the flag can excuse).
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        with ci_job_env(env, pr_body) as run_env:
+            c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=run_env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
         return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
     lines = out.splitlines()
@@ -2570,7 +2593,9 @@ def ci_job_run(wt, *args, notes=None):
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
-        return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
+        unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
+        about_body = any(re.search(r"pull_request\.body|CI_JOB_PR_BODY", l) for l in unknown)
+        return "unknown", unknown or [f"(no unknown line read; ci-job exit {c})"], log, bool(unknown) and not about_body
     return "unknown", [f"ci-job exited {c}"], log, False
 
 TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
@@ -2653,6 +2678,97 @@ def refuse_incomplete_tree(wt, head, base):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+PARENT_LINE = re.compile(r"merge after(.*)", re.I)
+# A backticked `git diff [flags] <start> <end>`, `<start>..<end>` or `<start>...<end>`, flags or `-- path` after the end allowed. Leading flags are
+# skipped; a lone `--` is no flag, since paths follow it. Group 1 is the start, group 2 the end.
+REVIEW_RANGE = re.compile(r"`git diff\s+(?:-(?!-(?:\s|`))[^\s`]+\s+)*(?!-)([^\s`]+?)(?:\.\.\.?|\s+)((?!-)[^\s`]+)[^`]*`")
+SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,6}")
+LONG_HEX = re.compile(r"[0-9a-fA-F]{7,40}")
+
+def parent_prs(body):
+    """The PR numbers of each `merge after` line in a PR body, in order, once each: every `#N` after the words on that line (case, colon, `**` and bullet free).
+    A line in a fenced block (stale_cites.fenced_lines, the one home of what a fence is) is an example and names no parent."""
+    import stale_cites
+    rows = (body or "").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    found = (int(n) for i, line in enumerate(rows, 1) if i not in fenced for m in [PARENT_LINE.search(line)] if m for n in re.findall(r"#(\d+)", m.group(1)))
+    return list(dict.fromkeys(found))
+
+def review_range_starts(body):
+    """The (start, end) of each backticked range (REVIEW_RANGE) in a PR body, read row by row. It reads the whole body: the range sits in the first paragraph.
+    A range in a fenced block (stale_cites.fenced_lines) is an example, and a range whose start holds <>{} is a placeholder: both are skipped.
+    An end that holds <>{} is a placeholder too: the range is still judged by its start, and its end is None, so the end check skips it."""
+    import stale_cites
+    rows = (body or "").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    return [(start, None if re.search(r"[<>{}]", end) else end) for i, row in enumerate(rows, 1) if i not in fenced
+            for start, end in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", start)]
+
+def check_review_ranges(root, host, info, base, body):
+    """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. A start judged by ancestry, not by string, also passes
+    a lane built on a parent that gained commits, or on a merge of its parents (decision lanes-run-no-full-ci-job):
+    a start S passes when (1) S is an ancestor of, or is, the lane head; (2) for each named parent P, merge-base(lane head, P's head) is an ancestor of, or is, S;
+    (3) `git rev-list --no-merges S --not <each parent head> origin/<base>` is empty. A start that does not resolve, or a hex start under 7 digits, refuses.
+    A start equal to a parent's branch, bare or as origin/<branch>, is that parent's head. `info` is the lane PR's read and `base` its base branch.
+    The end of each judged range must be the lane head: a 7 or more hex prefix of `info["head"]`, or `info["branch"]`, bare or as origin/<branch>. Else it refuses.
+    The caller has fetched the base and the lane head (fetch_pr_head, in lane_lint). It fetches each parent's head by its sha. Any git or host error refuses.
+    A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
+    parents = parent_prs(body)
+    if not parents:
+        return
+    starts = review_range_starts(body)
+    if not starts:
+        say(f"note: the body names {', '.join('#%d' % n for n in parents)} as parent, but holds no `git diff <start> <end>` range, so no review range was checked.")
+        return
+    infos = {n: host.pr(n) for n in parents}
+    lane, heads = info["head"], [i["head"] for i in infos.values()]
+    named = "; ".join(f"#{n} is at {i['head'][:9]} on {i['branch']}" for n, i in infos.items())
+
+    def refuse(start, why):
+        raise Stop(f"the review range starts at {start}, which {why}. The parents the body names: {named}; the lane head is {lane[:9]}. "
+                   f"A start off the lane's fork from its parents makes the reviewer read the wrong commits. Restate the range from the head of the parent "
+                   f"the lane is built on, or from the commit that merges its parents (7 or more hex digits). {LANE_LINT_CITE}")
+
+    for n, i in infos.items():  # by sha, not branch: a merged parent's branch may be deleted while its head stays on origin
+        c, out = git(root, "fetch", "-q", "origin", i["head"])
+        if c:
+            refuse(starts[0][0], f"cannot be judged: git fetch origin {i['head'][:9]} (#{n}'s head) failed, so that head is on no remote this clone reads: {out}")
+    branch_heads = {name: i["head"] for i in infos.values() for name in (i["branch"], f"origin/{i['branch']}")}
+    lane_ends = {info["branch"], f"origin/{info['branch']}"}
+    for start, end in starts:
+        if end is not None and end not in lane_ends and not (LONG_HEX.fullmatch(end) and lane.startswith(end.lower())):  # an end below the lane head leaves the commits above it unread
+            raise Stop(f"the review range ends at {end}, which is not the lane head {lane[:9]}. The end must be the lane head: {info['branch']}, "
+                       f"origin/{info['branch']}, or 7 or more hex digits of {lane[:9]}. End the range at the lane branch. {LANE_LINT_CITE}")
+        if SHORT_HEX.fullmatch(start):
+            refuse(start, "is a hex start under 7 digits")
+        sha = branch_heads.get(start)
+        if sha is None:
+            c, sha = git(root, "rev-parse", "--verify", "-q", f"{start}^{{commit}}")
+            if c or not sha:
+                refuse(start, "does not resolve to a commit in this clone")
+        at = start if sha.startswith(start.lower()) else f"{start} ({sha[:9]})"
+        inside = ancestor(root, sha, lane)
+        if inside is None:
+            refuse(at, f"cannot be judged: git could not say whether it is an ancestor of the lane head {lane[:9]}")
+        if not inside:
+            refuse(at, f"is off the lane: it is not an ancestor of the lane head {lane[:9]}")
+        for n, i in infos.items():
+            c, fork = git(root, "merge-base", lane, i["head"])
+            if c or not fork:
+                refuse(at, f"cannot be judged against #{n}: git found no merge base of the lane head and #{n}'s head {i['head'][:9]}")
+            below = ancestor(root, fork, sha)
+            if below is None:
+                refuse(at, f"cannot be judged against #{n}: git could not say whether it holds the lane's fork from #{n} at {fork[:9]}")
+            if not below:
+                refuse(at, f"is below #{n}'s head {i['head'][:9]}: the lane meets #{n} at {fork[:9]}, which this start does not hold")
+        c, extra = git(root, "rev-list", "--no-merges", sha, "--not", *heads, f"refs/remotes/origin/{base}")
+        if c:
+            refuse(at, f"cannot be judged: git rev-list failed: {extra}")
+        if extra:
+            rows = extra.split()
+            refuse(at, f"is above the parent heads: it holds {len(rows)} commit{'s' if len(rows) != 1 else ''} that no named parent and not origin/{base} holds, "
+                       f"such as {rows[0][:9]}")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -2660,6 +2776,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
+    A PR-number target also runs check_review_ranges on its body before the ci-job run.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
@@ -2667,13 +2784,14 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
+    pr_body = ""  # a commit or ref has no PR body
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
         info = host.pr(n)
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
-        head = info["head"]
+        head, pr_body = info["head"], info.get("body", "")
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
@@ -2707,7 +2825,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        if target.isdigit() and info.get("body"):  # after the worktree above, whose fetch the check's git reads need
+            check_review_ranges(root, host, info, base, info["body"])
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", pr_body=pr_body, notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
     finally:
@@ -3119,13 +3239,14 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again."):
+def run_ready_checks(wt, n, base, checks, pr_body, remedy="Fix it on the branch, push, and run --confirm again."):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
+    `pr_body` is the PR's body as Host.pr read it, as lane_lint passes it: a step that reads the PR body (silent-undo) sees what CI gives it.
     `remedy` is the route the refusal names: the draft step's by default.
     A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop."""
     args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    state, lines, log, _ = ci_job_run(wt, *args)
+    state, lines, log, _ = ci_job_run(wt, *args, pr_body=pr_body)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
         message = "\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
@@ -3153,12 +3274,12 @@ def draft_step(root, cfg, n, host, info):
         tmp, wt = open_worktree(root, info, base)
         try:
             if not default:
-                run_ready_checks(wt, n, base, checks)
+                run_ready_checks(wt, n, base, checks, info.get("body", ""))
             else:
                 claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
                 if claim:
                     if checks:
-                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                        run_ready_checks(wt, n, base, checks, info.get("body", ""))  # before the remedy: it has the session mark ready by hand, past the checks
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
@@ -3169,7 +3290,7 @@ def draft_step(root, cfg, n, host, info):
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+                    run_ready_checks(wt, n, base, checks, info.get("body", ""))  # on the page commit when there is one, so what is checked is what is pushed
                 if rebuilt:
                     push_branch(wt, info["branch"])
                     say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")

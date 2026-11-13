@@ -89,11 +89,21 @@ quiet git clone -q --single-branch -b topic-revert "$remote" "$work/single"
 quiet git -C "$work/unpersisted" remote set-url origin "$work/unreachable.git"
 head_rev="$(git -C "$work/revert" rev-parse HEAD)"
 fails=0
-expect() { # label want-exit work-dir base-ref want-text [head-sha]: runs check.sh as action.yml does
-  label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)}
+expect() { # label want-exit work-dir base-ref want-text [head-sha] [pr-body]: runs check.sh as action.yml does
+  label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)} body=${7-}
   if [ ! -f "$check" ]; then echo "FAIL $label: check.sh is not built at $check"; fails=$((fails + 1)); return; fi
+  # A pr-body goes in the event file that CI gives the step (GITHUB_EVENT_PATH), never in the step's env.
+  envset=()
+  if [ -n "$body" ]; then
+    event="$work/event-$label.json"
+    python3 -I -c 'import json, sys
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    json.dump({"pull_request": {"body": sys.argv[1]}}, f)' "$body" "$event" || { echo "fixture setup failed: the event file of $label"; exit 1; }
+    envset=("GITHUB_EVENT_PATH=$event")
+  fi
   # env -u CI: GitHub sets CI, which makes the lint red on UNKNOWN even without --strict. The cases must test --strict itself.
-  out="$(cd "$dir" && env -u CI BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
+  # env -u GITHUB_EVENT_PATH: a run on CI has the live event file; no case may read the live pull request body.
+  out="$(cd "$dir" && env -u CI -u GITHUB_EVENT_PATH ${envset[@]+"${envset[@]}"} BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
   if [ "$got" -ne "$want" ]; then
     echo "FAIL $label: exit $got, wanted $want"; printf '%s\n' "$out" | sed 's/^/     /'; fails=$((fails + 1))
   elif [ -n "$text" ] && ! printf '%s' "$out" | grep -q -F -- "$text"; then
@@ -112,5 +122,7 @@ expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
 expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
+# The pull request body, in the event file CI gives the step, excuses its path the way a commit trailer does.
+expect body-excuse-green 0 "$work/revert" main "ALLOWED rules.md" "" $'Summary.\n\nDrops-lines: rules.md -- the rules are rolled back on purpose for this test'
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))

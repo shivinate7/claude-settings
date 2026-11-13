@@ -70,6 +70,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
+      # event_body.py: test_merge (job $M) and test_ci_job.py (the `checks` lint job) import it.
+      testing/event_body.py) on="$on $M code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
