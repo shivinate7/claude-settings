@@ -6,17 +6,20 @@ Run it from the repository root:
     python3 hooks/test_guard_remedies.py -v
 
 The scan reads the source with ast, so no guard module is imported here (importing hooks/test_guard.py
-alone takes minutes). Five test methods in three groups:
+alone takes minutes). Six test methods in three groups:
 
-1. STATIC: each refuse() site in hooks/guard*.py, and each call of call_judge.py's refuse() wrapper,
-   resolves to a reason that carries "Remedy:". The resolution follows local names (the nearest assignment
-   above the use), module constants, imported constants, dict lookups, helper returns, appended values and
-   the arguments a helper's return names. A refuse() that reads a parameter, or a queue element an appender
-   fills (guard.py's ask_command), counts once per call of that function, with the call's own arguments. An
-   unresolvable reason counts as lacking.
+1. STATIC: each refuse() site in every hooks/ module, and each call of a module's own refuse() wrapper,
+   resolves to a reason that carries "Remedy:". A site is a call of guard_core's refuse() (imported or
+   attribute form), or a call of a refuse() wrapper that takes a rule and a reason. The resolution follows
+   local names (the nearest assignment above the use), module constants, imported constants, dict lookups,
+   helper returns, appended values and the arguments a helper's return names. A refuse() that reads a
+   parameter, or a queue element an appender fills (guard.py's ask_command), counts once per call of that
+   function, with the call's own arguments. An unresolvable reason counts as lacking. No rule is exempt.
 2. PROBES: each rule that has a Remedy is in REMEDY_PROBES, with the allowed act its Remedy names, or in
    REMEDY_PROSE_ONLY, with the reason no runnable act exists. Each probe runs through the guard, which must
-   answer, and must not refuse or ask it under that rule. The table entries are checked against the scan.
+   answer, and must not refuse or ask it under that rule. Each probe row names a token, which must appear in
+   the rule's resolved Remedy, so the probe is bound to the act the Remedy names. A row with no payload is a
+   prose act of a rule that also has a probe: its reason says why no runnable act proves it.
 3. HYGIENE: no Remedy names a forbidden target. The list and the exemptions are read from their one home,
    tests/guard/s30130-rule9.py (names_the_target), not copied.
 
@@ -40,13 +43,11 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 REMEDY = "Remedy:"
-# The argument positions of (rule, reason). guard_core.refuse(tool, decision, rule, reason, matched, ...) in
-# hooks/guard*.py, and call_judge.refuse(payload, tool, args, rule, reason), its own wrapper.
+# The argument positions of (rule, reason) in guard_core.refuse(tool, decision, rule, reason, matched, ...). A
+# module's own refuse() wrapper gives its positions by its parameter names (see refuse_shape).
 GUARD_SHAPE = (2, 3)
-WRAPPER_SHAPE = (3, 4)
-# 117 refuse sites in hooks/guard*.py on main, plus 3 in call_judge.py. Fewer than this means the scan lost
-# sites, not that the guard is clean.
-MIN_SITES = 50
+# Fewer sites than this means the scan lost sites, not that the guard is clean. The scan finds 132 on the head.
+MIN_SITES = 120
 RULE_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 ONE_HOME = os.path.join(REPO, "tests", "guard", "s30130-rule9.py")
 # Where the names the forbidden list reads are defined. ROOT is a fixture path: it stands in for itself
@@ -514,29 +515,66 @@ def expansions(mod, node, shape):
     return out
 
 
-def sites_in(mod, shape):
+def refuse_shape(mod):
+    """The (rule, reason) argument positions of the refuse() calls that a module's Name calls make, or None when
+    they name no rule. A module that imports guard_core's refuse takes GUARD_SHAPE. A module with its own refuse()
+    wrapper takes the positions of the wrapper's rule and reason parameters (call_judge.py). A wrapper with no rule
+    parameter (blind_brief.py, prose_judge.py, sendmessage_state.py) fixes its rule in its body, so its Name calls
+    add no site: the guard_core.refuse() call inside it is the site, and it reads the Remedy the wrapper appends."""
+    if "refuse" not in mod.funcs:
+        return GUARD_SHAPE
+    names = positional(mod.funcs["refuse"])
+    if "rule" in names and "reason" in names:
+        return names.index("rule"), names.index("reason")
+    return None
+
+
+def is_guard_core_refuse(mod, func):
+    """True when `func` is guard_core.refuse, called as an attribute of the imported module."""
+    return (isinstance(func, ast.Attribute) and func.attr == "refuse" and isinstance(func.value, ast.Name)
+            and is_module(mod, func.value.id) and mod.imports[func.value.id][0] == "guard_core")
+
+
+def sites_in(mod):
     out = []  # the decision is not read: a Remedy is owed on a deny and on an ask alike
+    shape = refuse_shape(mod)
+    wrapper = mod.funcs.get("refuse") if shape is not None else None
     for node in ast.walk(mod.tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "refuse"):
+        if not isinstance(node, ast.Call):
             continue
-        followed = expansions(mod, node, shape)
+        if isinstance(node.func, ast.Name) and node.func.id == "refuse" and shape is not None:
+            call_shape = shape
+        elif is_guard_core_refuse(mod, node.func):
+            # Inside a wrapper that takes the reason, the reason is the caller's: the wrapper's Name calls are the sites.
+            if wrapper is not None and any(f is wrapper for f in scopes(mod, node)):
+                continue
+            call_shape = GUARD_SHAPE
+        else:
+            continue
+        followed = expansions(mod, node, call_shape)
         if followed is None:
-            followed = [site_of(mod, node, call_arg(node, shape[0], "rule"), call_arg(node, shape[1], "reason"))]
+            followed = [site_of(mod, node, call_arg(node, call_shape[0], "rule"),
+                                call_arg(node, call_shape[1], "reason"))]
         out += followed
     return out
+
+
+def is_product_module(name):
+    """Every hooks/ module but the tests: a test file calls refuse() with fixture arguments, and is no guard site."""
+    return not (name.startswith("test_") or name.endswith("_test"))
 
 
 SCANNED = []
 
 
 def scan():
-    """Every refuse() site of hooks/guard*.py and call_judge.py's wrapper, read with ast. Read once per run."""
+    """Every refuse() site of every product module in hooks/, read with ast. Read once per run."""
     if not SCANNED:
         sites = []
-        for path in sorted(glob.glob(os.path.join(HERE, "guard*.py"))):
-            mod = load(os.path.splitext(os.path.basename(path))[0])
-            sites += sites_in(mod, GUARD_SHAPE)
-        sites += sites_in(load("call_judge"), WRAPPER_SHAPE)
+        for path in sorted(glob.glob(os.path.join(HERE, "*.py"))):
+            name = os.path.splitext(os.path.basename(path))[0]
+            if is_product_module(name):
+                sites += sites_in(load(name))
         SCANNED.append(sites)
     return SCANNED[0]
 
@@ -573,10 +611,14 @@ def one_home_reason_rules():
 
 # ------------------------------------------------------------------ the probes: the act each Remedy names
 
-# rule -> [(what the act is, payload)]. Each payload is the body the guard reads on stdin, as test_guard.py
+# rule -> [(what the act is, payload, token)]. Each payload is the body the guard reads on stdin, as test_guard.py
 # builds it: tool_name, tool_input, and cwd when a case names one. Each act is one the Remedy tells the
-# session to do; the guard must not refuse or ask it under that rule. The guard decides; it runs nothing.
-# <REPO> and <RUN> stand for the fixture folders, which exist only once the module runs.
+# session to do, of a tool kind the rule judges; the guard must not refuse or ask it under that rule. The guard
+# decides; it runs nothing. The token is the words of that Remedy which name the act, and it must appear in the
+# rule's resolved Remedy text. A row with a payload of None is an act no runnable probe can make: its first field
+# is the reason, and the rule's other rows still probe it.
+# <REPO>, <RUN>, <CFG>, <LANE>, <POINTER>, <POINTER_LANE> and <TMP> stand for the fixture folders, which exist only
+# once the module runs.
 REMEDY_PROBES = {}
 
 # rule -> one-line reason no runnable act can prove the Remedy. Read by the coverage test only.
@@ -609,21 +651,43 @@ RUN = None
 CFG = None
 REPO_DIR = None
 LANE_DIR = None  # a worktree of the fixture repo, where a per-file discard runs
+POINTER_DIR = None  # the pointer checkout the owner's global rules name: a repo of its own
+POINTER_LANE = None  # a worktree of the pointer checkout, the place EnterWorktree makes
+TMP = None  # the guard's temp folder. The fixtures sit outside it: a repo under the temp folder is a throwaway that
+            # several rules pass unjudged, so a probe there would pass for the wrong reason.
 
 
 def setUpModule():
-    global RUN, CFG, REPO_DIR, LANE_DIR
+    global RUN, CFG, REPO_DIR, LANE_DIR, POINTER_DIR, POINTER_LANE, TMP
     RUN = _test_temp.run_folder()
     CFG = os.path.join(RUN, "cfg")
     os.makedirs(CFG)
+    TMP = os.path.join(RUN, "tmp")
+    os.makedirs(TMP)
     REPO_DIR = os.path.join(RUN, "repo")
     os.makedirs(REPO_DIR)
+    # The pointer checkout: the global CLAUDE.md in CFG names it, so the pointer rules judge its files and HEAD.
+    POINTER_DIR = os.path.join(RUN, "pointer")
+    os.makedirs(POINTER_DIR)
+    subprocess.run(["git", "init", "-q", POINTER_DIR], check=True, capture_output=True)
+    subprocess.run(["git", "-C", POINTER_DIR, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+                    "commit", "-q", "--allow-empty", "-m", "probe"], check=True, capture_output=True)
+    POINTER_LANE = os.path.join(POINTER_DIR, ".claude", "worktrees", "probe-lane")
+    subprocess.run(["git", "-C", POINTER_DIR, "worktree", "add", "-q", "--detach", POINTER_LANE], check=True,
+                   capture_output=True)
+    with open(os.path.join(CFG, "CLAUDE.md"), "w", encoding="utf-8") as f:
+        f.write("@%s/CLAUDE.md\n" % POINTER_DIR)
     # A readable origin: a forced push is judged against its remote, so without one the guard reads the target
     # as unreadable and refuses even the lease form the Remedy names.
     origin = os.path.join(RUN, "origin.git")
     subprocess.run(["git", "init", "-q", REPO_DIR], check=True, capture_output=True)
     subprocess.run(["git", "init", "-q", "--bare", origin], check=True, capture_output=True)
     subprocess.run(["git", "-C", REPO_DIR, "remote", "add", "origin", origin], check=True, capture_output=True)
+    # The session home record of probe-session-1: its worktree is gone, so the session-home rule judges its calls.
+    home_records = os.path.join(REPO_DIR, ".git", "session-homes")  # the guard's SESSION_HOME_DIR, under the clone's .git
+    os.makedirs(home_records)
+    with open(os.path.join(home_records, "probe-session-1"), "w", encoding="utf-8") as f:
+        f.write(os.path.join(RUN, "gone-lane"))
     # The waiting page of this fixture repo: the page rules judge an ArtifactData write only on the page the repo names.
     os.makedirs(os.path.join(REPO_DIR, ".claude"))
     with open(os.path.join(REPO_DIR, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
@@ -651,49 +715,74 @@ def setUpModule():
         pass
 
 
-ENTER = tool_payload("EnterWorktree", {"name": "probe-lane"})
+def session_payload(body, cwd):
+    """A call from a session, not an agent, in `cwd`: the session id the session-home rule reads."""
+    body = dict(body, session_id="probe-session-1")
+    body["cwd"] = cwd
+    return body
+
+
 REMEDY_PROBES.update({
-    "pointer-edit": [("EnterWorktree with a name", ENTER)],
-    "pointer-head": [("EnterWorktree with a name", ENTER)],
-    "session-home": [("EnterWorktree with a name", ENTER)],
-    "hand-made-worktree": [("EnterWorktree with a name", ENTER)],
-    "process-args": [("ps by pid and command name", bash_payload("ps -o pid,comm"))],
-    "git-env-set": [("git -C with the repo path", bash_payload("git -C <REPO> status"))],
-    "two-worktrees-one-branch": [("git -C on the own checkout", bash_payload("git -C <REPO> status"))],
-    "shared-tree": [("git stash list, a read", bash_payload("git stash list", "<REPO>")),
-                    ("git worktree list, the read the prune Remedy names", bash_payload("git worktree list", "<REPO>")),
+    "pointer-edit": [("a write in a worktree of your own under the pointer checkout", tool_payload(
+        "Write", {"file_path": "<POINTER_LANE>/notes.md", "content": "probe"}), "inside that worktree")],
+    "pointer-head": [("git -C on a worktree of your own, not the pointer checkout's HEAD", bash_payload(
+        "git -C <POINTER_LANE> checkout -b probe-lane-branch"), "git -C <that worktree>")],
+    "session-home": [("a write inside the worktree the session makes, from the primary checkout's cwd",
+                      session_payload(tool_payload("Write", {"file_path": "<REPO>/.claude/worktrees/probe-lane/notes.md",
+                                                             "content": "probe"}), "<REPO>"),
+                      "write inside that worktree")],
+    "hand-made-worktree": [("a red-run checkout, its path written out in full under the primary's worktrees folder",
+                            bash_payload("git worktree add --detach <REPO>/.claude/worktrees/probe-red HEAD", "<REPO>"),
+                            "write its path out in full")],
+    "process-args": [("ps by pid and command name", bash_payload("ps -o pid,comm"), "ps -o pid,comm")],
+    "git-env-set": [("git -C with the repo path", bash_payload("git -C <REPO> status"), "git -C <dir>")],
+    "two-worktrees-one-branch": [("git -C on the own checkout", bash_payload("git -C <REPO> status"),
+                                  "git -C <own worktree>")],
+    "shared-tree": [("git stash list, a read", bash_payload("git stash list", "<REPO>"), "git stash list"),
+                    ("git worktree list, the read the prune Remedy names", bash_payload("git worktree list", "<REPO>"),
+                     "git worktree list"),
                     ("a per-file discard in the session's own lane worktree, with no cd", bash_payload(
-                        "git -C <LANE> restore probe.txt", "<LANE>"))],
-    "other-checkout": [("git -C log of another clone", bash_payload("git -C <REPO> log -1", "<RUN>"))],
-    "verdict-pipe": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"))],
-    "check-tail": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"))],
+                        "git -C <LANE> restore probe.txt", "<LANE>"), "git -C <lane> restore")],
+    "other-checkout": [("git -C log of another clone", bash_payload("git -C <REPO> log -1", "<RUN>"),
+                        "git -C <dir> log")],
+    "verdict-pipe": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"),
+                      "verdict <cmd>")],
+    "check-tail": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"),
+                    "verdict <cmd>")],
     "force-push": [("push with --force-with-lease", bash_payload(
-        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>")),
+        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>"), "--force-with-lease"),
         ("the lane's own branch, by name, with a lease", bash_payload(
-            "git push --force-with-lease --force-if-includes origin HEAD:lane-probe", "<REPO>"))],
+            "git push --force-with-lease --force-if-includes origin HEAD:lane-probe", "<REPO>"), "--force-with-lease")],
     "push-agent-branch": [("push the lane's branch by name", bash_payload(
-        "git push origin HEAD:lane-probe", "<REPO>"))],
+        "git push origin HEAD:lane-probe", "<REPO>"), "git push origin HEAD:<lane-branch>")],
     "push-all-main": [("push the lane's branch by name", bash_payload(
-        "git push origin HEAD:lane-probe", "<REPO>"))],
-    "gh-write-cloud": [("a GitHub MCP comment", tool_payload(
-        "mcp__github__add_issue_comment", {"owner": "probe", "repo": "probe", "issue_number": 1, "body": "probe"}))],
+        "git push origin HEAD:lane-probe", "<REPO>"), "git push origin HEAD:<lane-branch>")],
     "agent-role-model": [("a builder on its role's model", tool_payload(
-        "Agent", {"subagent_type": "builder", "model": "sonnet", "prompt": "probe", "description": "probe"}))],
+        "Agent", {"subagent_type": "builder", "model": "sonnet", "prompt": "probe", "description": "probe"}),
+        "name the role's model")],
     "agent-model-cap": [("a builder on its role's model", tool_payload(
-        "Agent", {"subagent_type": "builder", "model": "sonnet", "prompt": "probe", "description": "probe"}))],
+        "Agent", {"subagent_type": "builder", "model": "sonnet", "prompt": "probe", "description": "probe"}),
+        "name the role's model")],
     "waiter": [("wait until a clock time with bin/wait-until", bash_payload(
-        "bin/wait-until 2099-01-01T00:00:00Z"))],
+        "bin/wait-until 2099-01-01T00:00:00Z"), "bin/wait-until")],
     "background-end": [("a background job with an until note", tool_payload(
-        "Bash", {"command": "echo done", "run_in_background": True, "description": "until: probe done"}))],
-    "playwright-browsers-path": [("pgrep -f, which prints pids only", bash_payload("pgrep -f playwright"))],
-    "machine-wide-kill": [("kill of the pid this launch printed", bash_payload("kill $!"))],
-    "destructive-delete": [("delete of one named directory", bash_payload("rm -rf build", "<RUN>"))],
-    "ln-over-directory": [("ln -sfn, with -n beside -f", bash_payload("ln -sfn target linkname", "<RUN>"))],
-    "scratchpad-commit-msg-owner": [("a commit with -m", bash_payload("git commit -m probe", "<REPO>"))],
-    "hook-bypass": [("a commit with the hooks on", bash_payload("git commit -m probe", "<REPO>"))],
+        "Bash", {"command": "echo done", "run_in_background": True, "description": "until: probe done"}),
+        "until: <condition>")],
+    "playwright-browsers-path": [("pgrep -f, which prints pids only", bash_payload("pgrep -f playwright"),
+                                  "pgrep -f playwright")],
+    "machine-wide-kill": [("kill of the pid this launch printed", bash_payload("kill $!"), "stop that one process")],
+    "destructive-delete": [("delete of one named directory", bash_payload("rm -rf build", "<RUN>"),
+                            "name the one directory you mean")],
+    "ln-over-directory": [("ln -sfn, with -n beside -f", bash_payload("ln -sfn target linkname", "<RUN>"),
+                           "add -n beside -f")],
+    "scratchpad-commit-msg-owner": [("a commit with -m", bash_payload("git commit -m probe", "<REPO>"),
+                                     "with `-m`")],
+    "hook-bypass": [("a commit with the hooks on", bash_payload("git commit -m probe", "<REPO>"),
+                     "the repo's own hooks on")],
     "env-file": [("node with --env-file ahead of it", bash_payload(
-        "node --env-file=.env.local tool.mjs", "<RUN>"))],
+        "node --env-file=.env.local tool.mjs", "<RUN>"), "--env-file")],
 })
+
 
 def agent_payload(body):
     """A call from a scratchpad agent: the agent and session ids the scratchpad-owner rule reads."""
@@ -727,37 +816,45 @@ def handoff_write(sid, text, transcript=None):
 PREMISE_DATED = "- P1 [read] Probe premise. Source: probe. Checked 2026-11-01."
 PREMISE_NEVER = "- P1 [assumed] Probe premise. Source: probe. Checked never."
 # Under the session scratchpad path the scratchpad-owner rule judges: <tmp>/<session id>/scratchpad.
-SCRATCH_COPY = "<RUN>/claude/probe-session-1/scratchpad/fresh-copy.py"
+SCRATCH_COPY = "<TMP>/claude/probe-session-1/scratchpad/fresh-copy.py"
 
 REMEDY_PROBES.update({
-    "cite-by-id": [("a commit with its message inline", bash_payload('git commit -m "probe"', "<REPO>")),
+    "cite-by-id": [("a commit with its message inline", bash_payload('git commit -m "probe"', "<REPO>"),
+                    "pass the message inline"),
                    ("a commit that names the lane by its slug", bash_payload(
-                       'git commit -m "lane-number-cite: probe"', "<REPO>"))],
+                       'git commit -m "lane-number-cite: probe"', "<REPO>"), "its slug")],
     "lane-by-slug": [("a commit that names the lane by its slug", bash_payload(
-        'git commit -m "lane-number-cite: probe"', "<REPO>"))],
-    "conflict-markers": [("a push in a call of its own", bash_payload("git push origin HEAD:lane-probe", "<REPO>"))],
-    "octopus-push": [("a push of one branch", bash_payload("git push origin HEAD:lane-probe", "<REPO>"))],
-    "detached-launch": [("a launch with its pid captured by echo $!", bash_payload("echo probe & echo $!"))],
+        'git commit -m "lane-number-cite: probe"', "<REPO>"), "name the lane by its branch slug")],
+    "conflict-markers": [("a push in a call of its own", bash_payload("git push origin HEAD:lane-probe", "<REPO>"),
+                          "run the push in a call of its own")],
+    "octopus-push": [("a push of one branch", bash_payload("git push origin HEAD:lane-probe", "<REPO>"),
+                      "retry the push")],
+    "detached-launch": [("a launch with its pid captured by echo $!", bash_payload("echo probe & echo $!"),
+                         "cmd & echo $!")],
     "frozen-path": [("a write to a file in the clone", tool_payload(
-        "Write", {"file_path": "<REPO>/notes.md", "content": "probe"}))],
+        "Write", {"file_path": "<REPO>/notes.md", "content": "probe"}), "edit the clone")],
     "handoff-sections": [("a handoff with every required section", handoff_write(
-        "probe-sections", full_handoff(PREMISE_NEVER)))],
+        "probe-sections", full_handoff(PREMISE_NEVER)), "write the whole handoff again")],
     "handoff-checked-stamp": [("a handoff that restamps a premise as Checked never", handoff_write(
-        "probe-stamp", full_handoff(PREMISE_NEVER), "<RUN>/transcript.jsonl"))],
-    "linked-node-modules": [("the repo's setup script", bash_payload("npm run setup", "<REPO>"))],
+        "probe-stamp", full_handoff(PREMISE_NEVER), "<RUN>/transcript.jsonl"), "write `Checked never` on it")],
+    "linked-node-modules": [("the repo's setup script", bash_payload("npm run setup", "<REPO>"), "npm run setup")],
     "live-stream": [("a command redirected to a file that is read back", bash_payload(
-        "node tool.mjs > out.log", "<RUN>")),
-        ("a command with nothing after it", bash_payload("node tool.mjs", "<RUN>"))],
-    "merge-checks": [("the merge tool with --confirm", bash_payload("merge 123 --confirm"))],
-    "records-page": [("a commit that leaves the records page out", bash_payload('git commit -m "probe"', "<REPO>"))],
+        "node tool.mjs > out.log", "<RUN>"), "run the command in the foreground"),
+        ("a command with nothing after it", bash_payload("node tool.mjs", "<RUN>"),
+         "run the command with nothing after it")],
+    "merge-checks": [("the merge tool with --confirm", bash_payload("merge 123 --confirm"), "merge <pr> --confirm")],
+    "records-page": [("a commit that leaves the records page out", bash_payload('git commit -m "probe"', "<REPO>"),
+                      "drop the page from this commit")],
     "records-page-ready": [("return the pull request to draft", tool_payload(
-        "mcp__github__update_pull_request", {"owner": "probe", "repo": "probe", "pullNumber": 1, "draft": True}))],
+        "mcp__github__update_pull_request", {"owner": "probe", "repo": "probe", "pullNumber": 1, "draft": True}),
+        "return the pull request to draft")],
     "scratchpad-owner": [
         ("a write under a fresh name in the session's own scratchpad", agent_payload(tool_payload(
-            "Write", {"file_path": SCRATCH_COPY, "content": "probe"}))),
-        ("a run of that fresh copy", agent_payload(bash_payload("python3 %s" % SCRATCH_COPY, "<RUN>")))],
+            "Write", {"file_path": SCRATCH_COPY, "content": "probe"})), "under a fresh file name"),
+        ("a run of that fresh copy", agent_payload(bash_payload("python3 %s" % SCRATCH_COPY, "<TMP>")),
+         "run that copy")],
     "silent-write": [("the push with its output kept, ending 2>&1 | tail -1", bash_payload(
-        "git push origin HEAD:lane-probe 2>&1 | tail -1", "<REPO>"))],
+        "git push origin HEAD:lane-probe 2>&1 | tail -1", "<REPO>"), "2>&1 | tail -1")],
 })
 
 # ---- the spawn, lane, role, page and shell rules: each act is the one its Remedy names, judged as allowed.
@@ -812,89 +909,122 @@ def page_write(data, action="set"):
 
 REMEDY_PROBES.update({
     "agent-no-remote-tools": [("the agent's own shell work, not a remote call",
-                               agent_payload(bash_payload("git status", "<REPO>")))],
-    "agent-model-floor": [("an Agent spawn on sonnet", brief_spawn("probe")),
-                          ("a lane start on sonnet with its source_url", LANE_START)],
+                               agent_payload(bash_payload("git status", "<REPO>")), "put the request in your report")],
+    "agent-model-floor": [("an Agent spawn on sonnet", brief_spawn("probe"), "model sonnet"),
+                          ("a lane start on sonnet with its source_url", LANE_START, "model sonnet")],
     "ask-alone": [("the force push with --force-if-includes, alone in its call", bash_payload(
-        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>"))],
+        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>"), "Run that command alone")],
     "brief-claim-has-probe": [("a builder brief that carries the probe under its claim", brief_spawn(
-        "Keep the scan as it is.\nmain allows `port: 0`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nallowed\n```"))],
+        "Keep the scan as it is.\nmain allows `port: 0`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nallowed\n```"),
+        "add the probe")],
     "brief-destructive-git": [("a brief that orders tests only", brief_spawn(
-        "Run the tests and report the result. Discard nothing."))],
-    "builder-diff": [("a builder's Edit of a product file", role_payload("builder", "Edit", EDIT_PRODUCT))],
-    "builder-test-edit": [("a builder's Edit of a product file", role_payload("builder", "Edit", EDIT_PRODUCT))],
-    "command-in-item": [("a task whose command is set for both shells", page_write(PAGE_TASK))],
+        "Run the tests and report the result. Discard nothing."), "drop the order from the brief")],
+    "command-in-item": [("a task whose command is set for both shells", page_write(PAGE_TASK),
+                         "Put the command in the item's")],
     "designer-scope": [("a designer's Write in the design folder", role_payload("designer", "Write", {
-        "file_path": "<REPO>/docs/design/probe-mockup.html", "content": "probe"}))],
+        "file_path": "<REPO>/docs/design/probe-mockup.html", "content": "probe"}), "change only files in that folder")],
     "draft-pr": [("create_pull_request with draft true", tool_payload("mcp__github__create_pull_request", {
         "owner": "probe", "repo": "probe", "title": "probe", "head": "lane-probe", "base": "main", "body": "probe",
-        "draft": True}))],
+        "draft": True}), "draft")],
     "gh-login-switch": [("a task whose command switches the gh login first", page_write(dict(PAGE_TASK, command={
         "powershell": "gh auth switch -u shivinate7; gh pr view 1",
-        "mac": "gh auth switch -u shivinate7 && gh pr view 1"})))],
+        "mac": "gh auth switch -u shivinate7 && gh pr view 1"})), "gh auth switch -u")],
     "impeccable-review-only": [("the impeccable skill with audit as its first word", tool_payload(
-        "Skill", {"skill": "impeccable", "args": "audit <screen>"}))],
-    "item-field-rendered": [("an item whose fields the page draws", page_write(page_item()))],
-    "lane-effort-pin": [("a lane start at medium, its Grant line first", LANE_START)],
-    "lane-one-topic": [("a lane start whose cs-topic tag holds its brief's topic", LANE_START)],
-    "lane-repo-tag": [("a lane start with the full cs-repo tag", LANE_START)],
-    "lane-start-settings": [("a lane start with its model and source_url", LANE_START)],
+        "Skill", {"skill": "impeccable", "args": "audit <screen>"}), "as the first word of its args")],
+    "item-field-rendered": [("an item whose fields the page draws", page_write(page_item()), "Draw the field on the page")],
+    "lane-effort-pin": [("a lane start at medium, its Grant line first", LANE_START, "put the Grant line first")],
+    "lane-one-topic": [("a lane start whose cs-topic tag holds its brief's topic", LANE_START,
+                        "a cs-topic tag that matches")],
+    "lane-repo-tag": [("a lane start with the full cs-repo tag", LANE_START, "to the lane's tags")],
+    "lane-start-settings": [("a lane start with its model and source_url", LANE_START, "on create_session")],
     "message-time-matches-clock": [("the clock read with now-central", bash_payload(
-        "~/.claude/bin/now-central", "<REPO>"))],
+        "~/.claude/bin/now-central", "<REPO>"), "~/.claude/bin/now-central")],
     "mockup-home": [("a design whose file is a mockup in the design folder", page_write(page_item(designs=[
-        {"id": "d1", "file": "docs/design/probe-mockup.html", "label": "d1"}])))],
-    "option-letter-keys": [("options keyed a and b in the order shown", page_write(page_item()))],
-    "owner-judge": [("a decision whose Problem line names a stake", page_write(page_item()))],
+        {"id": "d1", "file": "docs/design/probe-mockup.html", "label": "d1"}])), "a mockup committed in that folder")],
+    "option-letter-keys": [("options keyed a and b in the order shown", page_write(page_item()), "in the order shown")],
+    "owner-judge": [("a decision whose Problem line names a stake", page_write(page_item()),
+                     "Write the Problem line as")],
     "page-thread-reply": [("the item rewritten, the act the Remedy names", page_write(
-        page_item(context=PAGE_CONTEXT + "\nRewritten after the comment.")))],
+        page_item(context=PAGE_CONTEXT + "\nRewritten after the comment.")), "rewrite the item the comment is about")],
     "playwright-install": [("the playwright install under node 22", bash_payload(
-        "npx -y node@22 node_modules/playwright/cli.js install", "<REPO>"))],
-    "port-question": [("a port item with its Departs from line", page_write(page_item(port=True)))],
-    "press-link": [("a press option with its link", page_write(page_item(options=[PAGE_PRESS_OPTION, PAGE_OPTIONS[1]])))],
+        "npx -y node@22 node_modules/playwright/cli.js install", "<REPO>"),
+        "npx -y node@22 node_modules/playwright/cli.js install")],
+    "port-question": [("a port item with its Departs from line", page_write(page_item(port=True)), "Departs from:")],
+    "press-link": [("a press option with its link", page_write(page_item(options=[PAGE_PRESS_OPTION, PAGE_OPTIONS[1]])),
+                    "an https:// url of the page where he presses")],
     "question-checked-with-repo": [("a question on this repo, named by its repo field", page_write(
-        page_item(repo="probe/probe")))],
-    "question-departs": [("a Departs from line with both sides filled", page_write(page_item()))],
-    "question-form": [("a decision in the form, a gain and a lose on each option", page_write(page_item()))],
+        page_item(repo="probe/probe")), "add `repo`")],
+    "question-departs": [("a Departs from line with both sides filled", page_write(page_item()), "Departs from:")],
+    "question-form": [("a decision in the form, a gain and a lose on each option", page_write(page_item()),
+                       "On the waiting page the lines go in")],
     "record-writer-scope": [("a record writer's Write of a Markdown file", role_payload("record-writer", "Write", {
-        "file_path": "<REPO>/docs/probe-record.md", "content": "probe"}))],
+        "file_path": "<REPO>/docs/probe-record.md", "content": "probe"}), "change only *.md files")],
     "rework-off-page": [("an item closed with a home that names the rework", page_write(page_item(
         status="closed", home="rework of probe-item",
-        context=PAGE_CONTEXT + "\nThe item is being reworked; the fresh item carries the options.")))],
+        context=PAGE_CONTEXT + "\nThe item is being reworked; the fresh item carries the options.")),
+        "Close the item with a home that names the rework")],
     "rm-after-cd": [("a recursive delete with no cd before it, the target a full path", bash_payload(
-        "rm -rf /tmp/w/out", "<REPO>"))],
-    "rm-var-unguarded": [("a variable written as ${NAME:?}", bash_payload('D=/tmp/w; rm -rf "${D:?}"/old', "<RUN>")),
-                         ("a literal path", bash_payload("rm -rf /srv/build/out", "<RUN>"))],
-    "roadmap-one-writer": [("get_session with no argument", tool_payload(GET_SESSION, {}))],
+        "rm -rf /tmp/w/out", "<REPO>"), "give the target as a full path")],
+    "rm-var-unguarded": [("a variable written as ${NAME:?}", bash_payload('D=/tmp/w; rm -rf "${D:?}"/old', "<RUN>"),
+                          "write every expansion as ${NAME:?}"),
+                         ("a literal path", bash_payload("rm -rf /srv/build/out", "<RUN>"),
+                          "run the delete with a literal path")],
+    "roadmap-one-writer": [("get_session with no argument", tool_payload(GET_SESSION, {}),
+                            "get_session (no argument) alone")],
     "roles-third-round-steps-up": [("a reviewer's second round on sonnet", brief_spawn(
-        "Round 2 of 3. Review the diff.", role="reviewer"))],
-    "sendmessage-session-id": [("send_message with the id as session_id", tool_payload(
-        "mcp__claude-code-remote__send_message", {"session_id": "session_probe", "message": "probe"}))],
+        "Round 2 of 3. Review the diff.", role="reviewer"), "spawn it with model sonnet")],
+    "sendmessage-session-id": [
+        ("a session's send_message with the id as session_id", tool_payload(
+            "mcp__claude-code-remote__send_message", {"session_id": "session_probe", "message": "probe"}),
+         "send_message"),
+        ("agents cannot call send_message; the Remedy says report to parent", None, "final report")],
     "simulator-boot-bypass": [("sim-test, which takes the lock and boots", bash_payload(
-        "sim-test -scheme Probe", "<REPO>"))],
-    "task-names-check": [("a task whose context holds a Why yours line", page_write(PAGE_TASK))],
-    "task-why-cited": [("a Why yours line that ends in a measured cite", page_write(PAGE_TASK))],
+        "sim-test -scheme Probe", "<REPO>"), "sim-test -scheme")],
+    "task-why-cited": [("a Why yours line that ends in a measured cite", page_write(PAGE_TASK), "End the line with")],
     "test-author-scope": [("a test author's Write of a test file", role_payload("test-author", "Write", {
-        "file_path": "<REPO>/tests/test_probe.py", "content": "probe"}))],
-    "trust-card-in-build": [("get_session with no argument", tool_payload(GET_SESSION, {}))],
-    "uniform-pick": [("an item with no pick", page_write(page_item()))],
+        "file_path": "<REPO>/tests/test_probe.py", "content": "probe"}), "write only tests and test config")],
+    "trust-card-in-build": [("get_session with no argument", tool_payload(GET_SESSION, {}),
+                             "get_session (no argument) alone")],
+    "uniform-pick": [("an item with no pick", page_write(page_item()), "leave pick out")],
     "workflow-args-shape-check": [("a Workflow started with a real value", tool_payload(
-        "Workflow", {"script": "probe", "args": {"repo": "probe/probe"}}))],
-    "wsl-allow-list": [("wsl with -e and a python script", bash_payload("wsl -e python3 hooks/test_guard.py", "<REPO>"))],
+        "Workflow", {"script": "probe", "args": {"repo": "probe/probe"}}), "Replace it with the real value")],
+    "wsl-allow-list": [("wsl with -e and a python script", bash_payload("wsl -e python3 hooks/test_guard.py", "<REPO>"),
+                        "wsl -e python3 <dir>/test_<name>.py")],
 })
 
 # ---- the ask reasons the scan reads through ask_command's queue: each act is the one its Remedy names.
 REMEDY_PROBES.update({
     # A network remote is the one the guard judges by its URL: a push to main asks there, and the local origin never does.
-    "push-main": [("the lane's own branch, by name", bash_payload("git push origin HEAD:lane-probe", "<REPO>")),
+    "push-main": [("the lane's own branch, by name", bash_payload("git push origin HEAD:lane-probe", "<REPO>"),
+                   "git push origin HEAD:<lane-branch>"),
                   ("the lane's own branch, by name, on a network remote", bash_payload(
-                      "git push https://github.com/probe/probe.git HEAD:lane-probe", "<REPO>"))],
+                      "git push https://github.com/probe/probe.git HEAD:lane-probe", "<REPO>"),
+                   "git push origin HEAD:<lane-branch>")],
     "push-stray-branch": [("the destination named, as the Remedy says", bash_payload(
-        "git push origin HEAD:lane-probe", "<REPO>"))],
-    "bare-merge": [("the merge tool with --confirm", bash_payload("merge 123 --confirm"))],
+        "git push origin HEAD:lane-probe", "<REPO>"), "name the destination")],
+    "bare-merge": [("the merge tool with --confirm", bash_payload("merge 123 --confirm"), "merge <pr> --confirm")],
 })
 
 REMEDY_PROSE_ONLY.update({
     "worktree-home": "the Remedy is to stop and report to the orchestrator: no tool call is the act",
+    # A builder's Edit of a product file is allowed, but the Remedy names a report to the orchestrator, not an edit.
+    "builder-diff": "the Remedy's act is a report of the test change to the orchestrator, which no tool call is",
+    "builder-test-edit": "the Remedy's act is a report of the test change to the orchestrator, which no tool call is",
+    # The Remedy names the GitHub MCP tools and the merge tool. The rule judges only a Bash gh write in a cloud
+    # session, and no act the Remedy names is one, so the guard judges none of them under this rule.
+    "gh-write-cloud": "the Remedy names GitHub MCP tools and the merge tool, and the rule judges only a Bash gh write "
+                      "in a cloud session: no act the Remedy names is one",
+    "task-names-check": "the Remedy's first act is to ask the owner, or to hand the task to a session with no cs-build "
+                        "tag: cs-build refuses request_computer_folder, so no cs-build session can make that ask, and "
+                        "the guard never judges it",
+    # The next three are model judges or their own hooks. guard.py does not run them, and run_guard drives only guard.py.
+    "blind-brief": "the check is hooks/blind_brief.py's own hook, which guard.py does not run; hooks/test_blind_brief.py "
+                   "judges the refusal in-process",
+    "prose-judge": "the verdict is a model's (hooks/prose_judge.py), and this fixture makes no model call; "
+                   "hooks/test_prose_judge.py judges the refusal in-process",
+    "parallelism-no-mid-task-talk": "the verdict is a model's (the wording judge and the busy check in "
+                                    "hooks/sendmessage_state.py), which run as their own hook, not in guard.py; "
+                                    "hooks/test_sendmessage_state.py judges them in-process",
     # The Remedy's act is a Read. The guard never judges a Read, and the check clears on the read itself, outside
     # the guard, so no guard call can prove the Remedy. A probe here would pass whatever the Read did.
     "handoff-unread": "the Remedy's act is a Read, which the guard never judges: the read clears the check outside "
@@ -932,9 +1062,10 @@ def tearDownModule():
 
 def run_guard(body):
     """(decision, reason) the guard prints for one payload, judged the way the guard suite judges it.
-    <REPO>, <RUN> and <CFG> in the payload stand for this run's fixture folders."""
+    <REPO>, <RUN>, <CFG>, <LANE>, <POINTER>, <POINTER_LANE> and <TMP> in the payload stand for this run's fixture folders."""
     text = (json.dumps(body).replace("<REPO>", REPO_DIR).replace("<RUN>", RUN).replace("<CFG>", CFG)
-            .replace("<LANE>", LANE_DIR))
+            .replace("<LANE>", LANE_DIR).replace("<POINTER_LANE>", POINTER_LANE)
+            .replace("<POINTER>", POINTER_DIR).replace("<TMP>", TMP))
     body = json.loads(text)
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
@@ -944,7 +1075,7 @@ def run_guard(body):
         "CLAUDE_CONFIG_DIR": CFG,
         "CLAUDE_GUARD_ROOT_PID": str(os.getpid()),
         "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-        "TMPDIR": RUN, "TEMP": RUN, "TMP": RUN,
+        "TMPDIR": TMP, "TEMP": TMP, "TMP": TMP,
     })
     result = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
                             text=True, env=env, timeout=120, cwd=RUN)
@@ -965,31 +1096,15 @@ def run_guard(body):
 
 # ------------------------------------------------------------------ the tests
 
-# Rules whose refusal has no Remedy yet, by the area PR that adds it. Each area PR deletes its own lines, so
-# every PR passes alone; the last one leaves this table empty. A rule listed here that already carries a
-# Remedy fails test_pending_rules_still_lack_a_remedy, so a line cannot outlive its fix.
-REMEDY_PENDING = {}
-PENDING = {rule for rules in REMEDY_PENDING.values() for rule in rules}
-
-
 class StaticRemedyTest(unittest.TestCase):
 
-    def test_pending_rules_still_lack_a_remedy(self):
-        # A pending rule is done only when it has a Remedy at every refuse site: one site without one keeps it pending.
-        sites = scan()
-        with_remedy = {rule for s in sites if s.has_remedy for rule in s.rules}
-        lacking = {rule for s in sites if not s.has_remedy for rule in s.rules}
-        done = sorted(PENDING & (with_remedy - lacking))
-        if done:
-            self.fail("these rules carry a Remedy at every refuse site now: delete them from REMEDY_PENDING: %s"
-                      % ", ".join(done))
-
     def test_every_refuse_site_names_a_remedy(self):
+        # No rule is exempt: a site without a Remedy fails, whatever its rule.
         sites = scan()
         self.assertGreaterEqual(len(sites), MIN_SITES,
                                 "the scan found %d refuse sites, fewer than %d: the scan lost sites"
                                 % (len(sites), MIN_SITES))
-        lacking = [s for s in sites if not s.has_remedy and not (s.rules and set(s.rules) <= PENDING)]
+        lacking = [s for s in sites if not s.has_remedy]
         if lacking:
             lines = ["  %s  rule %s  reason %s" % (s.where(), "/".join(s.rules), s.reason_src) for s in lacking]
             self.fail("%d of %d refuse sites carry no %r in their reason:\n%s"
@@ -1011,6 +1126,7 @@ class CoverageTest(unittest.TestCase):
         stale = sorted((set(REMEDY_PROBES) | set(REMEDY_PROSE_ONLY)) - self.remedy_rules())
         both = sorted(set(REMEDY_PROBES) & set(REMEDY_PROSE_ONLY))
         blank = sorted(rule for rule, why in REMEDY_PROSE_ONLY.items() if not why.strip())
+        all_prose = sorted(rule for rule, rows in REMEDY_PROBES.items() if rows and all(body is None for _, body, _ in rows))
         problems = []
         if stale:
             problems.append("table entries name no refuse site with a Remedy: %s" % ", ".join(stale))
@@ -1018,15 +1134,45 @@ class CoverageTest(unittest.TestCase):
             problems.append("a rule is in both tables: %s" % ", ".join(both))
         if blank:
             problems.append("REMEDY_PROSE_ONLY gives no reason for: %s" % ", ".join(blank))
+        if all_prose:
+            problems.append("these rules have only prose rows, so they belong in REMEDY_PROSE_ONLY: %s"
+                            % ", ".join(all_prose))
         if problems:
             self.fail("; ".join(problems))
 
 
+def normal(text):
+    """The text with every run of whitespace folded to one space, so a token matches across a source line break."""
+    return " ".join(text.split())
+
+
+def remedy_text(rule):
+    """The Remedy text the scan resolves for a rule, from every site that names it."""
+    return normal(" ".join(p for s in scan() if rule in s.rules for p in s.remedies))
+
+
 class ProbeTest(unittest.TestCase):
+
+    def test_each_probe_names_a_token_its_remedy_holds(self):
+        # The probe is bound to the act its Remedy names: the token is a word of that Remedy. A prose row names its
+        # reason in the act field, so a blank reason fails here too.
+        problems = []
+        for rule in sorted(REMEDY_PROBES):
+            text = remedy_text(rule)
+            for act, _body, token in REMEDY_PROBES[rule]:
+                if not act.strip():
+                    problems.append("%s: a probe row has no act or reason" % rule)
+                if not normal(token) or normal(token) not in text:
+                    problems.append("%s: the probe %r names %r, which its Remedy does not hold" % (rule, act, token))
+        if problems:
+            self.fail("%d probe row(s) do not name an act of their Remedy:\n  %s"
+                      % (len(problems), "\n  ".join(problems)))
 
     def test_each_remedy_names_an_act_the_guard_allows(self):
         for rule in sorted(REMEDY_PROBES):
-            for act, body in REMEDY_PROBES[rule]:
+            for act, body, _token in REMEDY_PROBES[rule]:
+                if body is None:  # a prose row: its reason says why no runnable act proves the Remedy
+                    continue
                 with self.subTest(rule=rule, act=act):
                     got, reason = run_guard(body)
                     if got not in ("allow", "deny", "ask"):  # a guard that crashed answers nothing: never a pass
