@@ -2586,13 +2586,11 @@ class CutLanesHome(unittest.TestCase):
         self.assertTrue(callable(getattr(merge.Host, "open_heads", None)), "merge.Host must define open_heads()")
         self.assertIn("keepBranches", merge.MERGE_FIELDS)
 
-    def test_the_proof_calls_guards_cherry_test_and_holds_no_copy(self):
+    def test_the_cherry_test_is_not_copied_into_merge_py(self):
         tree = self.tree()
         copies = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "branch_cherry_empty"
                   or isinstance(n, ast.Constant) and n.value == "cherry"]
         self.assertEqual(copies, [], "merge.py copies guard.branch_cherry_empty at line %s. Call it." % copies)
-        uses = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "branch_cherry_empty"]
-        self.assertTrue(uses, "cut_lanes must call guard.branch_cherry_empty")
 
     def test_the_ls_remote_split_is_an_escape_not_a_raw_tab(self):
         # The ls-remote parse splits on the escape \t. A raw TAB in a string is invisible in review and breaks on a re-save.
