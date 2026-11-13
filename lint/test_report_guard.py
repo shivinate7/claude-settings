@@ -5078,14 +5078,15 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
     - A hedge word on the line exempts it: "unmeasured", "unknown" or "not read", as whole words.
     - A cite of a main read on the same line: a path with a line (file.ext:123), origin/main, main@<sha>, `git show
       main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
-      screenshot" with a path or URL. A hash is six to forty hex characters with at least one letter a-f, so "20261112"
-      is no hash. A source inside an inline code span counts. The list is closed: a bare "main", a path or file name
-      with no line, a time, an item number and a `#<n>` PR ref are no cite.
+      screenshot" with a path or URL. A hash is six to forty hex characters with at least one letter a-f and one
+      digit, so "20261112" and "deadbeef" are no hash. A source inside an inline code span counts. The list is closed:
+      a bare "main", a path or file name with no line, a time, an item number and a `#<n>` PR ref are no cite.
     - Code spans: a span that holds only `main` is read as the word, so "not worse than `main`" is a claim. Any other
       span is blanked, so a claim that sits only inside one is exempt: "The check refuses `not worse than main`" is a
       mention.
     - Exempt: a question line, a line inside a ``` or ~~~ fence, and the noun "regression test(s)", "regression
-      suite(s)" or "regression testing" (a test count, not a claim). "No regression in the layout." stays refused.
+      suite(s)" or "regression testing" (a test count, not a claim). "No regression in the layout." and "No
+      regressions in the layout." stay refused.
     - Scanning: a lone apostrophe or double quote opens no span or phrase, a code span pairs only within its own line,
       and a fence marker opens a fence only at the start of a line.
 
@@ -5136,7 +5137,14 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The workflow matches main.yml.", "The workflow matches main."),
         ("The entry point is the same as main() in cli.py.", "The entry point is the same as main."),
     )
-    OWN_TWINS = ("The layout is main's own.", "The layout: main's own.")  # refused; "main's own CI is green." passes
+    OWN_TWINS = (  # refused; "main's own CI is green." passes
+        "The layout is main's own.", "The layout: main's own.",
+        "Layout main's own, see notes.",  # no copula: only the comma after "own" makes the claim
+        "Layout main's own: yes.",  # no copula: only the colon after "own" makes the claim
+        "Layout main's own",  # no copula, no mark: only the line end makes the claim
+        "The layout is main's own and unchanged.",  # the copula alone: no clause mark follows "own"
+        "The layout is main's own",  # the copula with the line end
+    )
     BYPASS_PAIRS = (  # (a claim, its cited twin): a bypass of a claim form is refused, and the cite passes it
         ("The filter is not worse than `main`.", "The filter is not worse than `main`; see lint/x.py:12."),
         ("The layout is **not worse** than main.", "The layout is **not worse** than main; see lint/x.py:12."),
@@ -5144,13 +5152,14 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The filter is not worse than the main branch.",
          "The filter is not worse than the main branch; see lint/x.py:12."),
     )
-    NOUN_TWIN = "No regression in the layout."
+    NOUN_TWINS = ("No regression in the layout.", "No regressions in the layout.")  # both refused
     CITES = (
         "The filter is not worse than main; see lint/report_guard.py:123.",
         "The filter is not worse than main; see report_guard.py:123.",
         "The filter is not worse than main; origin/main has it.",
         "The filter is not worse than main@36807ad19.",
         "The filter is not worse than main at 36807ad19.",
+        "same as main per 36807ad19 on main",  # the hash is a cite when "on main" follows it
         "The filter is not worse than main; git show main:lint/report_guard.py read it.",
         "Same as main per `git show origin/main:lint/report_guard.py`.",
         "The filter is not worse than the main screenshot at docs/shots/filter.png.",
@@ -5164,6 +5173,7 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         "The filter is not worse than main's screenshot.",
         "The filter is not worse than main, item 143 at 17:25 CST.",
         "The filter is not worse than main, PR #1008.",
+        "same as main per 36807ad19.",  # the twin of the cited line in CITES, without "on main"
     )
     SCANNER = (
         "Don't worry: the layout is main's own.",
@@ -5249,8 +5259,8 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         self.assert_blocked(self.NOT_A_HEDGE, self.NOT_A_HEDGE)
 
     def test_mc_red_the_cite_list_is_closed(self):
-        # Catches: a bare "main", a path or file name with no line, a main screenshot with no path or URL, or a time,
-        # item or PR ref is read as a read of main.
+        # Catches: a bare "main", a path or file name with no line, a main screenshot with no path or URL, a time,
+        # item or PR ref, or a hash with no "on main" beside it is read as a read of main.
         for line in self.NO_CITE:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
@@ -5321,10 +5331,12 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
 
     def test_mc_red_the_regression_test_noun_is_exempt(self):
         # Catches: "regression test(s)", "regression suite(s)" or "regression testing" is read as a claim, a false alarm
-        # on a test count.
-        # The refused twin stays first, so the exemption is the only difference between the two lines.
-        with self.subTest(line=self.NOUN_TWIN):
-            self.assert_blocked(self.NOUN_TWIN, self.NOUN_TWIN)
+        # on a test count. Also: "No regressions in the layout." is a claim, as the singular is, so the plural must not
+        # slip past the noun exemption.
+        # The refused twins stay first, so the exemption is the only difference between each twin and its pass.
+        for twin in self.NOUN_TWINS:
+            with self.subTest(line=twin):
+                self.assert_blocked(twin, twin)
         for line in self.NOUN_USES:
             with self.subTest(line=line):
                 self.assert_allowed(line)
@@ -5338,7 +5350,7 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
 
     def test_mc_red_main_s_own_before_a_noun_is_no_claim(self):
         # Catches: "main's own" before a noun ("main's own CI") is read as the claim form, a false alarm. The refused
-        # twins show the same form stays a claim as a predicate, or before a clause mark.
+        # twins show the form stays a claim after a copula, before a clause mark, or at the line end.
         for twin in self.OWN_TWINS:
             with self.subTest(twin=twin):
                 self.assert_blocked(twin, twin)
@@ -5352,10 +5364,11 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_blocked(line, line)
                 self.assert_allowed(twin)
 
-    def test_mc_red_a_digit_only_string_is_no_hash(self):
-        # Catches: a pure-digit string (a date such as 20261112) is read as a commit hash next to main, so the claim
-        # is cited. The hash with a letter beside it passes.
+    def test_mc_red_a_hash_needs_a_digit_and_a_letter(self):
+        # Catches: a pure-digit string (a date such as 20261112) or a letters-only string (deadbeef) is read as a commit
+        # hash next to main, so the claim is cited. The hash with a digit and a letter beside it passes.
         self.assert_blocked("same as main at 20261112", "same as main at 20261112")
+        self.assert_blocked("same as main at deadbeef", "same as main at deadbeef")
         self.assert_allowed("same as main at 3f9a1c2")
 
     # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
