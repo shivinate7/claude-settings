@@ -407,10 +407,10 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
+     '            elif names_default_branch(source):\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
      '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch asks'),
     ("push-main: a refspec target of main is not a destination",
-     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
+     '                if names_default_branch(target) and main():\n                    to_main = True',
      '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch asks'),
     ("push-main: a main refspec ends the read on a local origin",
      '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
