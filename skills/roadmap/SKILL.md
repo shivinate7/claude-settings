@@ -290,7 +290,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   time prints this report; otherwise it prints one line saying the pass is owed because the file is stale or unread (a failed fetch is unread). With no roadmap
   branch on origin it prints nothing, and a merge onto another base prints nothing. The merge's exit code is unchanged.
 
-  An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
+  An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of four: the three below, then the `unarchived` hold above.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
   `Step:` trailer on main. When the lane also carries another repo's `cs-repo:` tag, that reason ends `; also tagged <those tags>`.
   `step <ids> still doing under this lane`: each step whose `lane` is the session, with status doing or active, not landed on main.
@@ -302,7 +302,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - `readAt` is bad, over 60 minutes old or in the future;
   - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
   - the optional `keepSessions` is not a list, or an entry is not an object with a text `id`;
-  - a live lane row's `unarchived_epoch` is present and is a bool, not an int, or negative;
+  - a live, non-kept lane row's `unarchived_epoch` is present and is a bool, not an int, or negative;
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
     are not counted, so only archived lanes, or no live lane rows, read an empty row;
   - main or its git log cannot be read;
