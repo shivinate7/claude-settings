@@ -1,0 +1,10 @@
+{
+ "id": "own-764-b-fail-only-record",
+ "at": "2026-11-13T15:01:57-06:00",
+ "title": "A FAIL-only review record is allowed without lane lint",
+ "ruling": "Owner 15:01 CST Nov 13, page item 764 b: the record path may take a record whose rounds are all FAIL without running lane lint first, so a FAIL round on a lint-red head is never lost. A PASS or mixed record still runs lane lint first (lane R67-drain, PR #3222, rebuild of #1760). The owner chose the option labelled as going against his ruling that a repo changes to fit a shared tool, never the tool to fit a repo: this is his own word, a widening the owner took.",
+ "quote": "764 b",
+ "source": "Owner page save 21:01 UTC Nov 13 (comment thread 817a973d, typed by the owner); filed by triage.",
+ "status": "open",
+ "step": "record-post-runs-lane-lint"
+}
