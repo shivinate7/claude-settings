@@ -5482,10 +5482,13 @@ class PendingRefusalTests(unittest.TestCase):
 MG_RULE = "building-mistake-names-its-guard"
 MG_DONE = "> **Done** OTHER read the audit"
 MG_INBOX = "I broke my feedback inbox: a sed -i deleted its closing fence, not its last item."
+MG_PUSH = "I pushed the fix straight to main, which I should not have done."
 
 
-def mg_report(deviations, done=MG_DONE, nxt="> **Next** none"):
-    return "%s\n> **Deviations** %s\n%s" % (done, deviations, nxt)
+def mg_report(deviations, done=MG_DONE, nxt="> **Next** none", lines=()):
+    """One landing report. Each of `lines` is one report line under Deviations, such as a Cause: or Guard: line."""
+    extra = "".join("\n> %s" % line for line in lines)
+    return "%s\n> **Deviations** %s%s\n%s" % (done, deviations, extra, nxt)
 
 
 class MistakeNamesGuardTests(unittest.TestCase):
@@ -5704,6 +5707,25 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
+
+    # building-mistake-names-its-guard: a mistake the reply tells carries a `Cause:` and a `Guard:` line under
+    # Deviations. MG_PUSH names no guard and holds no fault word, so the admission check passes it as it stands.
+    # Each red gives one of the two lines, or neither. Each green gives both lines, or tells no mistake.
+    def test_mg_red_mistake_without_cause_or_guard_lines_blocks(self):
+        self.assert_blocked(mg_report(MG_PUSH))
+
+    def test_mg_red_cause_line_without_guard_line_blocks(self):
+        self.assert_blocked(mg_report(MG_PUSH, lines=("Cause: no guard stopped a direct push to main.",)))
+
+    def test_mg_red_guard_line_without_cause_line_blocks(self):
+        self.assert_blocked(mg_report(MG_PUSH, lines=("Guard: step:main-push-guard, queued.",)))
+
+    def test_mg_green_mistake_with_cause_and_guard_lines_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX, lines=(
+            "Cause: no fence check ran before the sed -i.", "Guard: step:inbox-fence-check, queued.")))
+
+    def test_mg_green_no_mistake_with_report_lines_passes(self):
+        self.assert_allowed(mg_report("I checked the lane's notes file, and it was intact."))
 
 
 if __name__ == "__main__":
