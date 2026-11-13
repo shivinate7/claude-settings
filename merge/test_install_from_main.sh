@@ -1550,7 +1550,133 @@ case45() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45"
+# ---- Pin-skip log (cases 46 to 49): each silent exit of the SessionStart pull writes one install log line ----
+# skip_log_problems LOG REASON: one line per problem. The log must hold exactly one line: a session-start hook line,
+# in the w helper's form (ISO 8601 stamp with the zone offset), that names REASON. No output means it holds.
+skip_log_problems() {
+  total=$(grep -c . "$1" 2>/dev/null)
+  if [ "${total:-0}" -ne 1 ]; then echo "want one line in the install log, got ${total:-0}: [$(cat "$1" 2>/dev/null)]"; return 0; fi
+  line=$(cat "$1")
+  if ! printf '%s\n' "$line" | grep -q -F 'session-start hook:'; then echo "the line is not a session-start hook line: [$line]"; return 0; fi
+  if ! printf '%s\n' "$line" | grep -q -E "$STAMP_RE"; then echo "the line has no ISO 8601 stamp with offset: [$line]"; return 0; fi
+  if ! printf '%s\n' "$line" | grep -q -F -- "$2"; then echo "the line does not name [$2]: [$line]"; fi
+  return 0
+}
+
+# tree_names DIR: every path under DIR, sorted. A case takes one listing before a run and one after, and compares them.
+tree_names() { find "$1" 2>/dev/null | sort; }
+# created_names BEFORE AFTER: the names only the AFTER listing holds. removed_names: the names only BEFORE holds.
+created_names() { grep -v -x -F -f "$1" "$2"; }
+removed_names() { grep -v -x -F -f "$2" "$1"; }
+
+# Waits, up to 30 s, until PATH is gone: a detached run removes the pull lock it made when it exits.
+wait_gone() {
+  i=0
+  while [ -e "$1" ] && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
+}
+
+# skip_run DIR REASON: the checks cases 46 to 48 share, run after the case sets its fixture (c0 is the pin's commit).
+# The local run must write exactly one install log line that names REASON, create no file under DIR but that log,
+# and leave the pin, origin/main's ref and the installer as the fixture left them. The remote run must add no line,
+# no file and no change to the log. Sets why: the problems found, empty when none.
+skip_run() {
+  sk_log="$1/home/.claude-cfg/claude-settings-install.log"
+  why=""
+  tree_names "$1" > "$work/skip-before.txt"
+  run_hook "$1" || { why="no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return 0; }
+  [ "$hrc" -eq 0 ] || why="$why; hook exited $hrc: $hout"
+  tree_names "$1" > "$work/skip-after.txt"
+  extra=$(created_names "$work/skip-before.txt" "$work/skip-after.txt" | grep -v -x -F "$sk_log")
+  [ -z "$extra" ] || why="$why; the run created [$extra], want only the install log"
+  gone=$(removed_names "$work/skip-before.txt" "$work/skip-after.txt")
+  [ -z "$gone" ] || why="$why; the run removed [$gone]"
+  problems=$(skip_log_problems "$sk_log" "$2")
+  [ -z "$problems" ] || why="$why; $problems"
+  [ "$(git -C "$1/clone" rev-parse refs/remotes/origin/main 2>/dev/null)" = "$c0" ] || why="$why; the run fetched origin/main"
+  [ "$(git -C "$1/clone-live" rev-parse HEAD 2>/dev/null)" = "$c0" ] || why="$why; the pinned checkout moved"
+  [ ! -e "$1/home/ran-install.txt" ] || why="$why; the installer ran"
+  had_log=0
+  if [ -e "$sk_log" ]; then cp "$sk_log" "$work/skip-log-local.txt"; had_log=1; fi
+  tree_names "$1" > "$work/skip-before-remote.txt"
+  run_hook "$1" remote || { why="$why; the remote run found no SessionStart command"; return 0; }
+  [ "$hrc" -eq 0 ] || why="$why; the remote run exited $hrc: $hout"
+  tree_names "$1" > "$work/skip-after-remote.txt"
+  made=$(created_names "$work/skip-before-remote.txt" "$work/skip-after-remote.txt")
+  [ -z "$made" ] || why="$why; the remote run created [$made]"
+  if [ "$had_log" = 1 ]; then cmp -s "$sk_log" "$work/skip-log-local.txt" || why="$why; the remote run changed the install log"; fi
+  return 0
+}
+
+# ---- Case 46: CLAUDE.md names no clone path -> exit 0, one install log line names it, no other file; a remote run writes nothing ----
+case46() {
+  name="case46: a SessionStart hook whose CLAUDE.md names no clone path exits 0, writes one install log line that names it, and creates no other file; a remote run writes nothing"
+  d="$work/case46"; hook_fixture "$d" trunk ahead
+  printf '# fixture CLAUDE.md with no pin line\n' > "$d/home/.claude-cfg/CLAUDE.md"
+  skip_run "$d" "no clone path"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 47: CLAUDE.md names a clone that is not there -> exit 0, one install log line names it, no other file; a remote run writes nothing ----
+case47() {
+  name="case47: a SessionStart hook whose CLAUDE.md names a clone that is not there exits 0, writes one install log line that names it, and creates no other file; a remote run writes nothing"
+  d="$work/case47"; hook_fixture "$d" trunk ahead
+  if [ -e "$d/no-such-clone-live" ]; then bad "$name" "FIXTURE the named clone exists"; return; fi
+  printf '@%s/CLAUDE.md\n' "$d/no-such-clone-live" > "$d/home/.claude-cfg/CLAUDE.md"
+  skip_run "$d" "clone not found"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 48: another pull holds the lock -> exit 0, one install log line names it, the other run's lock is left as it was ----
+case48() {
+  name="case48: a SessionStart hook that finds another pull's lock exits 0, writes one install log line that names it, and leaves that lock as it was; a remote run writes nothing"
+  d="$work/case48"; hook_fixture "$d" trunk ahead
+  lock="$d/home/.claude-cfg/.claude-settings-pull.lock"
+  # Empty, as install.sh's mkdir leaves it: a rmdir in the skip path can then remove it, and the check below sees that.
+  mkdir "$lock"
+  # Scope: the lock is fresh, so the hook's stale sweep (older than 10 min) leaves it for the skip to meet.
+  if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then bad "$name" "FIXTURE the lock is older than 10 min, so the hook sweeps it"; return; fi
+  skip_run "$d" "holds the lock"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 49: a run that does not skip writes nothing; a run held at the lock writes one line and no other file ----
+case49() {
+  name="case49: a SessionStart run that does not skip writes no install log line and creates no file in the config dir, and a run held at the lock writes one line and no other file"
+  d="$work/case49"; hook_fixture "$d" main same
+  cfg="$d/home/.claude-cfg"; lock="$cfg/.claude-settings-pull.lock"; log="$cfg/claude-settings-install.log"
+  why=""
+  # The held run first: a lock another run holds stops this run at the lock, so the fixture reaches that exit.
+  mkdir "$lock"
+  tree_names "$cfg" > "$work/case49-a.txt"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  [ "$hrc" -eq 0 ] || why="$why; held run exited $hrc: $hout"
+  tree_names "$cfg" > "$work/case49-b.txt"
+  extra=$(created_names "$work/case49-a.txt" "$work/case49-b.txt" | grep -v -x -F "$log")
+  [ -z "$extra" ] || why="$why; the held run created [$extra], want only the install log"
+  problems=$(skip_log_problems "$log" "holds the lock")
+  [ -z "$problems" ] || why="$why; $problems"
+  [ -d "$lock" ] || why="$why; the held lock was removed"
+  # Release the lock, then a run that does not skip. The pin is at main, so it fetches and installs nothing.
+  rmdir "$lock"
+  # The held run must stop at the lock, so it fetched nothing: FETCH_HEAD is still absent.
+  [ ! -e "$d/clone/.git/FETCH_HEAD" ] || why="$why; the held run fetched origin/main, so it did not stop at the lock"
+  had_log=0
+  if [ -e "$log" ]; then cp "$log" "$work/case49-log.txt"; had_log=1; fi
+  tree_names "$cfg" > "$work/case49-c.txt"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  wait_gone "$lock"
+  [ "$hrc" -eq 0 ] || why="$why; the run that does not skip exited $hrc: $hout"
+  [ -e "$d/clone/.git/FETCH_HEAD" ] || why="$why; the run never reached the fetch, so the check proves nothing"
+  tree_names "$cfg" > "$work/case49-d.txt"
+  made=$(created_names "$work/case49-c.txt" "$work/case49-d.txt")
+  [ -z "$made" ] || why="$why; the run that does not skip created [$made] in the config dir"
+  gone=$(removed_names "$work/case49-c.txt" "$work/case49-d.txt")
+  [ -z "$gone" ] || why="$why; the run that does not skip removed [$gone] from the config dir"
+  if [ "$had_log" = 1 ]; then cmp -s "$log" "$work/case49-log.txt" || why="$why; the run that does not skip changed the install log"; fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
