@@ -1700,6 +1700,15 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertEqual([line for line in lines if REFRESH_FAILED.match(line)], [],
                          "a refresh line printed with no origin: %r" % lines)
 
+    def test_a_stale_roadmap_ref_is_fetched_once_at_start(self):
+        # No origin, so the grants refresh starts no fetch and writes no FETCH_HEAD: the roadmap read is the only one.
+        long_ago = 1000000000  # an epoch second before any run, so the ref reads as stale
+        vcs(self.primary, "remote", "remove", "origin")
+        fixture.set_fetch_head(self.primary, when=long_ago)
+        _lines, starts = self.run_traced()
+        roadmap = [start for start in starts if start.split()[0] == "fetch" and "+roadmap:" in start]
+        self.assertEqual(len(roadmap), 1, "a stale roadmap ref: want one fetch of roadmap, got %r" % roadmap)
+
     # A refresh that fails: one line says so, and the grant line it leaves is marked unrefreshed.
 
     def stage_a_lane_grant(self):
