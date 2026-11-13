@@ -47,6 +47,9 @@
 #    user/foreground/LABEL` for each label in bin/sim-noise-services, beside the script: one label per line, `#` comments
 #    and blank lines allowed. A failed spawn never fails the run and prints nothing; xcodebuild still runs. The reuse path,
 #    the refusals and a failed boot run no spawn. chronod and AppIntentsLiveEntityService are never disabled.
+#  - Own boot: `simctl bootstatus UDID` runs once after `simctl boot` and before the first disable call. A bootstatus that
+#    fails or hangs changes no exit code and stops no spawn. A TERM or INT during it, or during a hanging disable call,
+#    ends the tool at once with the same cleanup: the device shut down, the lease given, the lock freed.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -137,7 +140,9 @@ SH
 # STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
 # then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
 # spawn logs its call like any verb. STUB_SPAWN_RC makes it exit with that code, after one line on stderr. Each spawn adds
-# one line to $RUN/spawn_record: `recorded` when the boot record file exists by then, else `none`.
+# one line to $RUN/spawn_record: `recorded` when the boot record file exists by then, else `none`. STUB_SPAWN_HANG makes
+# it write $RUN/spawn_started and sleep STUB_SPAWN_HANG_SECS (default 30). bootstatus logs its call, answers with
+# STUB_BOOTSTATUS_RC (default 0), and with STUB_BOOTSTATUS_HANG writes $RUN/bootstatus_started and sleeps like spawn.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
 [ "$1" = simctl ] || exit 99
@@ -156,7 +161,10 @@ case "$1" in
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   spawn) if [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-boots.jsonl" ]; then echo recorded >> "$RUN/spawn_record"; else echo none >> "$RUN/spawn_record"; fi
+    if [ -n "${STUB_SPAWN_HANG:-}" ]; then : > "$RUN/spawn_started"; sleep "${STUB_SPAWN_HANG_SECS:-30}"; fi
     [ -n "${STUB_SPAWN_RC:-}" ] && { echo "xcrun stub: simctl spawn refused" >&2; exit "$STUB_SPAWN_RC"; } ;;
+  bootstatus) if [ -n "${STUB_BOOTSTATUS_HANG:-}" ]; then : > "$RUN/bootstatus_started"; sleep "${STUB_BOOTSTATUS_HANG_SECS:-30}"; fi
+    [ -n "${STUB_BOOTSTATUS_RC:-}" ] && exit "$STUB_BOOTSTATUS_RC" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -220,7 +228,7 @@ fresh() {
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
   rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" \
-    "$work/spawn_record"
+    "$work/spawn_record" "$work/spawn_started" "$work/bootstatus_started"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -1149,6 +1157,59 @@ script=$saved_script
 need "exit code, with a list of comments and blanks" rc_is 0
 need "no disable call for a list of comments and blanks" no_spawn
 end_case "87 list file with a comment and a blank line: one label makes one call; comments and blanks alone make none"
+
+# ---- Cases 88 to 92: a signal during a hanging disable call or bootstatus, and the bootstatus call itself ----
+# hang_then_signal SIG VAR MARKER: an own boot whose stub hangs when VAR is set. Once $work/MARKER shows the hang began, SIG
+# goes to the tool alone, as a caller's own kill does. The tool must end within 5 s (a ceiling of 10 polls, 0.5 s apart).
+# If it has not, the group is killed so the case can finish; the cleanup checks then fail on the held lock.
+hang_then_signal() {
+  fresh
+  start_tool "$2=1"
+  need "the hang began (marker $3)" poll_for 20 test -e "$work/$3"
+  kill "-$1" "$tool_pid" 2>/dev/null
+  need "the tool ends within 5 s of $1 (a ceiling of 10 polls, 0.5 s apart)" poll_for 10 tool_ended
+  if ! tool_ended; then kill -KILL -- "-$tool_pid" 2>/dev/null; fi
+  finish_tool
+  need "the lock is freed" lock_gone
+  need "no xcodebuild call" no_xcodebuild
+  need "the booted Duo is shut down" has_call "simctl shutdown $DUO1"
+  need "the lease is given" lease_released
+}
+# bootstatus_on_duo: the stub log has one bootstatus call on the booted UDID, with or without flags after it.
+bootstatus_on_duo() { grep -Eq "^simctl bootstatus $DUO1( |\$)" "$calls"; }
+# bootstatus_order: the boot call, then the bootstatus call on the booted UDID, then the first disable call.
+bootstatus_order() {
+  local b s f
+  b=$(grep -n '^simctl boot ' "$calls" | head -n 1 | cut -d: -f1)
+  s=$(grep -n -E "^simctl bootstatus $DUO1( |\$)" "$calls" | head -n 1 | cut -d: -f1)
+  f=$(grep -n '^simctl spawn ' "$calls" | head -n 1 | cut -d: -f1)
+  [[ -n $b && -n $s && -n $f && $b -lt $s && $s -lt $f ]]
+}
+
+hang_then_signal TERM STUB_SPAWN_HANG spawn_started
+end_case "88 TERM during a hanging disable call: the tool ends within 5 s, with no xcodebuild, the booted Duo shut down, the lease given and the lock freed"
+
+hang_then_signal INT STUB_SPAWN_HANG spawn_started
+end_case "89 INT during a hanging disable call: the tool ends within 5 s, with the same cleanup"
+
+fresh; run
+need "scope: 17 disable calls were made" test "$(spawn_count)" -eq 17
+need "bootstatus was called on the booted UDID" bootstatus_on_duo
+need "bootstatus after the boot call and before the first disable call" bootstatus_order
+end_case "90 own boot: bootstatus on the booted UDID runs after the boot and before the first disable call"
+
+fresh; run STUB_BOOTSTATUS_RC=1
+need "scope: bootstatus was called on the booted UDID" bootstatus_on_duo
+need "all 17 disable calls are attempted" test "$(spawn_count)" -eq 17
+need "exit code unchanged, 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+end_case "91 a failing bootstatus (rc 1): all 17 disable calls are still attempted, and the exit status and xcodebuild are unchanged"
+
+hang_then_signal TERM STUB_BOOTSTATUS_HANG bootstatus_started
+end_case "92 TERM during a hanging bootstatus: the tool ends within 5 s, with the same cleanup, so a hanging bootstatus blocks no TERM"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
