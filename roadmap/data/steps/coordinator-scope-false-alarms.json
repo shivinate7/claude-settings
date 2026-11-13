@@ -1,0 +1,14 @@
+{
+ "id": "coordinator-scope-false-alarms",
+ "title": "The coordinator-scope write guard in #3249 denies harmless forms: heredoc and stdin tee, sed -i from /dev/null, chmod and truncate mode words",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A coordinator hits false alarms on ordinary commands, so a guard that cries wolf gets scrolled past or worked around.",
+ "source": "Lane rebuild-2123 (session_013NEJL4Lqx759D54GPKCSc2), 16:47 CST Nov 13: round 3 passed on #3249 at b62847435, net value positive; the review-record comment on #3249 holds the full text. Lane's read, unchecked by triage.",
+ "note": "Filed 16:47 CST Nov 13. One debt (a coordinator is likely to hit these), to be written in the repo's debt store by the lane that fixes it; triage cannot write it from the roadmap branch. False alarms, denied \"shell write: <<EOF\": `tee -a docs/debts/notes.md <<'EOF'`, `tee x < file`, `sed -i ... < /dev/null` (hooks/guard.py:6949-6990 and hooks/guard_frozen.py:1426: the operand loop skips only `>` words). Denied because mode and size words read as paths: `chmod +x /tmp/s.sh`, `chmod 755`, `truncate -s 0 f`, `install -m 644 a docs/decisions/b.md`. Fix: skip `<` words and mode words in the `outside` predicate, with cases. Two notes for the notes file: docs/debts/notes.md lines about 741-746 hold union-merge duplicates (noise only); note `coordinator-scope-missed-writes` (about line 2086) omits `cp --target-directory=hooks`, `awk -i inplace`, `ed -s`. A guard change: test-author red cases first, builder, reviewer; waits for #3249 to merge. Relation: rule `verification-cry-wolf-guard-is-spent`. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T16:47:51-06:00"
+}
