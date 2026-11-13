@@ -4585,19 +4585,30 @@ def unknown_reason(e):
 
 RELEASE_READ_ERRORS = (Stop, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired)  # OSError: gh or git missing; TimeoutExpired: sh's cap on a slow call
 
-def merge_reason(root, n, base, head, fetched):
+def merge_reason(root, n, base, head, fetched, into=None, target=None):
     """-> None when merging `head` into origin/<base> is clean, else the reason. `git merge-tree --write-tree` exits 1 both for a conflict and
     for a sha it cannot read, so only a CONFLICT line in its output says conflict; any other output is unknown, never clean. The base is fetched once
-    per run (`fetched` maps base -> its fetch error or None). A head this clone lacks is fetched from the pull request's own ref."""
-    if base not in fetched:
-        try:
-            c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-            fetched[base] = unknown_reason(f"git fetch origin {base} failed: {out}") if c else None
-        except (OSError, subprocess.TimeoutExpired) as e:  # cached like a failed exit, so a slow remote costs one wait, not one per pull request
-            fetched[base] = unknown_reason(f"git fetch origin {base} failed: {e}")
-    if fetched[base]:
-        return fetched[base]
-    return missing_head(root, n, head) or merge_tree_reason(root, f"refs/remotes/origin/{base}", head, base)
+    per run (`fetched` maps base -> its fetch error or None). A head this clone lacks is fetched from the pull request's own ref.
+    `into` and `target` merge `head` into another commit instead (an open batch's head) and name it in the reason; the base is then not fetched."""
+    if into is None:
+        if base not in fetched:
+            try:
+                c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+                fetched[base] = unknown_reason(f"git fetch origin {base} failed: {out}") if c else None
+            except (OSError, subprocess.TimeoutExpired) as e:  # cached like a failed exit, so a slow remote costs one wait, not one per pull request
+                fetched[base] = unknown_reason(f"git fetch origin {base} failed: {e}")
+        if fetched[base]:
+            return fetched[base]
+        into, target = f"refs/remotes/origin/{base}", base
+    gone = missing_head(root, n, head)
+    if gone:
+        return gone
+    c, out = git(root, "merge-tree", "--write-tree", into, head)
+    if not c:
+        return None
+    if c == 1 and "CONFLICT" in out:
+        return f"the merge with {target} is not clean (merge conflict)"
+    return unknown_reason(f"git merge-tree exited {c}: {out}")
 
 def missing_head(root, n, head, what="the head"):
     """-> None when the commit `head` is in this clone, else the unknown reason. A head this clone lacks is fetched from the pull request n's own ref."""
@@ -4608,20 +4619,10 @@ def missing_head(root, n, head, what="the head"):
         return unknown_reason(f"{what} {head[:9]} is not in this clone and could not be fetched: {fetch_out}")
     return None
 
-def merge_tree_reason(root, into, head, target):
-    """-> None when merging `head` into `into` is clean, else the reason; `target` names `into` in it. See merge_reason for why only a CONFLICT line says conflict."""
-    c, out = git(root, "merge-tree", "--write-tree", into, head)
-    if not c:
-        return None
-    if c == 1 and "CONFLICT" in out:
-        return f"the merge with {target} is not clean (merge conflict)"
-    return unknown_reason(f"git merge-tree exited {c}: {out}")
-
-def batch_merge_reason(root, head, bn, batch):
-    """-> None when merging `head` into the head of the open batch pull request bn is clean, else the reason. `batch` is {name, head, base}."""
-    target = f"open batch {batch['name']} (#{bn}, head {batch['head'][:9]})"
+def batch_merge_reason(root, n, head, bn, batch):
+    """-> None when merging `head` of pull request n into the head of the open batch pull request bn is clean, else the reason. `batch` is {name, head, base}."""
     return (missing_head(root, bn, batch["head"], f"the head of open batch #{bn}")  # a batch head may be a commit only the batch pull request's ref holds
-            or merge_tree_reason(root, batch["head"], head, target))
+            or merge_reason(root, n, batch["base"], head, {}, into=batch["head"], target=f"open batch {batch['name']} (#{bn}, head {batch['head'][:9]})"))
 
 def open_batches(h):
     """-> [(number, {name, head, base})] of the open integration pull requests, drafts too, from one read of the open list. A failed read is a Stop."""
@@ -4703,7 +4704,7 @@ def release_check(root, h, numbers, lints, root_why=None):
             if batch["base"] != i["base"]:
                 continue  # a batch on another base is not where this pull request lands
             try:
-                clash = batch_merge_reason(root, i["head"], bn, batch)
+                clash = batch_merge_reason(root, n, i["head"], bn, batch)
             except (OSError, subprocess.TimeoutExpired) as e:
                 clash = unknown_reason(e)
             if clash:
