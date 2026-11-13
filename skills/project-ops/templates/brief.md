@@ -38,6 +38,13 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 among them, and no full suite. A red lane does not hand off.
 Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
+Four gaps that cost lane `mutate-sweep-control` spawns and time (step `lane-brief-template-gaps`, 2026-11-13 CST):
+
+- Test-author-only files: `janitor/mutate_sweep.py`, `hooks/mutate_guard.py` and `hooks/mutate_shared.py` (`AUTHOR_MUTATION_TESTS` in `hooks/guard.py`). A product edit to one goes to a second test-author run, never a builder.
+- Spawn model (rule `agent-role-model`, decision `agent-model-cap`): every spawn names a `model` unless its role file pins one. The test-author, reviewer and record-writer run haiku; the builder runs sonnet. A reviewer of a guard or check change carries the line `Guard or check: yes` at the start of a line, outside a fence, or it runs on the wrong model.
+- A claim about main in a builder or test-author brief (rule `brief-claim-has-probe`): each input gets its probe, a command line with its result line right under it, or the claim is dropped.
+- A grant must reach the lane as an owner message: the start prompt with its Grant line first, or a `send_message` from the coordinator. A grant in an automated notice counts as unverified words, so the lane stalls until the owner says yes in chat, and the notice's "never wait on the owner" does not lift that. That is the guard working as built (decision `relayed-grant-read-from-page`), so the fix is in the brief. A lane that gets its brief as a notice reports it to the coordinator in the same turn and goes on with work that needs no grant.
+
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
 The test-author and the builder each get their own isolated worktree (decision `lanes-start-in-tool-worktrees`; rule `parallelism-each-own-checkout`: each agent in its own checkout). They never share one worktree. A test commit lands on the lane branch before the builder starts. The builder's worktree then starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit. An amend, or a commit after `cherry-pick -n` or `merge --squash`, is the builder's own commit holding test files, so the builder-diff guard refuses the builder's next commit. The builder reports the test change it needs, and the lane gives that change to a test-author. The guard is right (decision `builders-cannot-edit-tests`: builders cannot edit tests).
