@@ -5513,6 +5513,38 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base, so the run is real.
         self.assert_allowed("Is the failure on main at %s pre-existing?" % self.C)
 
+    def test_pe_red_or_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or" with no clause after it reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing or new?")
+
+    def test_pe_red_or_not_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or not" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing or not?")
+
+    def test_pe_red_then_in_a_one_clause_question_is_allowed(self):
+        # Catches: a trailing "then" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing then?")
+
+    def test_pe_red_or_flaky_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or flaky" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failing test pre-existing or flaky?")
+
+    def test_pe_red_or_caused_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or caused by" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the red job pre-existing or caused by my change?")
+
+    def test_pe_red_or_only_here_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or only here" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Did the failure fail on main too or only here?")
+
+    def test_pe_red_which_opener_in_a_one_clause_question_is_allowed(self):
+        # Catches: a "which" question is read as a claim-bearing clause, so a one-clause question is refused.
+        self.assert_allowed("Which failure is pre-existing?")
+
+    def test_pe_red_which_of_opener_in_a_one_clause_question_is_allowed(self):
+        # Catches: a "which of" question is read as a claim-bearing clause, so a one-clause question is refused.
+        self.assert_allowed("Which of the failures is pre-existing?")
+
     def test_pe_green_lines_with_no_pre_existing_claim_pass(self):
         rows = [
             # Catches: a failure on a sha with no "too" is read as the claim.
