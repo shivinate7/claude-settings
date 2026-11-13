@@ -37,8 +37,11 @@ Interface the generator must meet.
     empty text, is a problem.
   - Skills: skills/<name>/SKILL.md, frontmatter `description` (plain, quoted, or `>` folded).
     Missing or empty is a problem.
-  - Model and effort: the model-table row whose first cell names the script in backticks. None:
-    "no model" and "n/a". A prompt hook takes its own `model` field, effort "n/a". A skill takes
+  - Model and effort: the model-table row whose first cell names the script in backticks. If that
+    first cell also names an event (a bare settings.json event word after the path, as in
+    "UserPromptSubmit only"), the row goes to that event's registration alone, and the script's other
+    registrations take "no model". A row that names no event goes to every registration of the script.
+    None: "no model" and "n/a". A prompt hook takes its own `model` field, effort "n/a". A skill takes
     "no model". A script that calls or defines invoke_model (ast) needs its own table row.
     An inline command takes "no model" and "n/a".
 - Page: docs/catalog.md. Header row, exactly:
@@ -66,15 +69,18 @@ they use. Interface the generator must meet. One home: the same generator, no se
 - Merge-time rebuild. The shared merge tool (merge/merge.py,
   cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
   head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
-  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
-  run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) a stale or missing docs/records.md is no
-  failure and prints nothing. On any other run (a push to the default branch, a laptop) it fails and
-  names the page. A problem (a history marker, an empty record, an unreadable file) and the catalog
-  page stay red everywhere. Why keep the check: after a merge made without the tool, or a failed
-  rebuild, main would hold a stale index and no signal. The push check on main is that signal, and the
-  next merge heals it. Why lenient on a pull request: each pull request that touches a record would
-  have to carry a regenerated page, and two of them conflict on it. R10-R13 read the committed page, so
-  they are skipped on a pull request run. The fixture cases drop the runner's variables (B6-B10 set them).
+  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a waived run, a
+  pull request run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) or a dispatched run of a branch
+  other than main (GITHUB_EVENT_NAME workflow_dispatch, GITHUB_REF refs/heads/<lane>), a stale or missing
+  docs/records.md is no failure and prints nothing. On any other run (a push to the default branch, a
+  dispatch of main, a laptop) it fails and names the page. A problem (a history marker, an empty record,
+  an unreadable file) and the catalog page stay red everywhere. Why keep the check: after a merge made
+  without the tool, or a failed rebuild, main would hold a stale index and no signal. The push check on
+  main is that signal, and the next merge heals it. Why lenient on a waived run: each pull request that
+  touches a record would have to carry a regenerated page, and two of them conflict on it. A lane cannot
+  commit the page either, so its dispatched run would be red for a page only the merge writes. R10-R13
+  read the committed page, so they are skipped on a waived run (pull_request_run). The fixture cases drop
+  the runner's run variables (B6-B16 and U8 set them).
 - A root with no records at all (no record folder, no rule marker) writes no page: exit 0, nothing
   written, `--check` silent. The merge tool runs the generator on every repo it merges (D5).
 - `--root DIR` is the repo root, the same as the environment variable HOOK_CATALOG_ROOT (both work).
@@ -136,6 +142,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -151,6 +158,7 @@ LABEL = re.compile(r"^(\S+)(?: matcher=(\S+))?(?: if=(.+))?$")
 sys.path.insert(0, HERE)
 from test_settings_matcher import SETTINGS, JUDGE_TYPES, judge_hooks  # noqa: E402  one home for settings.json, the judge walk and its hook types
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
+from hook_catalog import pull_request_run  # noqa: E402  one home for the records waiver: the generator's own rule for a waived run
 
 
 def read(path, encoding="utf-8-sig"):
@@ -219,7 +227,10 @@ def page_rows(text):
 
 
 def table_rows():
-    """{script path: (model token, effort token)} for each model-table row that names a script."""
+    """{(script path, event): (model token, effort token)} for each model-table row that names a script.
+    The event is each settings.json event word in the first cell, else "" for a row that names none.
+    Written here from the spec, not imported from the generator."""
+    events = sorted(json.loads(read(SETTINGS))["hooks"])
     found = {}
     for line in read(TABLE).replace("\r\n", "\n").split("\n"):
         if not line.lstrip().startswith("|"):
@@ -229,7 +240,9 @@ def table_rows():
         if not path or len(cells) < 3:
             continue
         model = re.match(r"[\w.-]+", cells[1])
-        found[path.group(1)] = (model.group(0) if model else "", cells[2].strip("` "))
+        value = (model.group(0) if model else "", cells[2].strip("` "))
+        for event in [e for e in events if re.search(r"\b%s\b" % e, cells[0])] or [""]:
+            found[(path.group(1), event)] = value
     return found
 
 
@@ -256,25 +269,20 @@ def model_matches(cell, want):
     return cell == want or re.match(re.escape(want) + r"[ ,(]", cell) is not None
 
 
-PR_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request run
-
-
-def pull_request_run():
-    """True when this test run is itself a pull request run in Actions (the stamp engine's test: onDefaultBranch)."""
-    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+RUN_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request or a dispatched run
 
 
 def generator(root, *args, cwd=None, flag_root=False, env=None):
     """Run lint/hook_catalog.py on root (None: the real repo). Returns (code, stdout, stderr).
     The root goes in the environment variable, or as --root DIR with flag_root. cwd: the working folder, root by default.
-    env: variables to add. A fixture run (root given) drops the runner's pull request variables first, so a fixture
-    behaves the same on a laptop and in a pull request run; the real repo (root None) keeps them."""
+    env: variables to add. A fixture run (root given) drops the runner's run variables first, so a fixture
+    behaves the same on a laptop and in a CI run; the real repo (root None) keeps them."""
     if not os.path.exists(GEN):
         raise AssertionError("lint/hook_catalog.py does not exist yet: the builder writes it")
     child = dict(os.environ)
     child.pop("HOOK_CATALOG_ROOT", None)
     if root is not None:
-        for name in PR_ENV:
+        for name in RUN_ENV:
             child.pop(name, None)
     child.update(env or {})
     env = child
@@ -422,7 +430,7 @@ class RealRepo(unittest.TestCase):
             if hook.get("type") == "command":
                 path = command_script(hook)
                 key = (path or "inline: " + inline_label(event, matcher, cond), event, matcher, cond)
-                want_model, want_effort = table.get(path, ("no model", "n/a"))
+                want_model, want_effort = table.get((path, event), table.get((path, ""), ("no model", "n/a")))
             elif hook.get("type") == "prompt":
                 key = (first_sentence(hook.get("prompt", "")), event, matcher, cond)
                 want_model, want_effort = hook.get("model", ""), "n/a"
@@ -435,7 +443,7 @@ class RealRepo(unittest.TestCase):
                 problems.append("%r: Model %r, want %r" % (key, row["Model"], want_model))
             if row["Effort"] != want_effort:
                 problems.append("%r: Effort %r, want %r" % (key, row["Effort"], want_effort))
-        for path in sorted(invoke_model_callers() - set(table)):
+        for path in sorted(invoke_model_callers() - {p for p, _event in table}):
             problems.append("%s calls invoke_model but has no model-table row" % path)
         self.assertFalse(problems, "\n".join(problems))
 
@@ -445,6 +453,12 @@ class RealRepo(unittest.TestCase):
         committed = self.page().replace("\r\n", "\n")
         self.assertEqual(committed, out.replace("\r\n", "\n"),
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
+
+    def test_r8_header_says_a_row_that_names_an_event_gives_its_model_to_that_event_only(self):
+        # A text lint on the page header. The page is all a reader sees of the rule, so it must say it.
+        head = [p for p in self.page().split("\n\n") if p.startswith("Model and effort come from the model table")]
+        self.assertTrue(head, "the page header has no 'Model and effort come from the model table' paragraph")
+        self.assertIn("event", head[0], "the header does not say that a model-table row naming an event gives its model to that event only")
 
     def test_r9_session_start_refresh_has_its_text_markers(self):
         # A text lint, not a behaviour test. The refresh stays inline: a move into a script checks
@@ -521,6 +535,23 @@ def row_for(rows, key):
         if r["Key"].strip("`") == key:
             return r
     raise AssertionError("no row keyed %s in the page" % key)
+
+
+# One script registered under three events, as local_time is. Its docstring has a Modes line per event.
+CLOCK_DOC = ('"""Tells the session the time, and gives an agent the time.\n\nModes:\n'
+             '- UserPromptSubmit: Tells the session the time.\n'
+             '- SubagentStart: Gives the agent the time.\n'
+             '- PostToolUse: Notes the time after one read.\n"""\nprint("ok")\n')
+CLOCK_HOOKS = {
+    "UserPromptSubmit": [{"hooks": [command("hooks/clock.py")]}],
+    "SubagentStart": [{"hooks": [command("hooks/clock.py")]}],
+    "PostToolUse": [{"matcher": "ArtifactData", "hooks": [command("hooks/clock.py")]}],
+}
+# The model-table row for the script: one names an event in its first cell, one names none.
+CLOCK_NAMES_EVENT = "| clock (`hooks/clock.py`, UserPromptSubmit only) | haiku, through `decision_watch.invoke_model` | low |\n"
+CLOCK_NAMES_NO_EVENT = "| clock (`hooks/clock.py`) | haiku, through `decision_watch.invoke_model` | low |\n"
+# A row that names an event clock.py is never registered under: Stop, where only other.py is.
+CLOCK_NAMES_STOP = "| clock (`hooks/clock.py`, Stop only) | haiku, through `decision_watch.invoke_model` | low |\n"
 
 
 # ---- the records page: readers and fixture texts ------------------------------------------------
@@ -892,6 +923,39 @@ class Fixtures(Tree):
             {sidecar_key("Notification", "echo one"): "Says one plain thing.", "PreToolUse matcher=Gone #00000000": "Orphan."})
         self.assert_problem(spec, "PreToolUse matcher=Gone")
 
+    # Cases F30 and F31. A model-table row that names an event gives its model to that event's row
+    # alone. A row that names no event gives it to every row of the script. F31 passes today: a guard.
+
+    def test_f30_a_table_row_that_names_an_event_gives_its_model_to_that_event_only(self):
+        rows = self.rows_of(files(hooks=CLOCK_HOOKS, extra={
+            "hooks/clock.py": CLOCK_DOC, "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_EVENT}))
+        got = {r["Event"]: (r["Model"], r["Effort"]) for r in rows if r["Key"].strip("`") == "hooks/clock.py"}
+        self.assertEqual(sorted(got), ["PostToolUse", "SubagentStart", "UserPromptSubmit"],
+                         "the script needs one row per registration")
+        self.assertEqual(got, {"PostToolUse": ("no model", "n/a"),
+                               "SubagentStart": ("no model", "n/a"),
+                               "UserPromptSubmit": ("haiku", "low")},
+                         "the row names UserPromptSubmit: only that row takes its model, the other events call no model")
+
+    def test_f31_a_table_row_that_names_no_event_gives_its_model_to_every_row_of_the_script(self):
+        rows = self.rows_of(files(hooks=CLOCK_HOOKS, extra={
+            "hooks/clock.py": CLOCK_DOC, "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_NO_EVENT}))
+        got = sorted((r["Event"], r["Model"], r["Effort"]) for r in rows if r["Key"].strip("`") == "hooks/clock.py")
+        self.assertEqual([e for e, _m, _f in got], ["PostToolUse", "SubagentStart", "UserPromptSubmit"],
+                         "the script needs one row per registration")
+        self.assertEqual(got, [("PostToolUse", "haiku", "low"), ("SubagentStart", "haiku", "low"),
+                               ("UserPromptSubmit", "haiku", "low")],
+                         "a row that names no event must give its model to every row of the script")
+
+    # Case F32. A row that names an event its script never registers is a problem line. The check
+    # reads the registrations, so a row for Stop on a script registered under other events fails.
+
+    def test_f32_a_table_row_that_names_an_event_its_script_never_registers_is_a_problem(self):
+        self.assert_problem(files(hooks={**CLOCK_HOOKS, "Stop": [{"hooks": [command("hooks/other.py")]}]}, extra={
+            "hooks/clock.py": CLOCK_DOC, "hooks/other.py": '"""Does one other thing."""\nprint("ok")\n',
+            "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_STOP}),
+            "hooks/clock.py", "Stop")
+
 
 # ---- the records page: the generator on temp trees ---------------------------------------------
 
@@ -1151,6 +1215,25 @@ class RecordsPage(Tree):
                              "decisions/fm-open.md": "---\nid: D-3\ntitle: Never closed\n\nSome prose.\n"})
 
 
+# A lane is named like any branch. Only refs/heads/main is main, so a lane whose name starts with main is still a lane.
+LANE_RUNS = ("retire-run-records-waiver", "fix/main", "main-fix")
+
+
+def dispatched(branch):
+    """The variables Actions sets on a workflow_dispatch run of one branch, with no base ref."""
+    return {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/" + branch, "GITHUB_REF_NAME": branch}
+
+
+# Runs that are not a lane's dispatch: a dispatch of main (even with a lane's name in GITHUB_REF_NAME), a dispatch of an
+# empty branch, a dispatch of a tag, and a push of a lane. Each is no waived run and is red from --check on a stale page.
+NOT_A_LANE_RUNS = (
+    ("dispatch of main with a lane in GITHUB_REF_NAME", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main", "GITHUB_REF_NAME": "lane"}),
+    ("dispatch of an empty branch", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/", "GITHUB_REF_NAME": ""}),
+    ("dispatch of a tag", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/tags/v1", "GITHUB_REF_NAME": "v1"}),
+    ("push of a lane", {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/lane", "GITHUB_REF_NAME": "lane"}),
+)
+
+
 class RecordsStale(Tree):
     def published(self, extra=None):
         root = self.tree(with_records(extra))
@@ -1269,6 +1352,69 @@ class RecordsStale(Tree):
         self.assertEqual(code, 1, out + err)
         self.assertIn("docs/catalog.md", out + err)
         self.assertNotIn("docs/records.md", out + err)
+
+    # A dispatched run of a lane branch waives the records page as a pull request run does. A lane cannot
+    # commit the page (the guard records-page refuses it), so its run would be red for a page only the merge writes.
+    def test_b11_on_a_dispatched_lane_run_a_stale_page_is_not_red(self):
+        for branch in LANE_RUNS:
+            with self.subTest(branch):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                code, out, err = generator(root, "--check", env=dispatched(branch))
+                self.assertEqual(code, 0, "a stale page is red on a dispatched run of %s:\n%s%s" % (branch, out, err))
+                self.assertEqual(out + err, "", "a waived run prints nothing: %s" % branch)
+
+    def test_b12_on_a_dispatched_lane_run_a_missing_records_page_is_not_red(self):
+        for branch in LANE_RUNS:
+            with self.subTest(branch):
+                root = self.published()
+                self.records_text(root)  # a failure, not an error, while the page is not written
+                os.remove(os.path.join(root, "docs", "records.md"))
+                code, out, err = generator(root, "--check", env=dispatched(branch))
+                self.assertEqual(code, 0, "a missing page is red on a dispatched run of %s:\n%s%s" % (branch, out, err))
+                self.assertEqual(out + err, "", "a waived run prints nothing: %s" % branch)
+
+    def test_b13_on_a_dispatch_of_main_a_stale_or_missing_page_is_red(self):
+        # main is the default branch, so the signal that a merge left it stale holds on a dispatch of main too.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        code, out, err = generator(root, "--check", env=dispatched("main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+        self.records_text(root)
+        os.remove(os.path.join(root, "docs", "records.md"))
+        code, out, err = generator(root, "--check", env=dispatched("main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_b14_a_problem_is_red_on_a_dispatched_lane_run(self):
+        # Only a stale page is waived, as b9 pins for a pull request run.
+        root = self.published()
+        put(root, "decisions/old.md", old_decision("Superseded: x."))
+        put(root, "debts/empty.md", "\n")
+        code, out, err = generator(root, "--check", env=dispatched("fix/main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/old.md:7", out + err)
+        self.assertIn("debts/empty.md", out + err)
+
+    def test_b15_on_a_dispatched_lane_run_the_catalog_page_stays_red_while_the_records_page_is_waived(self):
+        # The waiver covers the records page only, as b10 pins for a pull request run. Here both pages are stale.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
+        code, out, err = generator(root, "--check", env=dispatched("retire-run-records-waiver"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/catalog.md", out + err)
+        self.assertNotIn("docs/records.md", out + err)
+
+    def test_b16_a_run_that_is_not_a_lane_dispatch_is_red_on_a_stale_page(self):
+        for name, env in NOT_A_LANE_RUNS:
+            with self.subTest(name):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                code, out, err = generator(root, "--check", env=env)
+                self.assertEqual(code, 1, "a stale page is waived on %s:\n%s%s" % (name, out, err))
+                self.assertIn("docs/records.md", out + err, name)
 
 
 NOT_HISTORY = [
@@ -1488,10 +1634,10 @@ class OtherRepos(Tree):
                 self.assertEqual(self.write(root, elsewhere, "--check"), (0, "", ""))
 
 
-@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
+@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a waived run (a pull request or a dispatched lane) need not carry a fresh one")
 class RealRecords(unittest.TestCase):
-    """The committed page against the real records. Skipped on a pull request run (the merge rebuilds the
-    page); run on a laptop and on a push to main."""
+    """The committed page against the real records. Skipped on a waived run, the same test as the records waiver
+    (pull_request_run); run on a laptop, on a dispatch of main and on a push to main."""
 
     def rows(self):
         if not os.path.exists(RECORDS_PAGE):
@@ -1568,6 +1714,20 @@ class Helpers(unittest.TestCase):
 
     def test_u7_line_of_counts_from_one(self):
         self.assertEqual(line_of("a\n\nb\nb\n", "b"), 3)
+
+    def test_u8_the_waiver_reads_a_dispatched_lane_run_and_not_a_dispatch_of_main(self):
+        # The waiver in --check and the skip of RealRecords read this one function. Each probe clears the
+        # runner's variables and sets only the ones it names, and the scope is asserted before the call (P7).
+        clean = {k: v for k, v in os.environ.items() if k not in RUN_ENV}
+        probes = [("no environment: a laptop run", {}, False),
+                  ("a pull request run", {"GITHUB_BASE_REF": "main"}, True),
+                  ("a dispatch of main", dispatched("main"), False)]
+        probes += [("a dispatch of lane %s" % branch, dispatched(branch), True) for branch in LANE_RUNS]
+        probes += [("not a lane run: %s" % name, env, False) for name, env in NOT_A_LANE_RUNS]
+        for name, env, want in probes:
+            with self.subTest(name), mock.patch.dict(os.environ, {**clean, **env}, clear=True):
+                self.assertEqual({k for k in RUN_ENV if k in os.environ}, set(env), "the fixture: only the probe's variables are set")
+                self.assertEqual(pull_request_run(), want, name)
 
     def test_the_guards_records_header_opens_the_generated_intro(self):
         """hooks/guard_merge.py copies the first line of RECORDS_INTRO as RECORDS_HEADER. If the intro title changes

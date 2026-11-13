@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: sim-test [--device duo|pro] <xcodebuild test args without -destination>   (run from the folder that holds the project)
 #        sim-test [--device duo|pro] --hold [--for S] [-- CMD ARGS...]
-# Runs the tests on one phone simulator, by role: the Duo by default (owner, 2026-11-02 13:17 and 15:03 CST), the 18 Pro
+# Runs the tests on one phone simulator, by role: the Duo by default (decision sim-test-is-the-one-boot-path), the 18 Pro
 # with --device pro. Its flags are double-dash and come first; the first argument it does not know starts xcodebuild's own
 # arguments, which pass through unchanged. Any other --device value, or a bad --for: one usage line, exit 2, no lock.
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
@@ -27,6 +27,10 @@
 # this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
 # reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
 # goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
+# On its own boot it deletes the PosterBoard store (`data/Library/Application Support/PRBPosterExtensionDataStore`) of the
+# leased device, which this run has not booted, before the boot (ruling 10 of decision sim-test-is-the-one-boot-path). The
+# devices root is $HOME/Library/Developer/CoreSimulator/Devices; SIM_TEST_DEVICES_DIR overrides it. It never does so on
+# the reuse path or any refusal path.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
 # it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
@@ -39,11 +43,22 @@
 # At 3 or more counted new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops the
 # child, shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
 # stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
+# Noise off: the own-boot path only, right after `simctl boot` and its record, it waits for the boot with `xcrun simctl
+# bootstatus UDID`, then runs `xcrun simctl spawn UDID launchctl disable user/foreground/LABEL` for each label of
+# bin/sim-noise-services (beside this script; one label per line, `#` comments and blank lines skipped). iOS 27.1
+# simulators crash those Siri, intelligence, Mail and Spotlight daemons on every boot; chronod and
+# AppIntentsLiveEntityService stay on. The whole step is one background child that this tool polls once a second, for at
+# most SIM_TEST_NOISE_WAIT s (default 90); on expiry it stops the child and goes on to xcodebuild. INT and TERM stop the
+# child at once. Best effort: a failed bootstatus or spawn, or an expiry, changes no exit code, prints nothing and
+# stops no loop. A missing list file is a silent no-op. The reuse path runs no step.
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
-# leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
+# processes (take, give), one more simctl list and one more rm (the PosterBoard store; no file written); one xcrun
+# bootstatus and one xcrun spawn per label of the list on an own boot, writing nothing, with one sleep per second while
+# that step runs, for at most SIM_TEST_NOISE_WAIT s, and one pgrep if it is stopped; a waiting take costs one sysctl and
+# one ps per poll there, and writes leases.json (see the header of sim-lease). One folder listing per poll while the
+# child runs (a waiting run also reads
 # the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
@@ -52,6 +67,7 @@
 CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 POLL=${SIM_TEST_POLL:-2}
 LOCK_WAIT=${SIM_TEST_LOCK_WAIT:-300}
+NOISE_WAIT=${SIM_TEST_NOISE_WAIT:-90}
 WINDOW=${SIM_TEST_WINDOW:-30}
 CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
 STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
@@ -87,9 +103,15 @@ have_lease=
 have_lock=
 child=
 
-# stop_child: TERM the child, wait up to 10 s for it, then KILL it.
+# stop_child: TERM the child, wait up to 10 s for it, then KILL it. During the noise step it also TERMs the child's own
+# child, the xcrun in flight; the xcrun's own children (a simctl helper) are not reached, bash 3.2 having no process group
+# for a background job.
+noise_step=
 stop_child() {
+  local kids=
+  [ -n "$noise_step" ] && kids=$(pgrep -P "$child" 2>/dev/null)
   kill "$child" 2>/dev/null
+  [ -n "$kids" ] && kill $kids 2>/dev/null
   for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
   kill -KILL "$child" 2>/dev/null
   wait "$child" 2>/dev/null
@@ -102,6 +124,23 @@ record_boot() {
   [ -n "$recorded" ] && return 0
   recorded=1
   python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
+}
+
+# noise_off: wait for the device this run booted to finish booting, then disable each label of bin/sim-noise-services on
+# it. Every label is tried; a failed bootstatus or spawn, or a missing list file, is silent and changes nothing. The
+# caller runs it as a background child and waits, so INT and TERM act at once (see stop_child).
+noise_off() {
+  local label list
+  list="$(dirname "$0")/sim-noise-services"
+  [ -f "$list" ] || return 0
+  xcrun simctl bootstatus "$booted_by_me" >/dev/null 2>&1 </dev/null || true
+  while IFS= read -r label || [ -n "$label" ]; do
+    label=${label#"${label%%[![:space:]]*}"}
+    label=${label%%[[:space:]]*}
+    case $label in ''|'#'*) continue ;; esac
+    xcrun simctl spawn "$booted_by_me" launchctl disable "user/foreground/$label" >/dev/null 2>&1 </dev/null || true
+  done < "$list"
+  return 0
 }
 
 # Order: stop the child, shut down my simulator, then free the lock, so no run sees the lock free while a simulator of
@@ -212,11 +251,27 @@ if [ -z "$udid" ]; then
     have_lease=
   else
     udid=$granted
+    # PosterBoard keeps a home-screen snapshot per fold or launch and never frees them (41 GB in 10 days seen on a Duo,
+    # iOS 27.1). The store is rebuilt on boot, so it goes before this run boots the device.
+    # rm -rf removes a symlink at the LAST path component (the store itself) and does not follow it; a symlinked parent
+    # folder is followed.
+    rm -rf "${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$udid/data/Library/Application Support/PRBPosterExtensionDataStore"
     # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
     # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
+    noise_step=1
+    noise_off &
+    child=$!
+    noise_end=$((SECONDS + NOISE_WAIT))
+    while kill -0 "$child" 2>/dev/null; do
+      if [ "$SECONDS" -ge "$noise_end" ]; then stop_child; break; fi
+      sleep 1
+    done
+    wait "$child" 2>/dev/null
+    child=
+    noise_step=
   fi
 fi
 echo "sim-test: using $udid"

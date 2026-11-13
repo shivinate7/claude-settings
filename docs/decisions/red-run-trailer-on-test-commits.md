@@ -22,13 +22,13 @@ Known limits:
 - A branch that merged a newer main carries main's commits in the range, and each is judged like the rest.
 - A lane begun before the check landed escapes for its commits from before that, unless it is rebased.
 - Conflict-resolution lines in a merge commit are not judged.
-- Mutation tests are not test paths, so they need no trailer.
+- The three mutation tests (`hooks/mutate_guard.py`, `hooks/mutate_shared.py`, `janitor/mutate_sweep.py`) are test content: a builder never edits them, a test-author writes them (owner ruling, 2026-11-08 17:19 CST, waiting-page item 447 a). This check does not judge them. It reads only `guard.is_test_rel`, which does not name them. `AUTHOR_MUTATION_TESTS` in `hooks/guard.py` reaches the builder and test-author checks through `is_mutation_test_rel`; this check does not read it. So a commit that adds lines to one of them needs no trailer.
 - The check path is fixed in the check. Renaming the check turns it off.
 - In a repo whose HEAD has no `lint/check_red_run.py`, a range that reaches back past the repo's first trailered test commit judges old commits too (item 5). The test-author's `--base origin/main` keeps the range to its own lane.
 
 Risk kind: likely risk, per `building-guard-needs-incident`. Test-author work adds new tests in normal work, and 12 of 29 recorded changes carried no red run. Landed 2026-11-01.
 
-Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push. It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD. Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
+Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push (unmeasured). It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD (unmeasured). Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
 
 Kind: process
 Home: lint/check_red_run.py

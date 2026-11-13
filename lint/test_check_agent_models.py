@@ -16,6 +16,9 @@ An agent body must not state the agent's own model in fixed text: a sentence wit
 in it, or a backticked PASS/FAIL/PARTIAL header that names a model. A body whose report header has a model slot
 (`the model` or `<model>`) must also name the line that gives the model: `powered by the model named`. Each failure
 names its file and line as file:line.
+Every agent file withholds the claude-code-remote server: disallowedTools: names the whole server (`mcp__claude-code-remote__*`
+or bare `mcp__claude-code-remote`), or tools: is an allow-list with no entry for it. Only the frontmatter counts, never the
+body or a description.
 """
 import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
 from unittest import mock
@@ -34,7 +37,7 @@ MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
 # The model table of docs/decisions/agent-model-cap.md, reduced to its lane session row. Only the effort cell varies.
 RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
-               "| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT | %s |\n")
+               "| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | %s |\n")
 
 
 def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x", pinned=True):
@@ -49,7 +52,8 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as handle:
             if text is None:
-                head = "---\nname: %s\n%s" % (name, "model: %s\n" % model if pinned else "")
+                head = "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s" % (
+                    name, "model: %s\n" % model if pinned else "")
                 handle.write("%s%sbody\n" % (head, "---\n" if closed else ""))
             else:
                 handle.write(text)
@@ -157,7 +161,8 @@ class PinEqualsRow(unittest.TestCase):
                                 "%s: no line names the pin and the row: %r" % (label, out))
         # A comment after a haiku pin that names sonnet leaves the pin haiku, so the file passes.
         self.assertEqual(verdict("agents/reviewer.md",
-                                 text="---\nname: reviewer\nmodel: haiku  # sonnet is above the row\n---\nbody\n"),
+                                 text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
+                                      "model: haiku  # sonnet is above the row\n---\nbody\n"),
                          (0, ""))
 
 
@@ -232,6 +237,69 @@ class RoleListDrift(unittest.TestCase):
     def test_no_drift_passes_the_check(self):
         code, out, _ = self.run_main([])
         self.assertEqual((code, out), (0, ""), "no drift from role_list_drift still fails the check: %r" % out)
+
+
+class RoundRowDrift(unittest.TestCase):
+    """The record's round rows are read by the guard (one home, decision agent-model-cap). A row the guard cannot read is drift:
+    the check fails and names that row. A readable row passes, and so does the real record (test_main_with_no_args_passes_on_the_real_repo)."""
+    ROLE_ROWS = "| Point | Model | Effort |\n|---|---|---|\n| reviewer | haiku | xhigh |\n| builder | sonnet | high |\n"
+    ROUND_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+
+    def write_fixture(self, round_row, round_table=True):
+        """A pointer folder whose record holds the role rows, the round table with `round_row` (or no round table when
+        `round_table` is false), and the lane row. Returns the folder's root."""
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        os.makedirs(os.path.join(root, "agents"))
+        record = os.path.join(root, RECORD_RELPATH)
+        os.makedirs(os.path.dirname(record))
+        rounds = self.ROUND_HEAD + round_row + "\n" if round_table else ""
+        with open(record, "w", encoding="utf-8") as handle:
+            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium")
+        return root
+
+    def check_fixture(self, round_row, round_table=True):
+        """The check run over write_fixture's folder: (code, stdout). The role lists are patched out, so only the round rows
+        can fail the check."""
+        root = self.write_fixture(round_row, round_table)
+        out = io.StringIO()
+        with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out), \
+                mock.patch.object(C._guard, "role_list_drift", lambda pointer_root: [], create=True):
+            code = C.main([])
+        return code, out.getvalue()
+
+    def assert_scope(self, root, rounds):
+        """Scope before verdict: the fixture holds the role table, and the guard reads its round table exactly when `rounds`."""
+        self.assertIsNotNone(C._guard.role_model_table(root), "the fixture holds no role table, so this case proves nothing")
+        self.assertEqual(C._guard.role_round_table(root) is not None, rounds,
+                         "the guard's round table read for this fixture is not %s, so this case proves nothing" % rounds)
+
+    def test_a_round_row_naming_a_model_the_guard_cannot_read_fails_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | fable | high |")
+        self.assertEqual(code, 1, "a round row naming a model the guard cannot read passes the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "fable"), "the check does not name the round row it flags: %r" % out)
+
+    def test_a_round_row_the_guard_reads_passes_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |")
+        self.assertEqual((code, out), (0, ""), "a readable round row fails the check: %r" % out)
+
+    def test_a_record_with_no_round_rows_table_fails_the_check(self):
+        # The record keeps its role table and lane row, and has no round table. The guard reads no round row from it, so the
+        # check must fail it, not pass it silently.
+        self.assert_scope(self.write_fixture("", round_table=False), rounds=False)
+        code, out = self.check_fixture("", round_table=False)
+        self.assertEqual(code, 1, "a record with no round rows table passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_a_round_table_with_no_rows_fails_the_check(self):
+        # The empty state of the round table: its header and separator, and no row. The guard reads no round row from it.
+        self.assert_scope(self.write_fixture(""), rounds=False)
+        code, out = self.check_fixture("")
+        self.assertEqual(code, 1, "a round table with no rows passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_the_real_record_round_table_holds_the_round_one_other_row(self):
+        # Control: the guard reads the real record's round table, with the reviewer's first-round other row, so the real repo's pass is a read.
+        self.assertIn(("reviewer", "1", "other"), C._guard.role_round_table(C.ROOT) or {})
 
 
 class RunFolder(unittest.TestCase):
@@ -314,7 +382,8 @@ BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the roun
 
 def agent_text(body, description=None):
     """A fixture agent file: a frontmatter block with a name, an optional description, then the body."""
-    keys = ["name: fixture"] + (["description: %s" % description] if description else [])
+    keys = ["name: fixture", "disallowedTools: mcp__claude-code-remote__*"] + (
+        ["description: %s" % description] if description else [])
     return "---\n%s\n---\n%s" % ("\n".join(keys), body)
 
 
@@ -460,6 +529,160 @@ class RealAgentFiles(unittest.TestCase):
                     code = C.main([os.path.join(folder, name)])
                 self.assertEqual(code, 0, "agents/%s fails the check: %r" % (name, out.getvalue()))
                 self.assertEqual(out.getvalue(), "", "agents/%s exits 0 but prints a finding" % name)
+
+
+REMOTE = "mcp__claude-code-remote"
+
+
+def agent_with(*lines, body="body\n"):
+    """A fixture agent file, agents/fixture.md: a frontmatter block with a name and the given lines, then the body."""
+    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture",) + lines), body)
+
+
+def server_withheld(keys):
+    """True when the agent cannot reach the claude-code-remote server: disallowedTools: names the whole server, or tools:
+    is an allow-list with no entry for it. It reads the files, not the check, so the repo case is red before the check
+    is built."""
+    denied = tokens(keys.get("disallowedTools", ""))
+    if REMOTE in denied or REMOTE + "__*" in denied:
+        return True
+    if "tools" in keys:
+        return not any(item == REMOTE or item.startswith(REMOTE + "__") for item in tokens(keys["tools"]))
+    return False
+
+
+class SessionTools(unittest.TestCase):
+    # Every agent file withholds the claude-code-remote server, since an agent that reaches it can create or message
+    # sessions it was not briefed on. Only the frontmatter counts. The cases go through main(), so a red case fails on
+    # its exit-code assert, not on a missing name.
+    def scope(self, text, absent=(), present=()):
+        """The fixture's frontmatter has the keys the case means, so the verdict reads the key it tests."""
+        keys, _, problem = agent_parts(text)
+        self.assertIsNone(problem, "fixture error: %s" % problem)
+        for key in absent:
+            self.assertNotIn(key, keys, "fixture error: the frontmatter has a %s: key" % key)
+        for key in present:
+            self.assertIn(key, keys, "fixture error: the frontmatter has no %s: key" % key)
+
+    def red(self, text, what):
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual(code, 1, "%s passes the check: %r" % (what, out))
+        self.assertTrue(names(out, "fixture.md"), "no line names fixture.md for %s: %r" % (what, out))
+
+    def clean(self, text, what):
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual((code, out), (0, ""), "%s is flagged: %r" % (what, out))
+
+    def test_agent_with_no_tools_or_refuse_key_is_flagged(self):
+        text = agent_with()
+        self.scope(text, absent=("tools", "disallowedTools"))
+        self.red(text, "an agent with no tools: and no disallowedTools: key")
+
+    def test_refuse_list_without_the_server_is_flagged(self):
+        self.red(agent_with("disallowedTools: Edit, Write, NotebookEdit"), "a deny list with no remote entry")
+
+    def test_empty_refuse_list_is_flagged(self):
+        self.red(agent_with("disallowedTools:"), "an empty disallowedTools: that withholds nothing")
+
+    def test_refuse_of_one_remote_tool_is_flagged(self):
+        # The server is withheld whole. A deny of one remote tool leaves the other remote tools reachable.
+        self.red(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote__create_session"),
+                 "a deny of one remote tool, not the server")
+
+    def test_refuse_of_another_server_is_flagged(self):
+        self.red(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remoteX__*"),
+                 "a deny of another server, named by a prefix")
+
+    def test_allow_list_naming_a_remote_tool_is_flagged(self):
+        self.red(agent_with("tools: Bash, Read, mcp__claude-code-remote__create_session"),
+                 "a tools: allow-list that names a remote tool")
+
+    def test_allow_list_in_yaml_form_naming_a_remote_tool_is_flagged(self):
+        self.red(agent_with("tools: [Bash, Read, mcp__claude-code-remote__create_session]"),
+                 "a YAML-list tools: that names a remote tool")
+
+    def test_allow_list_naming_the_whole_server_is_flagged(self):
+        self.red(agent_with("tools: mcp__claude-code-remote__*"), "a tools: allow-list that names the whole server")
+
+    def test_allow_list_naming_the_bare_server_is_flagged(self):
+        self.red(agent_with("tools: Bash, mcp__claude-code-remote"), "a tools: allow-list that names the bare server")
+
+    def test_refuse_only_in_the_body_is_flagged(self):
+        text = agent_with(body="disallowedTools: mcp__claude-code-remote__*\n")
+        self.scope(text, absent=("tools", "disallowedTools"))
+        self.red(text, "a deny written in the body, not the frontmatter")
+
+    def test_refuse_only_in_the_description_is_flagged(self):
+        text = agent_with('description: "Withheld with disallowedTools: mcp__claude-code-remote__* in its file."')
+        self.scope(text, absent=("tools", "disallowedTools"), present=("description",))
+        self.red(text, "a deny written in the description, not as a frontmatter key")
+
+    def test_refuse_written_as_an_indented_block_line_is_flagged(self):
+        text = agent_with("description: |", "  disallowedTools: mcp__claude-code-remote__*")
+        self.scope(text, absent=("tools", "disallowedTools"))
+        self.red(text, "a deny indented under a block scalar, so it is not a key")
+
+    def test_lone_quote_in_another_key_does_not_hide_a_remote_tool(self):
+        text = agent_with("description: Don't use // or # here.",
+                          "tools: Bash, mcp__claude-code-remote__create_session")
+        self.scope(text, absent=("disallowedTools",), present=("tools",))
+        self.red(text, "a remote tool after a description with a lone quote and comment openers")
+
+    def test_refuse_of_the_whole_server_passes(self):
+        self.clean(agent_with("disallowedTools: Edit, Write, NotebookEdit, mcp__claude-code-remote__*"),
+                   "a deny that names the whole server")
+
+    def test_refuse_of_the_bare_server_passes(self):
+        self.clean(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote"),
+                   "a deny that names the bare server")
+
+    def test_yaml_list_refuse_passes(self):
+        self.clean(agent_with("disallowedTools: [Edit, mcp__claude-code-remote__*]"), "a YAML-list deny of the server")
+
+    def test_refuse_with_a_trailing_comment_passes(self):
+        self.clean(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote__*  # the server is never needed"),
+                   "a deny of the server with a trailing comment")
+
+    def test_full_size_refuse_list_passes(self):
+        refuse = ", ".join(["Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+                         "Task", "TodoWrite", "mcp__claude-code-remote__*"])
+        self.clean(agent_with("disallowedTools: %s" % refuse), "a full-size deny list that ends in the server")
+
+    def test_allow_list_without_a_remote_entry_passes(self):
+        self.clean(agent_with("tools: Bash, Read, WebFetch, WebSearch, TaskStop"),
+                   "a tools: allow-list with no remote entry")
+
+    def test_allow_list_naming_another_server_passes(self):
+        self.clean(agent_with("tools: Bash, Read, mcp__claude-code-remoteX__ping"),
+                   "a tools: allow-list that names another server")
+
+    def test_lone_quote_in_another_key_does_not_hide_a_refuse(self):
+        self.clean(agent_with("description: Don't use // or # here.", "disallowedTools: Edit, mcp__claude-code-remote__*"),
+                   "a deny after a description with a lone quote and comment openers")
+
+
+class SessionToolsRepo(unittest.TestCase):
+    def test_main_with_no_args_passes_on_the_real_repo(self):
+        # A control: it passes on the old code, where the check is not built yet. It guards the real agent files once it is.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = C.main([])
+        self.assertEqual((code, out.getvalue()), (0, ""), "main() with no args flags the real repo: %r" % out.getvalue())
+
+    def test_every_real_agent_file_withholds_the_remote_server(self):
+        folder = os.path.join(ROOT, "agents")
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+        self.assertTrue(files, "agents/ holds no agent file to read")
+        for name in files:
+            with self.subTest(agent=name):
+                with open(os.path.join(folder, name), encoding="utf-8-sig") as handle:
+                    keys, _, problem = agent_parts(handle.read())
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                field = unread_list(keys)
+                self.assertIsNone(field, "%s: the %s list sits below its key, which this check does not read" % (name, field))
+                self.assertTrue(server_withheld(keys),
+                                "agents/%s can reach the claude-code-remote server: disallowedTools: names no remote "
+                                "entry, and it has no tools: allow-list" % name)
 
 
 def tearDownModule():

@@ -1,11 +1,13 @@
 // Checks the design pictures of one waiting-page item the way the page itself will draw them.
-//   node check_designs.mjs --page <published page file> --item <item json file>
+//   node check_designs.mjs --page <published page file> --item <item json file> [--answers <answers json file>]
 // Rule page-item-design (decision page-item-design): hooks/guard.py runs this at the write of an item.
 // It loads the page file in headless Chromium with a stub database that holds only the item, then asks the
-// page's own code: pictureProblem(item) for the sentence the page shows, and the drawn height of each option
+// page's own code: isAnswered(item) (an item the page draws as answered is not judged, so it passes), pictureProblem(item)
+// for the sentence the page shows, and the drawn height of each option
 // card picture (`.opic .dfitwrap`, at 390 px wide) against the page's own MIN_PIC. Nothing of the page's
 // rules is copied here, so the page and this check cannot disagree.
-// Prints one JSON line {"problem": string|null}. Exit 0 pass, 1 miss, 3 unknown (no Playwright or
+// --answers is the answers collection as {doc id: doc}, loaded into the stub database; with none, no item is answered
+// by a saved answer (the write-time guard passes none). Prints one JSON line {"problem": string|null}. Exit 0 pass, 1 miss, 3 unknown (no Playwright or
 // Chromium, an unreadable file, a run past its time cap). A design the page does not hold passes: the page warns in its frame.
 import fs from "node:fs";
 import path from "node:path";
@@ -19,15 +21,21 @@ const SHRUNK = 0.5;
 const unknown = (why) => { process.stderr.write("check_designs: unknown: " + why + "\n"); process.exit(3); };
 
 const argOf = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
-const pageFile = argOf("--page"), itemFile = argOf("--item");
+const pageFile = argOf("--page"), itemFile = argOf("--item"), answersFile = argOf("--answers");
 if (!pageFile || !itemFile) unknown("usage: check_designs.mjs --page <file> --item <json file>");
 
-let html, item;
+let html, item, answers = {};
 try { html = fs.readFileSync(pageFile, "utf8"); } catch (e) { unknown("cannot read the page: " + (e.code || e.message)); }
 try {
   item = JSON.parse(fs.readFileSync(itemFile, "utf8"));
   if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("not an object");
 } catch (e) { unknown("cannot read the item: " + (e.code || e.message)); }
+if (answersFile !== undefined) {
+  try {
+    answers = JSON.parse(fs.readFileSync(answersFile, "utf8"));
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) throw new Error("not an object");
+  } catch (e) { unknown("cannot read the answers: " + (e.code || e.message)); }
+}
 
 // Playwright from this folder's reach, then from each NODE_PATH folder: a bare `import` ignores NODE_PATH, require does not.
 function loadPlaywright() {
@@ -43,9 +51,9 @@ function loadPlaywright() {
 const playwright = loadPlaywright();
 if (!playwright) unknown("playwright is not installed here");
 
-// The page reads its database through window.claude.use("db"). This stub holds the one item and no other collection.
-function stubDb(doc) {
-  const docs = { items: { [doc.id]: doc } };
+// The page reads its database through window.claude.use("db"). This stub holds the one item and the given answers.
+function stubDb({ doc, answers }) {
+  const docs = { items: { [doc.id]: doc }, answers };
   const snap = (name) => ({ docs: Object.entries(docs[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
   const coll = (name) => ({
     onSnapshot: (cb) => { setTimeout(() => cb(snap(name)), 0); return () => {}; },
@@ -62,7 +70,8 @@ function stubDb(doc) {
 
 // Runs inside the page: the page's pictureProblem, then the options whose picture the card must draw. An option with
 // no design, or a design the page does not hold (it warns in the frame), has nothing to measure.
-const judge = (it) => {
+const judge = ({ it, useAnswers }) => {
+  if (useAnswers && isAnswered(it)) return { problem: null, pics: [], min: MIN_PIC };
   const problem = pictureProblem(it);
   const pics = [];
   for (const o of it.options || []) {
@@ -101,10 +110,12 @@ try {
   browser = await playwright.chromium.launch();
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 } });
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
-  await page.addInitScript(stubDb, item);
+  await page.addInitScript(stubDb, { doc: item, answers });
   await page.goto(ORIGIN);
-  await page.waitForFunction("typeof pictureProblem === 'function' && typeof MIN_PIC === 'number' && state.loaded");
-  const got = await page.evaluate(judge, item);
+  // Answers matter only when --answers was passed; the guard path passes none and must not call isAnswered or wait on feed.answers.
+  const useAnswers = answersFile !== undefined;
+  await page.waitForFunction("typeof pictureProblem === 'function' && typeof MIN_PIC === 'number' && state.loaded" + (useAnswers ? " && feed.answers" : ""));
+  const got = await page.evaluate(judge, { it: item, useAnswers });
   if (got.problem) await finish(1, { problem: got.problem });
   if (got.pics.length) {
     // The floor reads the drawn card, which exists only when the page shows the item. No card is unknown, never a pass.

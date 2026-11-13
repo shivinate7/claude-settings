@@ -17,7 +17,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base  # noqa: E402  the one home of the scope condition
-from workflow_steps import job_block, step_blocks, step_key, yaml_scalar  # noqa: E402  the one home of the step parser and the scalar reader
+from workflow_steps import COMMIT_SHA, job_block, step_blocks, step_key, yaml_scalar  # noqa: E402  the one home of the step parser, the scalar reader and the commit-sha pattern
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -27,7 +27,6 @@ FAN_IN = "ci-done"  # comments on a red run; it needs all-jobs-passed, and all-j
 CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
 STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green
 REMOTE_ACTION = "shivinate7/claude-settings/actions/all-jobs-passed"  # how a child repo names the shared action
-COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 def job_key(block, key):

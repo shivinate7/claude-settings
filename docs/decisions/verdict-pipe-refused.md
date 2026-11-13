@@ -8,6 +8,8 @@ The `verdict-pipe` rule in `hooks/guard.py` refuses a shell command (Bash or Pow
 - Passes: `verdict <cmd>` alone, `verdict <cmd> && <next>`, `verdict <cmd> || <next>`, a redirect to a file, and a `|` inside a quoted argument.
 - The remedy: run `verdict <cmd>` with nothing after it. Its output is already short: one verdict line, then at most 30 lines.
 
+Coordinator ruling, 2026-11-08 03:44 CST: a separate verdict-pipe-exit rule is dropped. It would have refused `verdict <check> | <filter> && ...` only when pipefail is off. This rule already refuses every `verdict` pipe, so it covers that job.
+
 ## The mistake and the harm
 
 On 2026-11-07 13:51 CST, a lane session ran `verdict <cmd> | tail` and read exit 0 as a pass. A pipe returns the exit of its last command, here `tail`, so a red run reads green. And `verdict` prints its `FAIL ... rc=` line first, so `tail` can cut the one line that says red. On 2026-10-17, an orchestrator's `| tail` on a background merge read as a false exit 3 (debt `verdict-pipe-drops-line`, a pipe after verdict hides its verdict line; this record retires it).

@@ -49,6 +49,11 @@ def mockup(css=CSS_OK, body=BODY_OK, script=""):
             "<style>\n%s\n</style>\n</head>\n<body>\n%s\n%s</body>\n</html>\n" % (css, body, tail))
 
 
+def beside_body(rule):
+    """The clean page (CSS_OK, with its -apple-system body) and one more CSS rule beside it."""
+    return mockup(css=CSS_OK + "\n" + rule)
+
+
 class ModuleCase(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(SCRIPT), "script absent: lint/check_ios_mockup.py")
@@ -119,6 +124,54 @@ class Faults(ModuleCase):
         css = (":root { --font: Georgia, serif; }\nbody { font-family: var(--font); }\n"
                ".screen { padding: env(safe-area-inset-top); }")
         self.assertEqual(self.codes(mockup(css=css)), {"system-font"})
+
+    def test_serif_h1_beside_a_system_body_font_fires_system_font(self):
+        # One system family elsewhere in the sheet must not clear a serif heading: every text rule names the system font.
+        css = ("body { font-family: -apple-system, sans-serif; }\nh1 { font-family: Georgia, serif; }\n"
+               ".screen { padding: env(safe-area-inset-top); }")
+        self.assertEqual(self.codes(mockup(css=css)), {"system-font"},
+                         "an h1 in Georgia beside a body in -apple-system must fault system-font")
+
+    # Scope first in each case: a serif rule beside the body still faults, so the rule under test is read.
+    def test_inherit_first_family_beside_the_system_body_passes(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.found(beside_body("h1 { font-family: inherit; }")), [],
+                         "an h1 that inherits the font must pass: inherit is a pass key")
+
+    def test_unset_first_family_beside_the_system_body_passes(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.found(beside_body("h1 { font-family: unset; }")), [],
+                         "an h1 with font-family unset must pass: unset is a pass key")
+
+    def test_ui_sans_serif_first_family_faults(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.codes(beside_body("h1 { font-family: ui-sans-serif, sans-serif; }")), {"system-font"},
+                         "a ui-* name is not a pass key: an h1 in ui-sans-serif beside the system body must fault")
+
+    def test_initial_first_family_faults(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.codes(beside_body("h1 { font-family: initial; }")), {"system-font"},
+                         "initial is not a pass key: an h1 set to initial must fault system-font")
+
+    def test_revert_first_family_faults(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.codes(beside_body("h1 { font-family: revert; }")), {"system-font"},
+                         "revert is not a pass key: an h1 set to revert must fault system-font")
+
+    def test_revert_layer_first_family_faults(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.codes(beside_body("h1 { font-family: revert-layer; }")), {"system-font"},
+                         "revert-layer is not a pass key: only inherit and unset pass besides the system families")
+
+    def test_html_sans_serif_beside_the_system_body_still_faults(self):
+        self.assertEqual(self.codes(beside_body("h1 { font-family: Georgia, serif; }")), {"system-font"})
+        self.assertEqual(self.codes(beside_body("html { font-family: sans-serif; }")), {"system-font"},
+                         "a non-system first family stays a fault: sans-serif on html must fault system-font")
+
+    def test_pre_menlo_monospace_stack_passes(self):
+        self.assertEqual(self.codes(beside_body("pre { font-family: Menlo, Georgia; }")), {"system-font"})
+        self.assertEqual(self.found(beside_body("pre { font-family: Menlo, monospace; }")), [],
+                         "a stack whose last family is the generic monospace is code text and must pass")
 
     def test_font_and_safe_area_in_style_attributes_count(self):
         body = ('<main style="font-family: -apple-system, sans-serif; padding: env(safe-area-inset-top);">\n'

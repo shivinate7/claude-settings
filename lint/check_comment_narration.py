@@ -6,21 +6,23 @@
 Rule: building-comments-say-why. A comment says what complex code does and why.
 Only lines the diff against the merge base adds can fail, so old lines never do.
 --exclude PREFIX (repeatable) drops each path that starts with PREFIX, a folder prefix such as `vendor/`.
-Languages come from the rows of actions/code-check/standard.json (extensions, and shebangs for a file with no
-extension): python, typescript, javascript, astro and swift. Python comments come from `tokenize`, docstrings from
-`ast`. JS, TS and Astro comments come from one lint/comment_scan.mjs process that parses with the pinned
-TypeScript. Swift comments come from a one-pass scanner in this file. The same words in any string never fail.
+Languages come from the rows of lint/code_check_standard.json (extensions, and shebangs for a file with no
+extension): python, typescript, javascript, astro, swift and shell. Python comments come from `tokenize`, docstrings
+from `ast`. JS, TS and Astro comments come from one lint/comment_scan.mjs process that parses with the pinned
+TypeScript. Swift and shell comments come from one-pass scanners in this file. The same words in any string, and in
+a shell heredoc body, never fail.
 
 Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
 Exit 2 when the base or a file cannot be read: an unread diff is never a clean one. An unread file does not stop
 the scan: every other file is read, every hit prints, and the run then exits 2.
 Exit 3 when the node tool for JS, TS and Astro cannot run (no npx, an npx error, comment_scan.mjs missing,
-typescript not found). Every Python and Swift hit prints first. Exit 3 wins over exit 2.
+typescript not found). Every Python, Swift and shell hit prints first. Exit 3 wins over exit 2.
 """
 import argparse
 import ast
 import bisect
 import io
+import itertools
 import json
 import os
 import re
@@ -28,7 +30,10 @@ import sys
 import tokenize
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 
 class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
@@ -42,35 +47,130 @@ class DatedText:
         return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
 
 
-PATTERNS = {
-    # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
-    # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
-    "review round": re.compile(r"\b(?:in|after|from)\s+round\s*\d"
-                               r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
-                               r"|\breview\s+(?:round|finding|points?)\b", re.I),
-    "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
-    "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
-    "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
-    "date": DatedText(),
+class ReviewRound:
+    """The pattern group for round numbers, kept as a class for its exemption. A round number after "in", "after" or
+    "from" is narration, and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
+    which is arithmetic. A comment that quotes a rule glosses a decision id holding `round-N`, such as
+    hold-unsafe-after-round-N. A round number with the same N passes only inside that gloss, and only when
+    a decisions folder that the layout gives for the checked repo holds <id>.md. The gloss is the parentheses that open with the id, as in
+    "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
+    Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
+    another number, and parentheses that hold the id later on."""
+    ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
+                       r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
+                       r"|\breview\s+(?:round|finding|points?)\b", re.I)
+    ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
+    # Form (i) needs a marker: "decision" with optional backticks, or backticks alone.
+    OPENS = re.compile(r"\s*(?:decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
+    BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
+
+    def __init__(self):
+        self.top, self.known = None, {}
+
+    def real(self, ident, n):
+        """True when ident holds `round-n` and names a decision file in the repo being checked."""
+        if not re.search(r"(?:^|-)round-%s(?:-|$)" % n, ident, re.I):
+            return False
+        if ident not in self.known:
+            if self.top is None:
+                try:
+                    self.top = git("rev-parse", "--show-toplevel").strip()
+                except Unread:
+                    self.top = ""
+            self.known[ident] = bool(self.top) and self.has_decision(ident)
+        return self.known[ident]
+
+    def has_decision(self, ident):
+        """True when any decisions folder the layout allows for the repo at self.top holds ident.md. A layout
+        that does not read says nothing is real, so the round stays flagged."""
+        try:
+            return any(os.path.isfile(os.path.join(self.top, *folder.split("/"), ident + ".md"))
+                       for folder in layout.candidates(self.top, "decisions"))
+        except (layout.LayoutError, KeyError, OSError):
+            return False
+
+    @staticmethod
+    def paren_spans(text):
+        spans, stack = [], []
+        for k, c in enumerate(text):
+            if c == "(":
+                stack.append(k)
+            elif c == ")" and stack:
+                spans.append((stack.pop(), k))
+        return spans
+
+    def gloss_ids(self, text, lo):
+        """The ids the parentheses at lo gloss: the one they open with, and the one right before them."""
+        for m in (self.OPENS.match(text, lo + 1), self.BEFORE.search(text[:lo])):
+            if m:
+                yield m.group("id")
+
+    def finditer(self, text):
+        spans = self.paren_spans(text)
+        for m in self.ROUND.finditer(text):
+            n = re.search(r"round\s*(\d+)", m.group(0), re.I)
+            if n and any(lo < m.start() < hi and self.real(ident, n.group(1))
+                         for lo, hi in spans for ident in self.gloss_ids(text, lo)):
+                continue
+            yield m
+
+
+class HistoryPhrase:
+    """The `history phrase` group: wording that tells how the code used to be, or how a run came out.
+    FORMS hold the wording that is history anywhere. RUN holds a run's colour or result named on the head, on
+    main or on the base, or red or green before a change: history whatever word comes before it ("is", "are",
+    a label). RUN is logic, and so skipped, when `when`, `if`, `unless`, `until`, `while` or `once` stands
+    earlier in the same clause, since the phrase then names a condition. A check on the clause before the
+    match does what a lookbehind cannot: take a variable run of words."""
     # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
     # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
     # A "changed from" form whose noun is a snapshot or run is change detection, not history: the noun after
     # the adjective decides, so the same form with any other noun still flags.
     # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
-    "history phrase": re.compile(
+    FORMS = re.compile(
         r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
         r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b(?!\s+(?:snapshot|run)\b)|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
         r"|\badded\s+after\s+(?:code\s+)?review\b"
         r"|\bformerly\b"
-        r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I),
-    "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
+        r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I)
+    # A pass or fail verb also names code: "fails on the main thread", "pass on the base class", "passes on the
+    # head of the list", "fails on main()", "fails on HEAD~1". So after head, main or base a pass or fail verb
+    # refuses `(`, a git ref suffix, "of" and a code noun. "was passed before the loop" is code too, so the
+    # bare before-form takes a colour or an -ing result only.
+    COLOUR = r"(?:red|green)"
+    VERB = r"(?:pass(?:es|ed|ing)?|fail(?:s|ed|ing)?)"
+    PLACE = r"\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
+    CODE_AFTER = r"(?![(~^]|\s+(?:of|thread|queue|class|node)s?\b)"
+    RUN = re.compile(
+        r"\b" + COLOUR + PLACE
+        + r"|\b" + VERB + PLACE + CODE_AFTER
+        + r"|\b(?:was|were|went|been|turned|stayed)\s+(?:red|green|passing|failing)\s+before\b"
+        r"|\b(?:" + COLOUR + "|" + VERB + r")\s+before\s+(?:this|the)\s+(?:change|fix)\b", re.I)
+    CONDITION = re.compile(r"\b(?:when|if|unless|until|while|once)\b", re.I)
+
+    def finditer(self, text):
+        run = (m for m in self.RUN.finditer(text)
+               if not self.CONDITION.search(re.split(r"[.;:!?,]", text[:m.start()])[-1]))
+        return itertools.chain(self.FORMS.finditer(text), run)
+
+
+PATTERNS = {
+    # A round number is narration, except as a unit ("2 decimals") or inside a decision id's gloss (ReviewRound).
+    "review round": ReviewRound(),
+    "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
+    "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
+    "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
+    "date": DatedText(),
+    "history phrase": HistoryPhrase(),
+    # A hyphenated "-owner" followed by 2+ spaces is a rule-table name column, so only a single space flags it.
+    "owner order": re.compile(r"(?:(?<!-)\bowner(?:'s)?\s+|(?<=-)owner(?:'s)?[ \t](?![ \t]))(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
-STANDARD = os.path.join(HERE, "..", "actions", "code-check", "standard.json")
+STANDARD = os.path.join(HERE, "code_check_standard.json")
 SCAN_SCRIPT = os.path.join(HERE, "comment_scan.mjs")
 NODE_LANGUAGES = ("typescript", "javascript", "astro")
-SCANNED = ("python", "swift") + NODE_LANGUAGES
+SCANNED = ("python", "swift", "shell") + NODE_LANGUAGES
 
 
 class Unread(Exception):
@@ -120,23 +220,38 @@ def language_of(path, std):
     return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
-def added_lines(base, std):
-    """Map each changed path in a scanned language to (language, the set of line numbers the diff adds)."""
+def added_lines(base, std, exclude=()):
+    """Map each changed path in a scanned language to (language, the set of line numbers the diff adds).
+
+    A path that starts with an `exclude` prefix is not scanned, on either side of the diff. A line the same
+    diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A move into an
+    untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
+
+    def scanned(path):
+        return not path.startswith(exclude) and language_of(path, std) is not None
+
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
-    added, path = {}, None
+    left = diff_moves.deleted_texts(diff, scanned)
+    added, path, header, line = {}, None, False, 0
     for row in diff.split("\n"):
-        if row.startswith("+++ "):
+        if row.startswith("diff --git "):
+            path, header = None, True
+        elif header and row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
-            lang = language_of(path, std) if path else None
+            lang = language_of(path, std) if path and not path.startswith(exclude) else None
             if lang is None:
                 path = None
             else:
                 added.setdefault(path, (lang, set()))
-        elif path and (m := HUNK.match(row)):
-            start, count = int(m.group(1)), int(m.group(2) or 1)
-            added[path][1].update(range(start, start + count))
+        elif (m := HUNK.match(row)):
+            header, line = False, int(m.group(1))
+        elif not header and row.startswith("+"):
+            moved = diff_moves.take_move(left, row[1:])  # a copy in an unscanned file uses its deleted copy up too
+            if path and not moved:
+                added[path][1].add(line)
+            line += 1
     return added
 
 
@@ -252,6 +367,380 @@ def swift_comments(path):
             yield line + k, text
 
 
+SH_WORD_END = " \t\n;&|()<>"
+
+
+def sh_quote_end(src, i):
+    """Index after the single-quoted string whose body starts at i."""
+    j = src.find("'", i)
+    if j < 0:
+        raise Unread("single quote never closes")
+    return j + 1
+
+
+def sh_ansi_end(src, i):
+    """Index after the $'...' string whose body starts at i; a backslash escapes a quote there."""
+    while i < len(src):
+        if src[i] == "\\":
+            i += 2
+        elif src[i] == "'":
+            return i + 1
+        else:
+            i += 1
+    raise Unread("$' string never closes")
+
+
+def sh_dollar_end(src, i, spans, pending, in_dq=False):
+    """Index after the expansion that starts at the `$` at i. Inside a double quote, `$'` and `$"` are a plain `$`."""
+    nxt = src[i + 1:i + 2]
+    if nxt == "{":
+        return sh_param_end(src, i + 2, spans, pending, in_dq)
+    if src.startswith("$((", i):
+        j = sh_try_arith(src, i + 3, spans, pending)
+        if j is not None:
+            return j
+    if nxt == "(":
+        return sh_code_end(src, i + 2, spans, pending, ")")
+    if nxt == "'" and not in_dq:
+        return sh_ansi_end(src, i + 2)
+    if nxt == '"' and not in_dq:
+        return sh_dquote_end(src, i + 2, spans, pending)
+    return i + 2 if nxt and nxt in "#?!$@*-" else i + 1
+
+
+def sh_param_end(src, i, spans, pending, in_dq):
+    """Index after the ${...} whose body starts at i. A `#` inside is an operator, never a comment. In a double
+    quote a single quote is a plain character, as it is in bash."""
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == "}":
+            return i + 1
+        elif c == "'" and not in_dq:
+            i = sh_quote_end(src, i + 1)
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+        elif c == "`":
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending, in_dq)
+        else:
+            i += 1
+    raise Unread("${ never closes")
+
+
+def sh_dquote_end(src, i, spans, pending):
+    """Index after the double-quoted string whose body starts at i. $(...) and backticks inside hold code."""
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == '"':
+            return i + 1
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending, True)
+        elif c == "`":
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+        else:
+            i += 1
+    raise Unread("double quote never closes")
+
+
+def sh_arith_end(src, i, spans, pending):
+    """Index after the $(( or (( expression whose body starts at i. A `#` there is a base prefix, and `<<` a shift."""
+    depth = 0
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == "'":
+            i = sh_quote_end(src, i + 1)
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending)
+        elif c == "(":
+            depth += 1
+            i += 1
+        elif c == ")":
+            if depth:
+                depth -= 1
+                i += 1
+            elif src.startswith("))", i):
+                return i + 2
+            else:
+                raise Unread("arithmetic expression ends with a lone )")
+        else:
+            i += 1
+    raise Unread("arithmetic expression never closes")
+
+
+def sh_try_arith(src, i, spans, pending):
+    """Index after the arithmetic expression whose body starts at i, or None when it is not one. Like bash, a `((`
+    or `$((` that does not close with `))` is a subshell or a command substitution that holds a subshell, as in
+    `((cd /tmp; ls) | wc -l)`; the caller then reads it as code."""
+    kept, saved = len(spans), list(pending)
+    try:
+        return sh_arith_end(src, i, spans, pending)
+    except Unread:
+        del spans[kept:]
+        pending[:] = saved
+        return None
+
+
+def sh_comment_end(src, i, in_backticks):
+    """Index of the end of the comment that opens at i: the line end, or inside backticks the first unescaped
+    backtick, since the shell cuts the command at that backtick before it parses it."""
+    n = len(src)
+    while i < n and src[i] != "\n":
+        if in_backticks and src[i] == "`":
+            return i
+        i += 2 if in_backticks and src[i] == "\\" and i + 1 < n and src[i + 1] != "\n" else 1
+    return i
+
+
+def sh_heredoc_word(src, i):
+    """Read the delimiter after `<<` (i is just past it). Returns (index after the word, (delimiter, tab_strip)).
+    The delimiter is the word with its quoting removed; a quoted word makes the body literal, which changes nothing
+    here, since no heredoc body is read for comments."""
+    strip = src.startswith("-", i)
+    i += strip
+    while i < len(src) and src[i] in " \t":
+        i += 1
+    word, start = [], i
+    while i < len(src) and src[i] not in SH_WORD_END:
+        c = src[i]
+        if c in "'\"":
+            j = src.find(c, i + 1)
+            if j < 0:
+                raise Unread("heredoc delimiter quote never closes")
+            word.append(src[i + 1:j])
+            i = j + 1
+        elif c == "\\":
+            word.append(src[i + 1:i + 2])
+            i += 2
+        else:
+            word.append(c)
+            i += 1
+    if i == start:
+        raise Unread("heredoc has no delimiter")
+    return i, ("".join(word), strip)
+
+
+def sh_heredoc_bodies(src, i, pending):
+    """Index after the bodies of the pending heredocs, read in order from the line that starts at i. A body is
+    data, so a `#` in it is never a comment."""
+    for word, strip in pending:
+        while True:
+            if i >= len(src):
+                raise Unread("heredoc %s never ends" % word)
+            end = src.find("\n", i)
+            end = len(src) if end < 0 else end
+            line = src[i:end]
+            i = min(end + 1, len(src))
+            if (line.lstrip("\t") if strip else line) == word:
+                break
+    pending.clear()
+    return i
+
+
+SH_BOUNDARY = r"(?![^\s;&|()<>`])"
+SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" + SH_BOUNDARY + r"|[!{](?=\s)")
+SH_FUNCTION = re.compile(r"function[ \t]+[^\s;&|()<>`]+")
+SH_TEST_OPEN = re.compile(r"\[\[(?=\s)")
+SH_TEST_CLOSE = re.compile(r"\]\]" + SH_BOUNDARY)
+SH_BRACKET_EXPR = re.compile(r"\[[!^]?\]?(?:\[:\w+:\]|[^\]\s$`'\"\\])*\]")
+SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
+SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
+
+
+def sh_code_end(src, i, spans, pending, close=None):
+    """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
+    the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
+    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. `cmd` is
+    True only at command position, the only place `case`, `esac` and the other reserved words count: after a newline,
+    `;`, `&`, `|`, `$(`, a backtick, `{`, `then` or `do`, or a `(` that opens a subshell. `parens` holds one kind per
+    open `(`: cmd for a subshell or a process substitution, list for an array, where a newline or `|` starts no
+    command, and word for a paren that is part of a word, an extglob group (right after `?*+@!`), a regex group or a
+    case pattern group, where `)#b` holds no comment. A bracket expression `[(]` inside `[[ ]]` or a case pattern is
+    one word that pushes and pops no paren. Inside `[[ ... ]]` (`test`) nothing starts a command either.
+    `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` (`sub` counts the open `[`); `((` and `$((`
+    are read by sh_try_arith. Each open `case` is one entry in `cases`, [state, paren depth where it opened]: word0
+    and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
+    never the substitution."""
+    ws, cmd, test, sub, parens, cases = True, True, False, 0, [], []
+
+    def starts_cmd():
+        return not test and (not parens or parens[-1] == "cmd")
+
+    while i < len(src):
+        c = src[i]
+        st = cases[-1] if cases else None
+        if st and st[0] == "word1" and ws and c not in " \t\n\\#":
+            m = SH_IN_WORD.match(src, i)
+            if not m:
+                raise Unread("case word is not followed by in")
+            st[0] = "pat"
+            i, ws, cmd = m.end(), True, False
+            continue
+        if st and st[0] == "word0" and ws and c not in " \t\n\\#":
+            st[0] = "word1"
+        if st and st[0] == "pat" and ws and len(parens) == st[1]:
+            if c == "(":
+                i += 1  # a bare ( before a pattern
+                continue
+            if SH_ESAC_WORD.match(src, i):  # like POSIX, esac first in a pattern list ends the case
+                cases.pop()
+                i, ws, cmd = i + 4, False, False
+                continue
+        if test and ws and (m := SH_TEST_CLOSE.match(src, i)):
+            test = False
+            i, ws, cmd = m.end(), False, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_TEST_OPEN.match(src, i)):
+            test = True
+            i, ws, cmd = m.end(), True, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_FUNCTION.match(src, i)):
+            i, ws = m.end(), False  # the name is read: `{` after it opens the body
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
+            word = m.group(0)
+            if word == "case":
+                cases.append(["word0", len(parens)])
+                i, ws, cmd = m.end(), True, False
+            elif word == "esac":
+                if not st:
+                    raise Unread("esac with no case")
+                cases.pop()
+                i, ws, cmd = m.end(), False, False
+            else:
+                i, ws = m.end(), False
+            continue
+        if st and st[0] == "body" and c == ";" and src[i + 1:i + 2] in (";", "&"):
+            i += 3 if src.startswith(";;&", i) else 2
+            st[0], ws, cmd = "pat", True, False
+            continue
+        if c == "\\":
+            if src.startswith("\n", i + 1):
+                i += 2  # a line break the shell removes: the next word starts where this one would have
+            else:
+                i += 2
+                ws = cmd = False
+        elif c == "'":
+            i = sh_quote_end(src, i + 1)
+            ws = cmd = False
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+            ws = cmd = False
+        elif c == "`":
+            if close == "`":
+                if cases:
+                    raise Unread("case never ends with esac")
+                return i + 1
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+            ws = cmd = False
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending)
+            ws = cmd = False
+        elif c == "#" and ws:
+            end = sh_comment_end(src, i, close == "`")
+            spans.append((i, end))
+            i = end
+        elif c == "\n":
+            i += 1
+            if pending:
+                i = sh_heredoc_bodies(src, i, pending)
+            ws, sub, cmd = True, 0, starts_cmd()  # a line continuation is read by the backslash branch, so [[ ]] goes on
+        elif src.startswith("<<<", i):
+            i += 3  # a here-string, not a heredoc
+            ws = True
+        elif sub and src.startswith("<<", i):
+            i += 2
+            ws = True
+        elif src.startswith("<<", i):
+            i, entry = sh_heredoc_word(src, i + 2)
+            pending.append(entry)
+            ws = False
+        elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
+            i = j
+            ws = cmd = False
+        elif c == "[" and (test or (st and st[0] == "pat" and len(parens) == st[1])) and (m := SH_BRACKET_EXPR.match(src, i)):
+            i, ws, cmd = m.end(), False, False  # a bracket expression is one word: a ( or ) in it opens and closes nothing
+        elif c == "[" and i and (src[i - 1].isalnum() or src[i - 1] in "_]"):
+            sub += 1
+            i += 1
+            ws = cmd = False
+        elif c == "]" and sub:
+            sub -= 1
+            i += 1
+            ws = cmd = False
+        elif c == "(":
+            if test or (st and st[0] == "pat") or (i > 0 and src[i - 1] in "?*+@!"):
+                kind = "word"
+            elif cmd or (i > 0 and src[i - 1] in "<>"):
+                kind = "cmd"
+            else:
+                kind = "list"
+            parens.append(kind)
+            ws, cmd = kind != "word", kind == "cmd"
+            i += 1
+        elif c == ")":
+            i += 1
+            base = st[1] if st else 0
+            if st and st[0] == "pat" and len(parens) == base:
+                st[0], ws, cmd = "body", True, True
+            elif len(parens) > base:
+                if parens.pop() == "word":
+                    ws = cmd = False
+                else:
+                    ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
+            elif cases:
+                raise Unread("case arm ends with a lone )")
+            elif close == ")":
+                return i
+            else:
+                ws = cmd = True  # a stray `)` at top level closes nothing
+        else:
+            redirect = c in "&|" and i > 0 and src[i - 1] in "<>"  # `>&2` and `>|` are redirections
+            i += 1
+            ws = c in " \t;&|<>"
+            if c in ";&|" and not redirect:
+                cmd = starts_cmd()
+            elif c not in " \t":
+                cmd = False
+    if close:
+        raise Unread("command substitution never closes")
+    if cases:
+        raise Unread("case never ends with esac")
+    return i
+
+
+def shell_comments(path):
+    """Yield (line, text) for each comment in a shell file: sh and bash, the rows of standard.json. zsh is not read:
+    no tracked file is zsh, and its quoting differs. No parser: shfmt is not installed in CI, so one pass reads the
+    quoting a `#` can hide in. A comment inside $(...) or backticks counts; a heredoc body never does. An unclosed
+    quote, expansion or heredoc raises Unread. The line `#!` on line 1 is not a comment."""
+    try:
+        with open(path, "rb") as f:
+            src = f.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
+    src = re.sub(r"\r\n|\r", "\n", src)
+    starts = [0] + [m.end() for m in re.finditer("\n", src)]
+    spans, pending = [], []
+    try:
+        first = src.find("\n") if src.startswith("#!") else 0
+        sh_code_end(src, len(src) if first < 0 else first, spans, pending)
+        if pending:
+            raise Unread("heredoc %s never starts" % pending[0][0])
+    except Unread as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
+    for start, end in spans:
+        yield bisect.bisect_right(starts, start), src[start:end]
+
+
 def node_comments(paths, std):
     """Run comment_scan.mjs once over every JS, TS and Astro path, each named with its language row.
     Returns ({path: [(line, text)]}, [unread]); raises NodeToolFailed when the tool cannot run."""
@@ -282,6 +771,9 @@ def node_comments(paths, std):
     return found, unread
 
 
+READERS = {"python": narrated_lines, "swift": swift_comments, "shell": shell_comments}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="ref the change is measured against, such as origin/main")
@@ -290,15 +782,15 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         std = load_standard()
-        files = {p: v for p, v in added_lines(args.base, std).items() if not p.startswith(tuple(args.exclude))}
+        files = added_lines(args.base, std, tuple(args.exclude))
     except Unread as e:
         print("UNKNOWN: %s (base %s)" % (e, args.base), file=sys.stderr)
         return 2
     comments, unread = {}, []
     for path, (lang, _) in sorted(files.items()):
-        if lang in ("python", "swift"):
+        if lang in READERS:
             try:
-                comments[path] = list(narrated_lines(path) if lang == "python" else swift_comments(path))
+                comments[path] = list(READERS[lang](path))
             except Unread as e:
                 unread.append(str(e))
     node_paths = [(p, lang) for p, (lang, _) in sorted(files.items()) if lang in NODE_LANGUAGES]

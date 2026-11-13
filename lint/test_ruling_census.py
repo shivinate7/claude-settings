@@ -20,6 +20,8 @@ CENSUS = os.path.join(HERE, "ruling_census.py")
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import ruling_census  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import own_session  # noqa: E402  agent_transcript_dir, the one home of the agent folder (hooks/own_session.py)
 
 
 def human(text, cwd=None):
@@ -642,6 +644,31 @@ class RulingCensusTests(unittest.TestCase):
             self.assertEqual(row["project"], self.repo)
             self.assertIn("real", row["answer"])
         self.assertIn("Skipped 2 candidate answer(s)", run.stderr)
+
+    # ---------------------------------------------------------- the agent folder has one home (hooks/own_session.py)
+
+    def test_28_agent_transcript_paths_lists_the_agent_folder_beside_the_session(self):
+        project_dir = self.make_project("proj_agent_paths")
+        write_transcript([human("top", cwd=self.repo)], os.path.join(project_dir, "sess.jsonl"))
+        folder = os.path.join(project_dir, "sess", "subagents")
+        os.makedirs(folder, exist_ok=True)
+        agent_file = write_transcript([human("child", cwd=self.repo)], os.path.join(folder, "agent-ab12cd34ef56a7890.jsonl"))
+        self.assertEqual(ruling_census.agent_transcript_paths(project_dir, "sess"), [agent_file],
+                         "agent_transcript_paths does not list the agent folder beside the session")
+
+    def test_29_agent_transcript_paths_reads_the_home_folder_with_or_without_jsonl(self):
+        self.assertTrue(hasattr(own_session, "agent_transcript_dir"),
+                        "own_session has no agent_transcript_dir: the one home of the agent folder is not built")
+        for index, name in enumerate(("sess.jsonl", "sess", "sess.v2")):
+            with self.subTest(transcript=name):
+                project_dir = self.make_project("proj_home_%d" % index)
+                stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+                folder = own_session.agent_transcript_dir(os.path.join(project_dir, name))
+                os.makedirs(folder, exist_ok=True)
+                agent_file = write_transcript([human("child", cwd=self.repo)],
+                                              os.path.join(folder, "agent-ab12cd34ef56a7890.jsonl"))
+                self.assertEqual(ruling_census.agent_transcript_paths(project_dir, stem), [agent_file],
+                                 "agent_transcript_paths reads a folder other than the home's")
 
 if __name__ == "__main__":
     unittest.main()

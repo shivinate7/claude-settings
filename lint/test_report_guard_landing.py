@@ -209,6 +209,82 @@ class LandingToolTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_quiet([("Bash", {"command": command})], command)
 
+    def test_lt_red_gh_api_merge_calls_block(self):
+        # Catches: a merge made through the REST API lands a commit, but the guard reads only gh pr verbs, so the
+        # turn passes with no report. A PUT to a pull's merge route merges it. A POST to the merges route writes a
+        # merge commit, and gh sends a POST whenever -f fields are given, as in the last command.
+        self.assert_scope(WITNESS_BASH)
+        commands = [
+            "gh api -X PUT repos/o/r/pulls/12/merge",
+            "gh api --method PUT repos/o/r/pulls/12/merge -f merge_method=squash",
+            "gh api -X POST repos/o/r/merges -f base=main -f head=topic",
+            "gh api repos/o/r/merges -f base=main -f head=topic",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_blocks([("Bash", {"command": command})], command)
+
+    def test_lt_green_gh_api_reads_and_other_writes_pass(self):
+        self.assert_scope(WITNESS_BASH)
+        # Catches: a gh api read of a pull, or of its merge status, is taken for a merge, or a write to another
+        # route is taken for one. Only a PUT to a pull's merge route and a POST to the merges route land.
+        commands = [
+            "gh api repos/o/r/pulls/12",
+            "gh api -X GET repos/o/r/pulls/12/merge",
+            "gh api -X PUT repos/o/r/issues/12/labels -f labels[]=x",
+            "gh api -X POST repos/o/r/issues/12/comments -f body=x",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_quiet([("Bash", {"command": command})], command)
+
+    def test_lt_red_gh_api_put_to_pull_merge_with_fields_still_blocks(self):
+        # Catches: the control for the POST case below. GitHub merges a pull by PUT, and -f fields do not change
+        # that method, so a PUT to a pull's merge route with fields is still a merge and still lands.
+        self.assert_scope(WITNESS_BASH)
+        self.assert_blocks([("Bash", {"command": "gh api -X PUT repos/o/r/pulls/12/merge -f merge_method=squash"})],
+                           "gh api -X PUT pulls/12/merge with fields")
+
+    def test_lt_green_gh_api_post_to_pull_merge_passes(self):
+        # Catches: a POST to a pull's merge route is no merge, since GitHub merges a pull by PUT only. gh sends a
+        # POST implicitly once -f fields are given, so the implicit form and the explicit form are both quiet.
+        self.assert_scope(WITNESS_BASH)
+        commands = [
+            "gh api repos/o/r/pulls/12/merge -f merge_method=squash",
+            "gh api -X POST repos/o/r/pulls/12/merge -f merge_method=squash",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_quiet([("Bash", {"command": command})], command)
+
+    def test_lt_green_gh_api_help_with_a_merge_route_passes(self):
+        # Catches: gh api with --help prints help and makes no request, so a merge route named beside --help is no
+        # merge, and it lands nothing whatever the method.
+        self.assert_scope(WITNESS_BASH)
+        commands = [
+            "gh api -X PUT repos/o/r/pulls/12/merge --help",
+            "gh api -X POST repos/o/r/merges -f base=main -f head=topic --help",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_quiet([("Bash", {"command": command})], command)
+
+
+    def test_lt_green_api_request_blob_copy_of_a_landing_call_passes(self):
+        # Catches: a resumed session's transcript holds `api-request-blob` records, copies of earlier calls with no
+        # timestamp. Read as this turn's calls, a copy of an old `git commit` lands a turn that ran nothing, so a quiet
+        # turn is blocked for a report. Only a real assistant record is a call.
+        self.assert_scope(WITNESS_BASH)
+        blob = {"type": "api-request-blob", "hash": "h1", "sessionId": "s1",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "old1", "name": "Bash", "input": {"command": "git commit -m x"}}]}}
+        records = [trg.human("is there any reason not to archive"), blob, trg.assistant_text(QUIET_REPLY)]
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        run = trg.run_guard(trg.REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, "the guard crashed: %s" % run.stderr[-300:])
+        self.assertEqual(run.stdout.strip(), "", "a blob copy of an old commit landed a turn that ran nothing")
+
 
 if __name__ == "__main__":
     unittest.main()

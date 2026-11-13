@@ -21,7 +21,7 @@ Why, a named incident: on 2026-10-26 the apt step of `playwright install --with-
 
 Why WebKit and Firefox may opt in, a named incident: joyous PR 47, run 40653154924. WebKit could not launch on ubuntu-latest: "Host system is missing dependencies" (libgtk-4, libgraphene, libevent, libopus, gstreamer). 228 WebKit tests were cancelled.
 
-Protected by `lint/test_compliance_probes.py` (class `Playwright`), `actions/playwright-setup/test_action.py` in the `checks` job, and the `checks-shoot` job, which runs the action whenever its files change.
+Protected by `lint/test_compliance_probes.py` (class `Playwright`), `actions/playwright-setup/test_action.py` in the `checks` job, and the `checks-shoot` and `checks-waiting-page` jobs, which run the action whenever its files change.
 
 ## Limits
 

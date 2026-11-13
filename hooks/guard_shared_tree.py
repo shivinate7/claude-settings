@@ -9,7 +9,7 @@ import tempfile
 
 import guard_core
 from guard_core import (
-    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _inside_work_tree,
+    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _git, _inside_work_tree,
     _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
     resolve_command,
     segment_tokens, split_segments, stash_stack, worktree_prune_subject, worktree_remove_subject,
@@ -19,11 +19,33 @@ from guard_branch_worktree import (
 )
 
 
+def lone_operand_is_dirty_file(root: str, name: str) -> bool:
+    """True when a bare `git checkout <name>` would be read by git as a path with an uncommitted
+    change: `name` is no revision (git's own rule reads a name that is both a branch and a file as
+    the branch), it exists under `root`, and `git status` reports a tracked change for it. The
+    spelling decides nothing, so an extensionless file reads the same as `a.json`. An unreadable
+    answer is False and is logged as `subject-unread`, the form this read used to leave unjudged."""
+    if not name or name.startswith(("-", ":")) or not os.path.lexists(os.path.join(root, name)):
+        return False
+    rev = _git(root, "rev-parse", "--verify", "--quiet", name + "^{commit}")
+    if rev is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    if rev.returncode == 0:
+        return False
+    lines = porcelain(root, [name])
+    if lines is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    return any(line[:2] != "??" for line in lines)
+
+
 def checkout_names_a_path(args, root: str = "") -> str:
     """Return the matched text when a `git checkout` names a path, else ''.
 
     Also matched: a forced switch (`-f`, `--force`), a pathspec file, and, when `root` is given,
-    a lone bare operand that is a folder under `root` (git reads it as a path)."""
+    a lone bare operand that is a folder under `root` or a tracked file with an uncommitted change
+    that no branch shares its name with (git reads each as a path)."""
     if "--" in args:
         return " ".join(["--"] + args[args.index("--") + 1:]).strip()
     plain = []
@@ -47,6 +69,8 @@ def checkout_names_a_path(args, root: str = "") -> str:
         ):
             return arg
     if root and len(plain) == 1 and os.path.isdir(os.path.join(root, plain[0])):
+        return plain[0]
+    if root and len(plain) == 1 and lone_operand_is_dirty_file(root, plain[0]):
         return plain[0]
     for arg in args:
         if arg in ("-f", "--force") or pathspec_from_file_flag(arg):
@@ -79,7 +103,9 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-STASH_READ_ACTIONS = {"list", "show", "help"}
+# `create` only writes an unreachable commit object and prints its hash: no entry, no ref, no
+# index or tree change. It reads like `list` and `show`.
+STASH_READ_ACTIONS = {"list", "show", "help", "create"}
 # `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
 # tree, so the working tree is their subject. Every other action that is not a read TAKES an
 # entry off the stack, so the stack is theirs.
@@ -123,7 +149,7 @@ def stash_action(args) -> str:
     reads it as a push anyway, to fail closed, so the tree is judged and nothing falls through.
 
     No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
-    that is not a read and not a push: pop, apply, drop, clear, branch, create, store, export and
+    that is not a read and not a push: pop, apply, drop, clear, branch, store, export and
     import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
     args = list(args)
@@ -145,12 +171,13 @@ def stash_takes_the_stack(args) -> bool:
     """True when a `git stash` call takes an entry OFF the shared stack.
 
     The predicate is the DIRECTION of the act, not a list of action words. A call reads the
-    stack, puts work onto it, or takes an entry off it. `list` and `show` read. `push`, `save`
+    stack, puts work onto it, or takes an entry off it. `list` and `show` read the stack; `create`
+    reads the tree and index and writes an unreachable commit, with no entry. `push`, `save`
     and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
-    `apply` reads another session's work into this tree without that session's word. `create`,
-    `store`, `export` and `import` touch the stack's entries or refs, so the stack is their
-    subject too, and they fall on its side with the rest.
+    `apply` reads another session's work into this tree without that session's word. `store`,
+    `export` and `import` touch the stack's entries or refs, so the stack is their subject too,
+    and they fall on its side with the rest.
 
     A word that is no known action is a pathspec, which stash_action reads as a push. Only a
     known action word that is neither a read nor a push falls on the stack side, the side where
@@ -163,7 +190,8 @@ def stash_takes_the_stack(args) -> bool:
 def stash_discards(args) -> bool:
     """True when a `git stash` call can lose work.
 
-    `list` and `show` read the stash and change nothing, so they pass. Every other action can
+    `list` and `show` read the stack and change nothing. `create` reads the tree and index and writes
+    an unreachable commit with no stash entry, so it loses nothing either. They pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
     `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
@@ -526,22 +554,210 @@ def session_id_of(payload) -> str:
     return value if SESSION_ID_RE.match(value or "") else ""
 
 
-def under_session_scratchpad(where: str, session_id: str) -> bool:
-    """True when `where` resolves to a path inside this session's own scratchpad."""
+def session_scratchpad_root(where: str, session_id: str) -> str:
+    """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''."""
     if not where or not session_id or not SESSION_ID_RE.match(session_id):
-        return False
+        return ""
     try:
         real = os.path.realpath(where)
         temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
-        return False
+        return ""
     if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
-        return False
+        return ""
     parts = real.split(os.sep)
     for index in range(len(parts) - 1):
         if parts[index] == session_id and os.path.normcase(parts[index + 1]) == "scratchpad":
-            return True
-    return False
+            return os.sep.join(parts[:index + 2])
+    return ""
+
+
+def under_session_scratchpad(where: str, session_id: str) -> bool:
+    """True when `where` resolves to a path inside this session's own scratchpad."""
+    return bool(session_scratchpad_root(where, session_id))
+
+
+# Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares that session's
+# scratchpad, so the guard records which agent wrote each file there. One sidecar file per script,
+# `<scratchpad>/.writers/<hash of the script's real path>`, holds the writer's agent id: a write or a run
+# reads one file, a write never rewrites another record, and two agents never share a file to race on.
+SCRATCHPAD_WRITERS = ".writers"
+
+
+def scratchpad_writer_record(where: str, session_id: str) -> str:
+    """The sidecar path for the file `where` in this session's scratchpad, or '' when `where` is not a
+    file there (the scratchpad folder itself and the sidecar folder carry no record)."""
+    root = session_scratchpad_root(where, session_id)
+    if not root:
+        return ""
+    real = os.path.realpath(where)
+    if real == root or real.startswith(os.path.join(root, SCRATCHPAD_WRITERS) + os.sep):
+        return ""
+    import hashlib   # lazy: only a scratchpad file reaches here
+    key = os.path.normcase(real).encode("utf-8", "replace")
+    return os.path.join(root, SCRATCHPAD_WRITERS, hashlib.sha1(key).hexdigest()[:24])
+
+
+def scratchpad_record_writer(where: str, session_id: str, agent_id: str) -> None:
+    """Record `agent_id` as the writer of the scratchpad file `where`. A failed write leaves no record:
+    the rule then passes that file, and the call goes on."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if not record:
+            return
+        folder = os.path.dirname(record)
+        os.makedirs(folder, exist_ok=True)
+        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(agent_id)
+            os.replace(temp, record)   # one step: a reader never sees half an id
+        except BaseException:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass
+
+
+def scratchpad_writer_of(where: str, session_id: str) -> str:
+    """The agent id recorded as the writer of the scratchpad file `where`, or '' when none is recorded or the
+    file no longer exists: the record of a removed file is stale, and a new file at its path is a first write."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if not record or not os.path.lexists(where):
+            return ""
+        with open(record, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except Exception:
+        return ""
+
+
+SCRATCHPAD_WALK_CAP = 5000   # entries one folder check reads, at most
+SCRATCHPAD_GLOB_MAGIC = re.compile(r"[*?\[]")
+SCRATCHPAD_BRACE_CAP = 256   # words one brace list expands to, at most
+_BRACE_RANGE = re.compile(r"(-?\d+)\.\.(-?\d+)|([A-Za-z])\.\.([A-Za-z])")
+
+
+def _brace_group(text: str, start: int):
+    """(index of the closing brace, the parts) of the brace expression opened at `text[start]`, or None when
+    it is no expression: bash keeps `{x}`, an unclosed `{` and `${x}` literal. A part is a comma-separated item
+    at depth one, or the items of a `{1..3}` or `{a..c}` range."""
+    depth, parts, last, at = 0, [], start + 1, start
+    while at < len(text):
+        char = text[at]
+        if char == "\\":
+            at += 2
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[last:at]
+                if parts:
+                    return at, parts + [body]
+                found = _BRACE_RANGE.fullmatch(body)
+                if found and found.group(1) is not None:
+                    low, high = int(found.group(1)), int(found.group(2))
+                    step = 1 if high >= low else -1
+                    if abs(high - low) < SCRATCHPAD_BRACE_CAP:
+                        return at, [str(n) for n in range(low, high + step, step)]
+                elif found:
+                    low, high = ord(found.group(3)), ord(found.group(4))
+                    step = 1 if high >= low else -1
+                    return at, [chr(n) for n in range(low, high + step, step)]
+                return None
+        elif char == "," and depth == 1:
+            parts.append(text[last:at])
+            last = at + 1
+        at += 1
+    return None
+
+
+def expand_shell_braces(word: str, cap: int = SCRATCHPAD_BRACE_CAP):
+    """The words brace expansion makes of `word`: `S/{a,b}` is `S/a` and `S/b`, a list nests, and a `{1..3}` or
+    `{a..c}` range counts. A one-element `{x}`, a `${x}`, an escaped brace and an unclosed one stay as written, as
+    in bash. Unlike bash, it drops a range's zero padding (`{01..03}` gives `1 2 3`) and keeps a stepped range
+    (`{1..3..1}`) literal; the list stops at `cap` words (the rest is unread). Quotes are not known here: a quoted
+    brace list expands too, which can only widen a refusal."""
+    for at, char in enumerate(word):
+        if char == "\\":
+            continue
+        if char != "{" or (at and word[at - 1] in "$\\"):
+            continue
+        group = _brace_group(word, at)
+        if not group:
+            continue
+        end, parts = group
+        out = []
+        for part in parts:
+            for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):
+                out.append(head)
+                if len(out) >= cap:
+                    return out
+        return out
+    return [word]
+
+
+def scratchpad_folder_writer(where: str, session_id: str, agent_id: str, cap: int = SCRATCHPAD_WALK_CAP):
+    """(path, writer) of the first file under `where` whose record names an agent other than `agent_id`, else
+    None. `where` is a folder, the scratchpad root, or a glob pattern that the shell would expand
+    (`S/sub/*`), and a brace list in it (`S/{a,b}`) is expanded first, as bash does before `rm` runs, with the
+    differences `expand_shell_braces` names: each word
+    is read against the real folder now, as the shell will. A root that is a link and has no trailing slash is
+    unlinked by `rm` or `mv`, and its target is left alone, so it is skipped. The walk reads every level
+    and skips the record folder. It stops after `cap` entries, and then the rest is unread: a folder past the
+    cap passes unless a file in the first `cap` entries already names another agent. That favours the agent that
+    clears its own large folder (a checkout, a build output) over a rare miss. A folder that cannot be listed
+    is skipped, and the walk goes on. The records are the ones `scratchpad_writer_of` reads: no second format."""
+    left = [cap]
+    skip = os.path.join(session_scratchpad_root(where, session_id) or "\0", SCRATCHPAD_WRITERS)
+    try:
+        roots = []
+        for word in expand_shell_braces(where):
+            if SCRATCHPAD_GLOB_MAGIC.search(word) and not os.path.lexists(word):
+                import glob   # lazy: only a pattern needs it
+                roots.extend(sorted(glob.glob(word)))
+            else:
+                roots.append(word)
+        for root in roots:
+            tops = [root]
+            while tops:
+                top = tops.pop()
+                if os.path.normcase(os.path.realpath(top)) == os.path.normcase(skip):
+                    continue
+                if left[0] <= 0:
+                    return None
+                left[0] -= 1
+                if os.path.islink(top):
+                    continue   # an `rm` or `mv` of a link leaves its target alone; a trailing slash makes `islink` false
+                if os.path.isdir(top):
+                    try:
+                        with os.scandir(top) as entries:
+                            tops.extend(entry.path for entry in entries)
+                    except OSError:
+                        pass   # a folder that cannot be listed is not judged; the others still are
+                    continue
+                writer = scratchpad_writer_of(top, session_id)
+                if writer and writer != agent_id:
+                    return top, writer
+    except Exception:
+        return None   # a path the walk cannot read at all is not judged, as a write the guard cannot read is not
+    return None
+
+
+def scratchpad_clear_writer(where: str, session_id: str) -> None:
+    """Delete the record of the scratchpad file `where`, when a call with no `agent_id` has written it. No
+    record, or a record that cannot be deleted, leaves things as they are."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if record:
+            os.remove(record)
+    except Exception:
+        pass
 
 
 def in_any_session_scratchpad(where: str) -> bool:

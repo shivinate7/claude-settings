@@ -40,16 +40,20 @@ CI MODES (decision mutation-report-scores-suites, owner item mutation-ci-job): t
 action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
-lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
+lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made and none ran,
+or when none ran because the run stopped first (the diff could not be read, a file did not parse, the checkout or the
+install was refused, or the replay raised). A `no mutant ran: ...` line says so, with the cause. Exit 0 otherwise, whatever the share.
 `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
 plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
-`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A guard module
+with a family row also prints its `hooks/test_guard.py::<family>` lines beside the suites that import it.
 """
 
 import contextlib
+import functools
 import os
 import shutil
 import signal
@@ -62,6 +66,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
@@ -124,6 +130,20 @@ MUTATIONS = [
     ("pointer-head: call every tree the pointer checkout",
      '    return mine == theirs',
      '    return True', "guard", 'pointer: checkout of a branch in another checkout is allowed'),
+    # RULE pointer-edit, a write into the pointer checkout's own files. Each mutant breaks one arm.
+    ("pointer-edit: the pointer's own .git is judged like a file of the checkout",
+     '                and path_is_inside(resolved, git_dir) is not True\n',
+     '', "guard", 'pointer-edit: Write into the pointer\'s own .git is not judged'),
+    ("pointer-edit: a linked worktree nested under the pointer is judged like a file of the checkout",
+     '                and path_is_inside(resolved, worktree_dir) is not True)',
+     '                and True)', "guard", 'pointer-edit: Write into a linked worktree nested under the pointer is allowed'),
+    ("pointer-edit: no write is ever judged",
+     '    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir',
+     '    return ""\n    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir', "guard", 'pointer-edit: Write of a tracked file in the pointer checkout is refused'),
+    # The gate is WRITE_TOOLS. Artifact and ArtifactData carry a file_path too, and both allow cases go red when it drops.
+    ("pointer-edit: the write-tool gate is dropped, so Artifact and ArtifactData are judged like writes",
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""',
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd)', "guard", 'with a pointer file as file_path is not a write and is allowed'),
     ("pointer-head: lose the exemption for a move to main",
      '    if target == PROTECTED_BASE:\n        return ""',
      '    if target == "no-such-branch":\n        return ""', "guard", 'pointer: a move back to main restores the invariant and passes'),
@@ -152,6 +172,22 @@ MUTATIONS = [
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
      'agent-owned worktree is allowed and noted, not asked'),
+    ("shared-tree: a lone operand that is also a revision still reads as a dirty file",
+     '    if rev.returncode == 0:\n        return False\n',
+     '    if False:\n        return False\n', "guard",
+     'per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows'),
+    ("shared-tree: a lone operand with no tracked change still reads as a dirty file",
+     '    return any(line[:2] != "??" for line in lines)\n',
+     '    return True\n', "guard",
+     'per-file bare: checkout of an untracked extensionless file in the shared checkout allows'),
+    ("shared-tree: a revision read that gets no answer is no longer logged as subject-unread",
+     '    if rev is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if rev is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file with no git on PATH is allowed and logged once as subject-unread'),
+    ("shared-tree: a status read that gets no answer is no longer logged as subject-unread",
+     '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if lines is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
@@ -246,10 +282,14 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
-     '        return cmd',
-     '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+     '    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
+     '            text, headers):',
+     '    if False:', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    ("shared-tree: keep no heredoc body in the per-body reading",
+     '        keep = [number for number, header in enumerate(headers)\n'
+     '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)\n'
+     '                or not _feeds_data(header, shells_only)]',
+     '        keep = []', "guard", 'frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
@@ -367,29 +407,102 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                return "main"',
-     '            elif False:\n                return "main"', "guard", 'a push of main from a feature branch asks'),
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
+     '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch asks'),
     ("push-main: a refspec target of main is not a destination",
-     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                    return "main"',
-     '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
-    ("push-main: --all no longer asks",
-     '    if every:\n        return "main"',
-     '    if False:\n        return "main"', "guard", 'main, --all reaches main and asks'),
+     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
+     '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch asks'),
+    ("push-main: a main refspec ends the read on a local origin",
+     '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
+     '                return main()\n            elif source in ("HEAD", "@")', "guard", 'local origin, main then HEAD on a branch tracking another name asks stray'),
+    ("push-main: a main refspec before an agent name asks push-main",
+     'if not agent and (to_main or',
+     'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
+    ("push-all-main: --all no longer refuses",
+     '    if every:\n',
+     '    if False:\n', "guard", '--all from a lane checkout, local main ahead of origin/main, refuses'),
+    ("push-agent-branch: --all from an agent checkout is not the agent rule's",
+     '        if current() and AGENT_BRANCH.fullmatch(current()):\n            return "agent"',
+     '        if False:\n            return "agent"', "guard", 'agent checkout, --all with main asks the agent rule'),
+    ("push-all-main: an --all that may update main is silent",
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return "all"',
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return ""', "guard", '--all from a main checkout, local main ahead of origin/main, refuses'),
+    ("push-all-main: a glob to a local-path origin is refused",
+     '(unreadable or reach or globs) and main()',
+     '(unreadable or reach or globs) and True', "guard",
+     'glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead'),
+    # Against the fixed text: git's `*` matches an empty name, so the reach test takes `>=`. The anchor is the whole
+    # comparison, since a bare `>=` occurs on other lines. Its killer is the lane row that names main with `main*`.
+    ("push-all-main: a glob whose star matches an empty name is not read as reaching main",
+     'len(full) >= len(target_pre) + len(target_suf)',
+     'len(full) > len(target_pre) + len(target_suf)', "guard",
+     'glob refspec refs/heads/main*:refs/heads/main* from a lane checkout'),
+    # Against the fixed text: a colon-less glob keeps its empty target and reads as unreadable. The tag row kills it.
+    # The anchor starts at the partition line: the bare `target = target if colon else source` also sits in _push_dest.
+    ("push-all-main: a colon-less glob refspec is read as unreadable",
+     'spec.partition(":")\n    target = target if colon else source',
+     'spec.partition(":")\n    target = target', "guard",
+     'glob refspec refs/tags/v* (colon-less) from a lane checkout, local main ahead, is silent'),
+    ("push-all-main: a matching tracking ref is refused",
+     'shas.get("refs/remotes/" + remote + "/" + name) != shas[source]',
+     'shas.get("refs/remotes/" + remote + "/" + name) == shas[source]', "guard",
+     '--all from a main checkout, local main equal to origin/main, is silent'),
+    ("push-all-main: an absent local main or master is an update",
+     'if source in shas and shas.get("refs/remotes/" + remote + "/" + name) != shas[source]:',
+     'if shas.get("refs/remotes/" + remote + "/" + name) != shas.get(source, ""):', "guard",
+     '--all with no local main or master, from a lane checkout, is silent'),
+    ("push-all-main: a failed ref read is silent",
+     '    if answer is None or answer.returncode != 0:\n        return True',
+     '    if answer is None or answer.returncode != 0:\n        return False', "guard",
+     '--all with a failed read of the tracking refs, and a local agent-named branch, refuses for the update'),
+    ("push-all-main: a second remote's tracking refs are read under origin",
+     '_push_updates_default(cwd, state["remote"].get("name", ""), reach)',
+     '_push_updates_default(cwd, "origin", reach)', "guard",
+     '--all to a second remote whose main ref equals local main, is silent'),
+    ("push-all-main: the remote's name is not kept for its tracking refs",
+     'resolved["name"] = remote',
+     'resolved["name"] = "origin"', "guard",
+     '--all with no remote named, a branch tracking a second remote, is silent'),
+    ("push-all-main: a push-all-main verdict is not refused",
+     'elif kind == "all":',
+     'elif kind == "all" and False:', "guard",
+     '--all from a main checkout, local main ahead of origin/main, refuses'),
+    ("push-all-main: the all-branches refusal prints the agent reason",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON,',
+     'refuse(tool, "deny", "push-all-main", PUSH_AGENT_REASON,', "guard",
+     '--all from a main checkout, local main ahead of origin/main, refuses'),
     ("push-main: a bare push that writes main no longer asks",
-     '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return "main"',
-     '        if False:\n            return "main"', "guard", 'main tracking origin/main, a bare push asks'),
+     '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
+     '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push asks'),
     ("push-main: HEAD on main no longer asks",
-     '        if implied and current() in DEFAULT_BRANCH_FALLBACK:',
-     '        if False:', "guard", 'main tracking origin/main, HEAD asks'),
+     '(to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):',
+     '(to_main or False):', "guard", 'main tracking origin/main, HEAD asks'),
     ("push-main: push.default upstream is not read for a bare push",
      '            dest = merge or None',
      '            dest = None', "guard", 'a branch tracking main asks'),
     ("push-main: a bare push under simple ignores git's own refusal",
-     '            dest = cur if merge == cur else None',
+     '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
+    ("push-main: a remote with no URL no longer stays silent",
+     '    if not url:\n        return False\n    if _is_local_path(url):',
+     '    if not url:\n        return True\n    if _is_local_path(url):', "guard",
+     'main, no remote in the repo is silent'),
+    ("push-main: a local path or file URL no longer stays silent",
+     '    if _is_local_path(url):\n        return False',
+     '    if False:\n        return False', "guard", 'main, a file URL named as the remote is silent'),
+    ("push-main: a remote the shell has not expanded reads as no remote, so it no longer asks",
+     '    if _PUSH_SHELL_EXPANSION.search(remote):\n        return True',
+     '    if False:\n        return True', "guard",
+     'main, a double-quoted shell variable as the remote asks push-main'),
+    ("push-main: an scp-like remote no longer asks",
+     'return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))',
+     'return bool(_PUSH_URL_SCHEME.match(url))', "guard", 'main, an scp-form origin asks'),
     ("push-stray-branch: a stray destination no longer asks",
-     '    return "stray" if merge != current() and not upstream else ""',
+     '    return "" if seen is not None and seen.returncode == 0 else "stray"',
      '    return ""', "guard", 'stray branch, HEAD asks'),
+    ("push-stray-branch: an existing destination ref no longer stays silent",
+     '    return "" if seen is not None and seen.returncode == 0 else "stray"',
+     '    return "stray"', "guard", 'own ref on origin, HEAD is silent'),
     ("push-stray-branch: @ is not an implied destination",
      '            elif source in ("HEAD", "@") or',
      '            elif source in ("HEAD",) or', "guard", 'stray branch, @ asks'),
@@ -405,12 +518,139 @@ MUTATIONS = [
     ("push-stray-branch: another remote than the upstream's is judged",
      'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
      'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
-    ("push-main: --branches is not read as --all",
+    ("push-all-main: --branches is not read as --all",
      '            elif name in ("--all", "--branches"):',
-     '            elif name == "--all":', "guard", 'main, --branches reaches main and asks'),
+     '            elif name == "--all":', "guard",
+     '--branches from a lane checkout, no origin/main tracking ref, refuses'),
     ("push-stray-branch: a -u push of the local name still asks",
-     'return "stray" if merge != current() and not upstream else ""',
-     'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
+     'if merge == current() or upstream:',
+     'if merge == current():', "guard", 'stacked lane, -u HEAD is silent'),
+    ("push-agent-branch: the agent name shape no longer matches",
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
+     'AGENT_BRANCH = re.compile(r"(?!)")', "guard", 'agent branch, HEAD asks'),
+    ("push-agent-branch: the worktree- prefix is not a name",
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
+     'AGENT_BRANCH = re.compile(r"(?:claude/)?agent-[0-9a-f]{8,}")', "guard",
+     'agent worktree, worktree-agent-<hex>, -u HEAD asks'),
+    ("push-agent-branch: a short hex tail is a name",
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]*")', "guard",
+     'agent-1234567, -u HEAD is silent'),
+    ("push-agent-branch: a config autoSetupRemote is not read",
+     '(default|autosetupremote)$)"',
+     '(default)$)"', "guard",
+     'agent branch, a bare push under a config autoSetupRemote asks'),
+    ("push-agent-branch: an exact 8-hex name no longer matches",
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
+     'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{9,}")', "guard",
+     'agent-12345678, -u HEAD asks'),
+    ("push-agent-branch: an explicit destination is not read",
+     '                agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))',
+     '                pass', "guard", 'explicit agent destination from a branch with no upstream asks'),
+    ("push-agent-branch: an implied destination is not the current branch",
+     '                agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))',
+     '                pass', "guard", 'agent branch, HEAD asks'),
+    ("push-agent-branch: a bare push under current is not judged",
+     '        agent = bool(dest and AGENT_BRANCH.fullmatch(dest))',
+     '        agent = False', "guard", 'a bare push under push.default current asks'),
+    ("push-agent-branch: autoSetupRemote is not read as the current name",
+     '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
+     '            dest = cur if merge == cur else None', "guard",
+     'agent branch, a bare push under autoSetupRemote asks'),
+    ("push-agent-branch: the refusal is not wired",
+     '                elif kind == "agent":',
+     '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
+    # The all-agent kind (rule push-all-main, decision plain-push-asks): a --all, --branches or glob push that sends a
+    # local branch named like an agent worktree while the tracking refs show no update. Its code is split across
+    # guard_push_delete.py (_local_agent_branches, _glob_sends, push_ask_hit, PUSH_ALL_AGENT_REASON) and guard.py (the
+    # deny). Each anchor is found once across the guard family, so an entry names its file by its text alone.
+    ("push-all-main: a local branch read as agent-named whatever its name",
+     'if AGENT_BRANCH.fullmatch(ref.removeprefix("refs/heads/"))]', 'if True]', "guard",
+     "with no local main or master, from a lane checkout"),
+    ("push-all-main: a local branch is matched without its refs/heads/ prefix, so no agent name matches",
+     'if AGENT_BRANCH.fullmatch(ref.removeprefix("refs/heads/"))]', 'if AGENT_BRANCH.fullmatch(ref)]', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: a failed listing of the local branches reads as no agent-named branch",
+     '        return None\n    return [ref for ref in answer.stdout.split()',
+     '        return []\n    return [ref for ref in answer.stdout.split()', "guard",
+     "--all with a failed read of the local branches"),
+    ("push-all-main: a glob's short source name is not read under refs/heads/",
+     'pre, _, suf = _qualified(spec.partition(":")[0]).partition("*")',
+     'pre, _, suf = spec.partition(":")[0].partition("*")', "guard",
+     "glob refspec agent-*:agent-* with a local agent-named branch refuses"),
+    ("push-all-main: a glob's source prefix is not checked, so any branch with its suffix matches",
+     'ref.startswith(pre) and ref.endswith(suf) and len(ref)', 'ref.endswith(suf) and len(ref)', "guard",
+     "glob refspec refs/heads/main* with a local agent-named branch"),
+    ("push-all-main: a glob's source suffix is not checked, so any branch with its prefix matches",
+     'ref.startswith(pre) and ref.endswith(suf) and len(ref)', 'ref.startswith(pre) and len(ref)', "guard",
+     "glob refspec refs/heads/agent-*x with a local agent-named branch"),
+    ("push-all-main: a glob whose prefix and suffix overlap matches a name shorter than both",
+     'ref.endswith(suf) and len(ref) >= len(pre) + len(suf)]', 'ref.endswith(suf)]', "guard",
+     "glob refspec whose prefix and suffix overlap"),
+    ("push-all-main: --all never reads the local branches, so an agent-named branch is silent",
+     '        sent = _local_agent_branches(cwd)\n        return "all" if sent is None else "all-agent" if sent else ""',
+     '        sent = []\n        return "all" if sent is None else "all-agent" if sent else ""', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: --all with an agent-named branch names the update's reason",
+     'return "all" if sent is None else "all-agent" if sent else ""',
+     'return "all" if sent is None else "all" if sent else ""', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: --all with a failed read of the local branches is silent",
+     '"all" if sent is None else "all-agent"', '"" if sent is None else "all-agent"', "guard",
+     "--all with a failed read of the local branches"),
+    ("push-all-main: --all with main ahead names an agent-named branch before the update",
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return "all"',
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]) '
+     'and not _local_agent_branches(cwd):\n            return "all"', "guard",
+     "--all with main ahead of its tracking ref and a local agent-named branch refuses for the update"),
+    ("push-all-main: a glob with a failed read of the local branches is silent",
+     '                if local is None:\n                    return "all"',
+     '                if local is None:\n                    return ""', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with a failed read of the local branches refuses"),
+    ("push-all-main: a glob is refused for any agent-named branch, whatever its source side matches",
+     'if any(_glob_sends(spec, local) for spec in globs):', 'if local:', "guard",
+     "glob refspec refs/heads/main* with a local agent-named branch"),
+    ("push-all-main: a glob is not judged by the agent-named branches it sends",
+     '            if globs:\n                local = _local_agent_branches(cwd)',
+     '            if False:\n                local = _local_agent_branches(cwd)', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with a local agent-named branch"),
+    ("push-all-main: a glob that reaches no main is not read for an agent-named branch",
+     'if not agent and (unreadable or reach or globs) and main():',
+     'if not agent and (unreadable or reach) and main():', "guard",
+     "glob refspec refs/heads/agent-*:refs/heads/agent-* with a local"),
+    ("push-all-main: a glob with main ahead names an agent-named branch before the update",
+     '            if unreadable or updates_default(reach):',
+     '            if unreadable or (updates_default(reach) and not _local_agent_branches(cwd)):', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with main ahead of its tracking ref"),
+    ("push-all-main: the all-agent reason does not name an agent worktree",
+     'a local branch named like an agent worktree "', 'a local branch named like a worktree "', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason does not say that every branch is sent",
+     'this push sends every branch it matches, and a local', 'this push sends a branch it matches, and a local', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason's remedy is not a push of the lane's own branch",
+     "plain-push-asks). Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`.",
+     "plain-push-asks). Remedy: push the lane's own branch by name: `git push origin <lane-branch>`.", "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason claims that the default branch may update",
+     'is among them (rule push-all-main, decision ',
+     'is among them, and it may update the default branch (rule push-all-main, decision ', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent verdict is not refused",
+     '                elif kind == "all-agent":', '                elif kind == "all-agent" and False:', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal prints the update's reason",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal is filed under the agent rule",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "deny", "push-agent-branch", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal asks instead of denying",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "ask", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
@@ -499,11 +739,11 @@ MUTATIONS = [
      '',
      "guard", "verdict-pipe: command -v names verdict, piped to head"),
     ("verdict-pipe: a verdict word anywhere in the segment counts, not only ahead of the command",
-     '        reach = tokens if at is None else tokens[:at + 1]',
+     '        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]',
      '        reach = tokens',
      "guard", "verdict-pipe: grep names verdict, pipe out of grep"),
     ("verdict-pipe: a verdict run through a wrapper such as timeout or python is no longer read",
-     '        reach = tokens if at is None else tokens[:at + 1]',
+     '        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]',
      '        reach = tokens[at:] if at is not None else tokens',
      "guard", "verdict-pipe: a timeout ahead of verdict, piped to tail"),
     ("detached-launch: the clause is never called, so the whole rule is gone",
@@ -584,7 +824,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_split_heredocs(cmd)[0])',
+     '    return "\\n".join(line for at, line in enumerate(cmd.split("\\n")) if at in show)',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',
@@ -670,6 +910,14 @@ MUTATIONS = [
      '        if reads(words, command, written):\n            return (ENV_CONTENTS_REASON,',
      '        if False:\n            return (ENV_CONTENTS_REASON,', "guard",
      'env: fd duplication or a read after the write, echo .env > f; cat f'),
+    ("env-file: a runner given the file never reads as running inline code",
+     '    if command.lower() not in ENV_INLINE_RUNNERS:\n        return False\n    hit, stdin = _runner_scan',
+     '    return False\n    hit, stdin = _runner_scan', "guard",
+     'inline code under a runner given the file denies, node --env-file=.env -e'),
+    ("env-file: a runner given the file never reads as starting a printing child",
+     '                    if _runner_child_prints(words, position, command, stdin_piped):\n',
+     '                    if False:\n', "guard",
+     'env-child: deny, a runner given the file must not print it through a child'),
     ("frozen-path: name the path in the frozen reason",
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
@@ -695,6 +943,87 @@ MUTATIONS = [
      '    if sleeps and loop:\n        return sleeps[0][0]\n',
      '    if False:\n        return sleeps[0][0]\n', "guard",
      'waiter: an until-loop waiting on a file is refused'),
+    ("waiter: a clock loop is let through in the foreground",
+     '    if background and clock_loop(token_rows):\n',
+     '    if clock_loop(token_rows):\n', "guard",
+     'wait-until: the clock loop in the foreground stays refused'),
+    ("waiter: every loop counts as a clock loop under run_in_background",
+     '    if background and clock_loop(token_rows):\n',
+     '    if background:\n', "guard",
+     'wait-until: a loop with no clock bound stays refused under run_in_background'),
+    ("waiter: a long pause is let through in the foreground",
+     '    long_ok = background and followed\n',
+     '    long_ok = followed\n', "guard",
+     'waiter: a 30 s sleep ahead of a later call is refused'),
+    ("waiter: a long pause followed by a command is refused under run_in_background",
+     '    long_ok = background and followed\n',
+     '    long_ok = False\n', "guard",
+     'wait-until: a pause of 600 s, then one command, is allowed under run_in_background'),
+    # The clock loop's checks in hooks/guard_stream.py (clock_test and clock_loop): one revert per check, and the
+    # forms a loop could take that a check refuses. Each names the case that must go red.
+    ("waiter: a clock loop with no date read is let through under run_in_background",
+     '    if not cut:\n        return False\n',
+     '    if not cut:\n        cut = 1\n', "guard",
+     'a loop on a read of another command with a +%s format'),
+    ("waiter: a clock loop with no literal time is let through under run_in_background",
+     'bool(CLOCK_LITERAL.match(rest[1]))',
+     'True', "guard",
+     'a loop on date with no literal time'),
+    ("waiter: a clock loop with a && clause after its test is let through under run_in_background",
+     '    return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])\n',
+     '    return clock_test(token_rows[heads[0]])\n', "guard",
+     'a && clause after it'),
+    ("waiter: a second loop with no pause is let through",
+     '    if len(heads) != 1 or any(',
+     '    if any(', "guard",
+     'a second loop with no pause'),
+    ("waiter: a bare sleep of 600 s is let through under run_in_background",
+     '    long_ok = background and followed\n',
+     '    long_ok = background\n', "guard",
+     'a bare sleep of 600 s with nothing after it'),
+    # The polarity, the operators, the operand count, the literal forms and the command form of the test.
+    ("waiter: a clock loop's direction is swapped, so a while loop on a later time is let through",
+     '    ends_loop = LATER_THAN if head[0].lower() == "until" else EARLIER_THAN\n',
+     '    ends_loop = EARLIER_THAN if head[0].lower() == "until" else LATER_THAN\n', "guard",
+     'a while loop that waits while the clock is later than a literal'),
+    ("waiter: a clock loop's direction is not checked, so a while loop on a later time is let through",
+     '    ends_loop = LATER_THAN if head[0].lower() == "until" else EARLIER_THAN\n',
+     '    ends_loop = LATER_THAN | EARLIER_THAN\n', "guard",
+     'a while loop that waits while the clock is later than a literal'),
+    ("waiter: an equality test is taken as a deadline, so a loop on an equal ISO time is let through",
+     'LATER_THAN = {">", "-gt", "-ge"}',
+     'LATER_THAN = {">", "-gt", "-ge", "="}', "guard",
+     'a loop that tests the clock for equality with a full ISO time'),
+    ("waiter: a clock test with an extra operand is let through under run_in_background",
+     'len(rest) == 2 and',
+     'len(rest) >= 2 and', "guard",
+     'a clock loop with an extra file test'),
+    ("waiter: an epoch literal is refused, so an epoch deadline is held as a wait",
+     r'|\d{9,}$")',
+     r'")', "guard",
+     'a clock loop on an epoch that is reached is allowed'),
+    ("waiter: an ISO date-time literal is refused, so an ISO deadline is held as a wait",
+     r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$|\d{9,}$',
+     r'\d{9,}$', "guard",
+     'a clock loop, then one command, is allowed under run_in_background'),
+    ("waiter: an arithmetic test is taken as a clock test, so it is let through under run_in_background",
+     'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}',
+     'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None, "((": "))"}', "guard",
+     'a loop written as an arithmetic test'),
+    ("waiter: a numeric order on a +%s read takes an ISO literal, so it is let through under run_in_background",
+     '        return form == "+%s" and ":" not in rest[1]\n',
+     '        return form == "+%s"\n', "guard",
+     'a numeric order on a +%s read against an ISO date-time'),
+    ("waiter: a text order on an ISO read takes an epoch literal, so it is let through under run_in_background",
+     '    return form is not None and "%s" not in form and not rest[1].isdigit()\n',
+     '    return form is not None and "%s" not in form\n', "guard",
+     'a text order on an ISO read against an epoch'),
+    # A `for` loop beside the clock loop makes it two loops, so the clock rule does not judge the command. Without
+    # the word check, the clock loop would count as the command's one loop and the pause loop would go unjudged.
+    ("waiter: a loop word other than while or until is ignored, so a clock loop beside a pause loop is let through",
+     '    if len(heads) != 1 or any(w in LOOP_WORDS and w not in ("while", "until", "do") for w in words):\n',
+     '    if len(heads) != 1:\n', "guard",
+     'a clock loop with a command body, then a for loop with pauses'),
     ("waiter: a foreground watcher is let through",
      '    return run_watch or ("" if background else watcher)',
      '    return ""', "guard",
@@ -741,9 +1070,9 @@ MUTATIONS = [
      '        if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):\n            return False',
      '        if False:\n            return False', "guard", 'per-file ask: restore -p of one file in a worktree still asks'),
     ("per-file: a second -C replaces the first, never joins onto it",
-     '            found = os.path.join(found, value) if found and value else (value or found)',
-     '            found = found or value', "guard",
-     'per-file allow: -C parent then a relative -C lane, checkout -- of one file'),
+     '    return os.path.join(base, value) if base and value else (value or base)',
+     '    return value or base', "guard",
+     'per-file deny: -C shared checkout then -C . reset --hard, from a clean worktree'),
     ("per-file: a restore operand before -- is no path",
      '        return before + after, True',
      '        return after, True', "guard",
@@ -763,7 +1092,7 @@ MUTATIONS = [
     ("per-file: the allow ignores a second distinct -C target in the command",
      '    return len(targets) <= 1',
      '    return True', "guard",
-     'per-file ask: two -C targets, lane then a second linked worktree, both per-file restores'),
+     'per-file ask: two -C targets in one checkout'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
@@ -849,6 +1178,14 @@ MUTATIONS = [
      '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
      '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
      "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
+    ("scratchpad-commit-msg-owner: the rule never fires",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = False and scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an agent's commit -F of a scratchpad file is refused"),
+    ("scratchpad-commit-msg-owner: an orchestrator's call is refused too",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'
@@ -896,16 +1233,16 @@ MUTATIONS = [
      '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
-     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    matched = shell_write_hit(raw, cwd, is_settings_file)\n'
      '    if matched:\n'
      '        change = cap_change(raw)\n'
      '        if change:\n'
      '            refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, matched),\n'
      '                   matched + " " + change)\n'
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
@@ -934,13 +1271,74 @@ MUTATIONS = [
      '            hit = rx.search(first)',
      '            hit = rx.search(brief)', "guard",
      'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
-    ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
-     'for kind, n in brief_markers(tool_input.get("prompt"))):',
-     'for kind, n in brief_markers("")):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
-    ("role-model: a reviewer round 1 is exempt too, so it walks past on sonnet",
-     'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
-     'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
+    ("role-model: a reviewer's Round N of 3 line selects no round row, so a round 2 reviewer on sonnet is denied",
+     'for kind, n in brief_markers(prompt) if kind.lower() == "round"]',
+     'for kind, n in brief_markers("") if kind.lower() == "round"]', "guard",
+     'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
+    ("role-model: the round 1 row is fixed to the fallback's round 1 sonnet, so a reviewer on sonnet with Round 1 of 3 walks past",
+     'ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")',
+     'ROLE_REVIEWER_FREE_ROUNDS = ("1", "2", "3")', "guard",
      'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
+    ("role-model: the fix verifier row is read off an empty brief, so a fix check reviewer on sonnet is denied",
+     '    if ("fixcheck", None) in marker_hits(prompt):\n        words.append(',
+     '    if ("fixcheck", None) in marker_hits(""):\n        words.append(', "guard",
+     'role-model: fix check: reviewer on sonnet with the marker on line one is allowed'),
+    ("role-model: the reviewer lift drops its role test, so a test-author on sonnet with a marker walks past",
+     '        if role == "reviewer" and any(role_model_rank(word) >= named',
+     '        if any(role_model_rank(word) >= named', "guard",
+     'role-model: fix check: test-author on sonnet with the marker is denied and names no fix check marker'),
+    ("role-model: the reviewer lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
+     'any(role_model_rank(word) >= named\n',
+     'any(True or role_model_rank(word) >= named\n', "guard",
+     'role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift does not reach an unranked model'),
+    ("role-model: the guard marker lifts nothing, so a reviewer on sonnet with it is denied",
+     '    if review_guard_marked(prompt):\n        words.append(',
+     '    if False:\n        words.append(', "guard",
+     'role-model: reviewer on sonnet with the guard marker on line 1 is allowed'),
+    ("role-model: the guard marker is read anywhere in a line, so a mid-line marker walks past on sonnet",
+     r'elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):',
+     'elif not fenced and REVIEW_GUARD_MARKER in line:', "guard",
+     'role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied'),
+    ("role-model: the guard marker's boundary counts a pipe, so the template line Guard or check: yes|no walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \t\r.|":', "guard",
+     'role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied'),
+    ("role-model: the guard marker's boundary drops a tab, so the marker then a tab and text walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \r.":', "guard",
+     'role-model: reviewer on sonnet with Guard or check: yes then a tab and text is allowed'),
+    ("role-model: the guard marker's boundary drops a CR, so a CRLF brief's marker line walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \t.":', "guard",
+     'role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed'),
+    ("role-model: the guard marker drops its leading-blank allowance, so an indented marker walks past on sonnet",
+     r'elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):',
+     'elif not fenced and line.startswith(REVIEW_GUARD_MARKER):', "guard",
+     'reviewer on sonnet on Round 1 with the guard marker after two spaces'),
+    ("role-model: the fence toggle never sets, so a marker line inside a fence counts again and walks past on sonnet",
+     '            fenced = not fenced\n        elif not fenced and line.lstrip(',
+     '            fenced = fenced\n        elif not fenced and line.lstrip(', "guard",
+     'whose only guard marker line sits inside a'),
+    ("role-model: the step-up reads no round rows, so a record whose round 2 row names haiku still refuses a round 2 reviewer on haiku",
+     '        rounds = role_round_table(pointer_checkout())\n    named = ',
+     '        rounds = None\n    named = ', "guard",
+     'role-model: round row: a record whose reviewer round 2 row names haiku lets a round 2 reviewer run haiku'),
+    ("role-model: the lift in role_model_one reads no round rows, so a record whose round 3 row names haiku still lets a round 3 reviewer on sonnet run",
+     '    rounds = role_round_table(pointer)\n', '    rounds = None\n', "guard",
+     'role-model: round row: a record whose reviewer round 3 row names haiku denies a round 3 reviewer on sonnet'),
+    ("role-model: the free rounds ignore the round 1 other row, so round 1 drops out of the lifted rounds and the test-author note",
+     '(word := role_round_model(rounds, role, n))',
+     '(word := role_round_model(None if n == "1" else rounds, role, n))', "guard",
+     'role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds'),
+    ("role-model: the fix check row loses its line-start anchor, so a reviewer on sonnet with Round 1 of 3 first on line one walks past",
+     r'("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER)',
+     r'("fixcheck", r"\b" + re.escape(FIX_CHECK_MARKER)', "guard",
+     'role-model: fix check: reviewer on sonnet with Round 1 of 3 first on line one and the marker after it is denied'),
+    ("role-model: the fix check row drops the tab from its line-start class, so a reviewer on sonnet with a leading tab walks past",
+     r'("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER)',
+     r'("fixcheck", r"^[ ]*" + re.escape(FIX_CHECK_MARKER)', "guard",
+     'role-model: fix check: reviewer on sonnet with the marker after a leading tab on line one is allowed'),
+    ("role-model: the fix check row loses its trailing word boundary, so a reviewer on sonnet with Fix checkpoint on line one walks past",
+     r're.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),',
+     r're.escape(FIX_CHECK_MARKER), "first-line"),', "guard",
+     'role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied'),
     ("role-model: Opus is no longer left to the ceiling, so a builder on opus is denied here",
      'named == top or row is None:',
      'row is None:', "guard",
@@ -967,12 +1365,12 @@ MUTATIONS = [
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
-    ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
-     'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
+    ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
+     'ROLE_ROUND_EXACT = ("2",)',
+     'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
     ("step-up: a builder round 3 on a non-opus model is no longer refused",
-     'if role == "builder" and builder_third_round(prompt) and "opus" not in model:',
-     'if False and role == "builder" and builder_third_round(prompt) and "opus" not in model:',
+     '        want = role_round_model(rounds, role, "3")\n        if want and (',
+     '        want = role_round_model(rounds, role, "3")\n        if False and want and (',
      "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
     ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on sonnet walks past",
      'BUILDER_MARKERS = ("round", "try")',
@@ -1394,9 +1792,13 @@ MUTATIONS = [
      "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False, predicate_command=True)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
-     '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
-     '        writes = bool(SHELL_WRITE_HINT.search(command))\n        moves =',
+     '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command))) or interpreter_may_write(raw)\n        moves =',
+     '        writes = bool(SHELL_WRITE_HINT.search(command)) or interpreter_may_write(raw)\n        moves =',
      "guard", "worktree-home: the cross-checkout read costs"),
+    ("other-checkout: an interpreter body's own write is not read",
+     "        if not hit and interpreter_may_write(raw):\n            hit = interpreter_write_hit(raw, where, elsewhere)",
+     "        if not hit and False:\n            hit = interpreter_write_hit(raw, where, elsewhere)",
+     "guard", "worktree-home: a copy whose source is in another checkout"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
      "        if elsewhere(move, where) and not _own_red_run(",
@@ -1570,6 +1972,243 @@ MUTATIONS = [
      '            folder = None if _unexpanded(named) else shell_abs(named, folder)\n        if not folder:\n            continue\n        for verb, args in verbs:',
      '            folder = where\n        if not folder:\n            continue\n        for verb, args in verbs:',
      "guard", "session-home: while lost, git verbs"),
+    # RULE scratchpad-owner: the `spo_case_*` log checks.
+    ("scratchpad-owner: a run of another agent's file is never refused",
+     '        if writer and writer != agent:\n            return "agent %s runs',
+     '        if False and writer != agent:\n            return "agent %s runs',
+     "guard", "scratchpad-owner: 1 agent B runs agent A's script with python3"),
+    ("scratchpad-owner: an agent's run of its own file is refused too",
+     '        if writer and writer != agent:\n            return "agent %s runs',
+     '        if writer:\n            return "agent %s runs',
+     "guard", "scratchpad-owner: 5 agent A runs its own script"),
+    ("scratchpad-owner: a call with no agent_id is judged",
+     '    if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):',
+     '    if not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):',
+     "guard", "scratchpad-owner: 7 a top-level call with no agent_id"),
+    ("scratchpad-owner: a read of the file reads as a run",
+     '    if not SCRATCHPAD_RUNNER(name):\n        word = re.sub(',
+     '    if False:\n        word = re.sub(',
+     "guard", "scratchpad-owner: 8 agent B reads agent A's script with cat"),
+    ("scratchpad-owner: the heredoc body is read as run text",
+     '    for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):',
+     '    for full in scratchpad_run_files(_resolve_vars(command), cwd):',
+     "guard", "scratchpad-owner: extra, a run in a heredoc body is text"),
+    ("scratchpad-owner: a relative path ignores the cd ahead of it",
+     '        named = [shell_abs(file, where) for file in (scripts or ([stdin] if stdin else []))]',
+     '        named = [shell_abs(file, cwd) for file in (scripts or ([stdin] if stdin else []))]',
+     "guard", "scratchpad-owner: 2 agent B runs agent A's script after cd"),
+    ("scratchpad-owner: a Write family target is not listed as a write",
+     '                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):\n                    files.append(full)',
+     '                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session) and False:\n                    files.append(full)',
+     "guard", "scratchpad-owner: 1 agent B runs agent A's script with python3"),
+    ("scratchpad-owner: a passing write records no writer",
+     '    record_writers()\n',
+     '    pass\n',
+     "guard", "scratchpad-owner: 3 agent B runs agent A's script through bash"),
+    ("scratchpad-owner: a write over another agent's file is never refused",
+     '        if writer and writer != agent and not taken:',
+     '        if False and writer != agent and not taken:',
+     "guard", "scratchpad-owner: overwrite 1 agent B's Write over agent A's file"),
+    ("scratchpad-owner: an agent's rewrite of its own file is refused too",
+     '        if writer and writer != agent and not taken:',
+     '        if writer and not taken:',
+     "guard", "scratchpad-owner: overwrite 4 agent A rewrites its own file"),
+    ("scratchpad-owner: a shell write target is not listed as a write",
+     '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):',
+     '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session) and "x" == "y":',
+     "guard", "scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file"),
+    ("scratchpad-owner: an interpreter's value flag is read as the script",
+     '    at = workflow_script_index(args, name)   # past the interpreter\'s flags and their values',
+     '    at = 0 if args else None   # past the interpreter\'s flags and their values',
+     "guard", "scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore"),
+    ("scratchpad-owner: a lone - before the script position is read as a script",
+     '    script = args[at] if at is not None and "-" not in args[:at] else ""',
+     '    script = args[at] if at is not None else ""',
+     "guard", "scratchpad-owner: stdin 1 agent B's python3 - with a heredoc"),
+    ("scratchpad-owner: a shell variable in a run path is not read",
+     '    for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):',
+     '    for full in scratchpad_run_files(strip_heredoc_bodies(command), cwd):',
+     "guard", "scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path"),
+    ("scratchpad-owner: a refused overwrite moves the record",
+     '    if taken:\n        # A refused write',
+     '    record_writers()\n    if taken:\n        # A refused write',
+     "guard", "scratchpad-owner: record 1 a refused overwrite leaves the record with agent A"),
+    ("scratchpad-owner: a top-level write keeps the record",
+     '            scratchpad_clear_writer(full, session)\n        return',
+     '            pass\n        return',
+     "guard", "scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write"),
+    ("scratchpad-owner: an rm or mv records its writer",
+     '            if full not in removed:\n                scratchpad_record_writer(full, session, after[full])',
+     '            if True:\n                scratchpad_record_writer(full, session, after[full])',
+     "guard", "scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A"),
+    ("scratchpad-owner: an overwrite the owner lifts leaves the old record",
+     ', on_lift=record_writers)',
+     ')',
+     "guard", "scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record"),
+    # Rule scratchpad-owner: the run forms a first-command reader does not read, and the copy and move destinations.
+    # Each entry names the case that goes red when its mechanism is removed.
+    ("scratchpad-owner: only the first command of a segment is judged",
+     '        for word, args in scratchpad_command_words(tokens):\n            scripts, stdin, reads',
+     '        for word, args in list(scratchpad_command_words(tokens))[:1]:\n            scripts, stdin, reads',
+     "guard", "scratchpad-owner: runner echo $(python3 F)"),
+    ("scratchpad-owner: a command in a substitution is not read",
+     '            views.append((inside + tokens[at + 1:], tick))',
+     '            views.append(([], False))',
+     "guard", "scratchpad-owner: runner out=$(python3 F)"),
+    ("scratchpad-owner: a word after an assignment substitution reads as a command",
+     '            if number or start not in after_assignment:',
+     '            if True:',
+     "guard", "scratchpad-owner: runner control, agent B's out=$(cat F)"),
+    ("scratchpad-owner: a command after a closed assignment substitution is skipped",
+     '            if opened.start(1) > 0 and _in_group(inside, tick) == inside:',
+     '            if opened.start(1) > 0:',
+     "guard", "scratchpad-owner: runner A=$(date) python3 F"),
+    ("scratchpad-owner: the text of a sh -c is not judged",
+     '        if depth < SCRATCHPAD_NESTING:\n            for inner in inner_commands(tokens):',
+     '        if False:\n            for inner in inner_commands(tokens):',
+     "guard", 'scratchpad-owner: runner bash -c "python3 F"'),
+    ("scratchpad-owner: a stdin redirect names no script",
+     '    args, stdin = scratchpad_stdin(args)\n    start = scratchpad_files_start(name, args)',
+     '    stdin = ""\n    start = scratchpad_files_start(name, args)',
+     "guard", "scratchpad-owner: runner python3 < F"),
+    ("scratchpad-owner: a pipe into an interpreter names no script",
+     '            if reads and not stdin and number and ends[number - 1] == "|":',
+     '            if False:',
+     "guard", "scratchpad-owner: runner cat F | python3"),
+    ("scratchpad-owner: uv, bun, deno and npx words are read as the script",
+     'WORKFLOW_RUNNER_VERBS = {"uv": ("run",), "bun": ("run",), "deno": ("run",), "npx": ("tsx", "ts-node")}',
+     'WORKFLOW_RUNNER_VERBS = {}',
+     "guard", "scratchpad-owner: runner uv run F"),
+    ("scratchpad-owner: python -m pytest reads no script",
+     'WORKFLOW_RUNNER_MODULES = ("pytest",)',
+     'WORKFLOW_RUNNER_MODULES = ()',
+     "guard", "scratchpad-owner: runner python3 -m pytest F"),
+    ("scratchpad-owner: a wrapper's inner command is not judged",
+     '    found = [nested_script(tokens), ssh_remote_script(tokens)]\n    for at in command_indexes(tokens):\n        found.extend(wrapped_commands(tokens, at))',
+     '    found = [nested_script(tokens), ssh_remote_script(tokens)]\n    for at in command_indexes(tokens):\n        found.extend([])',
+     "guard", "scratchpad-owner: runner stdbuf -oL python3 F"),
+    ("scratchpad-owner: a cp makes the write reader raise, so nothing of the call is recorded",
+     '            def in_scratchpad(word, at, verb=None):',
+     '            def in_scratchpad(word, at, verb):',
+     "guard", "scratchpad-owner: cp-mv 1"),
+    ("scratchpad-owner: an mv destination is judged as a removal and not recorded",
+     '                    removed.discard(dest)   # written here, though a later `mv` names it as its source\n',
+     '                    if verb != "mv":\n                        removed.discard(dest)   # written here, though a later `mv` names it as its source\n',
+     "guard", "scratchpad-owner: cp-mv 2"),
+    ("scratchpad-owner: a cp destination carries its source's record",
+     '                    if verb == "mv":\n                        moved[dest] = source\n',
+     '                    if True:\n                        moved[dest] = source\n',
+     "guard", "scratchpad-owner: cp-mv 3"),
+    ("scratchpad-owner: an mv destination records the mover and not its source's writer",
+     '                return scratchpad_writer_of(source, session)\n',
+     '                return agent\n',
+     "guard", "scratchpad-owner: cp-mv 4"),
+    ("scratchpad-owner: a same-call mv source's writer is not carried, so the moved file takes an empty record",
+     '            return agent if source in seen else writer_after(source, seen + (full,))\n',
+     '            return scratchpad_writer_of(source, session)\n',
+     "guard", "scratchpad-owner: one-call 1"),
+    ("scratchpad-owner: a cp source reads as a write",
+     '                if verb is None:   # `_copy_reads` asks with two arguments, about the `cp` target: no, so the sources are only read; `scratchpad_copies` judges the destination\n                    return False\n',
+     '',
+     "guard", "scratchpad-owner: cp-mv 3"),
+    # The shared runner tables keep their meaning for every rule but scratchpad-owner.
+    ("heredoc: uv and npx run a file a heredoc wrote",
+     '_INTERPRETERS + "|" + _WRAPPERS + r")',
+     '_INTERPRETERS + "|" + _WRAPPERS + r"|uv|npx)',
+     "guard", "ask-alone: a heredoc body holding a forced push, written to a file npx formats, chained, allows"),
+    ("workflow-test: pytest value flags are read for every runner",
+     '(pytest and arg in WORKFLOW_PYTEST_VALUE_FLAGS)',
+     '(arg in WORKFLOW_PYTEST_VALUE_FLAGS)',
+     "guard", "builder-test: a bash -k test run deleted from checks.yml is refused"),
+    ("scratchpad-owner: pytest names only the file in a fixed position",
+     '    if name in SCRATCHPAD_FILES_ANYWHERE:\n        return 0',
+     '    if name in SCRATCHPAD_FILES_ANYWHERE:\n        return None',
+     "guard", "scratchpad-owner: runner pytest -n 2 F"),
+    ("scratchpad-owner: a verb runner names only the file in a fixed position",
+     '        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):\n            return at + 1',
+     '        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):\n            return None',
+     "guard", "scratchpad-owner: runner uv run --with x F"),
+    # The verb runner's flag table: a value flag skips its value, and every other flag skips only itself.
+    ("scratchpad-owner: a verb runner's value flag skips one word, so its value is judged as the script word",
+     'at += 2 if arg in takes else 1',
+     'at += 1',
+     "guard", "scratchpad-owner: argument 9,"),
+    ("scratchpad-owner: a verb runner's flag that takes no value also skips the word after it",
+     'at += 2 if arg in takes else 1',
+     'at += 2',
+     "guard", "scratchpad-owner: argument control 3,"),
+    ("scratchpad-owner: a verb runner judges every plain argument after its script word, not only the run",
+     'files = [args[at]]',
+     'files = [arg for arg in args[at:] if not arg.startswith("-")]',
+     "guard", "scratchpad-owner: argument 1,"),
+    ("scratchpad-owner: ionice is no wrapper",
+     '    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):',
+     '    elif word not in ("stdbuf", "unbuffer", "caffeinate"):',
+     "guard", "scratchpad-owner: runner ionice -c3 python3 F"),
+    # Rule scratchpad-owner, the folder check (`scratchpad_owner_write` and `scratchpad_folder_writer`). Each row names
+    # the case that goes red when its mechanism is removed.
+    ("scratchpad-owner: a folder rm or mv is never read for the files under it",
+     "elif full in removed and not taken:",
+     "elif False:",
+     "guard", "folder rm 1,"),
+    ("scratchpad-owner: a folder rm does not read the files of a nested folder",
+     "tops.extend(entry.path for entry in entries)",
+     "pass",
+     "guard", "folder rm 11,"),
+    ("scratchpad-owner: a folder rm does not expand a glob",
+     "roots.extend(sorted(glob.glob(word)))",
+     "roots.append(word)",
+     "guard", "folder rm 8,"),
+    ("scratchpad-owner: a folder rm refuses on an agent's own file too",
+     "writer != agent_id",
+     "writer",
+     "guard", "folder rm control 1,"),
+    ("scratchpad-owner: the folder walk reads past its cap",
+     "left[0] <= 0",
+     "False",
+     "guard", "folder rm walk cap 2,"),
+    ("scratchpad-owner: the folder walk follows a symlink below the folder",
+     "if os.path.islink(top):",
+     "if top == root and os.path.islink(top):",
+     "guard", "folder rm walk link 1,"),
+    ("scratchpad-owner: a folder rm does not expand its brace list",
+     "for word in expand_shell_braces(where):",
+     "for word in [where]:",
+     "guard", "folder rm 13,"),
+    ("scratchpad-owner: a folder rm does not expand a brace list nested in another",
+     "for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):",
+     "for head in [word[:at] + part + word[end + 1:]]:",
+     "guard", "folder rm 19,"),
+    ("scratchpad-owner: a folder rm drops the text before a brace list, so the list names no folder of its own",
+     "for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):",
+     "for head in expand_shell_braces(part + word[end + 1:], cap):",
+     "guard", "folder rm 20,"),
+    ("scratchpad-owner: a folder rm drops an empty element of a brace list",
+     "parts.append(text[last:at])",
+     "if last < at: parts.append(text[last:at])",
+     "guard", "folder rm 21,"),
+    ("scratchpad-owner: a folder rm does not expand a letter range",
+     "return at, [chr(n) for n in range(low, high + step, step)]",
+     "return None",
+     "guard", "folder rm 22,"),
+    ("scratchpad-owner: a folder rm does not expand a numeric range",
+     "if abs(high - low) < SCRATCHPAD_BRACE_CAP:",
+     "if False:",
+     "guard", "folder rm 23,"),
+    ("scratchpad-owner: the folder walk skips a link below the folder but reads a root link through",
+     "if os.path.islink(top):",
+     "if top != root and os.path.islink(top):",
+     "guard", "folder rm walk link 3,"),
+    # Rule scratchpad-owner, an mv destination that is a folder of the call: the folder is dropped from the walk only when
+    # no other word of the call names it. The rows are the exception removed, and the brace or glob exclusion removed.
+    ("scratchpad-owner: an mv into a folder is dropped from the walk even when another word of the call names it",
+     'into if into and names.get(os.path.normpath(into)) == intos[os.path.normpath(into)] else ""',
+     'into if into else ""',
+     "guard", "folder move 3,"),
+    ("scratchpad-owner: an mv into a brace list or a glob drops the folder as if its name were one folder",
+     ' and expand_shell_braces(dest) == [dest] and not SCRATCHPAD_GLOB_MAGIC.search(dest)):',
+     '):',
+     "guard", "folder move 7,"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
      '    for target in targets[:1]:\n        # 0b.',
@@ -1629,15 +2268,15 @@ MUTATIONS = [
      'return host.head_read("", nothing_is_green', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
     ("merge-checks: the long repo flag goes unread",
-     '        elif arg.startswith("--repo="):',
-     '        elif False:', "guard", 'merge-checks: the long repo flag names the repo too'),
+     '        elif taken:',
+     '        elif taken and not arg.startswith("--repo="):', "guard", 'merge-checks: the long repo flag names the repo too'),
     ("merge-checks: a body flag's value is read as the pull request",
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body",',
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -1731,19 +2370,19 @@ MUTATIONS = [
      'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
      "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
     ("role-diff: a merge commit is judged against its first parent, not git's own merge",
-     '        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
-     '        old = parents[0] if parents else ""', "guard",
+     '            merged = merge_tree(root, *parents)',
+     '            merged = (parents[0], ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop"),
     ("role-diff: a merge in progress is judged against HEAD, not git's own merge",
-     '        old = merge_tree(root, "HEAD", merging.stdout.strip())', '        old = "HEAD"', "guard",
+     '        merged = merge_tree(root, "HEAD", merging.stdout.strip())', '        merged = ("HEAD", ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit"),
     ("role-diff: a rebase pick is read as the builder's resolved replay",
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")',
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "reword", "edit")', "guard",
      "builder-refuse: a rebase onto main where a test-author's commit and main change the same test file in different hunks"),
     ("role-diff: a replay in progress is refused as the builder's own work",
-     '    changes.append((old, None, paths, NOTED if replaying else OWN))',
-     '    changes.append((old, None, paths, OWN))', "guard",
+     '    changes.append((old, None, paths, NOTED if replaying else OWN, conflicts))',
+     '    changes.append((old, None, paths, OWN, conflicts))', "guard",
      "builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit"),
     ("role-diff: a write of the upstream side after a rebase is logged only",
      '            if not builder or kind == OWN:',
@@ -1757,12 +2396,33 @@ MUTATIONS = [
      '        if sha in lost:\n            continue', '        if False:\n            continue', "guard",
      "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line"),
     ("role-diff: every path a builder changes offends",
-     '            bad = any(is_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
+     '            bad = any(is_builder_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
      "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
     ("role-diff: a test-author's change is judged as a builder's",
      '        elif role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
      '        elif False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
-     "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing"),
+     "builder-refuse: a test-author's ordinary commit of a test file is never refused and logs no author-diff line"),
+    ("role-diff: a test-author's conflicted path is judged like any other",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):', '        if False:', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a conflicted test file and a conflicted product file"),
+    ("test-author: the write tool refuses a product path its merge left conflicted",
+     '            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):', '            if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts is allowed"),
+    ("test-author: the merge route is given to a merge with no test path conflicted",
+     '    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):', '    if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused"),
+    ("test-author: a merge whose only test path is a mutation test is given no merge route",
+     '    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):',
+     '    if not any(is_test_rel(path) for path in conflicts):', "guard",
+     "test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_guard.py, is allowed"),
+    ("role-diff: a test-author's commit gives the merge route to a merge with no test path conflicted",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):',
+     '        if role == AUTHOR_ROLE and all(norm(n) in conflicts for n in names):', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a product-only conflict logs author-diff"),
+    ("test-author: the merge route covers a conflicted workflow, test config or manifest",
+     '    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]',
+     '    return list(conflicts)', "guard",
+     "test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused"),
     ("role-diff: a flag on a line that calls a runner is not read",
      'any(TEST_RUNNER_CONTEXT.search(near) for near', 'any(False for near', "guard", "builder-test: addopts --deselect added to pytest.ini is refused"),
     ("role-diff: --deselect no longer disables tests",
@@ -1773,8 +2433,12 @@ MUTATIONS = [
     ("role-diff: conftest.py is no test path",
      '|conftest\\.py"', '|never-seen\\.py"', "guard", "builder-test: Edit of src/conftest.py is refused"),
     ("role-diff: no directory part makes a test path",
-     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
      'TEST_DIRS = set()', "guard", "builder-test: Edit of tests/helper.py is refused"),
+    ("role-diff: the testing folder is no test folder",
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     "guard", "test-author: Write of testing/shallow_clone.py is allowed"),
     ("role-diff: Swift test basenames are plural only (cries wolf)",
      'SWIFT_TEST = re.compile(r"^\\w+Tests\\.swift$")', 'SWIFT_TEST = re.compile(r"^\\w+Tests?\\.swift$")',
      "guard", "swift-test: Edit of non-test App/LoginTest.swift is allowed"),
@@ -1810,7 +2474,7 @@ MUTATIONS = [
     ("test-author: the scope is never enforced in the diff",
      '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("test-author: the write tool lets any path through",
-     '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
+     '                return ""\n        return target\n    if role == WRITER_ROLE:', '                return ""\n        return ""\n    if role == WRITER_ROLE:', "guard",
      "test-author: Edit of product code is refused"),
     ("test-author: test config is not its own",
      '    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',
@@ -1837,11 +2501,17 @@ MUTATIONS = [
      "            args = tokens if runner else tokens[:1]", "            args = tokens", "guard",
      "builder-test: a ruff --ignore line on tests/ added to checks.yml is allowed"),
     ("builder: an interpreter flag hides the test path a run line runs",
-     '    while index < len(args) and args[index].startswith("-"):', "    while False:", "guard",
+     '        elif arg.startswith("-"):\n            if arg in WORKFLOW_NO_PATH_FLAGS', '        elif False:\n            if arg in WORKFLOW_NO_PATH_FLAGS', "guard",
      "builder-test: python3 -u in place of python3 on a test run is allowed"),
     ("test-author: a mutation test is not its own",
-     '            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)', '            or False)', "guard",
+     '            or is_mutation_test_rel(rel))', '            or False)', "guard",
      "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
+    ("builder-test: is_builder_test_rel drops the mutation tests",
+     '    return is_test_rel(rel) or is_mutation_test_rel(rel)', '    return is_test_rel(rel)', "guard",
+     "builder-test: Edit of mutation test hooks/mutate_guard.py is refused"),
+    ("builder-test: is_mutation_test_rel stops folding case",
+     '    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS', '    return norm(rel).lstrip("/") in AUTHOR_MUTATION_TESTS', "guard",
+     "builder-test: Edit of HOOKS/mutate_guard.py is refused (case folds)"),
     ("role-diff: the builder reason drops the remedy",
      '"report. The orchestrator assigns it to a test-author."', '"report."', "guard",
      "builder-test: Write of a test file is refused"),
@@ -1919,9 +2589,21 @@ MUTATIONS = [
      'NPM_NO_CHANGE = {"--help", "-h", "--dry-run"}',
      "guard", 'linked-nm: npm i -g x (Bash) in a linked folder is allowed'),
     ('linked-node-modules: a value flag before the subcommand is read as the subcommand',
-     '    "--loglevel", "--prefix", "--cache",',
-     '    "--never-a-flag", "--prefix", "--cache",',
-     "guard", 'linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder'),
+     '"--logs-dir", "-C", "-L",',
+     '"--logs-dir", "--never-a-flag", "-L",',
+     "guard", 'linked-nm: npm -C . ls (Bash) in a linked folder is allowed'),
+    ('linked-node-modules: a subcommand off the read-only list is allowed',
+     '                if word not in NPM_READ_ONLY or (word == "audit"',
+     '                if False or (word == "audit"',
+     "guard", 'linked-nm: refuse npm prune (Bash) in a linked folder'),
+    ('linked-node-modules: audit fix is read as a plain audit',
+     '(word == "audit" and "fix" in words[at + 1:])',
+     'False',
+     "guard", 'linked-nm: refuse npm audit fix (Bash) in a linked folder'),
+    ('linked-node-modules: run is missing from the read-only list',
+     '    "run", "rum", "urn", "sbom",',
+     '    "rum", "urn", "sbom",',
+     "guard", 'linked-nm: npm run build (Bash) in a linked folder is allowed'),
     ('linked-node-modules: a recursive delete inside a linked node_modules goes unread',
      '        if _nm_recursive_delete(args) and any(',
      '        if False and any(',
@@ -1942,6 +2624,14 @@ MUTATIONS = [
      '("package.json", "node_modules")',
      '("package.json",)',
      "guard", 'linked-nm: walk: npm ci in a sub folder with a real node_modules and no package.json is allowed'),
+    ('linked-node-modules: a workspace flag on npm version is read as a plain version',
+     'version_in_workspace):',
+     'False):',
+     "guard", 'linked-nm: refuse npm version patch -w a (Bash) in a linked folder'),
+    ('linked-node-modules: a dry run is exempt again for rebuild, rb and edit',
+     'NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}',
+     'NPM_DRY_RUN_WRITERS = set()',
+     "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
@@ -1964,19 +2654,77 @@ MUTATIONS = [
      '        refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))',
      '        pass',
      "guard", 'rm-var: a loop deletes under an unguarded variable'),
+    # ---- substitution reads (debt guard-substitution-in-token): a command inside `$( )` is judged.
+    ("substitution: judge_shell reads only the outer text, so a reset inside a dollar paren passes",
+     '    texts = [stripped, *substitution_commands(raw, stripped)]\n',
+     '    texts = [stripped]\n',
+     "guard", "substitution: shared tree, an assignment from a dollar paren denies"),
+    # ---- ask-step-hidden (debt ask-step-hidden-in-script): the push loop reads wrapped scripts through _push_calls.
+    ("ask-step-hidden: the push loop skips _push_calls, so a force push inside bash -c passes",
+     '        for args, where, overrides in _push_calls(segment, stripped, cwd):\n            verdict = push_verdict(',
+     '        for args, where, overrides in ([] if tool else _push_calls(segment, stripped, cwd)):\n            verdict = push_verdict(',
+     "guard", "ask-step-hidden: a force push inside bash -c denies"),
+    ("push-calls-substitution: _push_calls reads only the wrapped script, so a force push inside a bash -c substitution passes",
+     '            for each in (stripped, *substitution_commands(text, stripped)):\n                for part in split_segments(each):\n                    yield from _push_calls(',
+     '            for each in (stripped,):\n                for part in split_segments(each):\n                    yield from _push_calls(',
+     "guard", "ask-step-hidden: a force push in a bash -c substitution denies"),
+    ("ask-step-hidden: the trailing paren or backtick stays on the path word, so a subshell write hides its path",
+     '                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word\n',
+     '                word = _typed(word, word)   # keeps the PowerShell type of the word\n',
+     "guard", "ask-step-hidden: a cap write in a subshell with a leading space asks"),
     # ---- hand-made-worktree (decision lanes-start-in-tool-worktrees): one mutant per branch.
     ("hand-made-worktree: the judge_shell loop never asks, so no hand-made tree is refused",
-     '            matched = hand_made_worktree_hit(segments, number, cwd, ends)\n',
+     '            matched = hand_made_worktree_hit(segments, number, cwd, ends, payload)\n',
      '            matched = ""\n',
      "guard", 'hand-made worktree: a relative sibling path from the primary is refused'),
     ("hand-made-worktree: the inside-the-home-folder test is inverted",
-     'if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:',
      'if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:',
+     'if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:',
      "guard", 'hand-made worktree: a relative sibling path from the primary is refused'),
     ("hand-made-worktree: the inside-the-home-folder pass is dropped, so a home tree is refused",
-     'if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:',
-     'if False:',
+     'if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:',
+     'if True:',
      "guard", "hand-made worktree: an absolute path under the primary's home folder passes"),
+    ("hand-made-worktree: a call with no agent_id is judged as an agent, so lane9 is refused",
+     'if status in ("none", "unknown") or _own_red_run(payload, primary, flat):',
+     'if status == "unknown" or _own_red_run(payload, primary, tree):',
+     "guard", "hand-made worktree: with no agent_id, the lane9 add from the primary passes"),
+    ("hand-made-worktree: an agent's own red-run folder is no longer passed",
+     'if status in ("none", "unknown") or _own_red_run(payload, primary, flat):',
+     'if status in ("none", "unknown"):',
+     "guard", "hand-made worktree: an agent adds its own red-run folder, as the red run does, passes"),
+    ("hand-made-worktree: an agent's own recorded home is no longer passed",
+     '    return "" if own else target\n',
+     '    return target\n',
+     "guard", "hand-made worktree: an agent adds its own recorded home tree passes"),
+    ("hand-made-worktree: an agent may add any tree inside the folder",
+     '    return "" if own else target\n',
+     '    return ""\n',
+     "guard", "hand-made worktree: an agent adds a non-agent folder, lane9, under the primary's folder is refused"),
+    ("hand-made-worktree: a tree nested inside the agent's own home is passed",
+     '    own = path_is_inside(flat, home) is True and path_is_inside(home, flat) is True\n',
+     '    own = path_is_inside(flat, home) is True\n',
+     "guard", "hand-made worktree: an agent adds a tree nested inside its own recorded home is refused"),
+    ("hand-made-worktree: an agent with no home record is read as unknown, so it passes",
+     'if status in ("none", "unknown") or _own_red_run(payload, primary, flat):',
+     'if status in ("none", "unknown", "no-record") or _own_red_run(payload, primary, flat):',
+     "guard", "hand-made worktree: an agent with no home record adds lane9 under the primary's folder is refused"),
+    ("hand-made-worktree: an unreadable home record no longer allows",
+     'if status in ("none", "unknown") or _own_red_run(payload, primary, flat):',
+     'if status == "none" or _own_red_run(payload, primary, flat):',
+     "guard", "hand-made worktree: an agent whose home record cannot be read adds lane9"),
+    ("hand-made-worktree: a gone cwd is not asked again from the readable repo",
+     '        status, home, _ = agent_worktree_home(payload, where)\n',
+     '        status, home, _ = agent_worktree_home(payload, drive_form_cwd(cwd))\n',
+     "guard", "hand-made worktree: an agent whose home folder is gone adds lane9 after a cd"),
+    ("hand-made-worktree: the tree is not flattened, so a dot-dot walk out of the red-run folder passes",
+     '    flat = os.path.normpath(tree)',
+     '    flat = tree',
+     "guard", "hand-made worktree: an agent walks out of its own red-run folder with .. to add lane9"),
+    ("hand-made-worktree: an agent_type with no agent_id reads as no agent",
+     'if status == "none" and isinstance(payload, dict) and payload.get("agent_type"):',
+     'if False:',
+     "guard", "hand-made worktree: a call that names an agent_type and no agent_id adds lane9"),
     ("hand-made-worktree: an option's value is taken as the new tree path",
      '        elif arg in HAND_MADE_VALUE_OPTIONS:\n            cursor += 1\n',
      '        elif arg in HAND_MADE_VALUE_OPTIONS:\n            pass\n',
@@ -1986,21 +2734,54 @@ MUTATIONS = [
      '        if False or not arg.startswith("-") or arg == "-":',
      "guard", 'hand-made worktree: a dash-led name after a double dash is still a path'),
     ("hand-made-worktree: the run folder ignores cd and reads the payload cwd only",
-     '    where = dir_before_segment(segments, number, cwd, ends)\n    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where or _unexpanded(target):',
-     '    where = cwd\n    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where or _unexpanded(target):',
+     '    where = dir_before_segment(segments, number, cwd, ends)\n    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:',
+     '    where = cwd\n    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:',
      "guard", 'hand-made worktree: cd into a non-temp primary'),
     ("hand-made-worktree: the run folder ignores -C",
-     '    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where or _unexpanded(target):',
-     '    if not where or _unexpanded(target):',
+     '    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:',
+     '    if not where:',
      "guard", 'hand-made worktree: -C reaches the primary from elsewhere'),
     ("hand-made-worktree: the temp exemption judges the target, not the repo",
-     '    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    tree = shell_abs(target, where)',
-     '    if path_is_inside(shell_abs(target, where) or "", tempfile.gettempdir()):\n        return ""\n    tree = shell_abs(target, where)',
+     '    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    if _unexpanded(target):',
+     '    if path_is_inside(shell_abs(target, where) or "", tempfile.gettempdir()):\n        return ""\n    if _unexpanded(target):',
      "guard", 'hand-made worktree: cd into a non-temp primary'),
     ("hand-made-worktree: the temp exemption is dropped, so a throwaway repo is refused",
-     '    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    tree = shell_abs(target, where)',
-     '    tree = shell_abs(target, where)',
+     '    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    if _unexpanded(target):',
+     '    if _unexpanded(target):',
      "guard", "hand-made worktree: a repo under the guard's temp folder is a throwaway"),
+    ("hand-made-worktree: a variable is no longer read from the command's earlier assignment",
+     '    for subcommand, args in git_calls(read):',
+     '    for subcommand, args in git_calls(segments[number]):',
+     "guard", 'hand-made worktree: a variable set in the same command to a path under the home folder'),
+    ("hand-made-worktree: the variable read keeps the first segment, not the one judged",
+     'mark.join(segments[:number + 1])).split(mark)[-1]',
+     'mark.join(segments[:number + 1])).split(mark)[0]',
+     "guard", 'hand-made worktree: a scratch path set in the same command, added from the non-temp primary as $S, is refused'),
+    # The read in guard_core.py's _variable_text (the walk's cd and assignment reads). Its anchor is unique to that site.
+    ("hand-made-worktree: a cd variable read in guard_core keeps the first assignment, not the value judged",
+     'given + text).split(mark)[-1]',
+     'given + text).split(mark)[0]',
+     "guard", 'hand-made worktree: a variable folder, cd "$R", then a tree outside home is refused'),
+    ("hand-made-worktree: a variable the command does not set is allowed",
+     '        return target   # a variable the command does not set: the shell\'s value is unknown\n',
+     '        return ""\n',
+     "guard", 'hand-made worktree: a variable this command does not set'),
+    ("hand-made-worktree: a -C variable is no longer read from the command's earlier assignment",
+     '    tokens = segment_tokens(read)\n',
+     '    tokens = segment_tokens(segments[number])\n',
+     "guard", 'hand-made worktree: a -C variable set in the same command'),
+    ("hand-made-worktree: an unset variable target is refused before the throwaway check",
+     '    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    if _unexpanded(target):\n        return target',
+     '    if _unexpanded(target):\n        return target\n    if path_is_inside(primary, tempfile.gettempdir()):\n        return ""\n    if False:\n        return target',
+     "guard", "hand-made worktree: a repo under the guard's temp folder runs a variable target no command sets"),
+    ("hand-made-worktree: every -C that held a variable is refused, though the command set it",
+     '    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:\n        return ""\n    primary = primary_checkout(where)',
+     '    named = _segment_git_c_target(tokens)\n    if _unexpanded(_segment_git_c_target(segment_tokens(segments[number])) or ""):\n        return target\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:\n        return ""\n    primary = primary_checkout(where)',
+     "guard", 'hand-made worktree: a -C variable set in the same command to the primary, with a home-folder target'),
+    ("hand-made-worktree: the early exit is dropped, so every segment re-resolves its variables",
+     '    if "worktree" not in segments[number]:\n        return ""',
+     '    if False:\n        return ""',
+     "guard", "rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU"),
     ("hand-made-worktree: the help flag no longer ends the read",
      '        elif arg in ("-h", "--help"):\n            return None\n',
      '        elif arg in ("-hh",):\n            return None\n',
@@ -2111,8 +2892,8 @@ MUTATIONS = [
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
     # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
     ("lane-repo-tag: the rule never fires",
-     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
-     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
      "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
     ("lane-repo-tag: a tag in other case no longer matches",
      '        if repo and repo_tag_names(tag, repo):',
@@ -2162,6 +2943,61 @@ MUTATIONS = [
      'LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>"))',
      'LANE_REPO_TAG_REASON % (REPO_TAG + "<owner>/<name>")',
      "guard", "lane-repo-tag: a denied lane names the expected repo tag in its reason"),
+    # ---- lane-start-settings. Each mutant breaks one clause of the rule in guard.py: the model and source_url
+    # reads, the empty and whitespace-only reads, the lane tag condition, or the refusal itself.
+    ("lane-start-settings: the model is not checked, so a lane with no model is allowed",
+     'missing = [k for k in ("model", "source_url")',
+     'missing = [k for k in ("source_url",)',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-start-settings: the source_url is not checked, so a lane with no source_url is allowed",
+     'missing = [k for k in ("model", "source_url")',
+     'missing = [k for k in ("model",)',
+     "guard", "lane-start-settings: lane tag with no source_url is denied"),
+    ("lane-start-settings: an empty string counts as present",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (isinstance(tool_input.get(k), str) and (tool_input[k].strip() or tool_input[k] == ""))]',
+     "guard", "lane-start-settings: lane tag with an empty model is denied"),
+    ("lane-start-settings: a whitespace-only value counts as present, so the strip is dropped",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k])]',
+     "guard", "lane-start-settings: lane tag with a whitespace-only model is denied"),
+    ("lane-start-settings: the lane tag condition is dropped, so every create_session with no model or source_url is refused",
+     '    if not is_lane_create_session(tool, tool_input):\n'
+     '        return ""\n'
+     '    missing = [k for k in ("model", "source_url")',
+     '    missing = [k for k in ("model", "source_url")',
+     "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
+    ("lane-start-settings: the rule never refuses, so a lane with no model or source_url is allowed",
+     '    if lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
+     '    if False and lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-start-settings: a value that is not text counts as present when its str() is not blank, so null, a number and a list are allowed",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (k in tool_input and str(tool_input[k]).strip())]',
+     "guard", "lane-start-settings: lane tag with a non-text"),
+    # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
+    # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
+    # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
+    ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'MODEL_FLOOR_REASON,',
+     "guard", "floor lane: a lane create_session on haiku is denied with the lane remedy"),
+    ("lane-floor: every floor refusal gets the lane remedy, so an Agent spawn names the lane inputs",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'LANE_MODEL_FLOOR_REASON,',
+     "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
+    ("lane-floor: is_lane_create_session is always False, so no lane check fires",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return False and any(',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-floor: is_lane_create_session is always True, so every call is judged as a lane",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return True or any(',
+     "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
+    ("lane-floor: the lane tag is matched without casefold, so an upper-case lane tag is no lane",
+     'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
+     'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
+     "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
@@ -2337,8 +3173,8 @@ MUTATIONS = [
      '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
      "the lease read writes nothing", "posix"),
     ("sim-lease: the pro slot maps to another device",
-     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3",',
-     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B4",', "simlease",
+     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
+     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
      "lease allow: this session's live pro lease", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
@@ -2372,25 +3208,415 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # The second pass of gh_call_of's loop reads a repo flag right after the group word (`gh pr -R o/r comment`).
+    # Only that pass goes: the first pass, before the group word, still reads its flags.
+    ("gh-group-flag: a repo flag after the group word goes unread",
+     '    for _ in (0, 1):',
+     '    for _ in (0,):',
+     "guard", "after the group word"),
+    # records-page: a commit of MERGE_HEAD's page is allowed on origin/<base>'s first-parent line, or for a stacked
+    # lane (some best merge base of HEAD and MERGE_HEAD is off origin/<base>).
+    ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
+     '    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""',
+     '    return ids[1]',
+     "guard", "a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on"),
+    ("records-page: the line is not first-parent only, so a branch merged into the base is allowed",
+     '"rev-list", "--first-parent", origin)',
+     '"rev-list", origin)',
+     "guard", "off its first-parent line"),
+    ("records-page: the page is not compared with MERGE_HEAD's, so a rebuilt page is allowed",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if not page_id or not _merge_head_page(top, base):',
+     "guard", "a test-author commit of a page rebuilt after the merge, origin/main moved on"),
+    ("records-page: MERGE_HEAD's page is never read, so the merge's own page is refused",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if True:',
+     "guard", "a test-author commit of the merge's own page, after origin/main moved on"),
+    # An absent page (a deletion staged in the index) is refused unless no merge brings one. Without the check, a
+    # deleted page with no merge in progress compares '' with '' and is allowed.
+    ("records-page: the absent-page check is dropped, so a commit that deletes the page is allowed with no merge",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if page_id != _merge_head_page(top, base):',
+     "guard", "a commit that deletes the page, with no merge in progress"),
+    # The stacked clause of `_merge_head_page` (guard_merge.py): a lane stacked on an unmerged base passes for
+    # MERGE_HEAD's page. Each label starts "records-page: stacked clause", so that prefix selects these three.
+    ("records-page: stacked clause, an is-ancestor exit of 0 or an error passes, so a failed read is a pass",
+     "if seen is not None and seen.returncode == 1:",
+     "if seen is not None and seen.returncode != 0:",
+     "guard", "so the is-ancestor read fails"),
+    ("records-page: stacked clause, merge-base without --all reads one best base, so a criss-cross base is missed",
+     '    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")',
+     '    meet = _git(top, "merge-base", "HEAD", "MERGE_HEAD")',
+     "guard", "a lane's merge of a criss-cross stacked base, with the base's page staged"),
+    ("records-page: stacked clause, the page passes with no is-ancestor read, so a branch cut from main passes",
+     '        seen = _git(top, "merge-base", "--is-ancestor", best, origin)\n'
+     '        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure\n'
+     '            return ids[1]',
+     '        return ids[1]',
+     "guard", "an unrelated unmerged branch, whose merge bases are both on origin/main"),
+    # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
+    ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
+     "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
+     "                if False and match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
+     "guard", "brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied"),
+    # Rule brief-claim-has-probe: one mutant per edge the cases pin.
+    ("brief-claim: the check never fires, so an unprobed claim about main passes",
+     '    return brief_claim_gaps(tool_input.get("prompt"))',
+     '    return []',
+     "guard", "brief-claim: builder brief that says main allows an input, with no probe, is denied"),
+    ("brief-claim: the dispatch reads no claim, so the refusal never prints",
+     "    claimed = brief_claim_hit(tool, tool_input)\n    if claimed:",
+     '    claimed = ""\n    if claimed:',
+     "guard", "brief-claim: test-author brief that says main passes two inputs, with no probe, is denied"),
+    ("brief-claim: a test-author is out of scope",
+     'BRIEF_CLAIM_ROLES = ("builder", "test-author")',
+     'BRIEF_CLAIM_ROLES = ("builder",)',
+     "guard", "brief-claim: test-author brief that says today main refuses an input, with no command, is denied"),
+    ("brief-claim: a reviewer is in scope, so its main claim is refused",
+     'BRIEF_CLAIM_ROLES = ("builder", "test-author")',
+     'BRIEF_CLAIM_ROLES = ("builder", "test-author", "reviewer")',
+     "guard", "brief-claim: reviewer brief with the main claim is allowed (out of scope)"),
+    ("brief-claim: today is no subject, so a claim with no main named passes",
+     "|(?<![\\w/.-])today,?",
+     "|(?<![\\w/.-])zzzzz,?",
+     "guard", "brief-claim: test-author brief that says today the guard refuses an input, with no main named, is denied"),
+    ("brief-claim: a command with no result line counts as a probe",
+     '        if result is not None:\n            probes.append([" ".join(row[1].split()), " ".join(result.split())])',
+     '        probes.append([" ".join(row[1].split()), " ".join((result or "").split())])',
+     "guard", "brief-claim: builder brief with a main claim and a command but no result line is denied"),
+    ("brief-claim: a probe for any input shows every claim",
+     "not any(_claim_probed(key, texts) for texts in probes)",
+     "not any(probes)",
+     "guard", "brief-claim: test-author brief whose probe is for another input does not show the claim, and is denied"),
+    ("brief-claim: a lone backtick opens no input, so the claim after it hides",
+     "|`+(.*)$|",
+     "|(?!x)x|",
+     "guard", "brief-claim: builder brief with a lone quote and an unmatched backtick around a main claim is denied"),
+    ("brief-claim: only the first 29 lines are read, so a claim on line 30 hides",
+     '    lines = brief.split("\\n")\n    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]',
+     '    lines = brief.split("\\n")[:29]\n    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]',
+     "guard", "brief-claim: builder brief with the claim on line 30 of a long brief, with no probe, is denied"),
+    ("brief-claim: a backticked main is no subject",
+     'if hit.group(1) and body.lower() in ("main", "origin/main"):',
+     'if False and body.lower() in ("main", "origin/main"):',
+     "guard", "brief-claim: test-author brief with a backticked main subject and a refusal is denied"),
+    ("brief-claim: fenced text is not read for claims",
+     "        listed = bool(BRIEF_CLAIM_LIST.match(text))\n",
+     '        if fenced:\n            rows.append(("out", text))\n            continue\n        listed = bool(BRIEF_CLAIM_LIST.match(text))\n',
+     "guard", "brief-claim: test-author brief with a claim inside a fence after Cases: is denied"),
+    ("brief-claim: a line that starts with a backtick is read as a command first, so a claim line is its own probe",
+     "        sentences = _claim_line(text)\n",
+     '        sentences = [] if text.startswith("`") else _claim_line(text)\n',
+     "guard", "brief-claim: builder brief whose claim line is its own probe is denied"),
+    ("brief-claim: a probe that holds the input as part of a longer one shows it",
+     '''shown = re.compile(r"(?:^|['\\"`])" + re.escape(key) + r"(?:$|['\\"`])")''',
+     "shown = re.compile(re.escape(key))",
+     "guard", "brief-claim: test-author brief whose probe is for a longer input than the claim is denied"),
+    ("brief-claim: the verbs rejects and blocks are no claim",
+     "accepts|accepted|refuses|refused|rejects|rejected|blocks|blocked)",
+     "accepts|accepted|refuses|refused)",
+     "guard", "brief-claim: builder brief with main rejects an input is denied"),
+    ("brief-claim: the passive form is no claim",
+     "clause = BRIEF_CLAIM_PASSIVE.search(sentence)",
+     "clause = None",
+     "guard", "brief-claim: builder brief with an input refused on main in passive form is denied"),
+    ("brief-claim: a plain-quoted input is no input",
+     '''|\\"([^\\"\\n]+)\\"|(?<!\\w)'([^'`\\n]+)'(?!\\w)")''',
+     '")',
+     "guard", "brief-claim: test-author brief where main passes a plain-quoted input is denied"),
+    ("brief-claim: any word between main and the verb is read, so main as an adjective is a subject",
+     '''_CLAIM_ADVERB = r"(?:(?:still|also|now|today|currently|already|even|always|never)\\s+)?"''',
+     '''_CLAIM_ADVERB = r"(?:\\S+\\s+)?"''',
+     "guard", "brief-claim: builder brief with main as an adjective before a refusal is allowed"),
+    ("brief-claim: any word after today is a subject, so today as a time word is read",
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"',
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check|\\w+)"',
+     "guard", "brief-claim: builder brief with today as a time word and the builder as subject is allowed"),
+    ("brief-claim: a path after in is an input, not a locator",
+     '            locator = (bool(BRIEF_CLAIM_LOCATOR.search(sentence[:m.start()])) and len(item.split()) == 1\n'
+     '                       and ("/" in item or "." in item))',
+     "            locator = False",
+     "guard", "brief-claim: test-author brief with a path locator after a probed refusal is allowed"),
+    ("brief-claim: a double-quoted span stops at a backtick, so a quoted case text is read as a claim",
+     '''|\\"([^\\"\\n]+)\\"|''',
+     '''|\\"([^\\"`\\n]+)\\"|''',
+     "guard", "brief-claim: test-author brief quoting a claim after Must deny: is allowed"),
+    ("brief-claim: a Must deny: line is skipped whole, so an unquoted claim in it hides",
+     "        sentences = _claim_line(text)\n",
+     '        sentences = [] if text.lower().startswith("must deny:") else _claim_line(text)\n',
+     "guard", "brief-claim: test-author brief with an unquoted claim inside a Must deny: line is denied"),
+    ("brief-claim: a referent takes nothing from the sentence before",
+     'claimed.extend(before if refer == "before" else items)',
+     "claimed.extend(items)",
+     "guard", "brief-claim: test-author brief where main passes both, with its inputs in the sentence before, is denied"),
+    ("brief-claim: a claim that ends with a colon takes no list lines after it",
+     "        elif listed and waiting is not None:\n            waiting.extend(own)",
+     "        elif False:\n            waiting.extend(own)",
+     "guard", "brief-claim: builder brief where as main refuses it, with its inputs in a list below, is denied"),
+    ("brief-claim: a referent after a list takes no list line",
+     "        if listed:\n            before = block\n",
+     "        if listed:\n            before = []\n",
+     "guard", "brief-claim: test-author brief where main passes all of them, after a list of inputs, is denied"),
+    ("brief-claim: a negated verb is no claim",
+     '''_CLAIM_NOT = r"(?:(?:does|did|do)\\s+not|(?:does|did|do)n['\\u2019]t)\\s+"''',
+     '''_CLAIM_NOT = r"(?!x)x"''',
+     "guard", "brief-claim: builder brief where main doesn't refuse an input is denied"),
+    ("brief-claim: never between main and the verb is no adverb",
+     "already|even|always|never)",
+     "already|even|always)",
+     "guard", "brief-claim: test-author brief where main never refuses an input is denied"),
+    ("brief-claim: lets ... through is no claim",
+     '''r"\\b|lets" + _CLAIM_THROUGH''',
+     '''r"\\b"''',
+     "guard", "brief-claim: builder brief where main lets an input through is denied"),
+    ("brief-claim: a claim clause runs past , so to the sentence's end",
+     "    stop = BRIEF_CLAIM_BREAK.search(sentence, clause.end())\n    hi = stop.start() if stop else len(sentence)",
+     "    hi = len(sentence)",
+     "guard", "brief-claim: builder brief whose main claim is followed by so and a backticked command is allowed"),
+    ("brief-claim: a probe that starts with cd ... && is no command",
+     '''(?:(?:cd\\s[^&|;\\n]*&&|echo''',
+     '''(?:(?:echo''',
+     "guard", "brief-claim: builder brief with a cd-and-python3 probe and its result line is allowed"),
+    ("brief-claim: a probe that starts with echo ... | is no command",
+     '''&&|echo\\s[^|\\n]*\\||[A-Za-z_]''',
+     '''&&|[A-Za-z_]''',
+     "guard", "brief-claim: test-author brief with a piped echo probe and its result line is allowed"),
+    ("brief-claim: a probe that starts with NAME=value is no command",
+     '''\\||[A-Za-z_]\\w*=\\S*|time)''',
+     '''\\||time)''',
+     "guard", "brief-claim: builder brief with an env-prefixed python3 probe and its result line is allowed"),
+    ("brief-claim: a probe that starts with time is no command",
+     '''\\w*=\\S*|time)\\s+)*''',
+     '''\\w*=\\S*)\\s+)*''',
+     "guard", "brief-claim: test-author brief with a time-prefixed python3 probe and its result line is allowed"),
+    ("brief-claim: the refusal names only the first gap",
+     'for item in claimed)',
+     'for item in claimed[:1])',
+     "guard", "brief-claim: builder brief with two unprobed claims names both inputs in its refusal, and is denied"),
+    ('brief-claim: all, each and both are referents anywhere in a clause, so main passes all tests takes the inputs before it',
+     'r"\\b(?:it|them)\\b|\\b(?:both|all|each|these)\\b(?=[\\s.!?:;,)]*$|\\s+of\\s+(?:them|these|those)\\b)"',
+     'r"\\b(?:it|them|both|all|each|these)\\b"',
+     "guard", 'brief-claim: test-author brief where origin/main passes all tests, after a backticked path, is allowed'),
+    ('brief-claim: a referent at the clause end is no referent, so main passes both takes nothing',
+     '(?=[\\s.!?:;,)]*$|\\s+of\\s+(?:them|these|those)\\b)"',
+     '(?=\\s+of\\s+(?:them|these|those)\\b)"',
+     "guard", 'brief-claim: test-author brief where main passes both, with its inputs in the sentence before, is denied'),
+    ('brief-claim: the active form takes every input of its clause whatever follows the verb',
+     'if not claimed and (passive or BRIEF_CLAIM_BARE.fullmatch(sentence, clause.end(), hi)):',
+     'if not claimed:',
+     "guard", 'brief-claim: test-author brief where origin/main passes CI after because, with an input before it, is allowed'),
+    ('brief-claim: a Controls heading does not close the claimed list',
+     'if waiting is not None and not own and BRIEF_CLAIM_HEADING.match(text):',
+     'if False:',
+     "guard", 'brief-claim: builder brief with a bulleted Controls heading after a probed refusal list is allowed'),
+    ('brief-claim: a numbered Controls heading does not close the claimed list',
+     'r"(?:(?:[-*+]|\\d+[.)])\\s+)?controls?\\b[^:]*:\\s*$"',
+     'r"(?:[-*+]\\s+)?controls?\\b[^:]*:\\s*$"',
+     "guard", 'brief-claim: test-author brief with a numbered Controls heading after a probed refusal list is allowed'),
+    ('brief-claim: the base verb form is no claim, so two inputs that pass on main hide',
+     '_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"',
+     '_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_ING + r")"',
+     "guard", 'brief-claim: test-author brief where two inputs pass on main, joined by and, is denied'),
+    ('brief-claim: the -ing verb form is no claim, so an input listed as passing on main hides',
+     '_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"',
+     '_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r")"',
+     "guard", 'brief-claim: builder brief where an input is listed as passing on main is denied'),
+    ('brief-claim: a leading On main frame is no claim',
+     'r"(?<![\\w/.-])(?:on\\s+(?:origin/main|main)(?![\\w/-])|today\\b),?\\s+"',
+     'r"(?<![\\w/.-])(?:today\\b),?\\s+"',
+     "guard", 'brief-claim: test-author brief where On main, an input passes is denied'),
+    ('brief-claim: a leading Today frame is no claim',
+     'r"(?<![\\w/.-])(?:on\\s+(?:origin/main|main)(?![\\w/-])|today\\b),?\\s+"',
+     'r"(?<![\\w/.-])(?:on\\s+(?:origin/main|main)(?![\\w/-])),?\\s+"',
+     "guard", 'brief-claim: builder brief where Today an input passes is denied'),
+    ('brief-claim: a subject with today later in the sentence is no claim',
+     '_CLAIM_ACTS + r"(?=[^.!?;]*\\btoday\\b)",',
+     '_CLAIM_ACTS + r"(?!x)x",',
+     "guard", 'brief-claim: test-author brief where the guard refuses an input today is denied'),
+    ('brief-claim: a NUL in a brief is read as an input marker',
+     '    text = text.replace("\\x00", " ")   # a NUL in a brief would read as a marker of its own\n',
+     '',
+     "guard", 'brief-claim: builder brief with a NUL marker on a line with no quoted input, then a claim, is denied without a crash'),
+    ('brief-claim: the base verb block is no claim, so main does not block an input hides',
+     '_CLAIM_BASE = r"(?:pass|allow|accept|refuse|reject|block)"',
+     '_CLAIM_BASE = r"(?:pass|allow|accept|refuse|reject)"',
+     "guard", 'brief-claim: builder brief where main does not block an input is denied'),
+    ('brief-claim: the -ing verb refusing is no claim, so an input refusing on main hides',
+     '_CLAIM_ING = r"(?:passing|allowing|accepting|refusing|rejecting|blocking)"',
+     '_CLAIM_ING = r"(?:passing|allowing|accepting|rejecting|blocking)"',
+     "guard", 'brief-claim: builder brief where an input is refusing on main is denied'),
+    ('brief-claim: check is no claim subject, so the check refuses an input today hides',
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"',
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule)"',
+     "guard", 'brief-claim: test-author brief where the check refuses an input today is denied'),
+    ('brief-claim: rule is no claim subject, so the rule refuses an input today hides',
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"',
+     '_CLAIM_SUBJECT = r"(?:it|they|guard|hook|check)"',
+     "guard", 'brief-claim: test-author brief where the rule refuses an input today is denied'),
+    ('brief-claim: now is no bare word after a verb, so an input before main refuses now hides',
+     '\\b(?:today|now)\\b)*"',
+     '\\b(?:today)\\b)*"',
+     "guard", 'brief-claim: test-author brief where an input before main refuses now is denied'),
+    # The count word, the pronoun tail and today in _claim_active. The two whole-sentence searches in _claim_active
+    # (the leading-claim search and the today-bounded subject search) have no mutant here: they are time-only, per the
+    # brief. Equivalent mutants change no verdict, so none is listed: "<=" for "<", taking a subject whenever one is
+    # found, and a today pattern without the word boundary.
+    ('brief-claim: a count word does not refer, so refuses all three today hides from the refers test',
+     'return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))',
+     'return bool(BRIEF_CLAIM_REFERENT.search(text))',
+     "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    ('brief-claim: a pronoun does not refer, so refuses it after a same-sentence input is read as no claim',
+     'return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))',
+     'return bool(BRIEF_CLAIM_COUNT.search(text))',
+     "guard", 'brief-claim: test-author brief where main refuses it, after an input in the same sentence'),
+    ('brief-claim: a bare now after both is no count, so refuses both now hides',
+     r'|(?:today|now)\b)[\s.!?:;,)]*$",',
+     r')[\s.!?:;,)]*$",',
+     "guard", 'brief-claim: test-author brief where main refuses both now'),
+    ('brief-claim: a today or now after a count word is no count, so refuses all three today hides',
+     r'\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$"',
+     r'\b|(?:today|now)\b)[\s.!?:;,)]*$"',
+     "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    ('brief-claim: now after a count word is no count, so refuses all three now hides',
+     r'(?:\s+(?:today|now)\b)?|',
+     r'(?:\s+(?:today)\b)?|',
+     "guard", 'brief-claim: test-author brief where main refuses all three now'),
+    ('brief-claim: a bare now is no count, so refuses both now hides',
+     r'|(?:today|now)\b)[\s.!?:;,)]*$"',
+     r'|(?:today)\b)[\s.!?:;,)]*$"',
+     "guard", 'brief-claim: test-author brief where main refuses both now'),
+    ('brief-claim: ones is no count word, so refuses these ones hides',
+     r'_CLAIM_COUNT_WORD = r"(?:one|ones|two',
+     r'_CLAIM_COUNT_WORD = r"(?:one|two',
+     "guard", 'brief-claim: test-author brief where main refuses these ones'),
+    ('brief-claim: digits are no count word, so refuses all 3 hides',
+     r'|ten|\d+|cases?|inputs?)"',
+     r'|ten|cases?|inputs?)"',
+     "guard", 'brief-claim: test-author brief where main refuses all 3'),
+    ('brief-claim: inputs is no count word, so refuses both inputs hides',
+     r'|ten|\d+|cases?|inputs?)"',
+     r'|ten|\d+|cases?)"',
+     "guard", 'brief-claim: test-author brief where main refuses both inputs'),
+    ('brief-claim: five to nine are no count words, so refuses all five hides',
+     r'_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|four|five|six|seven|eight|nine|ten|',
+     r'_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|ten|',
+     "guard", 'brief-claim: test-author brief where main refuses all five'),
+    ('brief-claim: these is no referent lead, so refuses these ones hides',
+     r'r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD',
+     r'r"\b(?:both|all|each)\s+(?:" + _CLAIM_COUNT_WORD',
+     "guard", 'brief-claim: test-author brief where main refuses these ones'),
+    ('brief-claim: both is no referent lead, so refuses both now hides',
+     r'r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD',
+     r'r"\b(?:all|each|these)\s+(?:" + _CLAIM_COUNT_WORD',
+     "guard", 'brief-claim: test-author brief where main refuses both now'),
+    ('brief-claim: a count word that is not at the clause end still refers, so main passes all three tests takes two inputs',
+     r'\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$"',
+     r'\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)"',
+     "guard", 'brief-claim: test-author brief where main passes all three tests, after two inputs'),
+    ('brief-claim: a pronoun tail reads the inputs before the verb, so refuses it after an input takes none',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]''',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if clause.end() <= at < hi]''',
+     "guard", 'brief-claim: test-author brief where main refuses it, after an input in the same sentence'),
+    ('brief-claim: a pronoun tail reads the inputs from the start of the sentence, so a fixed input is claimed',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]''',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if 0 <= at < hi]''',
+     "guard", 'brief-claim: test-author brief where main refuses it after a fixed input is allowed'),
+    ('brief-claim: a pronoun tail reads the inputs past the next break, so a verdict command is claimed',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]''',
+     '''    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < len(sentence)]''',
+     "guard", 'brief-claim: test-author brief where main refuses it, then a verdict command, is allowed'),
+    ('brief-claim: the refers test reads the inputs before the clause, so a kept input is claimed',
+     '    refers = _claim_refers(sentence[first:last])',
+     '    refers = _claim_refers(sentence[lo:hi])',
+     "guard", 'brief-claim: test-author brief where main passes CI for a kept input is allowed'),
+    ('brief-claim: the refers test reads the rest of the sentence, so an edit that keeps it is claimed',
+     '    refers = _claim_refers(sentence[first:last])',
+     '    refers = _claim_refers(sentence[first:])',
+     "guard", 'brief-claim: test-author brief where main passes CI, and an edit keeps it green, is allowed'),
+    ('brief-claim: the same-sentence pronoun tail is off, so refuses it after an input hides',
+     '    if not claimed and not passive and refers:',
+     '    if not claimed and refers and False:',
+     "guard", 'brief-claim: test-author brief where main refuses it, after an input in the same sentence'),
+    ('brief-claim: the before path reads the pronoun only, so refuses all three today with inputs before hides',
+     '    return [], "before" if refers else None',
+     '    return [], "before" if BRIEF_CLAIM_REFERENT.search(sentence[first:last]) else None',
+     "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    ('brief-claim: a claim with no referent takes the inputs before it, so main passes all tests is claimed',
+     '    return [], "before" if refers else None',
+     '    return [], "before"',
+     "guard", 'brief-claim: test-author brief where main passes all three tests, after two inputs'),
+    ('brief-claim: the today form wins only when it starts after the leading claim, so a later subject with today is missed',
+     '        if subject is not None and (clause is None or subject.start() < clause.start()):',
+     '        if subject is not None and (clause is None or subject.start() > clause.start()):',
+     "guard", 'brief-claim: test-author brief where the guard refuses an input today, and main refuses a second'),
+    ('brief-claim: the today form wins only when no leading claim exists, so a leading main claim hides the today subject',
+     '        if subject is not None and (clause is None or subject.start() < clause.start()):',
+     '        if subject is not None and clause is None:',
+     "guard", 'brief-claim: test-author brief where the guard refuses an input today, and main refuses a second'),
+    ('brief-claim: only the first today is read, so a leading Today frame hides the later today subject',
+     '    for late in BRIEF_CLAIM_TODAY.finditer(sentence):\n        pass\n',
+     '    for late in BRIEF_CLAIM_TODAY.finditer(sentence):\n        break\n',
+     "guard", 'brief-claim: test-author brief where today we know the guard refuses an input today is denied'),
+    ('brief-claim: today is case-sensitive, so a subject with TODAY in capitals is missed',
+     'BRIEF_CLAIM_TODAY = re.compile(r"\\btoday\\b", re.IGNORECASE)',
+     'BRIEF_CLAIM_TODAY = re.compile(r"\\btoday\\b")',
+     "guard", 'brief-claim: test-author brief where the guard refuses an input in capitals TODAY is denied'),
+    ('brief-claim: the today subject is dropped, so the subject-first form never claims',
+     '    return clause\n\n\ndef _claim_clause',
+     '    return None\n\n\ndef _claim_clause',
+     "guard", 'brief-claim: test-author brief where main refuses all three today'),
 ]
 
 
-# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (hooks/test_guard.py,
-# merge/test_merge.py, lint/test_ci_scope.py) is not run against that file: test_guard.py and test_merge.py
-# take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
+# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (merge/test_merge.py,
+# lint/test_ci_scope.py) is not run against that file: test_merge.py takes minutes per mutant, and
+# test_ci_scope.py only passes the file's path to the scope detector. hooks/test_guard.py runs only as the
+# families of GUARD_MODULE_FAMILIES, or whole against REPORT_GOLD's file: a whole run takes minutes per mutant.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_stamped.py",
                              "lint/test_report_guard_landing.py",
                              "lint/test_report_guard_refusal.py", "lint/test_report_guard_handoff.py",
+                             "lint/test_report_guard_cannot.py",
+                             "lint/test_report_guard_remedy.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
+    ("lint/_clause.py", ["lint/test_clause.py", "lint/test_report_guard_cannot.py", "lint/test_report_guard.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
                               "hooks/test_wrappers.py", "lint/test_hook_platform_exit.py",
                               "janitor/test_session_end_sweep.py", "lint/test_settings_matcher.py"]),
     ("lint/check_silent_undo.py", ["lint/test_check_silent_undo.py"]),
 ]
+# hooks/guard_<x>.py -> the families of hooks/test_guard.py (FAMILIES there) that exercise it. `--tests-for` prints a row as
+# `hooks/test_guard.py::<family>` lines beside the other suites that load the module, which the engine runs with
+# GUARD_FAMILY=<family> for a family line. A mutant meets only the families that reach its module, since the whole file takes
+# minutes. A guard module is a row, REPORT_GOLD's file, or in
+# GUARD_MODULE_EXEMPT (a test checks this).
+GUARD_MODULE_FAMILIES = {
+    "hooks/guard_kill.py": ["kill", "git-env"],
+    "hooks/guard_env.py": ["env", "git-env"],
+    "hooks/guard_frozen.py": ["frozen"],
+    "hooks/guard_pointer.py": ["pointer"],
+    "hooks/guard_rm_var.py": ["rm-var"],
+    "hooks/guard_shared_tree.py": ["shared-tree"],
+    "hooks/guard_stream.py": ["stream"],
+    "hooks/guard_push_delete.py": ["push-delete"],
+    "hooks/guard_branch_worktree.py": ["branch-worktree"],
+    "hooks/guard_merge.py": ["merge"],
+    "hooks/guard_mask_script.py": ["mask-script"],
+    "hooks/guard_argv.py": ["argv"],
+}
+GUARD_MODULE_EXEMPT = {
+    "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
+}
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
 # fails the CI job), which an ast sample of other files cannot be held against.
@@ -2448,8 +3674,8 @@ def report_main(argv) -> int:
 # print FAIL on red.
 # joyous: no-public-price, redirects, phone-first and tour-pages need dist/ or a browser, so they read unusable.
 # degen: py only. The app/ Playwright specs need a browser, so they are left out. test_ig_spike*.py is red on a
-# clean checkout. A module that imports dev-only pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads
-# unusable: the install folder holds one lockfile.
+# clean checkout. The install reads requirements-all.txt (runtime and dev pins, one flat file), so a module that
+# imports dev-only pins (PyYAML, openapi_core, jsonschema) installs. A commit before that file landed reads "no lockfile".
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
@@ -2566,8 +3792,8 @@ REPLAY_PROFILES = {
         "classify": "fail_line",
         "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
                     ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
-                     "requirements.txt"]],
-        "lockfile": "requirements.txt", "link": None, "sparse_skip": [],
+                     "requirements-all.txt"]],
+        "lockfile": "requirements-all.txt", "link": None, "sparse_skip": [],
         "select": ["python3", "scripts/tests-for.py", "{path}"],
     },
 }
@@ -2656,8 +3882,10 @@ def load_profile(args) -> dict:
 
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
-    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
-    a low share is a report, never a failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
+    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made
+    and none ran, or when none ran because the run stopped first (`no_run_cause` in `replay_pr`'s row), after a
+    `no mutant ran: ...` line that names the cause. Exit 0 otherwise, whatever the share: a low share is a report, never a
+    failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
@@ -2698,6 +3926,19 @@ def changed_main(argv) -> int:
         total.update({"base": base, "head": head, "profile": args.profile or args.profile_file})
         with open(args.log, "w", encoding="utf-8") as handle:
             json.dump(total, handle, indent=1)
+    made = sum(row.get("made", 0) for row in rows)
+    not_run = sum(row.get("not_run", 0) for row in rows)
+    # A run that stopped before any mutant ran is a run where no mutant ran, whatever its count. A part that ran mutants
+    # keeps the exit 0 of a run in which some mutant ran: the rule is that no mutant ran at all.
+    stopped = [row["no_run_cause"] for row in rows if row.get("no_run_cause")]
+    if made - not_run == 0 and stopped:
+        print("no mutant ran: %s" % "; ".join(stopped))
+        return 1
+    if made > 0 and made - not_run == 0:
+        why = ("the budget ran out, or no selected suite reaches the changed files" if args.budget is not None
+               else "no selected suite reaches the changed files")
+        print("no mutant ran: %d of %d mutants not run (%s)" % (not_run, made, why))
+        return 1
     return 0
 
 
@@ -2828,23 +4069,51 @@ def known_defects_main(argv) -> int:
     return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
-def _loads_module(source: str, stem: str) -> bool:
-    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
-    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
-    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
-    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
-    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
-    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+_PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath", "join", "abspath", "realpath", "normpath"))
+_PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
+_FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
+                         "check_output", "Popen", "read_text", "read_bytes"))
+_LOADERS = frozenset(("spec_from_file_location", "SourceFileLoader", "run_path"))
+
+
+def _load_profile(source: str):
+    """(stems, loads, reads) of one Python text, read from its `ast` tree (never its text, so a comment, a string or a
+    docstring that names a file is not a load). `stems` are the modules it imports or loads by name: `import`, `from ...
+    import`, `importlib.import_module` and `__import__` with a literal name. `loads` are the basenames of the string
+    constants in the path argument of a file loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`, never
+    the module-name argument). `reads` are the basenames of the string constants of each path expression that copies, opens
+    or runs a file: an argument of `open`, `shutil.copy*`, `subprocess.run` and the like (`_FILE_CALLS`), and a `os.path.join`,
+    `Path` or `/` expression (`_PATH_NAMES`, `_PATH_METHODS`). A text that does not parse has an empty profile.
+
+    A name in a path expression is followed to the expressions it is bound to by an assignment in any scope of the file
+    (module, function or class level; one name bound in two scopes pools both values). The path argument of a loader that
+    arrives as a function parameter is also followed to the calls of that function in the same file: a call by a bare name,
+    with the argument by position or by keyword for that parameter, counts as a binding of the parameter, read only inside
+    the def that owns the parameter. Two functions with different names that share a parameter name keep their calls apart.
+    A name in a `reads` expression is followed only through the parts of its bound value that can be the path (a string,
+    a name, a `/` or `+` of those, and the arguments of a path call), and never through a parameter.
+    Only the forms above are followed. Any other form reads as no load, and this list is not complete. Examples: a loader
+    imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
+    `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
+    it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
+    (`helper = load`), a loader that takes the path as `*args` or `**kwargs` (a `**kwargs` loader that copies the
+    keyword into a local of the same name, `path = kwargs["path"]`, is followed; `p = kwargs["path"]` is not), a call
+    that spreads the path in (a starred argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name
+    bound only as a `for` or comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking,
+    augmented assignment, `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that
+    takes the path (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding,
+    and a split literal (`"widget" + ".py"`).
+    Known false selections: a bare call `load(path=X)` also feeds a method `Loader.load` of the same name in the file, as
+    every def of that name takes the call, and a loader that reassigns its path before the load reads the argument its
+    calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
-    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    `test_action.py` repeats a stem today)."""
     import ast
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
-        return False
-    base = stem + ".py"
+        return set(), set(), set()
     bound = {}  # a name -> the expressions it is bound to, in any scope
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -2854,49 +4123,268 @@ def _loads_module(source: str, stem: str) -> bool:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
 
-    def names_base(expr, seen) -> bool:
+    parent = {}  # a node -> its parent, built on the first loader, so a file with none pays nothing
+    fed = {}  # (a def, a parameter name) -> the argument expressions its calls pass for it
+
+    def read_params() -> None:
+        defs = {}  # a function name -> its defs, in any scope
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parent[child] = node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(node.name, []).append(node)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in defs:
+                for function in defs[node.func.id]:
+                    params = [arg.arg for arg in function.args.posonlyargs + function.args.args]
+                    for index, value in enumerate(node.args):
+                        if isinstance(value, ast.Starred):
+                            break
+                        if index < len(params):
+                            fed.setdefault((function, params[index]), []).append(value)
+                    for keyword in node.keywords:
+                        if keyword.arg:
+                            fed.setdefault((function, keyword.arg), []).append(keyword.value)
+
+    def scope_of(node) -> list:
+        """The defs around `node`, innermost first: the parameters it can read."""
+        if not parent:
+            read_params()
+        scope = []
+        up = parent.get(node)
+        while up is not None:
+            if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope.append(up)
+            up = parent.get(up)
+        return scope
+
+    stems, loads, reads = set(), set(), set()
+
+    def collect(expr, seen: set, scope, into: set) -> None:
+        """Add the basename of each string constant in `expr` to `into`, and of each constant in the values its names are
+        bound to. A name that is a parameter of a def in `scope` adds the argument values its calls pass for it."""
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
-                    return True
-            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
-                seen.add(part.id)
-                if any(names_base(value, seen) for value in bound[part.id]):
-                    return True
-        return False
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
+            elif isinstance(part, ast.Name):
+                if part.id in bound and part.id not in seen:
+                    seen.add(part.id)
+                    for value in bound[part.id]:
+                        collect(value, seen, scope, into)
+                for function in scope:
+                    key = (function, part.id)
+                    if key in fed and key not in seen:
+                        seen.add(key)
+                        for value in fed[key]:
+                            collect(value, seen, (), into)
 
-    def last_part(dotted: str) -> bool:
-        return dotted.rsplit(".", 1)[-1] == stem
+    def read_collect(expr, seen: set, into: set) -> None:
+        """Add the basename of each string constant in a read's path expression, and follow each name in it (`read_follow`)."""
+        for part in ast.walk(expr):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
+            elif isinstance(part, ast.Name):
+                read_follow(part.id, seen, into)
+
+    def read_follow(name: str, seen: set, into: set) -> None:
+        """Follow a name of a read to the values an assignment binds it to. Only the parts of such a value that can be the
+        path are followed (`read_part`): a call that takes the name as one argument does not pass on its other arguments."""
+        if name in bound and name not in seen:
+            seen.add(name)
+            for value in bound[name]:
+                read_part(value, seen, into)
+
+    def read_part(expr, seen: set, into: set) -> None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            into.add(expr.value.replace("\\", "/").rsplit("/", 1)[-1])
+        elif isinstance(expr, ast.Name):
+            read_follow(expr.id, seen, into)
+        elif isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Div, ast.Add)):
+            read_part(expr.left, seen, into)
+            read_part(expr.right, seen, into)
+        elif isinstance(expr, ast.Call) and is_path_call(expr.func):
+            for arg in list(expr.args) + [kw.value for kw in expr.keywords]:
+                read_part(arg, seen, into)
+
+    def last(dotted: str) -> str:
+        return dotted.rsplit(".", 1)[-1]
+
+    def is_path_call(func) -> bool:
+        if isinstance(func, ast.Name):
+            return func.id in _PATH_NAMES
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr == "join":  # os.path.join, never `", ".join(...)`
+            owner = func.value
+            return (isinstance(owner, ast.Attribute) and owner.attr == "path") or \
+                   (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
+        return func.attr in _PATH_METHODS
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(last_part(alias.name) for alias in node.names):
-                return True
+            stems.update(last(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
-                return True
+            if node.module:
+                stems.add(last(node.module))
+            stems.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            read_collect(node, set(), reads)
         elif isinstance(node, ast.Call):
             func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             if func in ("import_module", "__import__"):
                 first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
-                    return True
-            elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    stems.add(last(first.value))
+            elif func in _LOADERS:
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if any(names_base(part, set()) for part in parts):
-                    return True
-    return False
+                scope = scope_of(node)
+                for part in parts:
+                    collect(part, set(), scope, loads)
+            elif func in _FILE_CALLS:
+                for part in list(node.args) + [kw.value for kw in node.keywords]:
+                    read_collect(part, set(), reads)
+            if is_path_call(node.func):
+                read_collect(node, set(), reads)
+    return stems, loads, reads
+
+
+def _profile_loads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) imports or loads the module `stem`: a `.py` stem imported by name, or the
+    basename `stem + extension` in a loader's path argument."""
+    stems, loads = profile[0], profile[1]
+    return (extension == ".py" and stem in stems) or stem + extension in loads
+
+
+def _profile_reads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) loads the module `stem + extension`, or names it in a path expression that
+    copies, opens or runs a file."""
+    return _profile_loads(profile, stem, extension) or stem + extension in profile[2]
+
+
+def _loads_module(source: str, stem: str, extension: str = ".py") -> bool:
+    """True when the Python text imports or loads the module `stem`, or loads `stem + extension` by a file loader
+    (`_load_profile`, `_profile_loads`). A text that does not parse reads False."""
+    return _profile_loads(_load_profile(source), stem, extension)
+
+
+def _tracked_files():
+    """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
+    done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                         encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        return None, "git ls-files failed: %s" % done.stderr.strip()
+    return [item for item in done.stdout.split("\0") if item], None
+
+
+def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
+    """The suites that test any of `paths`. Per path: each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, whether
+    or not it parses, plus each tracked `test_*.py` whose profile (`_load_profile`) reads it: it imports or loads the path's
+    module when the path is a `.py` file, or it names the path's basename in a path expression that copies, opens or runs
+    a file. A listed file (REPORT_TARGETS) adds its listed suites; with `union` False it gets those only and no scan. With
+    `chain` True a suite also tests a `.py` path that a module it loads imports, however deep: from each tracked `.py` the
+    suite names (by stem or by basename), it follows the stems that file imports (`import`, `from`, a literal
+    `import_module`) to tracked `.py` files, each file once, so a cycle ends. A deleted `.py` path is no longer tracked, so
+    its stem is matched against the stems those files import. A stem or basename with no tracked `.py` is outside the
+    repository and ends the chain there. Each file is read and parsed once, whatever the number of paths or suites. A file
+    that cannot be read has an empty profile."""
+    import re
+    listed = dict(REPORT_TARGETS)
+    names = set()
+    scan = [path for path in paths if union or path not in listed]
+    for path in paths:
+        if path in listed:
+            names.update(listed[path])
+    if not scan:
+        return names
+    profiles = {}  # a tracked path -> its profile; each file read once
+
+    def profile_of(item):
+        if item not in profiles:
+            try:
+                with open(item, encoding="utf-8") as handle:
+                    profiles[item] = _load_profile(handle.read())
+            except (OSError, ValueError):
+                profiles[item] = (set(), set(), set())
+        return profiles[item]
+
+    suites = [item for item in tracked if os.path.basename(item).startswith("test_") and item.endswith(".py")]
+    reached = {}  # a suite -> the tracked .py files its loads lead to
+    reached_stems = {}  # a suite -> the stems those files import, so a deleted module (no longer tracked) still matches
+    if chain:
+        by_stem = {}
+        for item in tracked:
+            if item.endswith(".py"):
+                by_stem.setdefault(os.path.splitext(os.path.basename(item))[0], []).append(item)
+        for suite in suites:
+            stems, loads, reads = profile_of(suite)
+            todo = [file for stem in stems for file in by_stem.get(stem, [])]
+            todo += [file for base in loads | reads if base.endswith(".py") for file in by_stem.get(base[:-3], [])
+                     if os.path.basename(file) == base]
+            seen = set()
+            followed = set()
+            while todo:
+                file = todo.pop()
+                if file in seen:
+                    continue
+                seen.add(file)
+                file_stems = profile_of(file)[0]
+                followed.update(file_stems)
+                todo.extend(next_file for stem in file_stems for next_file in by_stem.get(stem, []))
+            reached[suite] = seen
+            reached_stems[suite] = followed
+    for path in scan:
+        folder, name = os.path.split(path)
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        for item in suites:
+            if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
+                    or _profile_reads(profile_of(item), stem, extension) \
+                    or path in reached.get(item, ()) \
+                    or (extension == ".py" and stem in reached_stems.get(item, ())):
+                names.add(item)
+    return names
+
+
+def _guard_section_sources(tracked) -> list:
+    """The text of each tracked `.py` file directly in the folder that the runner SUITE reads its guard sections from. The
+    folder is the runner's SECTION_DIR, found by `rule_audit._section_dir`, the one home of that path. Empty when the runner
+    names no folder. A file that cannot be read is skipped."""
+    import ast
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import rule_audit
+    try:
+        with open(SUITE, encoding="utf-8") as handle:
+            folder = rule_audit._section_dir(ast.parse(handle.read()), SUITE)
+    except (OSError, ValueError, SyntaxError):
+        return []
+    if not folder:
+        return []
+    rel = os.path.relpath(os.path.normpath(folder), os.path.dirname(HERE)).replace(os.sep, "/")
+    sources = []
+    for item in tracked:
+        if os.path.dirname(item) != rel or not item.endswith(".py"):
+            continue
+        try:
+            with open(item, encoding="utf-8") as handle:
+                sources.append(handle.read())
+        except (OSError, ValueError):
+            continue
+    return sources
 
 
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
-    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
-    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
-    `claude_settings` profile. A file with no suite prints nothing."""
+    suites. Any other file prints `suites_for_paths` with no union: each tracked `test_<stem>.py` and `test_<stem>_*.py`
+    beside it, plus each tracked `test_*.py` of the repository of the working folder that imports or loads its module, or
+    names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
+    (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
+    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
+    whole `hooks/test_guard.py`. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
-    import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
     parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
     args = parser.parse_args(argv)
@@ -2905,29 +4393,51 @@ def tests_for_main(argv) -> int:
     if path in listed:
         names = set(listed[path])
     else:
-        folder, name = os.path.split(path)
-        stem, extension = os.path.splitext(name)
-        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
-        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
-                             encoding="utf-8", stdin=subprocess.DEVNULL)
-        if done.returncode != 0:
-            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
             return 2
-        tracked = [item for item in done.stdout.split("\0") if item]
-        names = {item for item in tracked
-                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
-        if extension == ".py":
-            for item in tracked:
-                base = os.path.basename(item)
-                if item in names or not (base.startswith("test_") and base.endswith(".py")):
-                    continue
-                try:
-                    with open(item, encoding="utf-8") as handle:
-                        source = handle.read()
-                except (OSError, ValueError):
-                    continue
-                if _loads_module(source, stem):
-                    names.add(item)
+        names = suites_for_paths([path], tracked, union=False)
+        stem, extension = os.path.splitext(os.path.basename(path))
+        # The runner reads each guard section file, so it stands for a section file that loads the module.
+        if extension == ".py" and any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
+            names.add("hooks/test_guard.py")
+        if path in GUARD_MODULE_FAMILIES:
+            # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
+            names.discard("hooks/test_guard.py")
+            names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
+    for name in sorted(names):
+        print(name)
+    return 0
+
+
+def lint_suites_main(argv) -> int:
+    """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
+    one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets
+    the suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
+    `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
+    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
+    parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
+    args = parser.parse_args(argv)
+    done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", args.lint_suites + "...HEAD"],
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        print("ERROR git diff %s...HEAD failed: %s" % (args.lint_suites, done.stderr.strip()))
+        return 2
+    changed = sorted({item.replace(os.sep, "/") for item in done.stdout.split("\0") if item})
+    tracked = []
+    if changed:
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
+            return 2
+    names = suites_for_paths(changed, tracked, union=True, chain=True)
+    # A changed suite is picked itself: an edit that breaks its own suite is caught by that suite.
+    on_disk = set(tracked)
+    names.update(item for item in changed if item in on_disk
+                 and os.path.basename(item).startswith("test_") and item.endswith(".py"))
     for name in sorted(names):
         print(name)
     return 0
@@ -2948,6 +4458,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
@@ -2957,7 +4468,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         result = _nowindow.run(
             # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
             [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=1200,
+            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
         )
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
@@ -2992,55 +4503,60 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
-def run_mutant(sources, work: str, entry):
-    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip, ERROR lines).
+def lay_out_guard_reads(root: str) -> None:
+    """Copy into `root` the three files outside hooks/, lint/, janitor/ and skills/ that a copied guard family
+    reads from beside its hooks folder: bin/sim-lease, the merge tool and the CI alarm's events. The folders
+    lint/, janitor/ and skills/ come from the callers, through `tracked_tree.copy_tracked` (git's own list, so no
+    file is hand-picked). The simulator refusal imports janitor/sweep.py and fails open without it.
+    A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
+    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, three files (about 275 KB), and
+    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (225 files, about 4.8 MB,
+    at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
+    read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
+    os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+    shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+    # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL), which reads ../actions/ci-alarm/events.json (ALARM_EVENTS).
+    os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
+    os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
+                os.path.join(root, "actions", "ci-alarm"))
 
-    `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
-    when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause.
-    """
-    label, old, new, target, required, only_on = mutation_parts(entry)
-    if required is None:
-        raise ValueError("mutation carries no required case name: %s" % label)
-    skip = mutate_shared.skip_reason(only_on)
-    if skip:
-        return label, None, [], required, skip
-    _path, suite, variable, stem = TARGETS[target]
+
+def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> str:
+    """Lay out one copy of `target` under `work` with `old` replaced by `new`, and return the path
+    of the file its suite loads. `name` keys the copy's folder or file (through `mutate_shared.safe_name`).
+
+    A mutant and its clean-layout control both go through here, so they differ only in the text:
+    `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
+    stem = TARGETS[target][3]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
-        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
-        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
-        # Without them every simulator arm would be judged against a guard that allows everything.
-        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
-        os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
-        else:
+        elif old != new:  # old == new is the clean-layout control: no anchor to find
             mutate_shared.apply_mutant(tree, old, new)
-            shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
-        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
-        for name in ("sweep.py", "temp_sweep.py"):
-            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
+        # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
+        # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
+        # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
+        # checkout, never from this scaffold.
+        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     else:
-        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
         # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
         # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
-        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
+        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
@@ -3050,7 +4566,7 @@ def run_mutant(sources, work: str, entry):
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
         # copied guard and the suite's grant child both import the override module beside guard.py.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         for helper in ("local_time.py", "_nowindow.py"):
             shutil.copy(os.path.join(HERE, helper), tree)
@@ -3059,7 +4575,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "guard.py")
     elif target == "calljudge":
         # call_judge.py imports guard_core and decision_watch beside itself: lay out the whole family.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -3067,6 +4583,77 @@ def run_mutant(sources, work: str, entry):
     elif target not in ("guard", "simlease"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
+    return copy_path
+
+
+def run_controls(sources, work: str, entries):
+    """Return {target: function} with one filtered control per target that has a mutation to run here.
+
+    A control is `run_suite` on the unmutated layout, built by `lay_out` with an identity mutation and
+    filtered to one required case of that target's own mutations (`run_control`). It answers one question:
+    does this layout run its suite at all? A layout that crashes (a missing sibling module, a wrong path)
+    fails every case whatever a mutant changed, and each FAIL line reads as a kill; one that exits 0 having
+    run no case is the same crash seen from the other side.
+    `mutate_shared.run_mutants` takes these functions as its `controls`: it runs them in the same pool as the
+    mutants, ahead of them, under MUTATE_JOBS, and makes every mutant of a red, empty or raising target UNKNOWN
+    (`mutate_shared.control_verdict`). `work` is `main`'s folder, after `main` has laid the shared guard family,
+    lint and guard reads in it.
+
+    Cost (rule outcomes-mechanize-rules): one filtered suite run and one temp tree per target per run, inside
+    the job cap. A filtered run takes seconds, as a mutant's first stage does. It writes no log and starts no
+    timer, thread or other long-lived process beyond the run's own pool."""
+    targets = []
+    for entry in entries:
+        _label, _old, _new, target, _required, only_on = mutation_parts(entry)
+        if target not in targets and not mutate_shared.skip_reason(only_on):
+            targets.append(target)
+    return {target: functools.partial(run_control, sources, work, target, entries) for target in targets}
+
+
+def control_name(target: str) -> str:
+    """The name keying a target's control copy, which `main` also checks for path collisions."""
+    return "clean layout of %s" % target
+
+
+def control_case(target: str, entries) -> str:
+    """The required case fragment a target's control runs: the first one among its mutations that run here."""
+    for entry in entries:
+        _label, _old, _new, entry_target, required, only_on = mutation_parts(entry)
+        if entry_target == target and required and not mutate_shared.skip_reason(only_on):
+            return required
+    raise ValueError("no mutation of target %s has a required case to run here" % target)
+
+
+def run_control(sources, work: str, target: str, entries=None):
+    """Run one filtered case of `target`'s suite on the unmutated layout. Return run_suite's result tuple.
+    `entries` defaults to MUTATIONS."""
+    _path, suite, variable, _stem = TARGETS[target]
+    name = control_name(target)
+    only = control_case(target, MUTATIONS if entries is None else entries)
+    copy_path = lay_out(sources, work, target, name, "", "")
+    config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(name))
+    os.makedirs(config_dir, exist_ok=True)
+    return run_suite(suite, variable, copy_path, config_dir, only)
+
+
+def run_mutant(sources, work: str, entry):
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
+    required, skip, ERROR lines).
+
+    `required` is the case name (or a distinctive fragment of it) the caller must find among the
+    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
+    when not None, is why this mutant did not run on this platform at all: the caller reports it
+    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    judges it against its target's clean-layout control (`run_controls`).
+    """
+    label, old, new, target, required, only_on = mutation_parts(entry)
+    if required is None:
+        raise ValueError("mutation carries no required case name: %s" % label)
+    skip = mutate_shared.skip_reason(only_on)
+    if skip:
+        return label, None, [], required, skip
+    _path, suite, variable, _stem = TARGETS[target]
+    copy_path = lay_out(sources, work, target, label, old, new)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red, seen = mutate_shared.staged_suite_seen(
@@ -3085,6 +4672,8 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    if "--lint-suites" in sys.argv[1:]:
+        return lint_suites_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
@@ -3139,6 +4728,20 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # Each target's clean-layout control (run_controls) writes its own copy and config folder, and
+    # must not collide with a mutant's either. The control's index is past every mutation's.
+    for control_index, target in enumerate(sorted({mutation_parts(e)[3] for e in MUTATIONS}),
+                                           start=len(MUTATIONS)):
+        label = control_name(target)
+        safed = mutate_shared.safe_name(label)
+        for candidate in ("%s_%s.py" % (TARGETS[target][3], safed), "cfg_%s" % safed):
+            other = seen_paths.get(candidate.lower())
+            if other is not None:
+                print("ERROR two mutations share one path on a case-insensitive filesystem: "
+                      "%r and %r both produce %s" % (other[1], label, candidate))
+                return 1
+            seen_paths[candidate.lower()] = (control_index, label)
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -3153,12 +4756,14 @@ def main() -> int:
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
     # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
+    tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+    lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
+            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

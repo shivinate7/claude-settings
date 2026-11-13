@@ -118,5 +118,5 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
 ## 10. Work outside this folder (for the builder)
 
 - page.html: Reply, the reply box, threads in `askAll` and `renderAskList`, `.myreply`, `.fwait`, the reply draft key, `where` in the sent slot.
-- SKILL.md, "The database" and "Route an ask": the `re` field. The page writes it once at Send. The writer routes a reply to the
+- skill `waiting-page`, "The database" and "Route an ask": the `re` field. The page writes it once at Send. The writer routes a reply to the
   `owner` of the record `re` names, or takes it when that session is gone.

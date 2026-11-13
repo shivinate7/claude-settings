@@ -55,7 +55,7 @@ record ids and no incident text.
     lints) reads git diff through process substitution. It has no fail-closed check.
   - lint/test_all_jobs_passed.py reads only the cs checks workflow, through CHECKS_YML (the
     variable that sets that path).
-  - actions/code-check/standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
+  - lint/code_check_standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
   - .github/workflows/checks.yml:89-90 runs zizmor (a GitHub workflow linter) as a plain step.
   - lint/rule_audit.py reads only CLAUDE.md and the shiv-stylisms output style (RULE_FILES).
   - lint/stale_cites.py takes --range only. It has no whole-tree mode.
@@ -99,7 +99,7 @@ gloss here. The reader did not return the titles.
 | 2 | guard-shell.py: clause_tree_bash, clause_tree_write. Stops a write outside this checkout. | D179 | 2026-09-06 about 1,500 lines written into the main checkout | DUPLICATE | cs hooks/guard.py rule other-checkout. Double fire live in Claude Code |
 | 3 | guard-shell.py: clause_wait. Stops a sleep or poll loop, and a waiter that matches itself in pgrep. | D179, D173 | 2026-09-12 pgrep waiter; 119-round merge loop | DUPLICATE | cs hooks/guard_stream.py:waiter_verdict. Double fire live |
 | 4 | guard-shell.py: clause_narrate (NARRATORS). Stops make merge piped into tail. | D235, D179 | 2026-09-20 | PROMOTE (--confirm spelling); DUPLICATE (rest) | cs hooks/guard_stream.py:narrated_tail_hit misses make merge with --confirm piped into tail (probed). Promote that spelling (not placed). The rest double fires live |
-| 5 | guard-shell.py: clause_push. Stops git push <remote> HEAD when the upstream has another name. | D179 | 2026-09-12 stray branch on origin | PROMOTE | cs hooks/guard_push_delete.py, beside push_verdict. Lane push-head-upstream-name |
+| 5 | guard-shell.py: clause_push. Stops git push <remote> HEAD when the upstream has another name. | D179 | 2026-09-12 stray branch on origin | DUPLICATE | cs hooks/guard_push_delete.py:push_ask_hit (rule push-stray-branch, ruling 206 a) asks on it; measured 2026-11-08. The agent-worktree form is refused by rule push-agent-branch |
 | 6 | guard-shell.py: clause_owner_only, _hatches_set, and the hatch audit rows. Stops an agent that sets a BANCHI_* hatch (an environment switch that turns a guard off). | D179 | none found | STAYS ? | Repo fact: BANCHI_* hatches. cs uses hooks/override.py. Goes if the hatches go |
 | 7 | silent-write-guard.py, with its selftest. Stops a git write whose output is discarded. | D171 | 2026-09-12 nine in 24 hours | PROMOTE (file and bash-c clauses); DUPLICATE (rest) | cs hooks/guard.py:silent_write_hit allows an unread-file sink and a bash -c git write. Banchi's Claude-side copy runs only those two clauses (BANCHI_SILENT_WRITE_ONLY=file,bash-c). Promote them (not placed). The rest runs in Codex only. Waits on owner question 1 |
 | 8 | reap.py: hook; reap_mark.py, with selftest. Stops a kill by name, or of another session's pid. | D127 | 2026-09-09 and 09-10 pkill -f hit :8000; 2026-09-27 | DUPLICATE ? | cs hooks/guard_kill.py:foreign_pid_kill, pid_is_session_job. Codex only, so no cs runner. Waits on owner question 1 |
@@ -232,7 +232,7 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 |---|---|---|---|
 | 1 | .github/workflows/check.yml scope step | STAYS ? | none |
 | 2 | Check, links and nightly workflow jobs that call cs actions | CONSUMER | cs actions/* (pinned da8d8073) |
-| 3 | Makefile lint-py: ruff check (ruff, a Python linter) | DUPLICATE ? | actions/code-check standard.json (ruff 0.17.3). This repo pins 0.17.0. Remove the local pin |
+| 3 | Makefile lint-py: ruff check (ruff, a Python linter) | DUPLICATE ? | lint/code_check_standard.json (ruff 0.17.3). This repo pins 0.17.0. Remove the local pin |
 | 3b | Makefile lint-py: ruff format check | STAYS ? | none |
 | 4 | Makefile lint-js: tsc --noEmit | DUPLICATE | actions/code-check typescript (runs twice in CI today) |
 | 5 | Makefile lint-actions: zizmor | PROMOTE ? | new actions/zizmor (lane zizmor-shared-action) |
@@ -369,14 +369,13 @@ copy, so no CI gap.
   2026-08-29 a symlink lost a 133 MB mirror.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 
-### 8. push-head-upstream-name (?)
+### 8. push-head-upstream-name
 
-- **cs files:** hooks/guard_push_delete.py. push_verdict allows a push that is not forced. An
-  explicit HEAD takes the checkout's current name (_push_dest). So a HEAD push to a name other
-  than the upstream passes. The lane judges that push. Tests: new cases in hooks/test_guard.py.
-- **Gap:** read from the code. Not run. Confirm the stray-branch case before the lane starts.
-- **Done check:** new cases in hooks/test_guard.py: git push origin HEAD, on a branch whose upstream
-  has another name, is asked. Red on the current code, green after.
+- **Status:** done on main before the lane started. Rule push-stray-branch
+  (hooks/guard_push_delete.py `push_ask_hit`, ruling 206 a) asks on a HEAD push from a branch
+  whose upstream has another name. Measured 2026-11-08, quoted HEAD too. The lane retired the
+  debt push-head-mismatch-trap and added rule push-agent-branch, which refuses a push to an
+  agent-worktree branch name.
 - **Child removals:** banchi row 5 (clause_push). Incident: 2026-09-12 a stray branch on origin.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 
@@ -403,8 +402,8 @@ copy, so no CI gap.
 
 ### 11. mjs-load-files
 
-- **cs files:** actions/code-check covers .mjs imports. Its standard.json skips the javascript
-  typecheck (line 53: checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
+- **cs files:** actions/code-check covers .mjs imports. Its standard, lint/code_check_standard.json, skips the javascript
+  typecheck (checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
 - **Done check:** a .mjs file with a broken import is red on the current code, green after.
 - **Child removals:** q_max row 18 (harness/load-files.mjs) stays, partly. PR #1135 (lane mjs-load-files) found that the shared check misses a bare package absent from node_modules, and .ts files run through tsx. The child keeps its own check for those until its own tsc covers them.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
@@ -479,7 +478,7 @@ that waits on a lane or an owner question says so.
 
 ### degen
 
-- Row 3 (ruff, "?"): cs actions/code-check standard.json pins ruff 0.17.3. This repo pins 0.17.0.
+- Row 3 (ruff, "?"): cs lint/code_check_standard.json pins ruff 0.17.3. This repo pins 0.17.0.
   Remove the local pin. Ruff format stays.
 - Row 4: tsc --noEmit runs twice in CI. Remove the local step. cs actions/code-check typescript runs
   it.

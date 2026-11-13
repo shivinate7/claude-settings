@@ -388,7 +388,7 @@ def case_prompt_carries_reply_and_rules():
 # --------------------------------------------------------------------------- case 5b
 # The owner-step rule, output-never-hand-off-doable-step: a step left to the owner comes as its
 # own fenced code block, outside the report blockquote. The judge is a model and the model is a
-# stub here, so a canned {"ok": false} on a prose-step reply would also be green on main and prove
+# stub here, so a canned {"ok": false} on a prose-step reply would pass the case too and prove
 # nothing. What can go red is the prompt, the one input the real model gets. Each case sends one
 # reply and reads the rule text before it (never the reply, so a word in the reply cannot satisfy
 # a pin). A pin is one sentence that holds a word from every group. The wording stays the

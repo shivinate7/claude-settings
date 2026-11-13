@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+# mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->
+# mail read [--addr <addr>] [<id>]   list the open messages, or show one with its body
+# mail take [--addr <addr>] <id>     move one open message to done/; act on it only after this exits 0
+# mail wait [--interval <s>] [--max-seconds <s>]   block until new mail for the session's address, then print one line per new message
+# --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
+# The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
+# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use, MAILBOX_REPO not set, or the platform held. Windows: bin/mail.cmd.
+# wait exits 0 on new mail; 2 not started (MAILBOX_REPO unset, no address, a waiter already runs, the lock cannot be taken,
+# the mailbox unreadable at start for about 5 minutes, or a bad --interval or --max-seconds); 3 ended with no mail.
+import argparse
+import os
+import secrets
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import mail  # noqa: E402  hooks/mail.py
+
+TRIES = 6  # the first push and at most 5 retries, each only after a non-fast-forward
+WAIT_CEILING = 7000  # the most --max-seconds a wait may ask for, in seconds
+
+
+def stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def send(env, args, addrs):
+    try:
+        body = (sys.stdin.read() if args.body_file == "-" else open(args.body_file, encoding="utf-8").read())
+    except UnicodeDecodeError:
+        print("not sent: body is not UTF-8", file=sys.stderr)
+        return 1
+    mid = secrets.token_hex(6)
+    for attempt in range(1, TRIES + 1):
+        tip = mail.sync(env)
+        text = "Msg %s from %s to %s kind %s re %s try %d\nReply-to: %s\n\n%s" % (
+            mid, addrs[0], args.to, args.kind, args.re or "-", attempt, addrs[0], body.rstrip("\n") + "\n")
+        commit = mail.commit_tree(env, tip, {"mail/%s/%s.md" % (args.to, mid): text}, [], "mail %s" % mid)
+        if mail.push(env, commit):
+            print("sent %s to %s" % (mid, args.to))
+            return 0
+    print("not sent: the mail ref kept moving, %d tries" % TRIES, file=sys.stderr)
+    return 1
+
+
+def show(env, addrs, mid):
+    tip = mail.sync(env)
+    if not tip:
+        print("no open messages" if not mid else "no open message %s" % mid)
+        return 0 if not mid else 1
+    if mid is None:
+        lines = mail.render(mail.open_messages(env, tip, addrs), time.time())
+        print("\n".join(lines) if lines else "no open messages")
+        return 0
+    paths = ["mail/%s/%s.md" % (addr, mid) for addr in addrs]
+    found = mail.must(["ls-tree", "--name-only", tip, "--"] + paths, env, mail.cache_path(env)).split()
+    if not found:
+        print("no open message %s" % mid, file=sys.stderr)
+        return 1
+    # A show that fails on a path ls-tree found is a git fault, so it says unknown and never "no open message".
+    print(mail.must(["show", "%s:%s" % (tip, found[0])], env, mail.cache_path(env)), end="")
+    return 0
+
+
+def take(env, addrs, mid):
+    for _ in range(TRIES):
+        tip = mail.sync(env)
+        paths = ["mail/%s/%s.md" % (addr, mid) for addr in addrs]
+        left = mail.must(["ls-tree", "--name-only", tip, "--"] + paths, env, mail.cache_path(env)).split() if tip else []
+        if not left:
+            gone = ["done/%s/%s.md" % (addr, mid) for addr in addrs]
+            done = mail.must(["ls-tree", "--name-only", tip, "--"] + gone, env, mail.cache_path(env)).split() if tip else []
+            print("taken by another" if done else "no open message %s" % mid, file=sys.stderr)
+            return 1
+        text = mail.must(["show", "%s:%s" % (tip, left[0])], env, mail.cache_path(env))
+        moved = "done/" + left[0][len("mail/"):]
+        text = text.rstrip("\n") + "\nTaken-by: %s %s %s\n" % (addrs[0], stamp(), secrets.token_hex(4))
+        if mail.push(env, mail.commit_tree(env, tip, {moved: text}, [left[0]], "take %s" % mid)):
+            print("taken %s" % mid)
+            return 0
+    print("not taken: the mail ref kept moving, %d tries" % TRIES, file=sys.stderr)
+    return 1
+
+
+def main(argv):
+    # The tool reads and prints UTF-8 whatever the locale: a Windows pipe defaults to cp1252 and fails on "→".
+    # Own copy: guard_core's helper is private and covers stdout and stderr only; verdict is a standalone script.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):  # redirect_stdout in a test swaps in a StringIO, which has no reconfigure
+            stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(prog="mail")
+    sub = parser.add_subparsers(dest="command", required=True)
+    one = sub.add_parser("send")
+    one.add_argument("--to", required=True)
+    one.add_argument("--kind", required=True, choices=("request", "inform", "reply"))
+    one.add_argument("--re")
+    one.add_argument("--body-file", required=True)
+    one = sub.add_parser("read")
+    one.add_argument("--addr")
+    one.add_argument("id", nargs="?")
+    one = sub.add_parser("take")
+    one.add_argument("--addr")
+    one.add_argument("id")
+    one = sub.add_parser("wait")
+    one.add_argument("--interval", type=int, default=mail.WAIT_INTERVAL)
+    one.add_argument("--max-seconds", type=int, default=mail.WAIT_MAX_SECONDS)
+    args = parser.parse_args(argv)
+    env = dict(os.environ)
+    if args.command == "wait":
+        # The 7000 s ceiling keeps a run under the 2 h background cap, which would end it with no line for the session.
+        for name, value, top in (("--interval", args.interval, None), ("--max-seconds", args.max_seconds, WAIT_CEILING)):
+            if value < 1 or (top and value > top):
+                print("mail wait: not started: %s %s" % (name, "below 1" if value < 1 else "above %d" % top))
+                return 2
+        addrs = mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env) if env.get("MAILBOX_REPO") else []
+        return mail.wait(env, addrs, clock=time.time, sleep=time.sleep, interval=args.interval, max_seconds=args.max_seconds)
+    if not env.get("MAILBOX_REPO"):
+        print("MAILBOX_REPO is not set", file=sys.stderr)
+        return 2
+    if mail.held(env):
+        print("mail is held on this platform until its round trip passes (step mail-mac-unhold)", file=sys.stderr)
+        return 2
+    addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
+    if not addrs:
+        print("no address: set CLAUDE_CODE_REMOTE_SESSION_ID or run inside a git repo with an origin", file=sys.stderr)
+        return 2
+    named = [value for value in (getattr(args, "to", None), getattr(args, "re", None), getattr(args, "id", None),
+                               getattr(args, "addr", None)) if value]
+    if not all(mail.safe(value) for value in named):
+        print("bad address or id", file=sys.stderr)
+        return 2
+    try:
+        if args.command == "send":
+            return send(env, args, addrs)
+        return show(env, addrs, args.id) if args.command == "read" else take(env, addrs, args.id)
+    except mail.MailError as error:
+        print(("not sent: %s" if args.command == "send" else "mail unknown: %s") % error, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

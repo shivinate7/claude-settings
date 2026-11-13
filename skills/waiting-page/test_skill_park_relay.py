@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prose contract for the waiting page's Park relay: skills/waiting-page/SKILL.md and docs/debts/notes.md.
+"""Prose contract for the waiting page: skills/waiting-page/SKILL.md (its Park relay and option labels) and docs/debts/notes.md.
 
     python3 -m unittest skills/waiting-page/test_skill_park_relay.py
 
@@ -10,6 +10,8 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   4. The untold-receiver note no longer says the receiver cannot be found while a close drops `lane`.
   5. In the park branch, every message is under a `lane` condition, and a park on an item with no `lane` just closes.
   6. The park tell names only the page URL, the item id and the act withdrawn, never the answer's note or text.
+  7. The decision's option bullet (the one with the option shape `{key, label, how`) says a settings-change option's
+     label names settings.json and the entry.
 """
 import os
 import re
@@ -48,6 +50,10 @@ WITHDRAWN = re.compile(r"\bwithdrawn\b", re.I)
 # Case 4: the old claim, a receiver that cannot be found, tied to a close that drops lane.
 OLD_FIND = re.compile(r"\b(?:cannot|can't|can not|unable to)\s+find\s+the\s+receiver\b", re.I)
 DROP_LANE = re.compile(r"\bdrops?\b[^.]{0,60}\blane\b", re.I)
+# Case 7: the option field list starts the decision's option bullet. Only its start is pinned, so a field added after
+# `how` does not move the anchor. The label names the settings file and the entry, in code or plain text.
+OPTION_SHAPE = "{key, label, how"
+SETTINGS_LABEL = re.compile(r"label names `?settings\.json`? and the entry", re.I)
 
 
 def read(path):
@@ -140,6 +146,19 @@ def lane_gated(sents, i):
     return False
 
 
+def option_bullet(text):
+    """The decision's option bullet: the two-space `- ` item holding OPTION_SHAPE, with its indented sub-bullets, up to the
+    next sibling bullet or heading. "" when no bullet holds it."""
+    start = text.find(OPTION_SHAPE)
+    if start < 0:
+        return ""
+    head = text.rfind("\n  - ", 0, start)
+    if head < 0:
+        return ""
+    stops = [i for i in (text.find("\n  - ", start), text.find("\n## ", start)) if i >= 0]
+    return text[head + 1:min(stops) if stops else len(text)]
+
+
 class ParkRelayProse(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -201,6 +220,17 @@ class ParkRelayProse(unittest.TestCase):
                          "the park tell names the answer's note or text: %s" % (tells[0] if tells else ""))
         self.assertTrue(any(PAGE_URL.search(s) and ITEM_ID.search(s) and WITHDRAWN.search(s) for s in tells),
                         "the park tell does not name the page URL, the item id and the act withdrawn")
+
+
+class OptionLabelGuidance(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bullet = option_bullet(read(SKILL))
+
+    def test_7_option_label_names_settings_json_and_the_entry(self):
+        self.assertTrue(self.bullet, "SKILL.md has no decision option bullet with the option shape `{key, label, how`")
+        self.assertRegex(self.bullet, SETTINGS_LABEL,
+                         "the option guidance does not say a settings-change option's label names settings.json and the entry")
 
 
 if __name__ == "__main__":

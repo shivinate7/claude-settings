@@ -6,7 +6,7 @@ No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build.
 `playwright-browsers-path` refuses a Bash or PowerShell command that sets the variable. A read, a grep
 and `unset` stay allowed. The refusal sends the reader to the two measured causes:
 
-- A stale `__dirlock` in the Playwright cache. The reader runs `pgrep -fl playwright` to confirm that no
+- A stale `__dirlock` in the Playwright cache. The reader runs `pgrep -f playwright` to confirm that no
   install is running, then removes the lock.
 - An install that hangs while it unpacks under Node 26.11 with Playwright 1.58. Under Node 22 it unpacks
   in 0.75 s, through `npx -y node@22 node_modules/playwright/cli.js install`.

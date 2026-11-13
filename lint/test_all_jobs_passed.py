@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS  # noqa: E402  the one home of the checks.yml path
 from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems, needs_problems,  # noqa: E402  the one home of the rules
-                                   off_problems, scope_if_problems, shape_problems, steps_problems)
+                                   needs_of, off_problems, scope_if_problems, shape_problems, steps_problems)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
@@ -377,6 +377,18 @@ class ChildActionAndLayouts(unittest.TestCase):
         code, out = child_check(text)
         self.assertEqual(code, 0, "a push-only job left out of needs: exit %d, want 0: %s" % (code, out))
         self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
+
+
+class NeedsOf(unittest.TestCase):
+    """needs_of reads each name as YAML does: a quoted item loses its quotes, in a block list or in a flow list."""
+
+    def test_a_block_list_with_quoted_items_reads_their_names(self):
+        block = "  checks-mac:\n    runs-on: macos-latest\n    needs:\n      - 'a'\n      - \"b\"\n    steps:\n      - run: echo\n"
+        self.assertEqual(needs_of(block), ["a", "b"], "a block list's quoted items must read as their names")
+
+    def test_a_flow_list_on_one_line_with_quoted_items_reads_their_names(self):
+        block = "  checks-mac:\n    runs-on: macos-latest\n    needs: ['a', 'b']\n    steps:\n      - run: echo\n"
+        self.assertEqual(needs_of(block), ["a", "b"], "a flow list's quoted items must read as their names")
 
 
 if __name__ == "__main__":

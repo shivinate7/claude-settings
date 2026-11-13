@@ -13,25 +13,30 @@ Why not rule_audit.py: it reads step names only. This needs job boundaries and `
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
 CHECKS_YML overrides the path (used for red runs on a scratch copy).
 
-CiCoverage also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
+CiCoverage also proves every tracked test file has a run step: test_*.py, test_*.sh, test_*.mjs, *.test.mjs,
+*.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
 SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
-each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`.
+each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
+(checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value, and both shards
+are named in the all-jobs-passed and ci-done needs.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key, yaml_scalar  # noqa: E402  the one home of the step parser and its scalar reader
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key, yaml_scalar  # noqa: E402
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -97,6 +102,7 @@ LINUX_SUITES = {
     "python3 hooks/test_agent_brief.py": (None, None),
     "python3 hooks/test_blind_brief.py": (None, None),
     "python3 hooks/test_local_time.py": (None, None),
+    "python3 hooks/test_probe.py": (None, None),
     "python3 hooks/test_ci_wake.py": (None, None),
     "python3 hooks/test_feedback_inbox.py": (None, None),
     "python3 hooks/test_waiting_export.py": (None, None),
@@ -107,6 +113,7 @@ LINUX_SUITES = {
     "python3 hooks/test_stall_watch_stop.py": (None, None),
     "python3 hooks/test_sim_boot_record.py": (None, None),
     "python3 hooks/test_wrappers.py": (None, None),
+    "python3 hooks/test_checks_never_raise.py": (None, None),
     "python3 hooks/test_session_start.py": (None, None),
     "python3 lint/test_report_guard.py": (None, None),
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
@@ -133,6 +140,7 @@ LINUX_SUITES = {
     "python3 lint/test_settings_matcher.py": (None, None),
     "python3 lint/test_hook_platform_exit.py": (None, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),
+    "python3 lint/test_check_hook_dup_names.py": (None, None),
     "python3 lint/test_check_record_slugs.py": (None, None),
     "python3 lint/test_check_red_run.py": (None, None),
     "python3 lint/test_find_copies.py": (None, None),
@@ -145,7 +153,6 @@ LINUX_SUITES = {
     "python3 lint/test_retired_repos.py": (None, None),
     "python3 skills/waiting-page/test_stale_pages.py": (None, None),
     "python3 skills/waiting-page/test_splice.py": (None, None),
-    "python3 skills/waiting-page/test_export_page.py": (None, None),
     "python3 lint/test_check_artifact_cites.py": (None, None),
     "python3 skills/roadmap/test_build.py": (None, None),
     "python3 lint/test_check_shared_resources.py": (None, None),
@@ -162,6 +169,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_unknown_reads_contract.py": (None, None),
     "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
     "python3 lint/test_check_agent_models.py": (None, None),
+    "python3 lint/test_agent_push_form.py": (None, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
@@ -226,6 +234,7 @@ MACOS_SUITES = {
     "python3 hooks/test_agent_brief.py": (MAC_OWN, None),
     "python3 hooks/test_blind_brief.py": (MAC_OWN, None),
     "python3 hooks/test_local_time.py": (MAC_OWN, None),
+    "python3 hooks/test_probe.py": (MAC_OWN, None),
     "python3 hooks/test_ci_wake.py": (MAC_OWN, None),
     "python3 hooks/test_feedback_inbox.py": (MAC_OWN, None),
     "python3 hooks/test_waiting_export.py": (MAC_OWN, None),
@@ -306,13 +315,24 @@ def shard_base(name):
 # The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
+MUTATE_JOBS = [MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"]  # shard i of 3 runs MUTATE_SHARD=i/3
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
+# The export suite runs in SHOOT_JOB too: its picture cases run check_designs.mjs in Playwright, and loadPlaywright reads NODE_PATH.
+EXPORT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py'
+EXPORT_IF = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+# The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
+WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
+WAITING_PAGE_JOB = "checks-waiting-page"
+ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs'
 # The scope flag each job skips on when the flag is not its own name.
-FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos"}
-# The lint jobs run on every PR with no scope condition: `checks` and its split half `checks-merge-install`.
-LINT_JOBS = ("checks", "checks-merge-install")
+FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
+           "checks-guard-2": "checks_guard"}
+FLAG_OF[WAITING_PAGE_JOB] = "shoot"
+FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
+# The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
+LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
 ALL_JOBS_PASSED_JOB = "all-jobs-passed"
 
@@ -654,14 +674,20 @@ def guard_problems(text):
 
 
 def mutate_problems(text):
-    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
+    """Cut F. The guard mutation test runs in the MUTATE_JOBS shards on Linux, one shard each (MUTATE_SHARD=i/3), and in no other job."""
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
     problems = []
-    if homes != [MUTATE_JOB]:
-        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly [{MUTATE_JOB!r}]")
-    if MUTATE_JOB in jobs and not (jobs[MUTATE_JOB]["os"] or "").startswith("ubuntu"):
-        problems.append(f"{MUTATE_JOB} runs on {jobs[MUTATE_JOB]['os']}, want ubuntu-latest")
+    if sorted(homes) != sorted(MUTATE_JOBS):
+        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly {MUTATE_JOBS!r}")
+    for index, name in enumerate(MUTATE_JOBS, start=1):
+        if name not in jobs:
+            continue
+        if not (jobs[name]["os"] or "").startswith("ubuntu"):
+            problems.append(f"{name} runs on {jobs[name]['os']}, want ubuntu-latest")
+        shards = [yaml_scalar(str((st.get("env") or {}).get("MUTATE_SHARD", ""))) for st in jobs[name]["steps"] if st.get("run") == MUTATE_CMD]
+        if shards != [f"{index}/{len(MUTATE_JOBS)}"]:
+            problems.append(f"{name}: the mutate step sets MUTATE_SHARD {shards}, want ['{index}/{len(MUTATE_JOBS)}']")
     return problems
 
 
@@ -686,6 +712,43 @@ def shoot_problems(text):
     installs = [n for n in jobs if n != SHOOT_JOB and "playwright install" in (job_block(text, n) or "")]
     if installs:
         problems.append(f"a browser install runs outside {SHOOT_JOB}: {installs}")
+    return problems
+
+
+def export_suite_problems(text):
+    """The export suite runs in SHOOT_JOB and in no other job, as EXPORT_CMD, with its `if:` and `shell:` pinned (EXPORT_IF, bash)
+    and no env. Its picture cases need the Playwright that only SHOOT_JOB installs, so a copy elsewhere would fail there."""
+    named = [n for n in all_jobs(text) for st in step_blocks(job_block(text, n))
+             if any("test_export_page.py" in ln for ln in run_lines(st))]
+    if named != [SHOOT_JOB]:
+        return [f"the export suite runs in {named}, want exactly [{SHOOT_JOB!r}]"]
+    homes = split_homes(text, [SHOOT_JOB], EXPORT_CMD)
+    if len(homes) != 1:
+        return [f"{SHOOT_JOB}: no step runs {EXPORT_CMD!r}, so the export suite's run line is not the pinned one"]
+    return pin_problems(SHOOT_JOB, homes[0][1], EXPORT_CMD, EXPORT_IF, "bash")
+
+
+def waiting_page_problems(text):
+    """The waiting page suite runs in WAITING_PAGE_JOB on Linux and in no other job. The roadmap suite runs in SHOOT_JOB
+    alone. Every step of WAITING_PAGE_JOB carries the scope condition alone (step_rest), so no step can add a condition that
+    skips it and read green. The condition's form is scope_problems'. Named failure: a suite in the wrong job, in two, or in
+    none; a step that adds to or lacks the scope condition."""
+    jobs = all_jobs(text)
+    problems = []
+    for cmd, want in ((WAITING_PAGE_CMD, [WAITING_PAGE_JOB]), (ROADMAP_CMD, [SHOOT_JOB])):
+        homes = [job for job, _ in split_homes(text, list(jobs), cmd)]
+        if homes != want:
+            problems.append(f"{cmd!r} runs in {homes}, want exactly {want}")
+    job = jobs.get(WAITING_PAGE_JOB)
+    if job:
+        if not (job["os"] or "").startswith("ubuntu"):
+            problems.append(f"{WAITING_PAGE_JOB} runs on {job['os']}, want ubuntu-latest")
+        scope_condition = read_scope_condition(job)
+        if scope_condition is None:
+            problems.append(f"{WAITING_PAGE_JOB}: its steps carry no one scope condition (none carries one, or they disagree)")
+        else:
+            problems += [f"{WAITING_PAGE_JOB}: step {st.get('name') or st.get('uses') or st.get('run')} does not carry the scope "
+                         f"condition alone: {step_if(st)}" for st in job["steps"] if step_rest(st, scope_condition) != ""]
     return problems
 
 
@@ -757,6 +820,74 @@ def macos_split_problems(text):
     return problems
 
 
+SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
+
+
+def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run=SHOOT_CMD,
+              runs_on="ubuntu-latest", extra="", shoot_extra="", roadmap_run=None, waiting_run=None, waiting_runs_on="ubuntu-latest",
+              waiting_checkout_if=SHOOT_IF, waiting_install_if=SHOOT_IF, waiting_suite_if=SHOOT_IF):
+    """A workflow for the shoot and waiting page checkers: the lint job `checks`; SHOOT_JOB with its install and suite, then
+    roadmap_run and shoot_extra when set; WAITING_PAGE_JOB with its checkout, install and suite when waiting_run is set. `extra`
+    adds steps to the lint job. An `if` of None leaves that step's `if:` out."""
+    def if_line(expr):
+        return f"        if: {expr}\n" if expr else ""
+    install = if_line(install_if)
+    suite = if_line(suite_if)
+    roadmap = f"      - name: roadmap page suite\n        run: {roadmap_run}\n" if roadmap_run else ""
+    waiting = ""
+    if waiting_run:
+        checkout = MOD_CHECKOUT.split("\n", 1)[0] + "\n"  # the pinned checkout line has one home, MOD_CHECKOUT
+        waiting = (f"  {WAITING_PAGE_JOB}:\n    runs-on: {waiting_runs_on}\n    needs: scope\n    steps:\n" + checkout
+                   + if_line(waiting_checkout_if)
+                   + f"      - name: Install the pinned Playwright and Chromium\n{if_line(waiting_install_if)}"
+                   + f"        uses: {PLAYWRIGHT_USES}\n"
+                   + f"      - name: waiting page suite\n{if_line(waiting_suite_if)}        run: {waiting_run}\n")
+    return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+            f"      - name: lint\n        run: {lint_run}\n" + extra
+            + f"  {SHOOT_JOB}:\n    runs-on: {runs_on}\n    needs: scope\n    steps:\n"
+            + f"      - name: Install Chromium\n{install}        run: playwright install chromium\n"
+            + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n" + roadmap + shoot_extra + waiting)
+
+
+# The Linux guard split: the guard suite runs in two shards, one per job, each with its GUARD_SHARD value. Each shard step is
+# pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
+LINUX_GUARD_SHARD = {"checks-guard": "1/2", "checks-guard-2": "2/2"}
+LINUX_GUARD = "python3 hooks/test_guard.py"
+LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request'"
+LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
+PLAYWRIGHT_USES = "$/actions/playwright-setup"
+
+
+def linux_guard_split_problems(text):
+    """The Linux guard split: the guard suite runs in exactly the LINUX_GUARD_SHARD jobs, one shard each, and in no other Linux
+    job. Each shard step is pinned by pin_problems. A job-level GUARD_SHARD reaches every step of its job, so job_env_problems
+    flags it; a workflow-level one is hardening_problems' to flag."""
+    problems = job_env_problems(text, tuple(LINUX_GUARD_SHARD))
+    linux = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("ubuntu")]
+    homes = split_homes(text, linux, LINUX_GUARD)
+    names = sorted(job for job, _ in homes)
+    if names != sorted(LINUX_GUARD_SHARD):
+        problems.append(f"{LINUX_GUARD!r} runs in {names}, want one shard in each of {sorted(LINUX_GUARD_SHARD)}")
+    for job, st in homes:
+        if job in LINUX_GUARD_SHARD:
+            problems += pin_problems(job, st, LINUX_GUARD, LINUX_GUARD_IF, None,
+                                     {**LINUX_GUARD_ENV, "GUARD_SHARD": LINUX_GUARD_SHARD[job]})
+    return problems
+
+
+def linux_guard_install_problems(text):
+    """Each Linux guard shard job installs Playwright, the browser the guard's checker renders with, under the scope `if:`."""
+    problems = []
+    for job in LINUX_GUARD_SHARD:
+        installs = [st for st in step_blocks(job_block(text, job)) if step_key(st, "uses") == PLAYWRIGHT_USES]
+        if not installs:
+            problems.append(f"{job} has no Playwright install step ({PLAYWRIGHT_USES})")
+        for st in installs:
+            problems += pin_problems(job, st, PLAYWRIGHT_USES, LINUX_GUARD_IF, None)
+    return problems
+
+
 class WindowsSplit(unittest.TestCase):
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -776,31 +907,80 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(shoot_problems(self.text), [])
 
     def test_the_shoot_checker_sees_its_defects(self):
-        scope_condition = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
-
-        def doc(lint_run="ruff", install_if=f"${{{{ {scope_condition} }}}}", suite_if=f"${{{{ {scope_condition} }}}}", suite_run=SHOOT_CMD,
-                runs_on="ubuntu-latest", extra=""):
-            install = f"        if: {install_if}\n" if install_if else ""
-            suite = f"        if: {suite_if}\n" if suite_if else ""
-            return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                    f"      - name: lint\n        run: {lint_run}\n" + extra
-                    + f"  {SHOOT_JOB}:\n    runs-on: {runs_on}\n    needs: scope\n    steps:\n"
-                    + f"      - name: Install Chromium\n{install}        run: playwright install chromium\n"
-                    + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n")
-
-        good = doc()
+        good = shoot_doc()
         self.assertEqual(shoot_problems(good), [])
-        bad = {"back in checks": doc(extra=f"      - name: s\n        run: {SHOOT_CMD}\n"),
-               "install in checks": doc(lint_run="playwright install --with-deps chromium"),
-               "install in a checks block": doc(lint_run="|\n          ruff\n          playwright install chromium"),
-               "suite step adds its own condition": doc(suite_if=f"${{{{ ({scope_condition}) && false }}}}"),
-               "suite step lacks the scope condition": doc(suite_if=None),
-               "install step lacks the scope condition": doc(install_if=None),
-               "on windows": doc(runs_on="windows-latest"),
-               "suite dropped": doc(suite_run="true")}
+        bad = {"back in checks": shoot_doc(extra=f"      - name: s\n        run: {SHOOT_CMD}\n"),
+               "install in checks": shoot_doc(lint_run="playwright install --with-deps chromium"),
+               "install in a checks block": shoot_doc(lint_run="|\n          ruff\n          playwright install chromium"),
+               "suite step adds its own condition": shoot_doc(suite_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "suite step lacks the scope condition": shoot_doc(suite_if=None),
+               "install step lacks the scope condition": shoot_doc(install_if=None),
+               "on windows": shoot_doc(runs_on="windows-latest"),
+               "suite dropped": shoot_doc(suite_run="true")}
         for label, text in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(shoot_problems(text), label)
+
+    def test_the_export_suite_is_pinned_in_the_shoot_job(self):
+        # Named failure: the export suite runs in `checks` again, which installs no browser, or in SHOOT_JOB without the
+        # NODE_PATH prefix, so its picture cases find no Playwright and go red.
+        self.assertEqual(export_suite_problems(self.text), [])
+
+    def test_the_export_suite_checker_sees_its_defects(self):
+        export = (f"      - name: export suite\n        if: ${{{{ {EXPORT_IF} }}}}\n"
+                  f"        shell: bash\n        run: {EXPORT_CMD}\n")
+
+        def doc(shoot=export, checks=""):
+            return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n"
+                    "      - name: lint\n        run: ruff\n" + checks
+                    + f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n"
+                    f"      - name: Install Chromium\n        if: ${{{{ {EXPORT_IF} }}}}\n        run: playwright install chromium\n"
+                    + shoot)
+
+        self.assertEqual(export_suite_problems(doc()), [])
+        bad = {"in checks": doc(checks=export),
+               "dropped": doc(shoot=""),
+               "no NODE_PATH prefix": doc(shoot=export.replace(EXPORT_CMD, "python3 skills/waiting-page/test_export_page.py")),
+               "shell not bash": doc(shoot=export.replace("        shell: bash\n", "")),
+               "if adds its own condition": doc(shoot=export.replace(EXPORT_IF, f"({EXPORT_IF}) && false")),
+               "if lacks the scope condition": doc(shoot=export.replace(f"        if: ${{{{ {EXPORT_IF} }}}}\n", "")),
+               "env set": doc(shoot=export.replace("        run:", "        env:\n          BASE_REF: main\n        run:"))}
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(export_suite_problems(text), label)
+
+    def test_the_waiting_page_suite_has_its_own_job(self):
+        # Named failure: the waiting page suite back in checks-shoot, where it hit that job's cap, or the roadmap suite moved out of it.
+        self.assertEqual(waiting_page_problems(self.text), [])
+
+    def test_the_waiting_page_checker_sees_its_defects(self):
+        good = shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD)
+        self.assertEqual(waiting_page_problems(good), [])
+        bad = {"waiting suite back in checks-shoot": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                              shoot_extra=f"      - name: w\n        run: {WAITING_PAGE_CMD}\n"),
+               "waiting suite in checks": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                    extra=f"      - name: w\n        run: {WAITING_PAGE_CMD}\n"),
+               "waiting suite dropped": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run="true"),
+               "waiting job missing": shoot_doc(roadmap_run=ROADMAP_CMD),
+               "waiting job on windows": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                   waiting_runs_on="windows-latest"),
+               "roadmap suite dropped": shoot_doc(waiting_run=WAITING_PAGE_CMD),
+               # Named failure: a step's if adds to the scope condition, so the step can skip the waiting page suite and read green.
+               "waiting suite step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                     waiting_suite_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "waiting suite step appends && false": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                               waiting_suite_if=f"${{{{ {SHOOT_SCOPE} && false }}}}"),
+               "waiting suite step lacks the scope condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                        waiting_suite_if=None),
+               "waiting install step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                       waiting_install_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "waiting install step lacks the scope condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                          waiting_install_if=None),
+               "waiting checkout step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                        waiting_checkout_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}")}
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(waiting_page_problems(text), label)
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
@@ -810,6 +990,18 @@ class WindowsSplit(unittest.TestCase):
         for name in (GUARD_JOB, MUTATE_JOB):
             self.assertIn(name, jobs, f"no job named {name}")
             self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
+        # checks-guard-2 is the Linux guard shard, on checks_guard through FLAG_OF. Named failure: its steps name another flag,
+        # so the shard starts on that flag's scope. The defect swaps the flag in every step: one scope condition, not steps that
+        # disagree (which would be a different cause).
+        job = job_block(self.text, "checks-guard-2")
+        self.assertIsNotNone(job, "no job named checks-guard-2")
+        self.assertEqual(self.text.count(job), 1, "the fixture: checks-guard-2's block appears once in checks.yml")
+        self.assertEqual(job.count(LINUX_GUARD_IF), len(step_blocks(job)),
+                         "the fixture: every step of checks-guard-2 carries LINUX_GUARD_IF")
+        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")
+        problems = [p for p in scope_problems(self.text.replace(job, swapped, 1)) if p.startswith("checks-guard-2:")]
+        self.assertEqual(len(problems), 1, f"checks-guard-2 problems: {problems}")
+        self.assertIn("does not read needs.scope.outputs.checks_guard", problems[0])
 
     def test_the_check_form_sees_its_defects(self):
         scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
@@ -1013,14 +1205,22 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
-        checks = "jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
-        self.assertEqual(mutate_problems(checks), [])
-        self.assertTrue(mutate_problems(checks.replace("checks-mutate-guard", "checks")))  # in the lint job
-        self.assertTrue(mutate_problems(checks.replace("ubuntu-latest", "windows-latest")))  # on Windows
-        self.assertTrue(mutate_problems("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"
-                                        "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+        def shard_job(name, shard, os_="ubuntu-latest"):
+            return (f"  {name}:\n    runs-on: {os_}\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
+                    f"        env:\n          MUTATE_SHARD: {shard}\n")
+        three = "jobs:\n" + shard_job("checks-mutate-guard", "1/3") + shard_job("checks-mutate-guard-b", "2/3") \
+            + shard_job("checks-mutate-guard-c", "3/3")
+        self.assertEqual(mutate_problems(three), [])
+        self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c", "checks")))  # a shard in the lint job
+        self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c:\n    runs-on: ubuntu-latest",
+                                                      "checks-mutate-guard-c:\n    runs-on: windows-latest")))  # on Windows
+        self.assertEqual(mutate_problems(three.replace("MUTATE_SHARD: 2/3", "MUTATE_SHARD: \"2/3\"  # shard two")), [])  # quotes and comment
+        self.assertEqual(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard-c", "3/3") + shard_job("checks-mutate-guard", "1/3")
+                                         + shard_job("checks-mutate-guard-b", "2/3")), [])  # job order is free
+        self.assertTrue(mutate_problems(three.replace("2/3", "1/3")))  # two shards run the same mutants
+        self.assertTrue(mutate_problems(three.replace("        env:\n          MUTATE_SHARD: 3/3\n", "")))  # no shard set: runs all
+        self.assertTrue(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard", "1/3")))  # shards 2 and 3 missing
+        self.assertTrue(mutate_problems(three + shard_job("checks", "1/3")))  # runs twice
 
 
 def split_doc(jobs):
@@ -1039,6 +1239,53 @@ def split_doc(jobs):
                 out += [f"          {k}: {v}" for k, v in env.items()]
             out.append(f"        run: {cmd}")
     return "\n".join(out) + "\n"
+
+
+def linux_guard_shard(value, if_=LINUX_GUARD_IF, shell=None, env=None):
+    """One Linux guard shard step for split_doc: the suite with its env, its GUARD_SHARD value and any `env` override."""
+    return (LINUX_GUARD, if_, shell, {**LINUX_GUARD_ENV, "GUARD_SHARD": value, **(env or {})})
+
+
+def linux_guard_doc(a=None, b=None, extra=None):
+    """checks.yml text for the planned Linux guard split: checks-guard runs shard 1/2 and checks-guard-2 shard 2/2. The step
+    lists a and b replace those jobs' steps, and extra jobs are added as given."""
+    jobs = {"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")] if a is None else a),
+            "checks-guard-2": ("ubuntu-latest", [linux_guard_shard("2/2")] if b is None else b)}
+    return split_doc({**jobs, **(extra or {})})
+
+
+def planned_linux_guard_split(text):
+    """checks.yml text with the planned Linux guard split, built from the real file: checks-guard keeps its job with GUARD_SHARD
+    1/2 in the guard step's env, a copy of that job named checks-guard-2 carries GUARD_SHARD 2/2, and checks-guard-2 follows
+    checks-guard in each fan-in. A file that already has checks-guard-2 is returned as it is, so the cases stay true after the
+    split lands."""
+    if "\n  checks-guard-2:\n" in text:
+        return text
+    job = job_block(text, "checks-guard")
+    env_end = '          GUARD_CHROMIUM: "1"\n'
+    assert job.count(env_end) == 1, "the checks-guard guard step's env changed: this fixture must follow it"
+    first = job.replace(env_end, env_end + "          GUARD_SHARD: 1/2\n")
+    second = job.replace(env_end, env_end + "          GUARD_SHARD: 2/2\n")
+    text = text.replace("  checks-guard:" + job, "  checks-guard:" + first + "  checks-guard-2:" + second, 1)
+    return text.replace("      - checks-guard\n", "      - checks-guard\n      - checks-guard-2\n")
+
+
+def fan_in_rules():
+    """The two fan-in rules as (needs_of, needs_problems, ci_done_problems): all-jobs-passed's needs (all_jobs_passed_rules) and
+    ci-done's needs (actions/ci-done-comment/test_comment.py). Imported here, not at the top: all_jobs_passed_rules imports this
+    file, so a module-level import would be circular."""
+    from all_jobs_passed_rules import needs_of, needs_problems  # noqa: E402  the one home of the all-jobs-passed needs rule
+    sys.path.insert(0, os.path.join(HERE, "..", "actions", "ci-done-comment"))
+    import test_comment  # noqa: E402  the one home of the ci-done needs rule
+    return needs_of, needs_problems, test_comment.ci_done_problems
+
+
+def without_need(text, job, name):
+    """`text` with `name` taken out of the needs of `job` (the job's own block, from its key to the next job key)."""
+    block = job_block(text, job)
+    entry = f"      - {name}\n"
+    assert block and entry in block, f"{name} is not in {job}'s needs"
+    return text.replace(block, block.replace(entry, "", 1), 1)
 
 
 class SplitJobs(unittest.TestCase):
@@ -1133,6 +1380,93 @@ class SplitJobs(unittest.TestCase):
         for label, (text, check) in cases.items():
             with self.subTest(defect=label):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
+
+    def test_the_linux_guard_runs_in_its_two_shard_jobs(self):
+        # Named failure: the guard suite runs in one Linux job, or in a third, or in neither, so its cases do not each run once.
+        self.assertEqual(linux_guard_split_problems(self.text), [])
+
+    def test_the_linux_guard_shards_install_playwright(self):
+        # Named failure: a guard shard job has no Playwright install, so the guard's checker has no browser to render with.
+        self.assertEqual(linux_guard_install_problems(self.text), [])
+
+    def test_checker_sees_the_linux_guard_split_defects(self):
+        self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
+        bad = {
+            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the second shard's value dropped": linux_guard_doc(b=[(LINUX_GUARD, LINUX_GUARD_IF, None, dict(LINUX_GUARD_ENV))]),
+            "both shards 1/2": linux_guard_doc(b=[linux_guard_shard("1/2")]),
+            "a third Linux job runs the guard": linux_guard_doc(
+                extra={"checks-guard-3": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the guard in neither shard job": linux_guard_doc(a=[], b=[]),
+            "no job at all": "jobs:\n",
+            "GUARD_SHARD in a job's env": linux_guard_doc().replace(
+                "    needs: scope\n    steps:", "    needs: scope\n    env:\n      GUARD_SHARD: 1/2\n    steps:", 1),
+            "the shard's if changed": linux_guard_doc(a=[linux_guard_shard(
+                "1/2", if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
+            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard("1/2", if_=None)]),
+            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard("1/2", shell="bash")]),
+            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard("1/2", env={"GUARD_CHROMIUM": '"0"'})]),
+        }
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(linux_guard_split_problems(text), label)
+
+    def test_the_planned_linux_guard_split_passes_the_split_and_install_checks(self):
+        # The full-size control: the planned split of the real file passes both checks, so each defect below is the only flag.
+        planned = planned_linux_guard_split(self.text)
+        self.assertEqual(linux_guard_split_problems(planned), [])
+        self.assertEqual(linux_guard_install_problems(planned), [])
+
+    def test_checker_sees_the_planned_install_defects(self):
+        planned = planned_linux_guard_split(self.text)
+        job = job_block(planned, "checks-guard-2")
+        install = f"        if: ${{{{ {LINUX_GUARD_IF} }}}}\n        uses: {PLAYWRIGHT_USES}\n"
+        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if")
+        bad = {
+            "the install step's if changed": planned.replace(job, job.replace(
+                install, install.replace(LINUX_GUARD_IF, "needs.scope.outputs.code == 'true'"), 1), 1),
+            "no install step in checks-guard-2": planned.replace(job, job.replace(
+                f"        uses: {PLAYWRIGHT_USES}\n", "        uses: actions/checkout@v5\n", 1), 1),
+        }
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(linux_guard_install_problems(text), label)
+
+    def test_hardening_does_not_flag_the_linux_shard_values(self):
+        # The two Linux shard values are homes: each sits in a guard step's env, as the Windows and macOS shard values do.
+        self.assertEqual([p for p in hardening_problems(planned_linux_guard_split(self.text)) if "GUARD_SHARD" in p], [])
+
+    def test_hardening_flags_a_stray_guard_shard_value(self):
+        # Named failure: a GUARD_SHARD value that no shard step owns reaches every step that inherits it (job or workflow env).
+        ci_wake = ("python3 hooks/test_ci_wake.py", None, None, {"GUARD_SHARD": "1/2"})
+        stray = {
+            "in the workflow env": "env:\n  GUARD_SHARD: 1/2\n" + linux_guard_doc(),
+            "on a step that runs no guard shard": linux_guard_doc(extra={"checks-ci-wake": ("ubuntu-latest", [ci_wake])}),
+        }
+        for label, text in stray.items():
+            with self.subTest(defect=label):
+                self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
+
+    def test_both_guard_shards_are_in_each_fan_in(self):
+        # Named failure: a guard shard runs on a pull request but is in neither all-jobs-passed's needs nor ci-done's, so its red
+        # cannot block the merge or post the wake comment. The names come from LINUX_GUARD_SHARD, the one home of the split.
+        needs_of, _, _ = fan_in_rules()
+        for job in ("all-jobs-passed", "ci-done"):
+            self.assertIsNotNone(job_block(self.text, job), job)
+            for shard in LINUX_GUARD_SHARD:
+                with self.subTest(job=job, shard=shard):
+                    self.assertIn(shard, needs_of(job_block(self.text, job)) or [], f"{shard} is not in {job}'s needs")
+
+    def test_a_shard_left_out_of_either_fan_in_is_flagged(self):
+        _, needs_problems, ci_done_problems = fan_in_rules()
+        planned = planned_linux_guard_split(self.text)
+        # The control: the planned text passes both fan-in rules, so each defect below is the only flag.
+        self.assertEqual(needs_problems(planned), [])
+        self.assertEqual(ci_done_problems(planned), [])
+        for job, check in (("all-jobs-passed", needs_problems), ("ci-done", ci_done_problems)):
+            for shard in LINUX_GUARD_SHARD:
+                with self.subTest(job=job, shard=shard):
+                    self.assertTrue(check(without_need(planned, job, shard)), f"{shard} left out of {job}")
 
 
 class TopLevelOr(unittest.TestCase):
@@ -1276,7 +1610,7 @@ class ScriptRun:
 
 def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
     """Run the script file in a scratch repo, with `arg` (None for no argument). files maps a path to True
-    (passes) or False (fails). dirs are empty folders to make. find_exit, when set, puts a `find` first on
+    (passes), False (fails), or the source text to write as is. dirs are empty folders to make. find_exit, when set, puts a `find` first on
     PATH that runs the real find and then exits with that code, as a find does that meets an error after it
     listed files. An `npm` shim records its arguments, so no run reaches the network. cwd is a repo-relative
     folder to start in."""
@@ -1298,8 +1632,9 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
         for rel, ok in files.items():
             full = os.path.join(work, rel)
             os.makedirs(os.path.dirname(full), exist_ok=True)
+            text = ok if isinstance(ok, str) else ("// fixture\n" if ok else 'throw new Error("planted failure");\n')
             with open(full, "w", encoding="utf-8") as f:
-                f.write("// fixture\n" if ok else 'throw new Error("planted failure");\n')
+                f.write(text)
         target = os.path.join(work, ".github", "scripts", MOD_SCRIPT_NAME)
         shutil.copyfile(script or MOD_SCRIPT, target)
         r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", target.replace("\\", "/")] + ([arg] if arg is not None else []),
@@ -1311,6 +1646,8 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
 
 SKILL_OK = {"skills/plain-english-map/tests/ok.test.mjs": True}
 NPM_CI = "ci --ignore-scripts --no-audit --no-fund"
+# A mod test that reads its input, as a test that reads stdin does: it takes every line the loop has left.
+STDIN_READER = 'import { readFileSync } from "node:fs";\nreadFileSync(0, "utf8");\n'
 
 
 class ModTestStep(unittest.TestCase):
@@ -1365,6 +1702,21 @@ class ModTestScript(unittest.TestCase):
             with self.subTest(case=label):
                 r = run_mod_script("mods", files)
                 self.assertEqual(r.rc == 0, ok, f"{label}: exit {r.rc}\n{r.out}")
+
+    def test_a_mod_test_that_reads_stdin_does_not_hide_the_files_after_it(self):
+        # Named cause: phase_mods feeds the file list on the loop's stdin, so a file that reads stdin takes the lines
+        # after it, and the loop ends before the failing file runs. find does not sort, so the script's own list order
+        # sets the roles: the reader first, the failing file second, a passing file third.
+        names = ["mods/a/a.test.mjs", "mods/b/b.test.mjs", "mods/c/c.test.mjs"]
+        probe = run_mod_script("list", {**SKILL_OK, **{name: True for name in names}})
+        self.assertEqual(probe.rc, 0, probe.out)
+        listed = [line for line in probe.out.splitlines() if line in names]
+        self.assertEqual(len(listed), 3, "list does not name the three fixture files:\n" + probe.out)
+        for label, first in (("file reads stdin", STDIN_READER), ("control: first file reads no stdin", True)):
+            with self.subTest(case=label):
+                r = run_mod_script("mods", {listed[0]: first, listed[1]: False, listed[2]: True})
+                self.assertIn("planted failure", r.out, f"{label}: the failing second file did not run\n{r.out}")
+                self.assertNotEqual(r.rc, 0, f"{label}: the phase exited 0 although the second file fails\n{r.out}")
 
     def test_the_script_fails_when_it_finds_no_test_or_find_errors(self):
         """`done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
@@ -1538,14 +1890,17 @@ class ModTestStepChecker(unittest.TestCase):
 
 
 # ---- every test file runs in a CI step. A test file that no run step names never fails a pull
-# request, so its red stays invisible: lint/test_check_agent_models.py ran in no step. Failure
-# classes: (a) product, a test file has no run line in checks.yml; (b) test, this parser misreads a
-# run line (a comment, a quote, a block scalar); (c) stale, a test file was renamed or removed and
-# its run line was not. Scope: test_*.py, test_*.sh and *.test.ps1 outside hidden folders.
-# mutate_*.py is not a suite (mutate_shared.py is plumbing), and mods/*/*.test.mjs runs through
-# .github/scripts/mod-tests.sh (the "Mod and map-skill tests" step of three jobs), so neither is listed here.
+# request, so its red stays invisible. Failure classes: (a) product, a test file has no run line in
+# checks.yml; (b) test, this parser misreads a run line (a comment, a quote, a block scalar); (c) stale,
+# a test file was renamed or removed and its run line was not. Scope: the tracked files whose basename
+# matches TEST_FILE. Tracked only, because a file git does not track, or a copy under node_modules, is
+# not a suite CI runs. A `_test_` name is a helper (lint/_test_git.py) and never matches. mutate_*.py is
+# not a suite (mutate_shared.py is plumbing). The mod and map-skill tests are not listed by name: COLLECTOR
+# prints them, and a file it prints counts as covered only when a run step is exactly MOD_CMD, since that
+# step is what runs them.
 REPO = os.path.normpath(os.path.join(HERE, ".."))
-TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh)|.*\.test\.ps1)$")
+COLLECTOR = MOD_CMD.split()[-1]  # the path MOD_CMD runs, so the collector's path has one home
+TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh|mjs)|.*\.test\.(?:mjs|js|ps1))$")
 
 
 def strip_comment(text):
@@ -1605,24 +1960,38 @@ def names_path(commands, path):
 
 
 def find_test_files(root):
-    """Repo-relative posix paths of the test files, skipping hidden folders such as .git and .claude.
-    A folder the scan cannot read raises. It must fail the test, never read as holding no tests."""
-    def unreadable(error):
-        raise error
-    found = []
-    for folder, dirs, names in os.walk(root, onerror=unreadable):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        found += [os.path.relpath(os.path.join(folder, n), root).replace(os.sep, "/")
-                  for n in names if TEST_FILE.match(n)]
-    return sorted(found)
+    """Repo-relative posix paths of the tracked test files under `root`, sorted. git lists the paths, so an
+    untracked file is not a test. A folder that is not a git repo fails the read and raises, so it never reads
+    as holding no tests."""
+    listed = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, stdout=subprocess.PIPE).stdout
+    paths = [p for p in listed.decode("utf-8").split("\0") if p]
+    return sorted(p for p in paths if TEST_FILE.match(p.split("/")[-1]))
+
+
+def runs_collector(commands):
+    """True when a run step is exactly the collector's command. `list`, `mods` and an echo of the command run something else."""
+    return any(command.strip() == MOD_CMD for command in commands)
+
+
+def collected_files(root):
+    """The files the collector prints for `list` in `root`, one repo-relative path per line. A nonzero exit raises,
+    so a collector that fails cannot read as an empty list."""
+    run = subprocess.run([shutil.which("bash") or "bash", COLLECTOR, "list"], cwd=root,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if run.returncode != 0:
+        raise RuntimeError("%s list exits %d: %s" % (COLLECTOR, run.returncode, run.stderr.strip()))
+    return [line for line in run.stdout.splitlines() if line]
 
 
 class CiCoverage(unittest.TestCase):
     def test_every_test_file_runs_in_a_ci_step(self):
         with open(CHECKS, encoding="utf-8") as handle:
-            commands = run_commands(handle.read())
-        missing = [p for p in find_test_files(REPO) if not names_path(commands, p)]
-        self.assertEqual(missing, [], "no run step in checks.yml names: " + ", ".join(missing))
+            commands = run_commands(gating_text(handle.read()))
+        collected = set(collected_files(REPO)) if runs_collector(commands) else set()
+        missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
+        # No rename remedy: a `_test_` name is outside the scope, so a rename would hide a real test from this check.
+        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing)
+                         + ". Add a run step in .github/workflows/checks.yml.")
 
     def test_a_comment_line_is_not_a_run(self):
         # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
@@ -1700,6 +2069,424 @@ class CiCoverage(unittest.TestCase):
     def test_an_unreadable_folder_fails_the_scan(self):
         with self.assertRaises(OSError):
             find_test_files(os.path.join(HERE, "no-such-folder-for-the-scan"))
+
+
+# ---- CI coverage cases on fixture repos. Each case runs the real CiCoverage case on a fixture: the module globals
+# REPO and CHECKS are swapped for the fixture folder and its checks.yml, and the case reads what that run says.
+# So a case tests the real scan, not a copy of it. The scan must read REPO and CHECKS at call time.
+
+RUN_FOLDER = None  # set by setUpModule, so an import makes no folder
+ENV_PATCH = None
+
+
+def setUpModule():
+    global RUN_FOLDER, ENV_PATCH
+    import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+    RUN_FOLDER = _test_temp.run_folder()
+    # A git hook sets these. A fixture git would then write the real index. The patch restores os.environ after the run.
+    ENV_PATCH = mock.patch.dict(os.environ)
+    ENV_PATCH.start()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        os.environ.pop(name, None)
+
+
+def tearDownModule():
+    if ENV_PATCH:
+        ENV_PATCH.stop()
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+        import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
+        tracked_tree.rm_tree(RUN_FOLDER)
+
+
+def write_file(root, rel, text):
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def checks_yml(*jobs):
+    """checks.yml text, in the layout lint/workflow_steps.py reads. A job is (name, runs-on, steps), or (name, runs-on,
+    steps, job keys): job keys are lines such as `if: false`, at 4 spaces. A step is a run command, or a list of its
+    lines: the first line is the step's first key, on the `      - ` line, and the rest are keys at 8 spaces."""
+    text = "jobs:\n"
+    for name, runs_on, steps, *rest in jobs:
+        text += "  %s:\n    runs-on: %s\n" % (name, runs_on)
+        text += "".join("    %s\n" % key for key in (rest[0] if rest else ()))
+        text += "    steps:\n"
+        for step in steps:
+            lines = step if isinstance(step, list) else ["run: %s" % step]
+            text += "      - %s\n" % lines[0] + "".join("        %s\n" % line for line in lines[1:])
+    return text
+
+
+def collector_stub(paths, exit_code):
+    """A stand-in for .github/scripts/mod-tests.sh: `list` prints `paths`, then exits `exit_code`."""
+    lines = "".join("printf '%%s\\n' %s\n" % shlex.quote(path) for path in paths)
+    return '#!/usr/bin/env bash\nif [ "${1:-}" = list ]; then\n%sexit %d\nfi\nexit 0\n' % (lines, exit_code)
+
+
+def make_repo(tracked=(), untracked=(), checks="", collected=(), collector_exit=0, git=True):
+    """A fixture repo in a new folder of this run. `tracked` paths are git-added, `untracked` paths are on disk
+    only, and each file holds one line. `checks` is .github/workflows/checks.yml. With git False the folder is no
+    repo. Returns the folder."""
+    root = tempfile.mkdtemp(prefix="cov-", dir=RUN_FOLDER)
+    for rel in (*tracked, *untracked):
+        write_file(root, rel, "fixture\n")
+    write_file(root, ".github/workflows/checks.yml", checks)
+    write_file(root, ".github/scripts/mod-tests.sh", collector_stub(collected, collector_exit))
+    if git:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if tracked:
+            subprocess.run(["git", "add", "--"] + list(tracked), cwd=root, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return root
+
+
+def scan(root):
+    """The real CiCoverage case run on fixture `root`: None when it passes, else the error it raised."""
+    checks = os.path.join(root, ".github", "workflows", "checks.yml")
+    with mock.patch.dict(globals(), {"REPO": root, "CHECKS": checks}):
+        try:
+            CiCoverage("test_every_test_file_runs_in_a_ci_step").test_every_test_file_runs_in_a_ci_step()
+        except Exception as error:  # the gap report is an AssertionError; a failed collector raises its own error
+            return error
+    return None
+
+
+def gap_text(root):
+    """The gap report on fixture `root`, "" when the case passes. An error that is not a gap report is raised."""
+    error = scan(root)
+    if error is None:
+        return ""
+    if isinstance(error, AssertionError):
+        return str(error)
+    raise error
+
+
+TEST_FILE_CHECKS = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]))  # names one test file
+COLLECTED = ("mods/a/x.test.mjs", "skills/plain-english-map/tests/y.test.mjs")
+
+
+class CiCoverageScope(unittest.TestCase):
+    def test_tracked_js_and_mjs_test_files_are_reported(self):
+        # Named cause: the scope reads only test_*.py, test_*.sh and *.test.ps1, so a JS test file is missed.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_x.mjs", "lib/y.test.mjs", "lib/z.test.js"],
+                                  checks=TEST_FILE_CHECKS))
+        for path in ("lint/test_x.mjs", "lib/y.test.mjs", "lib/z.test.js"):
+            with self.subTest(path=path):
+                self.assertIn(path, text, "a tracked test file with no run line is not reported")
+        self.assertNotIn("lint/test_ok.py", text, "a test file that a run step names is reported")
+
+    def test_an_untracked_test_file_is_not_reported(self):
+        # Named cause: the scan walks the disk, so a test file that git does not track counts.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py"], untracked=["lint/test_y.py"], checks=TEST_FILE_CHECKS))
+        self.assertNotIn("lint/test_y.py", text, "an untracked test file is reported: the scan read the disk, not git")
+
+    def test_a_js_file_under_untracked_node_modules_is_not_reported(self):
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lib/a.test.js"],
+                                  untracked=["node_modules/pkg/b.test.js"], checks=TEST_FILE_CHECKS))
+        with self.subTest("tracked"):
+            self.assertIn("lib/a.test.js", text, "a tracked *.test.js with no run line is not reported")
+        with self.subTest("untracked"):
+            self.assertNotIn("node_modules/pkg/b.test.js", text,
+                             "a *.test.js under an untracked node_modules is reported")
+
+    def test_a_helper_named_with_an_underscore_is_not_reported(self):
+        # A `_test_` name is a helper (lint/_test_git.py). The test-file row shows the scope is live, so the
+        # helper rows cannot pass on a scan that reads nothing.
+        helpers = ["lint/_test_helper.py", "lint/_test_helper.mjs", "lint/_test_git.mjs"]
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_x.mjs"] + helpers, checks=TEST_FILE_CHECKS))
+        with self.subTest("test file"):
+            self.assertIn("lint/test_x.mjs", text, "a tracked test_*.mjs with no run line is not reported")
+        for helper in helpers:
+            with self.subTest(helper=helper):
+                self.assertNotIn(helper, text, "a helper named _test_* is reported as a test")
+
+    def test_an_empty_git_repo_lists_no_test_files(self):
+        # The empty state. Splitting git's empty output must not give one blank name.
+        self.assertEqual(find_test_files(make_repo(checks=TEST_FILE_CHECKS)), [],
+                         "an empty git repo lists a file it does not track")
+
+    def test_a_name_with_a_space_or_non_ascii_comes_back_exact(self):
+        # Without -z, git quotes such a name and the scan no longer matches the file.
+        names = ["lint/test_my file.py", "lint/test_caf\u00e9.py"]
+        self.assertEqual(find_test_files(make_repo(tracked=names, checks=TEST_FILE_CHECKS)), sorted(names),
+                         "a tracked name with a space or a non-ASCII character came back altered")
+
+    def test_a_non_git_folder_raises(self):
+        # Named cause: the scan lists tracked files through git, so a folder that is no repo must fail the read.
+        root = make_repo(untracked=["lint/test_x.py"], git=False)
+        probe = subprocess.run(["git", "rev-parse"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(probe.returncode, 0, "the fixture folder is inside a git repo, so the case proves nothing")
+        try:
+            found = find_test_files(root)
+        except (OSError, subprocess.CalledProcessError):
+            return
+        self.fail("find_test_files listed %s for a folder that is not a git repo; it must raise" % found)
+
+    def test_a_file_named_only_in_a_windows_job_is_covered(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]),
+                            ("checks-windows", "windows-latest", ["python lint/test_win.py"]))
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_win.py"], checks=checks))
+        self.assertNotIn("lint/test_win.py", text, "a file that only a windows-latest job names is reported")
+
+    def test_the_gap_report_names_the_run_step_and_no_rename(self):
+        # Named failure: the report offers a rename to `_test_<name>`. A `_test_` name is outside the scope, so the
+        # rename hides a real test from the check.
+        text = gap_text(make_repo(tracked=["lint/test_x.py"], checks=TEST_FILE_CHECKS))
+        with self.subTest("file"):
+            self.assertIn("lint/test_x.py", text, "an unnamed test file is not reported")
+        with self.subTest("add a run step"):
+            self.assertIn("run step", text, "the gap report does not name the add-a-run-step remedy")
+        with self.subTest("no rename"):
+            self.assertNotIn("rename", text, "the gap report offers a rename, which hides a real test from the scope")
+        with self.subTest("no _test_ name"):
+            self.assertNotIn("_test_", text, "the gap report names a _test_ file, which the scope does not read")
+
+    def test_a_test_dot_file_gets_a_run_step_remedy_only(self):
+        # Named failure: the report offers a rename to _test_<name> for a `.test.*` file. That name still matches the
+        # scope, so the rename would not clear the gap.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lib/_test_x.test.mjs"], checks=TEST_FILE_CHECKS))
+        with self.subTest("file"):
+            self.assertIn("lib/_test_x.test.mjs", text, "a tracked .test.mjs with no run line is not reported")
+        with self.subTest("run step"):
+            self.assertIn("run step", text, "the gap report does not name the run-step remedy")
+        with self.subTest("no rename"):
+            self.assertNotIn("rename", text, "the gap report offers a rename for a .test.* file, which stays in scope")
+
+
+# The sentinel is tracked and named by no run step, so every gating fixture reports it. Its report shows the scan read the
+# fixture, and that is checked before any assert on GATING_FILE (P7: assert the scope before the subject).
+GAP_SENTINEL = "lint/test_gap.py"
+GATING_FILE = "lint/test_x.py"
+
+
+class CiCoverageGating(unittest.TestCase):
+    """A step or job that cannot fail a pull request does not count its file as covered. Each row runs the real scan."""
+
+    def assert_gap(self, checks, reported, cause):
+        text = gap_text(make_repo(tracked=[GAP_SENTINEL, GATING_FILE], checks=checks))
+        self.assertIn(GAP_SENTINEL, text, "the scan did not report the unnamed sentinel, so it read no fixture")
+        if reported:
+            self.assertIn(GATING_FILE, text, cause)
+        else:
+            self.assertNotIn(GATING_FILE, text, cause)
+
+    def test_a_gating_step_is_reported(self):
+        # Rows: a step with continue-on-error: true, or a `${{ true }}` form (the spacing varies), or an always-false if:,
+        # with the key below or on the dash line.
+        rows = [
+            ("continue-on-error: true", ["run: python3 lint/test_x.py", "continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["run: python3 lint/test_x.py", "continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["run: python3 lint/test_x.py", "continue-on-error: ${{true}}"]),
+            ("if: false", ["run: python3 lint/test_x.py", "if: false"]),
+            ("if: ${{ false }}", ["run: python3 lint/test_x.py", "if: ${{ false }}"]),
+            ("if: false on the dash line", ["if: false", "run: python3 lint/test_x.py"]),
+        ]
+        for label, step in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", [step]))
+                self.assert_gap(checks, True, "the only step naming lint/test_x.py has %s, which cannot fail a pull "
+                                "request, yet the file counts as covered" % label)
+
+    def test_a_gating_job_is_reported(self):
+        # Rows: the job holding the only step that names the file has continue-on-error: true (or a `${{ true }}` form), or if: false.
+        rows = [
+            ("continue-on-error: true", ["continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["continue-on-error: ${{true}}"]),
+            ("if: false", ["if: false"]),
+        ]
+        for label, job_keys in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_x.py"], job_keys))
+                self.assert_gap(checks, True, "the job holding the only step naming lint/test_x.py has %s, which cannot "
+                                "fail a pull request, yet the file counts as covered" % label)
+
+    def test_a_lone_quote_in_a_gating_step_name_is_reported(self):
+        # Named failure: a lone quote in a step name is text, so it must not hide the gating key below it.
+        step = ["name: Don't run it", "run: python3 lint/test_x.py", "continue-on-error: true"]
+        self.assert_gap(checks_yml(("checks", "ubuntu-latest", [step])), True,
+                        "the only step naming lint/test_x.py has continue-on-error: true after a lone quote in its name, "
+                        "which cannot fail a pull request, yet the file counts as covered")
+
+    def test_a_step_that_can_fail_a_pull_request_is_not_reported(self):
+        # Rows: a normal step; a key that is false, or a value that can be false (a matrix expression, an if: that can be
+        # true), on the step or the job; a file named by
+        # a gating and a normal step; gating text that is not a key (a comment, a run block, a quoted run).
+        block = '|\n          echo "continue-on-error: true"\n          python3 lint/test_x.py'
+        scope = "needs.scope.outputs.code == 'true'"
+        rows = [
+            ("a normal step", ["python3 lint/test_x.py"], []),
+            ("continue-on-error: false", [["run: python3 lint/test_x.py", "continue-on-error: false"]], []),
+            ("continue-on-error: a matrix expression", [["run: python3 lint/test_x.py", "continue-on-error: ${{ matrix.experimental }}"]], []),
+            ("an if: that can be true, on the step", [["run: python3 lint/test_x.py", "if: %s" % scope]], []),
+            ("an if: that can be true, on the job", ["python3 lint/test_x.py"], ["needs: scope", "if: %s" % scope]),
+            ("the file in a normal step and a gating step",
+             ["python3 lint/test_x.py", ["run: python3 lint/test_x.py", "continue-on-error: true"]], []),
+            ("a commented-out continue-on-error: true", [["run: python3 lint/test_x.py", "# continue-on-error: true"]], []),
+            ("continue-on-error: true in a run block", [block], []),
+            ("continue-on-error: true in a quoted run", ['echo "# continue-on-error: true" && python3 lint/test_x.py'], []),
+        ]
+        for label, steps, job_keys in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", steps, job_keys))
+                self.assert_gap(checks, False, "%s: the step can fail a pull request, yet the file is reported as a gap"
+                                % label)
+
+
+# Node's default `node --test` patterns (Node 22), matched against a file's name and against its path under the folder
+# the run starts in. The collector must list the same files for the skill's tests.
+NODE_TEST_NAME = re.compile(r"(?:.*\.test|.*-test|.*_test|test-.*|test)\.(?:cjs|mjs|js)$")
+NODE_TEST_DIR = re.compile(r"(?:^|/)test/.+\.(?:cjs|mjs|js)$")
+SKILL_TESTS = "skills/plain-english-map/tests"
+
+
+def node_test_files(folder):
+    """Repo-relative paths of the files a default Node test run finds under `folder`: recursive, node_modules skipped."""
+    found = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "node_modules"]
+        for name in names:
+            path = os.path.join(dirpath, name)
+            inside = os.path.relpath(path, folder).replace(os.sep, "/")
+            if NODE_TEST_NAME.match(name) or NODE_TEST_DIR.search(inside):
+                found.append(os.path.relpath(path, REPO).replace(os.sep, "/"))
+    return found
+
+
+def mod_check_files(folder):
+    """Repo-relative paths of the check.mjs files under `folder`: recursive, node_modules skipped."""
+    found = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "node_modules"]
+        for name in names:
+            if name == "check.mjs":
+                found.append(os.path.relpath(os.path.join(dirpath, name), REPO).replace(os.sep, "/"))
+    return found
+
+
+class CiCoverageCollector(unittest.TestCase):
+    def test_mod_tests_list_prints_what_both_phases_run(self):
+        # The oracle: the mods find (node_modules pruned), the check.mjs files under mods, which mod_check_files
+        # walks on its own, and Node's default test run under the skill's tests.
+        bash = shutil.which("bash")
+        mods = subprocess.run([bash, "-c", "find mods -name node_modules -prune -o \\( -name '*.test.mjs' -o -name '*.test.js' \\) -print"],
+                              cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(mods.returncode, 0, "the mods find exits %d: %s" % (mods.returncode, mods.stderr))
+        expected = sorted(mods.stdout.splitlines() + mod_check_files(os.path.join(REPO, "mods"))
+                          + node_test_files(os.path.join(REPO, SKILL_TESTS)))
+        self.assertTrue(expected, "the two oracles list no file, so the case proves nothing")
+        # An npm shim that fails and logs. A list run must never reach the skill phase's install.
+        shim = tempfile.mkdtemp(prefix="npm-", dir=RUN_FOLDER)
+        npm_log = os.path.join(shim, "npm.log")
+        write_file(shim, "npm", '#!/bin/sh\necho "$@" >> "%s"\nexit 1\n' % npm_log)
+        os.chmod(os.path.join(shim, "npm"), 0o755)
+        env = dict(os.environ, PATH=shim + os.pathsep + os.environ.get("PATH", ""))
+        listed = subprocess.run([bash, ".github/scripts/mod-tests.sh", "list"], cwd=REPO, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        with self.subTest("exit code"):
+            self.assertEqual(listed.returncode, 0,
+                             "mod-tests.sh list exits %d: %s" % (listed.returncode, listed.stderr.strip()))
+        with self.subTest("files"):
+            self.assertEqual(sorted(listed.stdout.splitlines()), expected,
+                             "mod-tests.sh list prints other files than the two phases' finds")
+        with self.subTest("npm"):
+            self.assertFalse(os.path.exists(npm_log), "mod-tests.sh list ran npm")
+
+    def test_a_file_the_collector_does_not_print_is_reported(self):
+        # The collector counts only the files it runs. Named failure: every mjs test counted as covered once a run
+        # line names the collector.
+        printed, unprinted = "mods/a/x.test.mjs", "mods/a/other.test.mjs"
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        root = make_repo(tracked=["lint/test_ok.py", printed, unprinted], collected=[printed], checks=checks)
+        scoped = find_test_files(root)
+        for path in (printed, unprinted):
+            with self.subTest(path=path):
+                self.assertIn(path, scoped, "%s is not a scoped test file, so its coverage proves nothing" % path)
+        text = gap_text(root)
+        with self.subTest("unprinted"):
+            self.assertIn(unprinted, text, "a test file the collector does not print is covered by the collector")
+        with self.subTest("printed"):
+            self.assertNotIn(printed, text, "a file the collector prints is reported")
+
+    def test_a_collected_file_is_covered_when_a_run_line_names_the_collector(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        root = make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collected=COLLECTED, checks=checks)
+        text = gap_text(root)
+        for path in COLLECTED:
+            with self.subTest(path=path):
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertNotIn(path, text, "a collected file is reported although a run line names the collector")
+
+    def test_a_collected_file_is_reported_when_no_run_line_names_the_collector(self):
+        root = make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collected=COLLECTED, checks=TEST_FILE_CHECKS)
+        text = gap_text(root)
+        for path in COLLECTED:
+            with self.subTest(path=path):
+                self.assertIn(path, text,
+                              "a collected file is not reported when no run line names the collector: %s" % path)
+
+    def test_a_collected_file_is_covered_when_only_a_windows_job_names_the_collector(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]),
+                            ("checks-windows", "windows-latest", [MOD_CMD]))
+        path = COLLECTED[0]
+        root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=checks)
+        self.assertIn(path, find_test_files(root), "%s is not a scoped test file, so its coverage proves nothing" % path)
+        self.assertNotIn(path, gap_text(root),
+                         "a collected file is reported when only a windows-latest job names the collector")
+
+    def test_a_comment_or_name_line_does_not_name_the_collector(self):
+        # Named failure: a commented run line, or a step name that spells the collector, counted as the run.
+        base = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]))
+        path = COLLECTED[0]
+        rows = (("comment", "      # run: %s\n" % MOD_CMD), ("name", "      - name: %s\n" % MOD_CMD))
+        for label, extra in rows:
+            with self.subTest(label):
+                root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=base + extra)
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertIn(path, gap_text(root), "a %s line that spells the collector counts as its run" % label)
+
+    def test_a_run_line_counts_for_the_collector_only_when_it_is_the_collector_command(self):
+        # Named failure: a run line that adds an argument, or echoes the command, counted as the collector's run.
+        path = COLLECTED[0]
+        rows = (("list argument", "%s list" % MOD_CMD), ("mods argument", "%s mods" % MOD_CMD),
+                ("echo", "echo %s" % MOD_CMD))
+        for label, command in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", command]))
+                root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=checks)
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertIn(path, gap_text(root),
+                              "a run line that is not exactly the collector command counts as its run: %s" % label)
+
+    def test_the_collector_lists_the_files_a_default_node_run_finds(self):
+        # Named failure: the collector lists only top-level *.test.mjs under the skill's tests, so a nested file, a
+        # `_test.mjs` file or a file under test/ is missed. node_modules is never listed.
+        planted = [SKILL_TESTS + "/nested/deep.test.mjs", SKILL_TESTS + "/b_test.mjs", SKILL_TESTS + "/test/c.js",
+                   SKILL_TESTS + "/test-e.mjs", SKILL_TESTS + "/test.mjs"]
+        root = make_repo(untracked=["mods/a/x.test.mjs"] + planted + [SKILL_TESTS + "/node_modules/pkg/d.test.mjs"])
+        shutil.copyfile(MOD_SCRIPT, os.path.join(root, ".github", "scripts", "mod-tests.sh"))
+        listed = subprocess.run([shutil.which("bash"), COLLECTOR, "list"], cwd=root,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        with self.subTest("exit code"):
+            self.assertEqual(listed.returncode, 0,
+                             "mod-tests.sh list exits %d: %s" % (listed.returncode, listed.stderr.strip()))
+        with self.subTest("files"):
+            self.assertEqual(sorted(listed.stdout.splitlines()), sorted(["mods/a/x.test.mjs"] + planted),
+                             "mod-tests.sh list misses a file the default Node run finds under the skill's tests")
+
+    def test_a_failing_collector_fails_the_scan(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        error = scan(make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collector_exit=3, checks=checks))
+        self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
+        self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
+        self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
 
 
 if __name__ == "__main__":
