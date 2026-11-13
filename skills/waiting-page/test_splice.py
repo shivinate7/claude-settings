@@ -589,6 +589,24 @@ class AddDesign(Folder):
             with self.subTest(slug=slug):
                 self.refused(live_page(), [(slug, good)], "slug", "the slug %r" % slug)
 
+    def test_a_slug_with_a_hyphen_is_accepted_and_lands_in_designdata(self):
+        page = live_page()
+        self.assertNotIn("price-a", self.designs(page), "the page already holds the slug, so the add proves nothing")
+        out = self.added(page, ("price-a", self.write("price-a.html", MOCK_HTML)))
+        self.assertEqual(list(self.designs(out)), ["mock", "price-a"], "the hyphen slug is not added after the existing design")
+        self.assertEqual(self.designs(out)["price-a"], MOCK_HTML, "the hyphen slug's design is not the file's text")
+        self.assert_only_designs_added(page, out)
+
+    def test_a_slug_with_a_digit_is_accepted_and_lands_in_designdata(self):
+        for slug in ["opt2", "2a"]:
+            with self.subTest(slug=slug):
+                page = live_page()
+                self.assertNotIn(slug, self.designs(page), "the page already holds the slug, so the add proves nothing")
+                out = self.added(page, (slug, self.write(slug + ".html", MOCK_HTML)))
+                self.assertEqual(list(self.designs(out)), ["mock", slug], "the digit slug %s is not added after the existing design" % slug)
+                self.assertEqual(self.designs(out)[slug], MOCK_HTML, "the digit slug %s's design is not the file's text" % slug)
+                self.assert_only_designs_added(page, out)
+
     def test_a_slug_that_exists_with_other_html_is_refused(self):
         other = self.write("other.html", "<p>different</p>\n")
         self.refused(live_page(), [("mock", other)], "already|exists|differ", "a slug that exists with other html")
