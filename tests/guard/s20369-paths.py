@@ -979,6 +979,32 @@ sh("builder-test: [apply-scanner control] echo of a lone quote, then echo of a t
 sh("builder-test: [apply-scanner control] a lone quote in an echo that names a git apply of a test patch is allowed",
    'echo "Don\'t; git apply patches/to_tests.patch"', "allow", **SB)
 
+# [apply-shell] A `git apply` that a subshell, a `bash -c` or `sh -c` body, or a variable runs, not the bare command at
+# the head of a segment. Each deny form has a product-only twin, which stays allowed, and an echo-only control, where the
+# same words are printed and nothing is applied.
+sh("builder-test: [apply-subshell red] a git apply of a test patch in a subshell is refused",
+   "(git apply patches/to_tests.patch)", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-subshell control] a git apply of a product patch in a subshell is allowed",
+   "(git apply patches/product.patch)", "allow", **SB)
+sh("builder-test: [apply-subshell control] an echo that holds a subshell git apply of a test patch is allowed",
+   "echo '(git apply patches/to_tests.patch)'", "allow", **SB)
+sh("builder-test: [apply-shell-c red] a bash -c git apply of a test patch is refused",
+   "bash -c 'git apply patches/to_tests.patch'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-shell-c red] a sh -c git apply of a test patch is refused",
+   'sh -c "git apply patches/to_tests.patch"', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-shell-c control] a bash -c git apply of a product patch is allowed",
+   "bash -c 'git apply patches/product.patch'", "allow", **SB)
+sh("builder-test: [apply-shell-c control] a sh -c git apply of a product patch is allowed",
+   'sh -c "git apply patches/product.patch"', "allow", **SB)
+sh("builder-test: [apply-shell-c control] an echo that holds a bash -c git apply of a test patch is allowed",
+   "echo 'bash -c \"git apply patches/to_tests.patch\"'", "allow", **SB)
+sh("builder-test: [apply-var red] a git apply of a test patch named by a variable is refused",
+   'P=patches/to_tests.patch; git apply "$P"', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-var control] a git apply of a product patch named by a variable is allowed",
+   'P=patches/product.patch; git apply "$P"', "allow", **SB)
+sh("builder-test: [apply-var control] an echo of a git apply of a test patch named by a variable is allowed",
+   'P=patches/to_tests.patch; echo "git apply $P"', "allow", **SB)
+
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
     ("cat of tests/x.py", "cat tests/x.py"),
