@@ -15408,7 +15408,7 @@ class ReviewRecordWrite(ReviewEnv):
 # when one parses with the pull request's number at --head, else FAILED (exit 1) and the reason. `--post`, outside a cloud session, posts the printed
 # body with the host's comment POST, then reads it back the same way. In a cloud session `--post` posts nothing: the body goes out through the GitHub
 # MCP tool, and the lane then runs --read-back. Each flag case first asks the parser for its flag by name (ReadBackEnv.flags_known).
-# The restart check refuses a record whose top round is below an earlier record's, or equal to it below round 3. A read-back case therefore names
+# The restart check refuses a record whose top round is below an earlier record's, or equal to it below REVIEW_LAST_ROUND. A read-back case therefore names
 # rounds the check allows: THREE_ROUNDS over a three-round record, or FAIL_THEN_PASS over a one-round FAIL record.
 
 READ_BACK_FLAGS = ("--read-back", "--post")
@@ -15500,7 +15500,7 @@ class ReadBackArgs(ReadBackEnv):
         rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(self.three_record()))
         self.assert_passed(rc, out, err)
 
-    def test_read_back_and_post_need_review_record(self):
+    def test_read_back_and_post_need_the_record_flag(self):
         for extra in (("--read-back",), ("--post",), ("--read-back", "--post")):
             argv = ("7", *extra)
             with self.subTest(argv=argv):
