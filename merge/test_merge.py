@@ -15571,7 +15571,9 @@ class ReadBackReads(ReadBackEnv):
         body = record_text(rounds=THREE_ROUND_LINES, head=REVIEW_HEAD, n=8)
         rec = parse_text(self, body)
         self.assertEqual(rec["n"], 8, "fixture: the record is not for pull request 8, so the scope case proves nothing")  # the scope first: the record is pull request 8's
-        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(review_comment(1, 8, body)))
+        host = self.read_back_host(review_comment(1, 7, body))  # filed on pull request 7's comments, so only the number check keeps it out
+        self.assertEqual(host.review_comments("1970-01-01T00:00:00Z").get(7), [body], "fixture: pull request 7's comments do not hold pull request 8's record")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
         self.assert_failed(rc, out, err, "no record comment found")
 
     def test_a_newer_record_that_does_not_parse_fails_over_an_older_one_at_the_head(self):
