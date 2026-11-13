@@ -4810,12 +4810,12 @@ def parse_freeze(body):
     return block
 
 def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=None):
-    """-> the block's lines, markers included. `lanes` is {PR: head}, listed by PR number; `on` is (branch, sha) or None; `base` is the sha
+    """-> the block's lines, markers included. `lanes` is {PR: head}, listed in hand-in order (the order the dict holds); `on` is (branch, sha) or None; `base` is the sha
     of the base branch the batch was built on, or None (a block made before Base was recorded). `blamed` is the lanes the last FAILing lint of the
     batch head blamed, the only lanes a drop may take off after the build. `linted` is the head a lint and the ready checks passed, or None: a
     rebuild leaves it None, because the new head is no head a lint read."""
     return [BATCH_BEGIN, f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *([f"Base: {base}"] if base else []),
-            *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
+            *(f"Lane: #{n} {lanes[n]}" for n in lanes),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
 def freeze_rewrite(body, block, lines):
@@ -4927,7 +4927,7 @@ def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
             text = freeze_rewrite(info["body"], block, freeze_lines(block["name"], kept, [*block["dropped"], *sorted(off)], (moved, new_head), block["base"],
                                                                     [b for b in block["blamed"] if b in kept]))
             drafted = return_to_draft(h, n, info)
-            new = build_integration_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
+            new = build_integration_branch(root, block["name"], new_head, list(kept.items()), lease=tip, body=(h, n, info["body"], text))
             say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}"
                 + (f", without {lane_list(off)}, which stacked on a dropped lane." if off else "."))
             needs_ready(block["name"], drafted)
@@ -4960,6 +4960,13 @@ def holds_commit_of(root, lane, other, kept, frozen=()):
         raise Stop(f"cannot read the common commits of {lane[:9]} and {other[:9]}: {out} {FREEZE_CITE}")
     return any(b not in frozen and not any(holds(root, b, k) for k in kept) for b in out.split())
 
+def own_commits(root, head, kept):
+    """-> the set of commits that `head` holds and no commit of `kept` holds, in one read."""
+    c, out = git(root, "rev-list", head, "--not", *kept)
+    if c:
+        raise Stop(f"cannot read the commits of {head[:9]}: {out} {FREEZE_CITE}")
+    return set(out.split())
+
 def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add the missing pull request, or leave the stacked lane out."):
     """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
     would put that pull request's commits into the batch unfrozen, an old commit of it as much as its head. `heads` is {PR: head} of the request;
@@ -4971,11 +4978,16 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
     found, named = [], set()
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    cut = git_reads.is_shallow(root) is not False  # a cut history hides a shared commit from rev-list, so a shallow or unreadable clone takes every pair through holds()
+    lane_own = {m: own_commits(root, heads[m], kept) for m in sorted(heads)}  # one read per lane and one per other head, none per pair
     for n, head in others:
         if head in unread:
             say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
             continue
-        hit = [m for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept, frozen)]
+        theirs = own_commits(root, head, kept)
+        # a pair that shares no commit outside `kept` has no common commit to hold, so only the pairs that share one take the full read
+        hit = [m for m in sorted(heads) if (cut or not lane_own[m].isdisjoint(theirs)) and holds_commit_of(root, heads[m], head, kept, frozen)]
         found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in hit]
         named.update(hit)
     if found:
@@ -5027,7 +5039,7 @@ def sync_batch(root, h, pr, info, block, on, base):
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded, block["blamed"]))
     drafted = return_to_draft(h, pr, info)
-    new = build_integration_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
+    new = build_integration_branch(root, name, start, list(heads.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: batch {name} rebuilt on {on or base}, lanes {lane_list(heads)}"
         + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
     if not info["draft"]:  # a draft was a draft before the rebuild; a batch that was ready needs the line, whether or not its return to draft held
@@ -5208,7 +5220,7 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
         frozen = parse_freeze(found[1]["body"])
         if frozen is None:
             raise Stop(f"#{found[0]} is the open pull request of {branch} and holds no frozen block, so its lane set is not known. {FREEZE_CITE}")
-        numbers = numbers or sorted(frozen["lanes"])
+        numbers = numbers or list(frozen["lanes"])
         on = on or (frozen["on"][0] if frozen["on"] else None)
         base = base or found[1]["base"]
     base = base or "main"
@@ -5235,7 +5247,7 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
         stacked_without_base(root, h, base, heads, start if on else None)
-        build_integration_branch(root, name, start, sorted(heads.items()))
+        build_integration_branch(root, name, start, list(heads.items()))
         try:
             pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n", draft=True)
         except Stop as e:
@@ -5370,7 +5382,7 @@ def batch_drop(root, h, name, number):
             say(f"merge: {on[0]} could not be read ({e}); batch {name} is rebuilt on the On sha it recorded, {on[1][:9]}.")
     text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], on, recorded, [b for b in block["blamed"] if b in kept]))
     drafted = return_to_draft(h, pr, info)
-    new = build_integration_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
+    new = build_integration_branch(root, name, start, list(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
     needs_ready(name, drafted)
@@ -5698,7 +5710,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:
                 return batch_blame(root, h, name, a.blame, a.run)
-            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
+            return batch_build(root, h, name, list(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
         lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
