@@ -43,7 +43,7 @@ incoming message, a peer's included; the ack of a send this turn made to the wri
 starts no turn. Owner-facing session: a send to
 the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
+parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
@@ -1183,6 +1183,14 @@ def _own_lane_read(path, own_id):
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+def _is_page_writer(path):
+    """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
+    repo's page writer, whatever parent id its record names (the one triage reader, guard_merge._own_tier_proved)."""
+    _hooks_on_path()
+    from guard_merge import _own_tier_proved
+    return _own_tier_proved(path, HOLD_TIER)
+
+
 def _turn_acts(records, turn, acks):
     """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
@@ -1204,7 +1212,9 @@ def question_problem(records, turn, text, hook):
     with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
+    parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
@@ -1220,6 +1230,8 @@ def question_problem(records, turn, text, hook):
     from override import remote_session_id
     own_id = remote_session_id()
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
+    if lane and _is_page_writer(hook.get("transcript_path")):
+        lane = False  # the triage session names a parent id in its record but is the page writer, so owner-facing
     if lane:
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
