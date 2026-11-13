@@ -15399,7 +15399,7 @@ class ReviewLogPastHead(ReviewEnv):
     BASE_TIP = "7a1e" * 10  # main's tip, which the live head holds: compare(main, BASE_TIP) reads identical
     BASE = "main"  # the pull request's base branch, as batch_pull names it
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
-    FAIL_THREE = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # round 3 is the final round, so its net value sets the state
+    FAIL_THREE = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the last round decides the state, so its net value counts
     FIX_START = "5e" * 20  # the head a fix verifier starts from: an earlier review log's head. It must differ from --head, so it is neither PAST nor LIVE
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
     PAST_LABEL ="merge: past round: head {past} is one of the PR's commits, not the live head {live}; merge --reviewed reads this record stale."
