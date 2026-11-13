@@ -1,0 +1,10 @@
+{
+ "id": "runner-merge-main-grant",
+ "at": "2026-11-13T13:12:00-06:00",
+ "title": "The batch runner may push a plain merge of main into a handed-in PR branch",
+ "ruling": "Owner 2026-11-13 13:12 CST, answer \"a\" to the coordinator's standing-grant question, relayed by the coordinator: the batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in 2 h. No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh record. Home: .claude/CLAUDE.md Standing grants, written by lane runner-merge-main-grant.",
+ "quote": "a",
+ "source": "Coordinator message to triage, 13:12 CST Nov 13, relaying the owner's answer. The owner's words are the single letter; the terms are the coordinator's question.",
+ "status": "open",
+ "step": "runner-merge-main-grant"
+}
