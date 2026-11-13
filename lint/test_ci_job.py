@@ -39,6 +39,8 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+from event_body import EVENT_BODY_SCRIPT, NO_BODY  # noqa: E402  the one home of the test event-body reader (testing/event_body.py)
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -49,6 +51,8 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
+for _name in ("GITHUB_EVENT_PATH", "CI_JOB_PR_BODY", "CI_JOB_PR_BODY_FILE", "PR_BODY"):  # a CI run sets some of these: no case inherits them
+    ENV.pop(_name, None)
 
 
 def workflow(*steps, job="lane", other=None):
@@ -133,6 +137,14 @@ class Job(unittest.TestCase):
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
+
+    def body_file(self, body):
+        """A file in this run's folder that holds `body`: the form ci-job reads the pull request body in, named by CI_JOB_PR_BODY_FILE.
+        `body` is text, written as UTF-8, or bytes, written as they are (a file that is not UTF-8)."""
+        fd, path = tempfile.mkstemp(prefix="body-", suffix=".txt", dir=RUN_FOLDER)
+        with os.fdopen(fd, "wb") as f:
+            f.write(body if isinstance(body, bytes) else body.encode("utf-8"))
+        return path
 
     def seen_after(self, *steps, args=(), env=None):
         """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job. ci-job relays
@@ -527,6 +539,40 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+    def event_body_step(self):
+        """A step that writes the body it reads from its event file to seen.txt. The reader is a script in the run's lint/ folder."""
+        os.makedirs(os.path.join(self.root, "lint"), exist_ok=True)
+        with open(os.path.join(self.root, "lint", "seen_event_body.py"), "w", encoding="utf-8") as f:
+            f.write(EVENT_BODY_SCRIPT)
+        return step("seen", "python3 lint/seen_event_body.py")
+
+    def test_a_step_that_reads_the_pull_request_body_from_its_event_file_gets_the_body_ci_job_is_given(self):
+        """ci-job reads the pull request body from the UTF-8 file that CI_JOB_PR_BODY_FILE names, and gives each step an event file
+        at GITHUB_EVENT_PATH that holds `.pull_request.body`. The step reads the body there, not from its env."""
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n"
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file(body)})
+        self.assertEqual((verdicts, seen), (["PASS"], body), out)
+
+    def test_an_empty_body_file_passes_a_body_step_with_an_empty_body(self):  # control: an empty body is known, so the step runs
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file("")})
+        self.assertEqual((verdicts, seen), (["PASS"], ""), out)
+
+    def test_a_missing_body_file_gives_the_body_step_the_sentinel_not_an_empty_body(self):
+        """A body file that cannot be read gives the step no body: its reader reads the sentinel, never "", which a body check would pass."""
+        path = os.path.join(self.root, "no-such-body.txt")
+        self.assertFalse(os.path.exists(path), "the premise: the body file is missing")
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": path})
+        self.assertEqual((verdicts, seen), (["PASS"], NO_BODY), out)
+
+    def test_a_body_file_that_is_not_utf_8_gives_the_body_step_the_sentinel_not_an_empty_body(self):
+        """A body file of bytes that are not UTF-8 is unreadable, so the step reads the sentinel, never ""."""
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file(b"\xff")})
+        self.assertEqual((verdicts, seen), (["PASS"], NO_BODY), out)
 
 
 class PinNoteEnv(Job):
