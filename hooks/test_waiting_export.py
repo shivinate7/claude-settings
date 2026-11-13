@@ -30,6 +30,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import _transcript  # noqa: E402  the transcript reader the guard uses (lint/_transcript.py)
 sys.path.insert(0, HERE)
 
 ROOT = _test_temp.run_folder()
@@ -228,6 +229,12 @@ def with_writer(records, writer=SESSION):
     return writer_get(at(18, 30), writer) + records
 
 
+def writer_seen(label):
+    """The writer string the transcript names for `label`, read the way the guard reads it. A case that probes the
+    writer match checks this first, so a failure there is the label not coming through whole."""
+    return _transcript.page_writer_id(with_writer([], label))
+
+
 def transcript(folder, records):
     """The transcript file, one JSON record a line. `records` None writes an empty file."""
     path = os.path.join(folder, "transcript.jsonl")
@@ -272,15 +279,17 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
-    """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             session=SESSION):
+    """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the page writer string the
+    transcript names (None: unknown). `session` is the hook's own session_id. `extra_env` adds variables for this
+    run. No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
-    payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
+    payload = {"hook_event_name": "Stop", "session_id": session, "stop_hook_active": stop_active,
                "cwd": cwd, "transcript_path": transcript(folder, records)}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
@@ -293,7 +302,7 @@ def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SES
     if count_git:
         env["RUN_GIT_LOG"] = git_log
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    inbox = os.path.join(cfg, "handoffs", SESSION + ".inbox.md")
+    inbox = os.path.join(cfg, "handoffs", session + ".inbox.md")
     try:
         cp = subprocess.run([sys.executable, PROBE_PATH, HERE, GUARD_PATH], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=60)
@@ -686,6 +695,74 @@ def case_n17_writer_write_by_path_to_items_blocks():
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
 
 
+def case_n19_labelled_writer_with_this_uuid_session_blocks():
+    """The writer is "Triage (<this hook's uuid session id>)", the local id a hook payload carries. The label names
+    this session, so its stale write blocks. A match that reads only session_ ids passes it."""
+    uuid = "5f0c9a1e-3b2d-4e8f-9a6b-7d1c2e3f4a5b"
+    writer = "Triage (%s)" % uuid
+    check("N19 scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    p = run_stop("n19", base_repo("n19"), [owner(at(18, 50))] + page_write(at(19)), writer=writer, session=uuid)
+    expect_block("N19", p, (SCRIPT,))
+
+
+def case_n20_labelled_writer_naming_another_id_passes():
+    """The writer is "Triage (session_8e1b)", another session's id. This session is SESSION, with no remote env.
+    Control: this session's bare id blocks the same stale write, so the pass comes from the label, not a missing write."""
+    other = "Triage (session_8e1b)"
+    check("N20 scope: the label names another id, not this session",
+          writer_seen(other) == other and SESSION not in other, writer_seen(other))
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N20", run_stop("n20", base_repo("n20"), records, writer=other))
+    expect_block("N20 control", run_stop("n20c", base_repo("n20c"), records, writer=SESSION), (SCRIPT,))
+
+
+def case_n22_bare_word_writer_takes_the_export_run_fallback_blocks():
+    """The writer is the bare word "Triage", which names no session id. The word names no writer, so the export run
+    before the write decides: this session is the writer, and its stale write blocks. Control: N23."""
+    writer = "Triage"
+    check("N22 scope: the transcript holds the bare word as the writer", writer_seen(writer) == writer,
+          writer_seen(writer))
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    expect_block("N22", run_stop("n22", base_repo("n22"), records, writer=writer), (SCRIPT,))
+
+
+def case_n23_bare_word_writer_without_an_export_run_passes():
+    """Control for N22: the same bare word, and no export run before the write. No run makes this session the
+    writer, and the word names no id, so the check passes."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N23", run_stop("n23", base_repo("n23"), records, writer="Triage"))
+
+
+def case_n24a_label_with_a_remote_id_and_a_trailing_period_blocks():
+    """The remote env names this session as cse_5b9e, and the writer label holds session_5b9e followed by a period
+    inside the parentheses. The period ends the token, so the id is this session's and its stale write blocks."""
+    writer = "Triage (session_5b9e.)"
+    check("N24a scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    p = run_stop("n24a", base_repo("n24a"), [owner(at(18, 50))] + page_write(at(19)), writer=writer,
+                 extra_env={REMOTE_ENV: "cse_5b9e"})
+    expect_block("N24a", p, (SCRIPT,))
+
+
+def case_n24b_comma_after_the_name_and_a_trailing_period_blocks():
+    """The remote env names this session as cse_5b9e, and the writer label is "Triage, session_5b9e.": a comma after
+    the name, then the id and a period. The punctuation ends no id, so this session is the writer and its write blocks."""
+    writer = "Triage, session_5b9e."
+    check("N24b scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    p = run_stop("n24b", base_repo("n24b"), [owner(at(18, 50))] + page_write(at(19)), writer=writer,
+                 extra_env={REMOTE_ENV: "cse_5b9e"})
+    expect_block("N24b", p, (SCRIPT,))
+
+
+def case_n25_cse_label_with_the_remote_env_blocks():
+    """The remote env names this session as cse_5b9e, and the writer label holds the same cse_ form. The label
+    names this session, so its stale write blocks."""
+    writer = "Triage (cse_5b9e)"
+    check("N25 scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    p = run_stop("n25", base_repo("n25"), [owner(at(18, 50))] + page_write(at(19)), writer=writer,
+                 extra_env={REMOTE_ENV: "cse_5b9e"})
+    expect_block("N25", p, (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -776,6 +853,13 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n19_labelled_writer_with_this_uuid_session_blocks,
+    case_n20_labelled_writer_naming_another_id_passes,
+    case_n22_bare_word_writer_takes_the_export_run_fallback_blocks,
+    case_n23_bare_word_writer_without_an_export_run_passes,
+    case_n24a_label_with_a_remote_id_and_a_trailing_period_blocks,
+    case_n24b_comma_after_the_name_and_a_trailing_period_blocks,
+    case_n25_cse_label_with_the_remote_env_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
