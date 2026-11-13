@@ -1,0 +1,14 @@
+{
+ "id": "deviations-means-departure",
+ "title": "A report's Deviations line names only a departure from a rule, ruling or brief; an unchecked claim goes elsewhere",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:01 CST Nov 13, on a coordinator report: \"Deviations: #3243's round 1 reviewer ran haiku-5-5...\" shown as a deviation although it was intentional: \"so something's going wrong in the prose\".",
+ "source": "owner 14:01 CST Nov 13, via retrospective",
+ "note": "Todo. Candidate wording (retrospective): a Deviations line names only a departure from a rule, ruling or brief. A claim the session did not check goes elsewhere (for example \"Unchecked:\" under Next). An act that matches its rule row is not listed. Home: rule reports-order-of-labels. Triage applies this to its own reports from now on (undoable). Past rulings not checked; adding a label may need the owner's word.",
+ "updatedAt": "2026-11-13T14:02:30-06:00"
+}
