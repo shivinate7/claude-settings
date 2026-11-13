@@ -5124,7 +5124,7 @@ def debt_blamed_lane(wt, base_ref, slugs, lanes, debt, start):
             return None
         c, out = git(wt, "ls-tree", "--name-only", start, "--", path[slug])
         if c:
-            raise Stop(f"cannot read whether {path[slug]} is in {start[:9]}: {out}")
+            raise Stop(f"cannot read whether {path[slug]} is in {start[:9]}: {out} {DEBT_CITE}")
         if not out.strip():
             return None  # the batch starts without the debt: no lane closed it
         causes = {n for n in closing[slug] if not any(m != n and holds(wt, lanes[m], lanes[n]) for m in closing[slug])}
