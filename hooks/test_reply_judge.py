@@ -34,11 +34,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
-import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+sys.path.insert(0, HERE)
+import test_call_judge as tcj  # noqa: E402  the widening sentences and in_text (one home)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
-ROOT = _test_temp.run_folder()
+ROOT = tcj.ROOT  # the run folder the shared harness made, so this process has one
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RED_CASES = []
@@ -1279,11 +1280,10 @@ def case_port_finding_is_a_note_with_its_rule():
 
 
 # --------------------------------------------------------------------------- c139
-# Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
-# shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never
-# the recommended option. Rule
-# `style-question-form` holds that text (the one question form, hooks/question_form.py).
+# A repo should change to fit a shared tool, rather than the tool change to fit a repo. Widening is judged by scope:
+# a change that applies the same way to every repo is not widening. An option that widens carries the question form's
+# "Goes against your ruling" label and is never the recommended option. Rule `style-question-form` holds that text
+# (the one question form, hooks/question_form.py).
 
 WIDENS_RULE = "style-question-form"
 WIDENS_ASK = (
@@ -1327,14 +1327,66 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("flag",), ("recommend",), ("widen",), ("shared tool",)), sentences)
     check("prompt: a sentence flags such an option offered without its label",
           has_pin(sentences, ("flag",), ("widen",),
-                  ("goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",)),
+                  ("goes against your ruling: a repo should change to fit the shared tool, rather than the tool change "
+                   "to fit a repo",)),
           sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
-          has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
+          has_pin(sentences, ("never flag", "do not flag"), ("repo",), ("match",)), sentences)
     check("prompt: a sentence judges only offered options and spares a reply that describes the rule",
           has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
     check("prompt: a sentence never flags a reply that describes the rule itself",
-          has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
+          has_pin(sentences, ("never flag", "do not flag"), ("describes the rule",)), sentences)
+
+
+def case_prompt_says_a_same_change_for_every_repo_is_not_widening():
+    # A change made the same way for every repo, for every repo's sake, is not widening. Pinned whole in the prompt,
+    # so a sentence that drops the motive clause fails.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    check("prompt: a sentence says a change made the same way for every repo, for every repo's sake, is not widening",
+          tcj.in_text(tcj.SAME_CHANGE_IS_NOT_WIDENING, run.prompt()),
+          "the prompt lacks the same-change sentence")
+
+
+def case_prompt_names_a_per_repo_exception_as_widening():
+    # Control: the scope sentence still names a per-repo or one-repo exception as widening.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence names a per-repo or one-repo exception as widening",
+          has_pin(sentences, ("flag",), ("widen",), ("per-repo", "one repo")), sentences)
+
+
+def case_prompt_scopes_widening_to_one_repos_sake():
+    # The definition holds its motive clause, "for that repo's sake". Pinned whole in the prompt.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    check("prompt: a sentence defines widening whole, with its one repo's sake",
+          tcj.in_text(tcj.REPLY_DEFINITION, run.prompt()), "the prompt lacks the definition sentence")
+
+
+def case_prompt_says_an_unmarked_allow_list_option_is_widening():
+    # An unmarked option that adds to a shared allow-list or a second accepted form is widening, unless it says it
+    # applies to every repo. Pinned whole in the prompt, so dropping the exemption clause fails.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    check("prompt: a sentence says an unmarked allow-list or second-form option is widening unless it says it applies "
+          "to every repo",
+          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, run.prompt()),
+          "the prompt lacks the owner's sentence on unmarked options")
+
+
+ALLOW_LIST_ASK = ("Done: read banchi's record titles.\n"
+                  "Input Needed: pick A or B. A: Add the record-title format to the shared allow-list (Recommended). "
+                  "B: rename banchi's titles to the shared form.\n")
+
+
+def case_prompt_judges_a_recommended_unmarked_allow_list_option():
+    # The reply offers a Recommended option with no mark that adds to a shared allow-list. The judge is called once,
+    # sees the option's words, and is told the owner's sentence on unmarked options.
+    run = run_hook(ALLOW_LIST_ASK, answer=OK_ANSWER)
+    prompt = run.prompt()
+    check("prompt: one model call, and the judge sees the Recommended allow-list option",
+          len(run.calls) == 1 and ALLOW_LIST_ASK in prompt, prompt[:300])
+    check("prompt: the judge is told an unmarked allow-list option is widening",
+          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, prompt),
+          "the prompt lacks the owner's sentence on unmarked options")
 
 
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
@@ -1730,6 +1782,11 @@ CASES = (
     case_port_finding_is_a_note_with_its_rule,
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
+    case_prompt_says_a_same_change_for_every_repo_is_not_widening,
+    case_prompt_names_a_per_repo_exception_as_widening,
+    case_prompt_scopes_widening_to_one_repos_sake,
+    case_prompt_says_an_unmarked_allow_list_option_is_widening,
+    case_prompt_judges_a_recommended_unmarked_allow_list_option,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
