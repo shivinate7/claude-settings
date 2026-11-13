@@ -6,7 +6,7 @@ tool refusal with the rule or decision text it claims to hold.
 
 Owner, 2026-11-01 20:57 CST: "a lot of what this repo is is just self improvement best practices so
 that my next project comes in faster, better than the last". The incident: the merge tool refused a
-merge while another ready PR ran CI, stricter than rule git-no-merge-during-batch-ci. The per-lane cutover
+merge while another ready PR ran CI, stricter than the batch-CI rule that was then `git-no-merge-during-batch-ci`. The per-lane cutover
 (R42 part 2) removed that refusal, so its rows are gone from this sweep. This sweep cites the incident and does not redo it.
 
 ## Method
