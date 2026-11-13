@@ -1,0 +1,14 @@
+{
+ "id": "page-no-preselected-pick",
+ "title": "A triage pick on the waiting page never preselects an answer",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 13:04 CST Nov 13 (typed in this session, on the Cockpit page): stood picks must not be preselected answers.",
+ "source": "owner, 13:04 CST Nov 13, typed to triage",
+ "note": "Todo. Owner: \"in general on this artifact can pick stand's not be preselected answers please\". Done by triage now: the `pick` and `stands` fields were removed from the 18 open items that carried them (54 closed ones left alone). Triage no longer writes them. The pick stays in the item text and the lane message, with its undo. Open: the waiting-page skill and its page code may still write or read `pick`/`stands`; a builder removes that, and any check that requires it.",
+ "updatedAt": "2026-11-13T13:04:25-06:00"
+}
