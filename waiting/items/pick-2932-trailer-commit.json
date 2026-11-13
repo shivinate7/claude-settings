@@ -26,6 +26,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator 10:24 CST Nov 13; sent to triage 10:56 CST",
+  "reply": "Closed 11:05 CST Nov 13 by triage: you accepted a at 11:03 CST. Already done: the trailer-only commit is on #2932. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "#2932 trailer-only commit",
   "shown": [
@@ -40,8 +41,8 @@
       "label": "Amend the last commit"
     }
   ],
-  "stands": true,
-  "status": "open",
+  "stands": false,
+  "status": "closed",
   "title": "Add one commit to #2932 that carries only the Drops-lines trailer?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

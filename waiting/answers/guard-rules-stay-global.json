@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-13T17:03:26.838Z",
+  "choice": "none",
+  "item": "guard-rules-stay-global",
+  "label": "none of these",
+  "n": 606,
+  "note": "i thought hooks apply to all repos though and are installedi n all of them, so how would they not be on all the repos that call claude-settings, or am i misunderstanding? "
+}

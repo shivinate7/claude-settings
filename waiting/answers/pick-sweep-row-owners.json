@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:03:26.838Z",
+  "choice": "a",
+  "item": "pick-sweep-row-owners",
+  "label": "A: Split by row kind (coordinator's pick)",
+  "n": 697,
+  "note": "accepted pick",
+  "optionId": "split-owners"
+}

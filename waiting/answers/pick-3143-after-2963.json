@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:03:26.838Z",
+  "choice": "a",
+  "item": "pick-3143-after-2963",
+  "label": "A: Wait for #2963, then retarget (coordinator's pick)",
+  "n": 696,
+  "note": "accepted pick",
+  "optionId": "wait-retarget"
+}

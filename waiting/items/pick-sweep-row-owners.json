@@ -26,6 +26,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator 10:50 CST Nov 13; sent to triage 10:56 CST",
+  "reply": "Closed 11:05 CST Nov 13 by triage: you accepted a at 11:03 CST. The row owners are with the lost-work-sweep lane. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Lost-work sweep: who fixes each row",
   "shown": [
@@ -40,8 +41,8 @@
       "label": "The coordinator owns every row"
     }
   ],
-  "stands": true,
-  "status": "open",
+  "stands": false,
+  "status": "closed",
   "title": "Who fixes each kind of row the lost-work sweep finds?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

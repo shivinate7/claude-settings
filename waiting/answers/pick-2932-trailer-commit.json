@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:03:26.838Z",
+  "choice": "a",
+  "item": "pick-2932-trailer-commit",
+  "label": "A: One trailer-only commit (coordinator's pick)",
+  "n": 695,
+  "note": "accepted pick",
+  "optionId": "trailer-commit"
+}

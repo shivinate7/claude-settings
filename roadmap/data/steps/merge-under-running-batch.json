@@ -1,0 +1,14 @@
+{
+ "id": "merge-under-running-batch",
+ "title": "Allow a merge to main while a batch run is in CI when the change touches no file that batch reads",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The owner asked runner 10 at about 11:00 CST Nov 13 why nothing merges while a batch runs. R42 part 2 (owner 13:39 CST Nov 11) supersedes rule git-no-merge-during-batch-ci, and R55 part 2 lets an express lane cancel a running batch, but the merge tool and CLAUDE.md still enforce the lock.",
+ "source": "coordinator 11:03 CST Nov 13; runner 10",
+ "note": "Shape (runner 10): the merge tool lets a merge land under a running batch when main's change shares no file with what that batch's jobs read; otherwise the batch re-lints after the merge. First measure: how often main's moves are file-disjoint from a running batch (unmeasured). A slice of R42 part 2, whose full design (merge on own green, main's CI after, revert on red) is step merge-flow-after-anthropic. Express (ruling drain-first-hold part 4: merge flow).",
+ "updatedAt": "2026-11-13T11:05:00-06:00"
+}
