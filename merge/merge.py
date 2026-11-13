@@ -5304,7 +5304,10 @@ def idle_lanes(live, repo_dir=None):
     unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
         held = f", {len(holds)} held" if holds else ""
-        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
+        epoch = ("After get_session, skip a lane whose ccr.external_metadata.unarchived_epoch is above 0 (the owner unarchived it) "
+                 "and name it in your report; a lane with no unarchived_epoch field, or one at 0, still archives.")
+        tail = ("Run get_session on each lane line alone, then archive it; never archive a hold line. " if holds
+                else "Run get_session on each alone, then archive it. ") + epoch
         entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
