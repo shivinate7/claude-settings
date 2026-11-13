@@ -962,9 +962,10 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, rule=RECORD_RULE, **kw):
+    """A git push the guard refuses under roadmap-one-writer, or under `rule` when another rule reads it first.
+    The reason names the rule, never the push."""
+    sh("roadmap-one-writer: " + name, command, "deny", rule=rule, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1039,7 +1040,7 @@ record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tai
 record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
-              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.

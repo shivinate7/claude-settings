@@ -1691,10 +1691,12 @@ for _name, _command in (
 RM_PARENT_HINT = {"Bash": "rm -rf build", "PowerShell": "Remove-Item -Recurse build"}
 
 
-def rm_parent(name, command, expected="deny", **kw):
-    """One case of the block: a deny names destructive-delete, an allow names nothing."""
-    sh("rm-parent: " + name.replace("\n", " ; "), command, expected,
-       "destructive-delete" if expected == "deny" else None, cwd=NOGIT, **kw)
+def rm_parent(name, command, expected="deny", rule=None, **kw):
+    """One case of the block: a deny names destructive-delete unless `rule` names the rule that reads it first,
+    and an allow names nothing."""
+    if rule is None:
+        rule = "destructive-delete" if expected == "deny" else None
+    sh("rm-parent: " + name.replace("\n", " ; "), command, expected, rule, cwd=NOGIT, **kw)
 
 
 # The flag spellings, on `.` and `..`: one cluster, split flags, a capital R, a verbose letter, the
@@ -1924,10 +1926,13 @@ for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --ca
     rm_parent("allows " + _command, _command, "allow")
 rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 
-# KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
-# unread by both the token read and the raw read. These cases record today's verdict and are not a
-# ruling that it is right: when a fix makes one deny, re-point it here.
-for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
+# A `&` glued to the target backgrounds the delete as a spaced one does, so detached-launch refuses
+# `rm -rf ..&` before any delete rule reads it (decision detached-launch-refused).
+rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detached-launch")
+# KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
+# both the token read and the raw read. These cases record today's verdict and are not a ruling that
+# it is right: when a fix makes one deny, re-point it here.
+for _command in ("rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 

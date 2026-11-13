@@ -403,10 +403,9 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=(">",))
-    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, is refused by detached-launch",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
-       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
-       carries="Run `sim-test -scheme App", lacks=("&",))
+       "deny", rule="detached-launch", env_path=one_path, config=one_cfg)
     sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
