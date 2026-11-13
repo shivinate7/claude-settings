@@ -3036,8 +3036,8 @@ class LintCheckJoin(tm.CloudSession):
         self.refused_with_rollup("pending newest run beside an older pass", seq, runs_seq=runs)
 
     def test_an_integration_pr_whose_older_all_jobs_passed_run_failed_still_needs_the_lane_lint_under_a_newer_pass(self):
-        """Why: an older run's red rollup row holds the rollup not green, even when a newer run passes it, because the merge gate reads the older
-        red. A skip line here would name a head the gate then refuses. The join names `merge --lane-lint 7` and merges and pushes nothing.
+        """Why: an older run's red rollup row holds the rollup not green, even when a newer run passes it, because the merge check reads the older
+        red. A skip line here would name a head the check then refuses. The join names `merge --lane-lint 7` and merges and pushes nothing.
         Red under a mutant that lets an older run's fail drop out of the rollup."""
         seq, runs = rollup_by_run([(100, "fail"), (200, "pass")])
         with self.integration_pr():
