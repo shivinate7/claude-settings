@@ -119,7 +119,7 @@
                           the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
                           A PR number also reads the draft's lane-touched-tests run at the head (Windows and macOS jobs; never a ref or commit), after the cross-measure
                           and before the ci-job run. A failed job FAILs and names its link, never lifted. A run unfinished, or no `touched` job on the head, is an
-                          unknown that --lint-unknown-ok lifts, logged. Cost: one check-runs read per call.
+                          unknown that --lint-unknown-ok lifts, logged, unless the PR reads dirty: then no `touched` job is a FAIL (GitHub starts no run on a conflicting PR), never lifted. Cost: one check-runs read per call.
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
@@ -1383,11 +1383,16 @@ class Host:
     DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
     DRAFT_OK = ("success", "skipped", "neutral")
 
+    @classmethod
+    def no_touched_line(cls, sha):
+        """The one line draft_run_state gives for a head with no `touched` job; lane_lint compares against it to tell that from a skipped job."""
+        return f"no `{cls.DRAFT_TOUCHED}` job (lane-touched-tests) has run on {sha[:9]}"
+
     def draft_run_state(self, sha):
         """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
         "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
         "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
-        or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
+        or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof. The two differ by `lines`: the first is exactly [no_touched_line(sha)].
         "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
         newest = {}
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
@@ -1403,7 +1408,7 @@ class Host:
         if waiting:
             return "wait", waiting
         if self.DRAFT_TOUCHED not in newest:
-            return "unknown", [f"no `{self.DRAFT_TOUCHED}` job (lane-touched-tests) has run on {sha[:9]}"]
+            return "unknown", [self.no_touched_line(sha)]
         if newest[self.DRAFT_TOUCHED].get("conclusion") == "skipped":
             return "unknown", [f"the `{self.DRAFT_TOUCHED}` job (lane-touched-tests) was skipped on {sha[:9]}, so no touched test ran: {newest[self.DRAFT_TOUCHED].get('html_url') or newest[self.DRAFT_TOUCHED].get('details_url') or '(no link)'}"]
         return "pass", []
@@ -1500,7 +1505,7 @@ class Host:
                 return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again. {GREEN_CITE}"
-            if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
+            if pr_reads_dirty(info):
                 return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
@@ -2895,10 +2900,14 @@ def load_config(root, base, path, cite=""):
         say(f"merge: {path} on {ref} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
+def pr_reads_dirty(info):
+    """True when GitHub reads the pull request as conflicting with its base."""
+    return info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY"
+
 def refuse_bad_pr(info):
     if info["state"] != "OPEN":
         raise Stop(f"the pull request is {info['state']}")
-    if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
+    if pr_reads_dirty(info):
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
 def fetch_branch(root, branch, cite=""):
@@ -3270,6 +3279,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
+            elif draft == "unknown" and draft_lines == [Host.no_touched_line(head)] and pr_reads_dirty(info):
+                # GitHub starts no pull_request run on a PR that conflicts with main, so the missing job is the conflict, which no reason lifts.
+                fails.append(f"PR conflicts with main: merge {base} in (no lane-touched-tests run on {head[:9]})")
             elif draft != "pass" and not (fails or stop):
                 if not unknown_ok.strip():
                     raise Liftable("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass:", *draft_lines,
