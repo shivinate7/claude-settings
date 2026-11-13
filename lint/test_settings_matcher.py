@@ -661,7 +661,7 @@ class QuestionReviewer(unittest.TestCase):
 
 
 # The STE write guard and the markdown sweep are not wired in settings.json.
-# CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
+# CI's STE lint (actions/ste-lint) carries STE011 and STE013 on changed lines instead.
 class SteHooksRemoved(unittest.TestCase):
     def test_no_hook_runs_the_removed_scripts(self):
         with open(SETTINGS, encoding="utf-8") as f:

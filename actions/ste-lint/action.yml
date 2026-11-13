@@ -40,8 +40,8 @@ inputs:
     default: "false"
   decisions-dir:
     description: >
-      Folder of D-nnn decision records. STE001 then stops counting the words a gloss
-      tool inserts after a citation. Empty, the default: the decisions folder that
+      Folder of D-nnn decision records. Gloss text the tool inserts is not linted by
+      any rule and not counted by --stats. Empty, the default: the decisions folder that
       lint/layout.json names. The collapse turns on only when the folder exists, so a
       repository with none sees no change. Pass off to turn it off.
     required: false
