@@ -6,7 +6,8 @@ extra kind may not replace a layout kind. The mark that the repo has rolled out 
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "page-writer", "kind", "caution", "visibility",
-"devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
+"devices", "shared-resources", "roadmap", "record-branch", "artifacts") read from the default branch's blob on origin, else
+the checkout's file (`repo_keys()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
 The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
 the registry entry whose role is "waiting-page";
@@ -275,15 +276,20 @@ COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
 
 
-def artifacts(root):
-    """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
-    for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
+def artifacts(root, keys=None, tree_only=False):
+    """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file (read through
+    `repo_keys`: origin's default branch first; one git start per call), in order; [] for a repo with no
+    extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
-    repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
-    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
+    repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path.
+    `keys` is the dict a caller already read with `repo_keys(root)`, so a caller that reads two keys starts git once.
+    `tree_only` reads the checkout's own file (no git start): the CI check of the checkout's own registry."""
+    if keys is None:
+        keys = _tree_keys(root) if tree_only else repo_keys(root)
+    return _registry(root, keys.get(ARTIFACTS), _extras(root))
 
 
 def _registry(root, found, where):
@@ -340,27 +346,40 @@ def _registry(root, found, where):
     return out
 
 
-GIT_SHOW_TIMEOUT = 10  # seconds one `git show` may run
+GIT_SHOW_TIMEOUT = 10  # seconds the one blob read may run
 
 
 def _default_branch_extras(root):
-    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. For a
-    checkout that holds no extras file of its own, such as a worktree on the record branch. It reads origin/HEAD's
+    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. The first
+home of every repo-config read (`repo_keys`, `waiting_page`). It reads origin/HEAD's
     branch, else origin/main, from the ref alone: no checkout moves and no fetch runs. None for no extras path, no
     such ref, a git error or a timeout, and for a file that does not parse.
-    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve), and
-    only when the checkout holds no extras file. No file is written."""
+    Cost: one `git cat-file --batch` process per call, which asks for origin/HEAD's file and origin/main's together.
+    No file is written."""
     where = layout().get("extras")
     if not where:
         return None
-    for ref in ("origin/HEAD", "origin/main"):
+    refs = ("origin/HEAD", "origin/main")
+    try:
+        done = _nowindow_run(["git", "-C", root, "cat-file", "--batch"], capture_output=True,
+                             input="".join("%s:%s\n" % (ref, where) for ref in refs).encode("utf-8"),
+                             timeout=GIT_SHOW_TIMEOUT)
+    except (OSError, ValueError, subprocess.SubprocessError, ImportError):
+        return None
+    out = done.stdout if done.returncode == 0 else b""
+    for ref in refs:
+        head, _, out = out.partition(b"\n")
+        fields = head.split()
+        if len(fields) != 3 or fields[1] != b"blob":
+            continue  # "<ref:path> missing", or no blob
+        if not fields[2].isdigit():
+            break
+        size = int(fields[2])
+        body, out = out[:size], out[size + 1:]
         try:
-            done = _nowindow_run(["git", "-C", root, "show", "%s:%s" % (ref, where)], capture_output=True,
-                                 stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
-            if done.returncode == 0:
-                return _parse(done.stdout.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
-        except (OSError, ValueError, subprocess.SubprocessError, LayoutError, ImportError):
-            continue
+            return _parse(body.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
+        except (ValueError, LayoutError):
+            continue  # a blob that does not parse: the next ref, else the checkout's file
     return None
 
 
@@ -373,20 +392,29 @@ def _page_in(root, keys, where):
     return "unknown" if found is None else _artifact_link(found, where)
 
 
-def waiting_page(root):
+def waiting_page(root, keys=None):
     """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
-    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. A checkout with no extras
-    file reads it from the default branch's (_default_branch_extras); its own file always wins.
+    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. It reads the default branch's
+    blob on origin (_default_branch_extras), else the checkout's own file; a fork's own file (it sets "record-branch") wins
+    whole. Cost: one git start per call (none for a fork or when `keys` is passed).
+    `keys` is the dict a caller already read with `repo_keys(root)`: no git start, and a registry that holds no page is
+    "unknown" whichever source it came from.
     "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
-    if has_extras(root):
-        return _page_in(root, _read(_extras(root)), _extras(root))
-    held = _default_branch_extras(root)
-    if held is None:
+    if keys is not None:
+        try:
+            return _page_in(root, keys, _extras(root))
+        except LayoutError:
+            return "unknown"
+    found = _config_source(root)
+    if found is None:
         return "unknown"
+    keys, where, from_blob = found
     try:
-        return _page_in(root, *held)
+        return _page_in(root, keys, where)
     except LayoutError:
-        return "unknown"  # a ref's file that does not hold a page is no page, never an error
+        if from_blob:
+            return "unknown"  # a ref's file that does not hold a page is no page, never an error
+        raise
 
 
 def set_waiting_page(root, url):
@@ -400,11 +428,12 @@ def set_waiting_page(root, url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
         data = _read(_extras(root))
-        held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
+        entries = _registry(root, data.get(ARTIFACTS), _extras(root))
+        held = next((e for e in entries if e["role"] == WAITING_ROLE), None)
         if held is not None:
             if artifact_id(held["url"]) == artifact_id(url):
                 return False
-            data[ARTIFACTS][[e["id"] for e in artifacts(root)].index(held["id"])]["url"] = url
+            data[ARTIFACTS][[e["id"] for e in entries].index(held["id"])]["url"] = url
         elif data.get(WAITING_PAGE) is not None:
             return False
         else:
@@ -422,10 +451,11 @@ RECORD_BRANCH = "record-branch"  # the extras key: the branch that holds this wo
 DEFAULT_RECORD_BRANCH = "roadmap"
 
 
-def record_branch(root):
+def record_branch(root, keys=None):
     """The record branch of `root` from its extras file: the "record-branch" key, else "roadmap". A fork
-    worktree sets its own. LayoutError when the key is not a plain git branch name."""
-    keys = _repo_keys(root)
+    worktree sets its own. LayoutError when the key is not a plain git branch name. `keys` is the dict a caller
+    already read with `repo_keys(root)`."""
+    keys = repo_keys(root) if keys is None else keys
     if RECORD_BRANCH not in keys:
         return DEFAULT_RECORD_BRANCH
     found = keys[RECORD_BRANCH]
@@ -441,20 +471,21 @@ PAGE_WRITER_KEY = "page-writer"  # the extras key: the session id of the page's 
 PARENT_TARGETS = frozenset({"@parent", "parent"})  # send targets that name the parent, never a session id
 
 
-def page_writer_key(root):
+def page_writer_key(root, keys=None):
     """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
     null, not a string, blank, padded with whitespace or a parent alias (PARENT_TARGETS). A session id is a
     claim, not checked past that."""
-    found = _repo_keys(root).get(PAGE_WRITER_KEY)
+    found = (repo_keys(root) if keys is None else keys).get(PAGE_WRITER_KEY)
     if not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS:
         return None
     return found
 
 
 def waiting_page_colour(root):
-    """The waiting page colour of `root` from its extras file, lowercased; None when unset. LayoutError
-    when it is not #rrggbb, so a caller never guesses one."""
-    found = _repo_keys(root).get(WAITING_PAGE_COLOUR)
+    """The waiting page colour of `root` from the checkout's own extras file only, lowercased; None when unset. No git
+    start and no blob read: lint/repo_colour.py runs with no process. LayoutError when it is not #rrggbb, so a caller
+    never guesses one."""
+    found = _tree_keys(root).get(WAITING_PAGE_COLOUR)
     if found is None:
         return None
     if not isinstance(found, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", found):
@@ -463,9 +494,9 @@ def waiting_page_colour(root):
 
 
 def waiting_page_icon(root):
-    """The path, relative to `root`, of its waiting page icon from its extras file; None when unset.
-    LayoutError when it is not a path inside the repo. The file itself is the caller's to read."""
-    found = _repo_keys(root).get(WAITING_PAGE_ICON)
+    """The path, relative to `root`, of its waiting page icon from the checkout's own extras file only (no git start, no
+    blob read); None when unset. LayoutError when it is not a path inside the repo. The file itself is the caller's to read."""
+    found = _tree_keys(root).get(WAITING_PAGE_ICON)
     if found is None:
         return None
     where = "%s: %s" % (_extras(root), WAITING_PAGE_ICON)
@@ -486,15 +517,40 @@ def live_pages(roots):
     return found
 
 
-def _repo_keys(root):
-    """The extras file of `root` as a dict, or {} when the repo has none."""
+def _tree_keys(root):
+    """The checkout's own extras file as a dict, {} when it holds none. No git start. LayoutError when it does not parse."""
     return _read(_extras(root)) if has_extras(root) else {}
 
 
-def _named(root, key, table):
+def _config_source(root):
+    """(keys, where, from_blob) of the repo config of `root`, else None. A fork keeps its own file whole: the checkout's
+    file sets "record-branch". Any other checkout reads the default branch's blob on origin first (a session's checkout
+    goes stale), and its own file only when no blob resolves or the blob does not parse. A checkout file that does not
+    parse raises LayoutError before any blob is read."""
+    tree = _tree_keys(root)
+    if RECORD_BRANCH in tree:
+        return tree, _extras(root), False
+    held = _default_branch_extras(root)
+    if held is not None:
+        return held[0], held[1], True
+    return (tree, _extras(root), False) if tree else None
+
+
+def repo_keys(root):
+    """The extras file of `root` as a dict, {} when neither source holds one. The one home of every guard and tool read
+    of repo config (_config_source): a fork's own file whole, else the blob on origin's default branch (origin/HEAD, else
+    origin/main), else the checkout's file. Writers (set_waiting_page) read the checkout's file with `_read`, never this.
+    waiting_page_colour and waiting_page_icon read the checkout's file only (_tree_keys): lint/repo_colour.py runs with
+    no process. Cost: at most one git start per call (none for a fork, or when the layout names no extras path);
+    so a caller that reads two keys passes `keys`. No fetch; no file is written."""
+    found = _config_source(root)
+    return found[0] if found else {}
+
+
+def _named(root, key, table, keys=None):
     """The value of extras key `key` when it names an entry of layout table `table`, None when unset.
-    LayoutError when it names no entry."""
-    found = _repo_keys(root).get(key)
+    LayoutError when it names no entry. `keys` is the dict a caller already read with `repo_keys(root)`."""
+    found = (repo_keys(root) if keys is None else keys).get(key)
     if found is None:
         return None
     if not isinstance(found, str) or found not in layout().get(table, {}):
@@ -505,10 +561,10 @@ def _named(root, key, table):
 def devices(root):
     """[{id, name, size}] for the repo at `root`, first device first: the repo's own "devices" list, else
     the default order of its "kind". None (printed as `unknown`) when the repo names neither. A size is
-    None until a written source gives it (lint/layout.json, "devices"): no size is ever guessed."""
-    keys, table = _repo_keys(root), layout().get("devices", {})
+    None until a written source gives it (lint/layout.json, "devices"): no size is ever guessed. One git start per call."""
+    keys, table = repo_keys(root), layout().get("devices", {})
     listed = keys.get("devices")
-    kind = _named(root, "kind", "app-kinds")
+    kind = _named(root, "kind", "app-kinds", keys)
     if listed is None:
         if kind is None:
             return None
@@ -521,10 +577,12 @@ def devices(root):
 def caution(root):
     """{level, facts, acts} for the repo at `root`: its "caution" key, else the level its "visibility"
     key maps to. A missing, non-string, "default" or unmapped visibility resolves to the layout's default,
-    "unknown", never to "public". The visibility source is a key in the extras file, so it reads offline."""
-    level = _named(root, "caution", "cautions")
+    "unknown", never to "public". The visibility source is a key in the extras file, so it reads offline. One git
+    start per call."""
+    keys = repo_keys(root)
+    level = _named(root, "caution", "cautions", keys)
     if level is None:
-        by, seen = layout().get("visibility-caution", {}), _repo_keys(root).get("visibility")
+        by, seen = layout().get("visibility-caution", {}), keys.get("visibility")
         level = by.get(seen, by["default"]) if isinstance(seen, str) and seen != "default" else by["default"]
         if level not in layout().get("cautions", {}):
             raise LayoutError("%s: visibility-caution maps to no caution level" % LAYOUT_FILE)
@@ -563,8 +621,10 @@ SHARED_RESOURCES = "shared-resources"  # the extras key: [{name, owner, prefligh
 def shared_resources(root):
     """[{name, owner, preflight, holds}] from the "shared-resources" key of `root`'s extras file, [] when
     it has none. owner is `<gh-owner>/<repo>`; preflight and holds are paths inside the owner repo. When
-    `root` is the owner, its preflight file must exist. LayoutError names the extras file and the entry."""
-    found = _repo_keys(root).get(SHARED_RESOURCES)
+    `root` is the owner, its preflight file must exist. LayoutError names the extras file and the entry. It reads the
+    checkout's own file only, with no git start: its callers are the CI check and a command line, which validate the
+    file as committed, never origin's blob."""
+    found = _tree_keys(root).get(SHARED_RESOURCES)
     if found is None:
         return []
     where = _extras(root)
@@ -701,7 +761,7 @@ if __name__ == "__main__":
             here = os.path.abspath(sys.argv[2])
             if set_waiting_page(here, sys.argv[3]):
                 sys.exit(0)
-            print(waiting_page(here))
+            print(waiting_page(here, _tree_keys(here)))  # the checkout's own page, as set_waiting_page judged it
             sys.exit(1)
         except (LayoutError, OSError) as err:
             print("layout: %s" % err, file=sys.stderr)

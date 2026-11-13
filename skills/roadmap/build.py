@@ -524,11 +524,9 @@ def extras(repo, source):
     try:
         sys.path.insert(0, str(LINT))
         import layout
-        if layout.has_extras(str(repo)):
-            path = repo / layout.layout()["extras"]
-            found = json.loads(path.read_text(encoding="utf-8")).get("roadmap")
-            if isinstance(found, dict):
-                return found, layout.layout()["extras"]
+        found = layout.repo_keys(str(repo)).get("roadmap")  # the one home: github_slug and the guard read the same file
+        if isinstance(found, dict):
+            return found, layout.layout()["extras"]
     except Exception:  # an unreadable extras file falls through to the record branch's
         pass
     finally:

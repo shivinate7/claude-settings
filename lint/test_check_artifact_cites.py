@@ -35,6 +35,8 @@ URL = "https://claude.ai/artifact/" + REGISTERED
 CODE_URL = "https://claude.ai/code/artifact/" + REGISTERED
 REGISTRY = {"kinds": {}, "rolled-out": True,
             "artifacts": [{"id": REGISTERED, "url": URL, "role": "waiting-page", "account": "work"}]}
+NEW_ENTRY = {"id": "newref", "url": "https://claude.ai/artifact/newref", "role": "reference", "account": "work",
+             "collections": []}  # added to the checkout or to origin/main only, by the cases below
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -94,6 +96,17 @@ class CiteTests(unittest.TestCase):
     def ref_exists(self, ref):
         return subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
 
+    def origin_main(self, text):
+        """refs/remotes/origin/main holds the extras file `text` and no local main: the state a fetch leaves."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "main-index"))
+        self.git("read-tree", "--empty", env=env)
+        blob = self.git("hash-object", "-w", "--stdin", stdin=text, env=env).strip()
+        self.git("update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, EXTRAS), env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "main", env=env).strip()
+        self.git("update-ref", "refs/remotes/origin/main", commit)
+        self.assertTrue(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture lost origin/main")
+
     def run_check(self):
         done = subprocess.run([sys.executable, SCRIPT, "--root", self.root], capture_output=True, text=True, timeout=60)
         return done.returncode, done.stdout + done.stderr
@@ -130,6 +143,21 @@ class CiteTests(unittest.TestCase):
     def test_an_artifact_cite_with_an_unregistered_id_is_red(self):
         self.decision("# Record\n\nSee artifact:" + UNREGISTERED + ".\n")
         self.assertRed("docs/decisions/x.md", "an artifact:<id> cite with no registry entry was not refused")
+
+    def test_an_artifact_the_checkout_adds_is_green_when_origin_main_lacks_it(self):
+        self.put(EXTRAS, json.dumps(dict(REGISTRY, artifacts=REGISTRY["artifacts"] + [NEW_ENTRY])))
+        self.origin_main(json.dumps(REGISTRY))
+        self.assertNotIn("newref", self.git("show", "refs/remotes/origin/main:" + EXTRAS))  # scope: origin lacks the entry
+        self.decision("# Record\n\nSee artifact:newref for the page.\n")
+        self.assertGreen("an artifact the checkout registers was refused: the check read origin/main's registry, not the checkout's")
+
+    def test_a_cite_of_an_entry_the_checkout_removed_is_red_when_origin_main_still_has_it(self):
+        self.origin_main(json.dumps(dict(REGISTRY, artifacts=REGISTRY["artifacts"] + [NEW_ENTRY])))
+        self.assertIn("newref", self.git("show", "refs/remotes/origin/main:" + EXTRAS))  # scope: origin holds the entry
+        with open(os.path.join(self.root, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            self.assertNotIn("newref", handle.read())  # scope: the checkout's own file lacks the entry
+        self.decision("# Record\n\nSee artifact:newref for the page.\n")
+        self.assertRed("docs/decisions/x.md", "a cite of an entry the checkout removed passed: the check read origin/main's registry")
 
     def test_a_bare_link_inside_a_code_fence_is_still_red(self):
         self.decision("# Record\n\n```\n" + URL + "\n```\n")

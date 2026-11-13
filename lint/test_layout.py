@@ -29,6 +29,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
 REPO = os.path.dirname(LINT)
+HOOKS = os.path.join(REPO, "hooks")  # git_reads.py, which the guard's github_repo read is in
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -433,6 +434,33 @@ class GitTree(Tree):
         self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
         self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
 
+    def scope_origin(self, ref):
+        """The ref holds the extras file, so an unknown page or repo is the read's fault, not the fixture's."""
+        found = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", ref + ":" + EXTRAS], capture_output=True).returncode
+        self.assertEqual(found, 0, "scope: the fixture's %s holds no extras file" % ref)
+
+    def working_extras(self):
+        """The checkout's own extras file, as text."""
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            return handle.read()
+
+    def stale_checkout(self, working, origin):
+        """A checkout whose own extras file holds `working`, with origin/main's extras file holding `origin` (text).
+        Scope first: both files are where the case says, so a read that goes wrong is the read's fault."""
+        self.put(EXTRAS, working)
+        self.record("refs/remotes/origin/main", {EXTRAS: origin})
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds no extras file")
+        self.scope_origin("refs/remotes/origin/main")
+
+    def git_starts(self, read, *args):
+        """(value, argv of each git process the read started). Counts subprocess.Popen, the start that subprocess.run,
+        check_output and Popen all make, so the count holds whichever runner a read uses."""
+        real = subprocess.Popen
+        with mock.patch("subprocess.Popen", wraps=real) as spy:
+            value = read(*args)
+        starts = [list(call.args[0] if call.args else call.kwargs["args"]) for call in spy.call_args_list]
+        return value, [argv for argv in starts if argv and os.path.basename(str(argv[0])) == "git"]
+
 
 class WaitingCopy(GitTree):
     """The waiting page's copy lives in `waiting/` on the record branch (decision waiting-data-in-repo). A repo whose
@@ -526,13 +554,16 @@ class WaitingCopy(GitTree):
 
 
 class DefaultBranchPage(GitTree):
-    """A checkout with no extras file reads the waiting page from the repo's default branch on origin: the branch
-    origin/HEAD names, else origin/main (skill waiting-page). A worktree on the record branch can hold no extras file;
-    without this read its page would read as unknown and its page checks would not run. The read is of the ref only: no
-    checkout moves and no fetch runs."""
+    """The guard's read of the waiting page comes from the repo's default branch on origin: the branch origin/HEAD
+    names, else origin/main (skill waiting-page). A stale checkout's own extras file does not win over that blob. The
+    checkout's file is read only when no origin ref resolves, when its blob does not parse, or when the checkout holds
+    no file of its own (a worktree on the record branch). Writers (set_waiting_page) read the checkout's file only. The
+    read is of the ref only: no checkout moves and no fetch runs."""
     URL_MAIN = "https://claude.ai/artifact/fromorigin"
     URL_LOCAL = "https://claude.ai/artifact/fromlocal"
     URL_TRUNK = "https://claude.ai/artifact/fromtrunk"
+    URL_NEW = "https://claude.ai/artifact/fromnew"
+    FORK_BRANCH = "fork-roadmap"  # the record branch a fork checkout sets for itself
     REMOTE = "https://github.com/owner/fixture.git"
     BRIEF = {"briefs/a.md": "# Brief\n"}
 
@@ -552,11 +583,6 @@ class DefaultBranchPage(GitTree):
 
     def scope_checkout(self):
         self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-
-    def scope_origin(self, ref):
-        """The ref holds the extras file, so an unknown page is the read's fault, not the fixture's."""
-        found = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", ref + ":" + EXTRAS], capture_output=True).returncode
-        self.assertEqual(found, 0, "scope: the fixture's %s holds no extras file" % ref)
 
     def test_origin_main_registry_names_the_page_at_a_checkout_with_no_extras_file(self):
         self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
@@ -579,13 +605,88 @@ class DefaultBranchPage(GitTree):
         self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN),
                         "the checkout has no extras file, so its page url reads as unknown and does not name the page")
 
-    def test_the_checkouts_own_extras_file_wins_over_origin(self):
+    def test_guard_read_names_the_origin_main_page_over_a_stale_checkouts_own_extras_file(self):
+        """Re-pointed: this case used to expect the checkout's own page. It now follows this lane's task (coordinator grant);
+        Part (a) of ledger row D14, the reversal of grants-read-from-main, is left to the owner."""
+        self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
+                         "the guard read named the checkout's stale page, not the page origin/main holds")
+
+    def test_guard_read_is_waiting_page_url_follows_origin_main_over_a_stale_checkout(self):
+        self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN),
+                        "the guard's url check does not name the page origin/main holds")
+        self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL_LOCAL),
+                         "the guard's url check still names the checkout's stale page")
+
+    def test_guard_read_of_origin_main_with_no_page_is_unknown_over_a_stale_checkout(self):
+        self.stale_checkout(self.old_key(self.URL_LOCAL), json.dumps({"kinds": {}}))
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown",
+                         "the guard read kept the checkout's page, though origin/main names no page")
+
+    def test_guard_read_with_no_origin_ref_keeps_the_checkouts_own_extras_file(self):
         self.put(EXTRAS, self.old_key(self.URL_LOCAL))
+        self.assertEqual(self.git("remote").strip(), "", "scope: the fixture has a remote")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "with no origin ref the guard read did not keep the checkout's own extras file")
+
+    def test_guard_read_with_an_unparseable_origin_main_keeps_the_checkouts_own_extras_file(self):
+        self.stale_checkout(self.old_key(self.URL_LOCAL), "{not json\n")
+        with self.assertRaises(ValueError):
+            json.loads(self.git("show", "refs/remotes/origin/main:" + EXTRAS))  # scope: the blob does not parse
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "an origin/main blob that does not parse made the guard read fail or lose the checkout's page")
+
+    def test_guard_read_keeps_the_checkouts_own_record_branch_and_page_the_blob_lacks(self):
+        """A fork checkout sets its own record branch and waiting page. origin/main's blob lacks both, so the guard reads
+        keep the checkout's values: the blob wins only for the keys it holds."""
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "waiting-page": self.URL_LOCAL}
+        self.stale_checkout(json.dumps(fork), json.dumps({"kinds": {}}))
+        self.assertEqual(self.layout.record_branch(self.tree), self.FORK_BRANCH,
+                         "the guard read dropped the checkout's record branch, which origin/main's blob lacks")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "waiting_page did not read the checkout's page")
+
+    def test_writer_set_waiting_page_reads_the_checkouts_extras_file_not_origin_main(self):
+        self.stale_checkout(self.registry(self.URL_LOCAL), self.registry(self.URL_MAIN))
+        before = self.working_extras()
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.URL_LOCAL),
+                         "the writer compared the checkout's page with origin/main's and wrote over the same page")
+        self.assertEqual(self.working_extras(), before, "the writer rewrote the checkout's extras file for its own page")
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL_NEW),
+                        "the writer did not change the checkout's page to the new one")
+        self.assertEqual(json.loads(self.working_extras())["artifacts"][0]["url"], self.URL_NEW,
+                         "the writer did not write the new page into the checkout's extras file")
+
+    def test_writer_set_waiting_page_writes_the_file_when_only_origin_main_names_the_page(self):
         self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
         self.scope_origin("refs/remotes/origin/main")
-        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds no extras file")
-        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
-                         "the page is read from origin, not from the checkout's own extras file")
+        self.scope_checkout()
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL_MAIN),
+                        "the writer took origin/main's page for the checkout's own and wrote nothing")
+        self.assertEqual(json.loads(self.working_extras())["waiting-page"], self.URL_MAIN,
+                         "the writer did not write the key into the checkout's extras file")
+
+    def test_guard_read_starts_exactly_one_git_process_and_reads_origin_main(self):
+        self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
+        _, starts = self.git_starts(self.layout.waiting_page, self.tree)
+        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin/main blob read): %s"
+                         % (len(starts), starts))
+
+    def test_guard_read_of_a_fork_starts_no_git_process(self):
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "waiting-page": self.URL_LOCAL}
+        self.stale_checkout(json.dumps(fork), self.registry(self.URL_MAIN))
+        _, starts = self.git_starts(self.layout.waiting_page, self.tree)
+        self.assertEqual(starts, [], "a fork's guard read started git processes, which a fork's own file must not: %s" % starts)
+
+    def test_guard_read_runs_no_fetch_and_writes_no_file(self):
+        self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
+        before = self.working_extras()
+        _, starts = self.git_starts(self.layout.waiting_page, self.tree)
+        self.assertFalse([argv for argv in starts if "fetch" in argv], "the guard read ran git fetch")
+        self.assertEqual(self.working_extras(), before, "the guard read wrote the checkout's extras file")
 
     def test_origin_head_names_the_default_branch(self):
         self.record("refs/remotes/origin/trunk", {EXTRAS: self.registry(self.URL_TRUNK)})
@@ -648,6 +749,78 @@ class DefaultBranchPage(GitTree):
         self.hooks_unimportable()
         self.assertEqual(self.read_without_raising(self.layout.waiting_page), "unknown",
                          "the read returns None without the no-window helper, so the page reads as unknown")
+
+
+class GithubGuardRead(GitTree):
+    """git_reads.github_repo, the guard's read of a repo's GitHub name (hooks/git_reads.py). The guard passes no extras,
+    so the read takes the "github" key under the "roadmap" object of the default branch's extras file on origin (origin/HEAD,
+    else origin/main). The checkout's own file is read only when no origin ref resolves or its blob does not parse. The
+    origin URL is read only when the extras name no repo. No fetch runs and no file is written."""
+    OLD = "old/repo"
+    NEW = "new/repo"
+    ORIGIN = "https://github.com/new/repo.git"
+    FORK = "fork/repo"  # the repo a fork checkout names for itself
+    FORK_BRANCH = "fork-roadmap"  # the record branch a fork checkout sets for itself
+
+    def setUp(self):
+        super().setUp()
+        if HOOKS not in sys.path:
+            sys.path.append(HOOKS)
+        self.git_reads = load("git_reads_under_test", os.path.join(HOOKS, "git_reads.py"))
+        self.git("init", "-q")
+
+    def extras(self, repo):
+        return json.dumps({"kinds": {}, "roadmap": {"github": repo}})
+
+    def test_github_repo_guard_read_takes_the_origin_main_repo_over_a_stale_checkout(self):
+        self.stale_checkout(self.extras(self.OLD), self.extras(self.NEW))
+        self.assertEqual(self.git_reads.github_repo(self.tree), self.NEW,
+                         "the guard read named the checkout's stale repo, not the repo origin/main names")
+
+    def test_github_repo_with_no_origin_ref_keeps_the_checkouts_repo(self):
+        self.put(EXTRAS, self.extras(self.OLD))
+        self.assertEqual(self.git("remote").strip(), "", "scope: the fixture has a remote")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
+        self.assertEqual(self.git_reads.github_repo(self.tree), self.OLD,
+                         "with no origin ref the guard read did not keep the checkout's repo")
+
+    def test_github_repo_with_an_unparseable_origin_main_keeps_the_checkouts_repo(self):
+        self.stale_checkout(self.extras(self.OLD), "{not json\n")
+        with self.assertRaises(ValueError):
+            json.loads(self.git("show", "refs/remotes/origin/main:" + EXTRAS))  # scope: the blob does not parse
+        self.assertEqual(self.git_reads.github_repo(self.tree), self.OLD,
+                         "an origin/main blob that does not parse made the guard read fail or lose the checkout's repo")
+
+    def test_github_repo_guard_read_starts_exactly_one_git_process_when_origin_main_names_the_repo(self):
+        self.stale_checkout(self.extras(self.OLD), self.extras(self.NEW))
+        _, starts = self.git_starts(self.git_reads.github_repo, self.tree)
+        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin/main blob read): %s"
+                         % (len(starts), starts))
+
+    def test_github_repo_guard_read_starts_exactly_two_git_processes_when_it_reads_the_origin_url(self):
+        self.git("remote", "add", "origin", self.ORIGIN)
+        self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds an extras file")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
+        value, starts = self.git_starts(self.git_reads.github_repo, self.tree)
+        self.assertEqual(value, self.NEW, "the guard read did not name the repo of the origin URL")
+        self.assertEqual(len(starts), 2, "the guard read started %d git processes, expected exactly two (the blob read, then remote get-url): %s"
+                         % (len(starts), starts))
+
+    def test_github_repo_of_a_fork_starts_no_git_process_and_names_its_own_repo(self):
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "roadmap": {"github": self.FORK}}
+        self.stale_checkout(json.dumps(fork), self.extras(self.NEW))
+        value, starts = self.git_starts(self.git_reads.github_repo, self.tree)
+        self.assertEqual(starts, [], "a fork's repo read started git processes, which a fork's own file must not: %s" % starts)
+        self.assertEqual(value, self.FORK, "a fork's repo read did not name its own repo")
+
+    def test_github_repo_guard_read_runs_no_fetch_and_writes_no_file(self):
+        self.stale_checkout(self.extras(self.OLD), self.extras(self.NEW))
+        before = self.working_extras()
+        _, starts = self.git_starts(self.git_reads.github_repo, self.tree)
+        self.assertFalse([argv for argv in starts if "fetch" in argv], "the guard read ran git fetch")
+        self.assertEqual(self.working_extras(), before, "the guard read wrote the checkout's extras file")
 
 
 class SetWaitingPage(Tree):

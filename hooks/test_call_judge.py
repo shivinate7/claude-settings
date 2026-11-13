@@ -1547,7 +1547,8 @@ def case_past_ruling_cost():
           len(r.calls) == 1 and r.git == 1, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs two git processes, the roadmap read then the origin/main blob read "
+          "(step guards-read-origin-main-config)", len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
     check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
           len(q.calls) == 1 and q.git <= 1, detail(q))

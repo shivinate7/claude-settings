@@ -295,17 +295,27 @@ def origin_slug(url):
     return "%s/%s" % (owner, name) if owner and name else None
 
 
+def _roadmap_extras(root):
+    """The "roadmap" object of `root`'s layout extras, read through lint/layout.py repo_keys (the one home: origin's
+    default branch blob first, else the checkout's file). None when layout cannot be imported or read."""
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    try:
+        import layout  # lazy: the guard reads one file at start-up, not the layout file too
+        return layout.repo_keys(str(root)).get("roadmap")
+    except Exception:  # no layout, no file, one that does not parse: the origin decides
+        return None
+
+
 def github_repo(root, extras=_READ_EXTRAS):
     """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
     "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it
-    already found; the guard passes none, so this reads the "roadmap" object of `root`'s layout extras file: one
-    file read. The origin costs one git start, and only when the extras name no repo."""
+    already found; the guard passes none, so this reads the "roadmap" object through layout.repo_keys (the default
+    branch's blob on origin, else the checkout's file). Cost: at most two git starts per call: the
+    blob read, then `remote get-url`, which runs only when the extras name no repo; with extras passed, at most one."""
     if extras is _READ_EXTRAS:
-        try:
-            with open(os.path.join(root, *LAYOUT_EXTRAS), encoding="utf-8") as handle:
-                extras = json.load(handle).get("roadmap")
-        except Exception:  # no file, or one that does not parse: the origin decides
-            extras = None
+        extras = _roadmap_extras(root)
     if isinstance(extras, dict) and isinstance(extras.get("github"), str):
         return extras["github"]
     done = _git(str(root), "remote", "get-url", "origin")

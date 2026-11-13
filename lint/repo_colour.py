@@ -28,8 +28,9 @@ declaration), and prints one line per checkout. Exits 0 when each value matches 
 any differs (drift wins over unknown), 2 when any cannot be read or the repo is not in the registry:
 unknown, never clear. Other repos are not in CI, so it runs on demand only.
 Cost: per call, one read of the registry; identity adds the extras file, the git config and the icon;
-drift adds the extras file, the git config and one source file per checkout. No process starts and no
-file or log is written (test Drift.test_cost_reads_only_no_process_no_write).
+drift adds the extras file, the git config and one source file per checkout. The extras file is the checkout's own
+(layout.waiting_page_colour and waiting_page_icon read no origin blob). No process starts and no file or log is written
+(test Drift.test_cost_reads_only_no_process_no_write).
 """
 import base64
 import colorsys

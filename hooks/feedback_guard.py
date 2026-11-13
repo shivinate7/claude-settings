@@ -374,8 +374,9 @@ def waiting_copy(layout, root):
     """(record branch, copy folder) of the waiting copy of `root`: the folder is the export of the waiting-page
     registry entry, else layout.path "waiting-data". The one home of that resolution, for the filing check
     (Homes.filed_numbers) and the export check (export_check). Raises layout.LayoutError."""
-    branch = layout.record_branch(root)
-    waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+    keys = layout.repo_keys(root)  # one read for both keys
+    branch = layout.record_branch(root, keys)
+    waiting = [e for e in layout.artifacts(root, keys) if e["role"] == layout.WAITING_ROLE]
     return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
 
 
@@ -1340,7 +1341,9 @@ def export_check(cwd, transcript_path, session_id):
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
-    transcript is read and timestamps decide, so a write in an earlier turn still counts."""
+    transcript is read and timestamps decide, so a write in an earlier turn still counts.
+    Cost of the repo config reads, once a page write is found: N+2 git starts, one per distinct page url written
+    (layout.is_waiting_page_url), one for the registry entry and one for waiting_copy, plus the log read."""
     try:
         records = _transcript.read_transcript(transcript_path)
         import layout

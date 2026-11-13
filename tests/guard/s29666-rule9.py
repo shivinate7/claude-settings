@@ -247,7 +247,7 @@ LANE_EXTRAS = os.path.join(ROOT, "laneextras")  # a non-GitHub origin, and an ex
 def _build_lane_extras():
     """A real checkout whose extras file names org/name, with a non-GitHub origin. A lane case names it by `cwd`."""
     make_repo(LANE_EXTRAS, {"README.md": "# r\n",
-                            ".claude/layout-extras.json": json.dumps({"roadmap": {"github": "org/name"}}) + "\n"})
+                            ".claude/layout-extras.json": json.dumps({"kinds": {}, "roadmap": {"github": "org/name"}}) + "\n"})
     added = run_vcs(LANE_EXTRAS, "remote", "add", "origin", "https://git.example.com/x/y")
     if added.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
