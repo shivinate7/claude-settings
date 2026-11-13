@@ -4690,8 +4690,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
-# write to this repo's waiting page.
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`, `option-letter-keys`, `option-letters-frozen`). This check runs them only for a
+# write to this repo's waiting page. `option-labels-match-chat` runs after them (data_tool_label_hit): it
+# reads the transcript, and starts that read only for a write that carries options.
 from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
@@ -4700,6 +4701,22 @@ def data_tool_judge(tool_input, cwd="", session_id=None):
     reads the writes again (page-item-design)."""
     import question_form
     return question_form.page_item_hit(tool_input, cwd, session_id)
+
+
+def data_tool_label_hit(item_writes, transcript_path, cwd=""):
+    """(rule, matched) of rule `option-labels-match-chat` for the item writes the page rules passed: a label that
+    differs from the chat question's text for its letter. It runs here, not in question_form.item_hit, because it
+    reads the transcript. An unreadable transcript, or a payload with no transcript_path, is unknown: it allows
+    and logs one `noted` line."""
+    import question_form
+    try:
+        rule, matched = question_form.page_label_hit(item_writes, transcript_path, cwd)
+    except Exception as err:  # page_label_hit never raises; this keeps an unexpected error from denying a write
+        rule, matched = question_form.LABELS_UNKNOWN, type(err).__name__ + ": " + str(err)
+    if rule == question_form.LABELS_UNKNOWN:
+        record(DATA_TOOL, "noted", "option-labels-match-chat", "unknown: " + cap_safe(matched, 100))
+        return "", ""
+    return rule, matched
 
 
 def data_tool_hit(tool_input, cwd="", session_id=None):
@@ -6254,6 +6271,8 @@ def judge(payload) -> None:
     if tool == DATA_TOOL:
         import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID
         (rule, matched), item_writes = data_tool_judge(tool_input, cwd, override.remote_session_id())
+        if not rule and item_writes:
+            rule, matched = data_tool_label_hit(item_writes, payload.get("transcript_path"), cwd)
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
@@ -6275,6 +6294,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "option-letter-keys":
             refuse(tool, "deny", "option-letter-keys", question_form.PAGE_REASONS["option-letter-keys"], matched)
+        if rule == "option-letters-frozen":
+            refuse(tool, "deny", "option-letters-frozen", question_form.PAGE_REASONS["option-letters-frozen"], matched)
         if rule == "rework-off-page":
             refuse(tool, "deny", "rework-off-page", question_form.PAGE_REASONS["rework-off-page"], matched)
         if rule == "question-form":
@@ -6287,6 +6308,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
+        if rule == "option-labels-match-chat":
+            refuse(tool, "deny", "option-labels-match-chat", question_form.PAGE_REASONS["option-labels-match-chat"], matched)
         if item_writes:
             unhomed = mockup_home_hit(item_writes, tool_input, cwd)
             if unhomed:
