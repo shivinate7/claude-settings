@@ -1425,8 +1425,8 @@ ARCHIVE_TAGS_REASON = (
     "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -1435,8 +1435,8 @@ ARCHIVE_NO_PR_REASON = (
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
