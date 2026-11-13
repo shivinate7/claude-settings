@@ -284,6 +284,93 @@ class ProgressClaimTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line, RULE)
 
+    def test_pc_red_a_table_row_under_a_lane_header_flags(self):
+        # Catches: a table row names its lane only in the header, so its phrase reads with no subject on the line.
+        row = "| 4 | in progress |"
+        self.assert_blocked("| Lane | Status |\n|---|---|\n" + row, row, RULE)
+
+    def test_pc_red_a_table_row_with_a_code_span_step_flags(self):
+        # Catches: a subject held in a code span is masked, so a row that names its step in code reads as no subject.
+        line = "| `rounds-rules-one-record` | still in progress |"
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_bullet_with_a_code_span_step_flags(self):
+        # Catches: a bullet whose step is named in a code span passes, since the span is masked as no subject.
+        line = "- `rounds-rules-one-record`: nearly done"
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_lane_subject_flags(self):
+        # Catches: a lane named in a code span, with the phrase outside the span, passes.
+        line = "`lane 4` is nearly done."
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_pr_subject_flags(self):
+        # Catches: a PR named in a code span, with the phrase outside the span, passes.
+        line = "`PR #3171` is in progress."
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_pr_without_a_hash_flags(self):
+        # Catches: a PR named without a hash, in a code span, passes. Control: the plain form already flags.
+        line = "`PR 3171` is nearly done."
+        self.assert_blocked(line, line, RULE)
+        self.assert_blocked("PR 3171 is nearly done.", "PR 3171 is nearly done.", RULE)
+
+    def test_pc_red_a_code_step_with_a_state_word_is_no_claim(self):
+        # Catches: a step named in a code span reads as no subject, so its phrase passes.
+        # Controls: a state word on a step is no claim, since the step covers how far, not state.
+        line = "`rounds-rules-one-record` is nearly done."
+        self.assert_blocked(line, line, RULE)
+        self.assert_allowed("Step `x` is done.")
+        self.assert_allowed("Lane x merged in #2888.")
+
+    def test_pc_red_a_trailing_question_does_not_hide_a_claim(self):
+        # Catches: a line that ends in "?" is skipped whole, so a claim before its question passes.
+        line = "Lane 4 is nearly done with the merge. Want me to wait?"
+        self.assert_blocked(line, line, RULE)
+        # Control: a pure question stays exempt.
+        self.assert_allowed("Is the lane counts-from-rest nearly done?")
+
+    def test_pc_red_a_claim_split_across_sentences_flags(self):
+        # Catches: a subject in one sentence and a phrase in the next, with neither sentence holding both, passes.
+        reply = "Lane 4 is being merged. It is nearly done."
+        self.assert_blocked(reply, reply, RULE)
+
+    def test_pc_red_a_claim_split_across_a_soft_wrap_flags(self):
+        # Catches: a claim wrapped over two lines is read one line at a time, so neither line holds it.
+        self.assert_blocked("Lane 4 is\nnearly done.", "nearly done.", RULE)
+
+    def test_pc_red_a_later_sentence_keeps_the_subject_of_a_claim(self):
+        # Catches: a later sentence with a phrase and no subject passes, though its subject is carried from the sentence before.
+        reply = "Lane 4 finished its checks. It has not finished the merge."
+        self.assert_blocked(reply, "It has not finished the merge.", RULE)
+
+    def test_pc_red_an_uppercase_rest_alone_is_no_cite(self):
+        # Catches: a bare REST, as in "the REST tests" or "REST at 11:43 CST", is read as a live read.
+        self.assert_blocked("Batch 133 is waiting on the REST tests.", "the REST tests.", RULE)
+        self.assert_blocked("Batch 133 is waiting on CI (REST at 11:43 CST: idle).", "(REST at 11:43 CST: idle).", RULE)
+        # Control: a named read with a verb still cites.
+        self.assert_allowed("Batch 133 is waiting on CI (REST read: open).")
+
+    def test_pc_red_a_stamp_alone_is_no_read(self):
+        # Catches: a read stamp with no named read beside it passes as a cite.
+        reply = "Lane 4 is nearly done (read at 11:43 CST)."
+        self.assert_blocked(reply, reply, RULE)
+        # Controls: the stamp passes beside a named read.
+        self.assert_allowed("Lane 4 is nearly done (get_session read at 11:43 CST: idle).")
+        self.assert_allowed("Lane 4 is nearly done (list_events read at 11:43 CST: idle).")
+        self.assert_allowed("Lane 4 is nearly done (REST API read at 11:43 CST: idle).")
+
+    def test_pc_red_the_refusal_does_not_offer_a_bare_stamp(self):
+        # Catches: the refusal names "read at 11:43 CST" as a read to make, so a session writes the bare stamp.
+        reason = self.assert_blocked("Lane 4 is nearly done.", RULE)
+        self.assertNotIn("read at", reason, "the refusal offers a bare stamp: %s" % reason)
+
+    def test_pc_red_a_work_in_progress_marker_noun_is_no_claim(self):
+        # Scope first: a lane with the phrase blocks. Catches: the noun in "work in progress marker" is read as a phrase.
+        self.assert_blocked("Lane 4 is in progress.", "Lane 4 is in progress.", RULE)
+        self.assert_allowed("Lane 4 adds the work in progress marker to the guard.")
+        self.assert_allowed("Lane 4 adds the in-progress marker to the guard.")
+
     def test_pc_red_a_rewrite_under_stop_hook_active_stays_quiet(self):
         # Same shape as answered-needs-source: the rewrite that follows a block is not refused again.
         self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
