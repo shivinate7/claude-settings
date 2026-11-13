@@ -25,9 +25,10 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     were working:`, the CLI's mid-turn frame), then a newline and that tag.
   - A peer session's message is never captured. It starts with `<cross-session-message`, the tag
     the harness puts on a send_message from another session. A tag quoted mid-message is owner text.
-  - A bash-input echo is never captured. It starts with `<bash-input>`, after any leading whitespace: the echo
-    of a shell command the owner ran with `!`. It counts toward no burst. A tag quoted mid-message, on a later
-    line, or inside a longer tag name is owner text, saved verbatim.
+  - A bash-input echo is never captured. It is the echo of a shell command the owner ran with `!`: a prompt that,
+    after any leading whitespace, is one `<bash-input>` block, then only whitespace and `<bash-stdout>` or
+    `<bash-stderr>` blocks. It counts toward no burst. Owner words after the block, on the same line or a later
+    one, an unclosed block, a tag quoted mid-message, or a longer tag name is owner text, saved verbatim.
   - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
     replacement character) in its place, or stdout carries a line that says `not saved`. Never
     silent. The inbox stays strict UTF-8.
@@ -2778,29 +2779,38 @@ def case_cross_session_tag_mid_line_is_owner_text():
 
 # --------------------------------------------------------------------------- bash-input echo cases
 
-# The echo of a shell command the owner ran with `!`: a prompt that starts with the bash-input tag. It is the
-# harness's echo, not feedback, so capture never saves it and its turn never counts as a burst. The long shape
-# is the full-size state: a paste of many lines.
+# The echo of a shell command the owner ran with `!`: one bash-input block, then only whitespace and output blocks.
+# It is the harness's echo, not feedback, so capture never saves it and its turn never counts as a burst. The long
+# shape is the full-size state: a paste of many lines.
 BASH_ECHO_SHAPES = (
     ("a one-line command", "<bash-input>git status</bash-input>"),
     ("a command after leading whitespace", "  \n\t<bash-input>git status</bash-input>"),
     ("a three-line command", "<bash-input>for f in a b c; do\n  echo \"$f\"\ndone</bash-input>"),
     ("a forty-line command", "<bash-input>" + "\n".join("echo line %d" % i for i in range(40))
      + "</bash-input>"),
+    ("a command with a stdout block", "<bash-input>ls</bash-input>\n<bash-stdout>a\nb</bash-stdout>"),
+    ("a command with stdout and stderr blocks, whitespace between",
+     "<bash-input>ls /x</bash-input>\n\n<bash-stdout>out</bash-stdout>\n  <bash-stderr>ls: /x: gone</bash-stderr>\n"),
 )
-# Owner text that quotes the tag, or a dollar-sign command, or a longer tag name. It is feedback: saved verbatim.
+# Owner text: a quoted tag, a dollar-sign command, a longer tag name, or owner words after an echo's blocks or in an
+# unclosed block. It is feedback: saved verbatim.
 BASH_QUOTED_SHAPES = (
     ("a command quoted mid-sentence", "I ran <bash-input>ls</bash-input> and it failed"),
     ("a command quoted on a later line", "the run was:\n<bash-input>git status</bash-input>\nit failed"),
     ("a plain line that starts with a dollar sign", "$ git status\nthe output lists a file I did not expect"),
     ("a longer tag name", "<bash-input-log>\nan owner note whose first tag name is longer"),
+    ("an echo with owner words on the next line", "<bash-input>ls</bash-input>\nmy note about the listing"),
+    ("an echo with owner words on the same line", "<bash-input>ls</bash-input> and my note"),
+    ("an echo with a stdout block, then owner words",
+     "<bash-input>ls</bash-input>\n<bash-stdout>a</bash-stdout>\nmy note about the listing"),
+    ("an unclosed command block with owner words", "<bash-input>ls and my note"),
 )
 BASH_NOTE = "ok, that is the result I wanted"
 
 
 def case_capture_skips_bash_input_echo():
-    """A prompt that starts with the bash-input tag is never saved, and the turn it ends does not block the
-    Stop guard, whatever the command's line count."""
+    """A prompt that is one bash-input echo, then only output blocks, is never saved, and the turn it ends does not
+    block the Stop guard, whatever the command's line count."""
     for label, text in BASH_ECHO_SHAPES:
         cfg, sid = new_cfg(), "bash-echo"
         p = turn(cfg, sid, text)
@@ -2821,8 +2831,8 @@ def case_bash_echo_does_not_make_the_next_note_a_burst():
 
 
 def case_owner_text_that_quotes_a_bash_echo_is_saved():
-    """Owner text that quotes the tag mid-message, on a later line, after a dollar sign, or under a longer tag
-    name is feedback: saved verbatim."""
+    """Owner text that quotes the tag mid-message, on a later line, after a dollar sign, under a longer tag name,
+    or in words that follow an echo's blocks is feedback: saved verbatim."""
     for label, text in BASH_QUOTED_SHAPES:
         cfg, sid = new_cfg(), "bash-quoted"
         p = capture(cfg, sid, text)
