@@ -23,8 +23,8 @@ Interface the hook must match:
   with the call's tool_input JSON where $ARGUMENTS stood.
 - A model answer {"ok": false, "reason": R} refuses through guard_core.refuse(): a PreToolUse deny
   that holds R and the override line, and one guard.log deny line. An override lifts it: no output.
-- Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
-  Every other refusal is liftable.
+- Veto (an act no override lifts): an Explore spawn with no model, a blank model or a haiku model.
+  A model above Sonnet is liftable. Every other refusal is liftable.
 - The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
   EXPLORE_AUDIT_MARKER in hooks/guard.py, read at test time and never copied here.
 - Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
@@ -514,8 +514,8 @@ def case_agent_override():
 
 
 def case_explore_row_is_vetoed():
-    # An Explore spawn on a model that is neither sonnet nor opus is the Explore row of agent-model-cap,
-    # a model guard. No override lifts it.
+    # An Explore spawn with no model, a blank model or a haiku model is the Explore row of agent-model-cap,
+    # a model guard. No override lifts it. A model above Sonnet is liftable (case_explore_unranked_model_is_liftable).
     constant = getattr(override, "NO_OVERRIDE", None) if override is not None else None
     for label, model in (("haiku", "haiku"), ("no model field", None), ("a blank model", "   "), ("a tab model", "\t")):
         r = run_hook(spawn_input("Explore", model=model), answer=FLAG, pass_=(SID_A, TIMED))
