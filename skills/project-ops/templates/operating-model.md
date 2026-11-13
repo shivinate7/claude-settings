@@ -1,7 +1,7 @@
 # Operating model
 
-Paste this into the project instructions. Replace each `<placeholder>`. The roster goes with it,
-from `roster.md`.
+Paste this into the project instructions. Replace each `<placeholder>`. The roster is not pasted:
+triage writes it to `roster.md` on the record branch.
 
 ## Session tiers
 
@@ -108,14 +108,14 @@ parent, or miss a message while busy.
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
-     the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
-     the roster.
+     the hand-off file. It sends triage the successor's new session id in the same turn, and triage
+     rewrites that roster line. The coordinator sends no broadcast. Sessions read the roster.
   5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
      before any other act. It reads each page's comments since the time in the hand-off file.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
      that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
-     the writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
-     gives it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
+     the writer role, it also sets `writer` in `meta/page` to its own session title, as `roster.md`
+     lists it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
      (`ArtifactData`). In a repo whose extras file holds the `page-writer` key, it also updates that
      key to its own session id. The key sits in a committed file, so the update goes in a PR. For each
      ask with no `reply` whose `owner` is the old writer, it reads the
@@ -168,7 +168,7 @@ parent, or miss a message while busy.
 - Triage reads the outbox at each wake, files each item, and removes what it filed.
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
-- A session re-reads the roster right before it sends to a standing session.
+- A session re-reads `roster.md` on the record branch right before it sends to a standing session.
 
 ## Briefs
 

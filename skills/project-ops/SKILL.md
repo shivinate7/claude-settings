@@ -16,7 +16,8 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `templates/operating-model.md` says what each role owns. Triage, the batch runner and the arbiter
   compact in routine use and are not replaced. The coordinator rotates a standing session only when it
   goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
-- **The roster.** One list of who holds each standing session now. `templates/roster.md`.
+- **The roster.** One list of who holds each standing session now. Triage writes it to `roster.md`
+  at the record branch root, from `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
@@ -47,9 +48,10 @@ that triage or the batch runner writes for its successor.
    It writes `CLAUDE.md`, `roadmap/README.md`, `roadmap/outbox/README.md` and the empty folders `roadmap/data/steps`,
    `roadmap/data/topics`, `roadmap/data/meta`, `briefs` and `handoffs`. It prints each path it
    writes. It refuses, and writes nothing, when one of those files exists.
-4. **Fill the tiers.** Copy `templates/operating-model.md` and `templates/roster.md` into the
-   project's instructions on claude.ai. Fill each `<placeholder>`. The roster's home is the project
-   instructions, so keep no second copy in the repo.
+4. **Fill the tiers.** Copy `templates/operating-model.md` into the project's instructions on
+   claude.ai. Fill each `<placeholder>`. The roster is not in the project instructions. Triage writes
+   it to `roster.md` at the record branch root, and rewrites a standing session's line when that
+   session's starter sends the new id.
 5. **Triage pushes the record branch.** The guard lets only the triage session push it (rule
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3

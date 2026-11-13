@@ -6,7 +6,7 @@
 PR is stalled: the build exits 1 until triage sets it `todo` or `done`, or writes `paused`
 (`{"why", "decides": "owner" | "coordinator" | "triage", "at": ISO time with a zone, "by": "triage"}`; triage
 writes it only). Two more fields serve the guard: `lane`
-(`"session_<id>"`, the lane bound to the step; the coordinator writes it) and `grants` (step grants,
+(`"session_<id>"`, the lane bound to the step; triage writes it, from the id the lane's starter sends) and `grants` (step grants,
 each `{"words", "at", "role", "by": "triage"}`; triage writes them only). The skill gives their shape.
 
 The roadmap build script is `skills/roadmap` in claude-settings. Build the roadmap block from this repo's checkout:
