@@ -20,8 +20,8 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 `sh roadmap/hooks/install.sh`, which never sets core.hooksPath; step c138). It reads the step files from the index, not the
 working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
-note never blocks another's commit. It also refuses a staged roadmap/rulings/*.json that is empty or not
-valid JSON. It writes no page.
+note never blocks another's commit. It also refuses a staged roadmap/rulings/*.json that is empty, not
+UTF-8, not valid JSON, or not a JSON object. It writes no page.
 """
 import datetime
 import json
@@ -157,10 +157,11 @@ def staged_top_level_json(repo, folder):
 
 
 def staged_unparsable_rulings(repo):
-    """Refusal lines for each staged roadmap/rulings/*.json that the ruling reader (lint/ruled_store.py) would drop.
+    """Refusal lines for each staged roadmap/rulings/*.json that a ruling reader (lint/ruled_store.py) drops or may misread.
 
-    That is a blob that is not strict UTF-8, is empty, is not valid JSON (NaN and Infinity included), or is not
-    a JSON object. The blob is read from the index as bytes. Only the commit's own adds and changes count, so a
+    That is a blob that is not strict UTF-8, is empty, is not valid JSON, or is not a JSON object. NaN and
+    Infinity are refused too, which is stricter than that reader on purpose: no reader should have to guess
+    at a ruling that other JSON parsers reject. The blob is read from the index as bytes. Only the commit's own adds and changes count, so a
     broken ruling already on HEAD never makes this check refuse another writer's commit. A merge's own
     parent holding the identical blob excuses it, as steps are excused; a ruling the merge edits is checked.
     """
