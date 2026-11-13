@@ -919,6 +919,44 @@ class Registry(Tree):
                 self.assertEqual(got["other_url"], control["other_url"], "is_waiting_page_url() names another artifact under the mark")
                 self.assertEqual(got["homes"], control["homes"], "mockup_homes() reads another folder under the mark")
 
+    def test_a_bad_mark_gives_the_refusal_sentence_for_a_mockup_outside_the_design_folder(self):
+        """A "rolled-out" that is not JSON true or false: mockup_home_problem() of a design `file` outside the design folder
+        gives the sentence a valid mark gives, not a raise. A file inside the design folder gives None under each mark. The
+        valid mark is the control."""
+        outside, inside = "/Users/x/mock.png", os.path.join(self.tree, "docs", "design", "mock.png")
+        self.waiting_readings(True)
+        control = self.read_reader("mockup_home_problem", outside)
+        self.assertIsInstance(control, str, "the control (a valid mark) gave no refusal for a file outside the design folder")
+        self.assertIsNone(self.read_reader("mockup_home_problem", inside), "the control (a valid mark) refused a file inside the design folder")
+        for mark in ("yes", "true", 1, None):
+            with self.subTest(mark=mark):
+                self.waiting_readings(mark)
+                problem = self.read_reader("mockup_home_problem", outside)
+                self.assertEqual(problem, control, "the refusal sentence under the bad mark differs from the one under a valid mark")
+                self.assertNotIn(self.tree, problem, "the refusal sentence holds an absolute path of the repo")
+                self.assertIsNone(self.read_reader("mockup_home_problem", inside), "a file inside the design folder was refused under the bad mark")
+
+    def test_set_waiting_page_under_a_bad_mark_writes_the_page_and_keeps_the_mark(self):
+        """A "rolled-out" that is not JSON true or false, with a waiting-page entry that has no export key: set_waiting_page()
+        writes the new URL into that entry and leaves the mark as it was. The valid mark is the control. The entry is read for
+        its id only, so no folder is read through the mark."""
+        new = "https://claude.ai/artifact/newpg02"
+        for mark in (True, "yes", "true", 1, None):
+            with self.subTest(mark=mark):
+                self.registry([self.page_entry()], extra={"rolled-out": mark})
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    held = json.load(handle)
+                self.assertEqual(json.dumps(held.get("rolled-out", "absent")), json.dumps(mark), "the fixture does not hold the mark")  # the scope first
+                try:
+                    wrote = self.layout.set_waiting_page(self.tree, new)
+                except self.layout.LayoutError as err:
+                    self.fail("set_waiting_page was refused under the mark %s: %s" % (json.dumps(mark), err))
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    after = json.load(handle)
+                self.assertIs(wrote, True, "set_waiting_page did not report that it wrote the page")
+                self.assertEqual(after["artifacts"][0]["url"], new, "the waiting-page entry's url was not written")
+                self.assertEqual(json.dumps(after.get("rolled-out", "absent")), json.dumps(mark), "set_waiting_page changed the mark")
+
     def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
         self.registry([self.page_entry(url="https://example.com/x")])
         with self.assertRaises(self.layout.LayoutError, msg="a role entry that is not an artifact link was not an error"):
