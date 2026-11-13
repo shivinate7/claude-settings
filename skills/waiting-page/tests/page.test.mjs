@@ -513,6 +513,232 @@ test("long context folds to three lines and opens on More context", async (t) =>
   assert.doesNotMatch(await ctx.getAttribute("class"), /clamp/);
 });
 
+// ---- A case against the pick: a case line leaves the context and draws as its own block under the options.
+// AGAINST_TABLE is the one table both readers test: the guard's CHALLENGED_LINE (the Python case) and the card (the page cases).
+const AGAINST_TABLE = JSON.parse(fs.readFileSync(path.join(HERE, "against_lines.json"), "utf8")).lines;
+const AGAINST_QUIET = "No case against the pick on this item.";
+const AGAINST_LONG = Array.from({ length: 80 }, (_, i) => "w" + (i + 1)).join(" "); // the skill caps a case at 80 words
+const AGAINST_TYPED = 'Keep <b>A</b> means **every** push runs the `<script src=x>` check &amp; the docs say &lt;none&gt; (see <a href="#">#41</a>).';
+// One read of a card's case state in one evaluate, so a missing block fails an assert and never waits on a locator.
+// blocks: the case blocks, each with its leaf texts, inner tags, screen-reader words and whether any part is clamped.
+// quiet: the border style of each box that carries the no-case sentence (dashed for the one line).
+// A closed item is drawn as a line (line-<n> in the answered tier), not a card, so the read takes either.
+const againstOf = (page, it) => page.evaluate(({ id, n, quiet }) => {
+  const card = document.getElementById("item-" + id) || document.querySelector("#tier-answered #line-" + n);
+  if (!card) return null;
+  const ctx = card.querySelector(".ctx"), opts = card.querySelector(".opts"), ready = card.querySelector(".ready");
+  const leaves = (el) => [...el.querySelectorAll("*")].filter((e) => e.children.length === 0);
+  const blocks = [...card.querySelectorAll(".stake.against")].filter((b) => !b.textContent.includes(quiet)).map((b) => ({
+    text: b.textContent,
+    leaves: leaves(b).map((e) => e.textContent.trim()).filter(Boolean),
+    inner: [...b.querySelectorAll("*")].map((e) => e.tagName),
+    srWords: leaves(b).filter((e) => e.textContent.includes("Against the pick")).map((e) => !!e.closest(".sr")),
+    clamped: [b, ...b.querySelectorAll("*")].some((e) => { const c = getComputedStyle(e).webkitLineClamp; return !!c && c !== "none"; }),
+    afterOpts: !!opts && !!(opts.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING),
+    beforeReady: !!ready && !!(b.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING),
+  }));
+  return {
+    ctx: ctx ? ctx.textContent : null,
+    ctxLines: ctx ? ctx.textContent.split("\n").map((l) => l.trim()) : [],
+    more: [...card.querySelectorAll("button")].some((b) => b.textContent.trim() === "More context"),
+    blocks,
+    quiet: leaves(card).filter((e) => e.textContent.trim() === quiet).map((e) => getComputedStyle(e.closest(".stake") || e).borderTopStyle),
+  };
+}, { id: it.id, n: it.n, quiet: AGAINST_QUIET });
+
+test("a case against the pick leaves the context and keeps the rest of it", async (t) => {
+  const it = mk("ag-ctx", 1, { context: "Goal: keep the stamp check in its own job.\nAgainst the pick (sonnet): Merging adds one more push wait." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.ok(s.ctxLines.includes("Goal: keep the stamp check in its own job."), `${it.id}: the context lost its own line`);
+  assert.ok(!s.ctxLines.some((l) => l.startsWith("Against the pick")), `${it.id}: the case line is still drawn in the context`);
+});
+
+test("a case against the pick draws once, as a block under the options and above the ready line", async (t) => {
+  const it = mk("ag-block", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): Merging adds one more push wait." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks, want one`);
+  assert.ok(s.blocks[0].afterOpts, `${it.id}: the case block is not under the options`);
+  assert.ok(s.blocks[0].beforeReady, `${it.id}: the case block is not above the ready line`);
+});
+
+test("a case against the pick names the pick's key and label, and the model word", async (t) => {
+  const it = mk("ag-head", 1, { context: "Goal: keep it.\nAgainst the pick (opus): Merging adds one more push wait." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks, want one`);
+  assert.ok(s.blocks[0].leaves.includes("A"), `${it.id}: the block does not show the pick's key A`);
+  assert.ok(s.blocks[0].text.includes("Red"), `${it.id}: the block does not show the pick's label Red`);
+  assert.ok(s.blocks[0].text.includes("opus"), `${it.id}: the block does not show the model word opus`);
+});
+
+test("the words of a case against the pick show on the first block only, and later blocks keep them for screen readers", async (t) => {
+  const first = mk("ag-first", 1, { context: "Goal: one.\nAgainst the pick (sonnet): The first case." });
+  const later = mk("ag-later", 2, { context: "Goal: two.\nAgainst the pick (sonnet): The second case." });
+  const page = await open(t, { items: [first, later] }); if (!page) return;
+  const words = await page.evaluate((quiet) => [...document.querySelectorAll(".stake.against")].filter((b) => !b.textContent.includes(quiet)).map((b) => [...b.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.textContent.includes("Against the pick")).map((e) => !!e.closest(".sr"))), AGAINST_QUIET);
+  assert.equal(words.length, 2, `${words.length} case blocks on the screen, want one per card`);
+  assert.ok(words[0].length > 0 && words[0].every((sr) => !sr), "the first case block on the screen does not show Against the pick");
+  assert.ok(words[1].length > 0 && words[1].every((sr) => sr), "a later case block does not keep Against the pick for screen readers");
+});
+
+test("lines that are not a case against the pick stay in the context, mid-line and with no text", async (t) => {
+  const it = mk("ag-stay", 1, { context: "Goal: x.\nKeep it. Against the pick (sonnet): A phrase mid-line.\nAgainst the pick (opus):" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.ok(s.ctxLines.includes("Keep it. Against the pick (sonnet): A phrase mid-line."), `${it.id}: the mid-line phrase left the context`);
+  assert.ok(s.ctxLines.includes("Against the pick (opus):"), `${it.id}: the line with no case text left the context`);
+  assert.equal(s.blocks.length, 0, `${it.id}: a line with no case text drew a case block`);
+});
+
+test("a case against the pick draws as typed text, and makes no markup of its own", async (t) => {
+  const it = mk("ag-typed", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): " + AGAINST_TYPED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks, want one`);
+  assert.ok(s.blocks[0].text.includes(AGAINST_TYPED), `${it.id}: the case is not drawn as typed text`);
+  assert.deepEqual(s.blocks[0].inner.filter((tag) => ["A", "B", "CODE", "STRONG", "SCRIPT", "IMG"].includes(tag)), [], `${it.id}: the case made markup of its text`);
+});
+
+test("an 80-word case against the pick draws whole, with no line clamp", async (t) => {
+  const it = mk("ag-long", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): " + AGAINST_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks, want one`);
+  assert.ok(s.blocks[0].text.includes("w80"), `${it.id}: the case is cut short before its last word`);
+  assert.equal(s.blocks[0].clamped, false, `${it.id}: the case is drawn clamped`);
+});
+
+test("a case against the pick, and a second one, both draw in order, each with its model word", async (t) => {
+  const it = mk("ag-two", 1, { context: "Goal: keep it.\nAgainst the pick (opus): The first, older case.\nAgainst the pick (sonnet): The second, newer case." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  const all = s.blocks.map((b) => b.text).join("\n");
+  assert.ok(all.includes("The first, older case."), `${it.id}: the older case is not drawn as a case block`);
+  assert.ok(all.includes("The second, newer case."), `${it.id}: the newer case is not drawn as a case block`);
+  assert.ok(all.indexOf("The first, older case.") < all.indexOf("The second, newer case."), `${it.id}: the two cases are not in order`);
+  assert.ok(all.includes("opus") && all.includes("sonnet"), `${it.id}: a case lacks its model word`);
+});
+
+test("the 220-character fold counts the context left after a case against the pick is removed", async (t) => {
+  const it = mk("ag-fold", 1, { context: "Goal: a short context line that stays here.\nAgainst the pick (sonnet): " + AGAINST_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.more, false, `${it.id}: More context folds a case that is no longer context`);
+});
+
+test("an open decision with a pick and no case against the pick shows one dashed line that names the gap", async (t) => {
+  const bare = mk("ag-bare", 1, { context: "Which tone?" }), empty = mk("ag-empty", 2, { context: "" });
+  const page = await open(t, { items: [bare, empty] }); if (!page) return;
+  for (const it of [bare, empty]) {
+    const s = await againstOf(page, it);
+    assert.ok(s, `${it.id}: the card is not drawn`);
+    assert.equal(s.quiet.length, 1, `${it.id}: ${s.quiet.length} no-case lines, want one`);
+    assert.equal(s.quiet[0], "dashed", `${it.id}: the no-case line is not dashed`);
+  }
+});
+
+test("a stood pick, a port item and a closed item draw no case against the pick", async (t) => {
+  const stood = mk("ag-stood", 1, { stands: true }), port = mk("ag-port", 2, { port: true });
+  const closed = mk("ag-closed", 3, { status: "closed", closed: "2026-11-09T15:00:00Z", reply: "Filed as step ask-phase-out. The record stays there." });
+  const page = await open(t, { items: [stood, port, closed] }); if (!page) return;
+  for (const it of [stood, port, closed]) {
+    const s = await againstOf(page, it);
+    assert.ok(s, `${it.id}: the card is not drawn`);
+    assert.equal(s.blocks.length, 0, `${it.id}: a case block is drawn`);
+    assert.equal(s.quiet.length, 0, `${it.id}: a no-case line is drawn`);
+  }
+});
+
+test("a pick the card does not show draws no case against the pick line", async (t) => {
+  const it = mk("ag-nofit", 1, { pick: "zzz" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.quiet.length, 0, `${it.id}: a no-case line is drawn for a pick the card does not show`);
+});
+
+test("the page draws each table case against the pick as a block, and keeps each other line in the context", async (t) => {
+  const it = mk("ag-table", 1, { context: AGAINST_TABLE.map((row) => row.line).join("\n") });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  for (const row of AGAINST_TABLE) {
+    const where = JSON.stringify(row.line), inCtx = s.ctxLines.includes(row.line.trim());
+    if (row.draws === "case") {
+      assert.ok(s.blocks.some((b) => b.text.includes(row.case)), `${where} is not drawn as a case block`);
+      assert.ok(!inCtx, `${where} is still drawn in the context`);
+    } else {
+      assert.ok(inCtx, `${where} left the context`);
+    }
+  }
+});
+
+test("the guard's CHALLENGED_LINE takes each table case against the pick as a case, and leaves each other line", () => {
+  assert.ok(AGAINST_TABLE.some((r) => r.draws === "case") && AGAINST_TABLE.some((r) => r.draws === "context"), "the table lacks one of its two kinds of line");
+  const script = [
+    "import json, sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "import question_form",
+    "out = []",
+    "for line in json.load(sys.stdin):",
+    "    hits = question_form.CHALLENGED_LINE.findall(line)",
+    "    out.append(bool(hits) and bool(hits[0][1].strip()))",
+    "print(json.dumps(out))",
+  ].join("\n");
+  const r = spawnSync("python3", ["-c", script, path.join(HERE, "..", "..", "..", "hooks")], { input: JSON.stringify(AGAINST_TABLE.map((row) => row.line)), encoding: "utf8" });
+  assert.equal(r.status, 0, "python3 could not load the guard's question_form: " + r.stderr);
+  const guard = JSON.parse(r.stdout);
+  assert.equal(guard.length, AGAINST_TABLE.length, "the guard read a different number of lines");
+  AGAINST_TABLE.forEach((row, i) => assert.equal(guard[i], row.draws === "case", `${JSON.stringify(row.line)}: the guard's pattern says ${guard[i] ? "case" : "context"}, the table says ${row.draws}`));
+});
+
+// ---- The case against the pick on a task, on an answered decision, and the fold of a card with no case.
+test("task case: a task's case against the pick line stays in its context and draws no block", async (t) => {
+  const it = { ...TASK, id: "ag-task", n: 7, context: "Plug it in.\nAgainst the pick (sonnet): x" };
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.ok(s.ctxLines.includes("Against the pick (sonnet): x"), `${it.id}: the task's Against line is missing from its context`);
+  assert.equal(s.blocks.length, 0, `${it.id}: a case block is drawn on a task`);
+});
+
+test("answered case: a case against the pick on an answered decision shows its words on its block once Change opens it", async (t) => {
+  const it = mk("ag-answered", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): Merging adds one more push wait." });
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: "2026-10-26T01:00:00Z", choice: "a", note: "" } } }); if (!page) return;
+  const c = card(page, it);
+  assert.equal(await c.getByRole("button", { name: "Change" }).count(), 1, `${it.id}: the answered decision has no Change control`);
+  await c.getByRole("button", { name: "Change" }).click();
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks once Change opens it, want one`);
+  assert.deepEqual(s.blocks[0].srWords, [false], `${it.id}: the first block on the screen hides Against the pick from sight`);
+});
+
+// One case per cause: a trailing newline (trim), CRLF line ends (joined as LF), and three newlines (collapsed to two).
+for (const [label, context] of [
+  ["a newline at its end", "x".repeat(220) + "\n"],
+  ["CRLF line ends", "a".repeat(218) + "\r\nb"],
+  ["three newlines inside", "a".repeat(217) + "\n\n\nb"],
+]) test(`no-case fold: a card with no case against the pick folds a 221-character context with ${label} as it did before`, async (t) => {
+  const it = mk("fold-one", 1, { context });
+  assert.equal(it.context.length, 221, `${it.id}: the fixture is not 221 characters`);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.ctx, it.context, `${it.id}: the context is drawn changed, not as written`);
+  assert.equal(s.more, true, `${it.id}: a 221-character context does not fold`);
+});
+
 test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   const page = await open(t, { items: [DECISION] }); if (!page) return;
   await card(page, DECISION).locator(".title").click();
@@ -8346,7 +8572,8 @@ test("a card with none of lastAnswer, reply and lane draws as today, and so does
   const plainD = mk("as-d", 1), plainT = { ...TASK, id: "as-t", n: 2 };
   const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
   const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
-  const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
+  // The no-case line of an open decision with a pick is the one child a pick with no case adds, so the shape leaves it out.
+  const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].filter((e) => !e.textContent.includes("No case against the pick on this item.")).map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
   // The children of a plain open card, read from page.html at 2b66f6a3 plus the always-open note box (step note-always-open): a build that adds a wrapper or a row to a card with nothing to show fails here.
   const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "DIV.note", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "DIV.note", "P.dest"] };
   for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {

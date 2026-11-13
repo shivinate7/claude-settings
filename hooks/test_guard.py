@@ -140,6 +140,7 @@ FAMILIES = {
     "task-names-check": "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "question-departs": "the page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
+    "question-challenged": "the page writer: a decision with a pick carries an Against the pick line, the refuter's case, in its context",
     "option-letter-keys": "the page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",

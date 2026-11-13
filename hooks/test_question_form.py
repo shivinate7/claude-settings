@@ -101,6 +101,10 @@ PAGE_URL, PAGE_REPO = tcj.PAGE_URL, tcj.PAGE_REPO
 FORM_RULE = "question-form"
 DEPARTS_RULE = "question-departs"
 DEPARTS = tcj.DEPARTS_LINE  # the one valid Departs from line (hooks/test_call_judge.py builds the box from it)
+CHALLENGED_RULE = "question-challenged"
+# The Against the pick line a page decision with a pick carries: `Against the pick (<model>): <text>`, the refuter's case.
+AGAINST = ("Against the pick (sonnet): the lint job already holds the other format checks, so moving the stamp check "
+           "splits them across two jobs.")
 # A Problem line that is bare, or names a stake outside OWNER_STAKES: the contract does not say whether
 # question-form or owner-judge names it, so either id passes and the refusal must name the Problem line.
 STAKE_RULES = (FORM_RULE, "owner-judge")
@@ -130,7 +134,7 @@ BASED = ("Based on (measured): auto mode refused the runner's merge at 03:04 CDT
 THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
 
 
-LINE_KEYS = ("goal", "problem", "based", "departs")
+LINE_KEYS = ("goal", "problem", "based", "departs", "against")
 
 
 def parts(**over):
@@ -140,8 +144,8 @@ def parts(**over):
     return found
 
 
-def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
-    return "\n".join(line for line in (goal, problem, *based, departs) if line)
+def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS, against=AGAINST):
+    return "\n".join(line for line in (goal, problem, *based, departs, against) if line)
 
 
 def page_item(tail="", options=None, lines=None, **over):
@@ -710,15 +714,16 @@ PROSE = "Based on the log, option A is safer."
 # (name, the context lines in order, verdict). Only `Based on (<kind>):` is a Based on line, so prose that
 # starts with the same two words is not one, and does not move a Based on line before Problem.
 LINE_VARIANTS = [
-    ("the lines in order", [GOAL, PROBLEM, *BASED, DEPARTS], None),
+    ("the lines in order", [GOAL, PROBLEM, *BASED, DEPARTS, AGAINST], None),
     ("Problem before Goal", [PROBLEM, GOAL, *BASED, DEPARTS], (FORM_RULE, None)),
     ("a Based on line before Problem", [GOAL, BASED[0], PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
     ("every Based on line before Problem", [GOAL, *BASED, PROBLEM, DEPARTS], (FORM_RULE, None)),
     ("a Based on line before Goal", [BASED[0], GOAL, PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
-    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, DEPARTS, PROSE], None),
-    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED, DEPARTS], None),
+    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, DEPARTS, AGAINST, PROSE], None),
+    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED, DEPARTS, AGAINST],
+     None),
     ("prose that starts with Based on, beside three Based on lines",
-     [GOAL, PROBLEM, *BASED, THIRD, PROSE, DEPARTS], None),
+     [GOAL, PROBLEM, *BASED, THIRD, PROSE, DEPARTS, AGAINST], None),
     ("prose that starts with Based on is no Based on line", [GOAL, PROBLEM, PROSE, DEPARTS], (FORM_RULE, "Based on")),
     ("a Based on kind outside PREMISE_KINDS still refuses beside the prose",
      [GOAL, PROBLEM, BASED[0], "Based on (guess): the log is old.", PROSE, DEPARTS], (FORM_RULE, "Based on")),
@@ -1482,7 +1487,7 @@ def case_departs_line_forms_pass():
         dp_chat("a line form %r passes" % body, body, None)
         dp_page("a page line form %r passes" % body, body, None)
     # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
-    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS, AGAINST) if line)
     box = chat_box()
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
@@ -2188,7 +2193,7 @@ MA144_ID = "ma144-tab-bar"
 MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
 VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
 
-MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
+MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.\nAgainst the pick (sonnet): the tab bar under the left page matches degen, and the two apps stay alike.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
 
 
 def ma144(repo=OTHER_REPO, checked=None, **over):
@@ -2662,8 +2667,161 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ the Against the pick line (rule question-challenged)
+#
+# A page decision with a pick carries one line at a line start in `context`: `Against the pick (<model>): <text>`, the
+# refuter's best case. question_form.challenged_hit(text) returns a miss, or "". The predicate's cases call it by name:
+# on a build without that name they fail as "no such function" and are not the red for this rule. The red on a build
+# without the rule comes from the decision, item, str_replace and reason cases below, which fail by their assertions.
+CHALLENGED_REFUSAL = (CHALLENGED_RULE, "")
+CHALLENGED_OK = [
+    ("sonnet", AGAINST),
+    ("opus", "Against the pick (opus): the stamp check is one step, and a second job adds a wait."),
+    ("a bullet and a bold label", "- **Against the pick (sonnet):** the lint job already holds the other format checks."),
+    ("comment openers and an apostrophe", "Against the pick (sonnet): don't parse // or /* or # here, the lint job holds them."),
+    ("a line of full size", "Against the pick (sonnet): " + "the lint job holds the other format checks and a move splits them. " * 20),
+    ("a line after other lines", "Goal: keep the stamp check fast.\nAgainst the pick (opus): the lint job holds them."),
+]
+CHALLENGED_BAD = [
+    ("no line", "Goal: keep the stamp check fast.\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves."),
+    ("an empty context", ""),
+    ("an empty text", "Against the pick (sonnet):"),
+    ("a text of spaces", "Against the pick (sonnet):    "),
+    ("a placeholder text", "Against the pick (sonnet): <the refuter's case>"),
+    ("a model word outside sonnet and opus (gpt)", "Against the pick (gpt): the lint job holds them."),
+    ("a model word outside sonnet and opus (haiku)", "Against the pick (haiku): the lint job holds them."),
+    ("no model word", "Against the pick: the lint job holds them."),
+    ("a phrase mid-line", "Why: Against the pick (sonnet): the lint job holds them."),
+]
+
+
+def challenged_text(name, text, ok):
+    """question_form.challenged_hit(text): "" for a well formed line, a miss string otherwise."""
+    got = call("challenged_hit", text)
+    if ok:
+        check("challenged predicate: " + name, got == "", "want no miss, got %r" % (got,))
+    else:
+        check("challenged predicate: " + name, isinstance(got, str) and got != "", "want a miss, got %r" % (got,))
+
+
+def case_challenged_predicate():
+    for name, text in CHALLENGED_OK:
+        challenged_text("a well formed line, %s, passes" % name, text, True)
+    for name, text in CHALLENGED_BAD:
+        challenged_text("%s is a miss" % name, text, False)
+
+
+def challenged_decision(name, op, data, want):
+    verdict("decision_form_hit: " + name, call("decision_form_hit", op, data), want)
+
+
+def case_challenged_decision_form():
+    base = page_item(against=None)
+    challenged_decision("a set of a decision with a pick and no Against line is refused", "set", base,
+                        CHALLENGED_REFUSAL)
+    challenged_decision("a set with a well formed Against line passes", "set", page_item(), None)
+    challenged_decision("a set with no kind is judged like a decision", "set", dict(base, kind=None),
+                        CHALLENGED_REFUSAL)
+    challenged_decision("a stood pick passes with no Against line", "set", page_item(against=None, stands=True), None)
+    challenged_decision("a port item passes with no Against line", "set", page_item(against=None, port=True), None)
+    challenged_decision("an item with no pick passes", "set", page_item(against=None, pick=None), None)
+    challenged_decision("a closed item passes", "set", page_item(against=None, status="closed"), None)
+    challenged_decision("a note passes", "set", page_item(against=None, kind="note"), None)
+    challenged_decision("an update of kind decision and a pick, with a context and no line, is refused", "update",
+                        {"kind": "decision", "pick": "a", "context": base["context"]}, CHALLENGED_REFUSAL)
+    challenged_decision("an update with a pick and no context passes", "update", {"kind": "decision", "pick": "a"}, None)
+    challenged_decision("an update with a context and no pick passes", "update",
+                        {"kind": "decision", "context": base["context"]}, None)
+    challenged_decision("an update with a pick and a context, and no kind, passes", "update",
+                        {"pick": "a", "context": base["context"]}, None)
+    # `recommended` names the pick now, and `pick` is its old name: each case above holds for it too.
+    challenged_decision("a set with a recommended key and no Against line is refused", "set",
+                        page_item(against=None, pick=None, recommended="a"), CHALLENGED_REFUSAL)
+    challenged_decision("a set with a recommended key and a well formed Against line passes", "set",
+                        page_item(pick=None, recommended="a"), None)
+    challenged_decision("a stood recommended key passes with no Against line", "set",
+                        page_item(against=None, pick=None, recommended="a", stands=True), None)
+    challenged_decision("a port recommended key passes with no Against line", "set",
+                        page_item(against=None, pick=None, recommended="a", port=True), None)
+    challenged_decision("an update of kind decision and a recommended key, with a context and no line, is refused",
+                        "update", {"kind": "decision", "recommended": "a", "context": base["context"]},
+                        CHALLENGED_REFUSAL)
+    challenged_decision("an update of kind decision and a recommended key, with a context and the line, passes",
+                        "update", {"kind": "decision", "recommended": "a", "context": page_item()["context"]}, None)
+    challenged_decision("an update of kind decision and a recommended key, with no context, passes", "update",
+                        {"kind": "decision", "recommended": "a"}, None)
+    challenged_decision("a set with a recommended list of two keys and no Against line is refused", "set",
+                        page_item(against=None, pick=None, recommended=["a", "b"],
+                                  options=copy.deepcopy(ITEM92["options"])), CHALLENGED_REFUSAL)
+    challenged_decision("a set with a recommended list of two keys and a well formed Against line passes", "set",
+                        page_item(pick=None, recommended=["a", "b"], options=copy.deepcopy(ITEM92["options"])), None)
+
+
+def challenged_page(name, op, data, want):
+    page("challenged " + name, op, entry_of(data), want)
+
+
+def case_challenged_item_hit():
+    challenged_page("a page decision with a pick and no Against line is refused", "set", page_item(against=None),
+                    CHALLENGED_REFUSAL)
+    challenged_page("a page decision with a recommended key and no Against line is refused", "set",
+                    page_item(against=None, pick=None, recommended="a"), CHALLENGED_REFUSAL)
+    challenged_page("a Departs from line missing, with no Against line, is refused as question-departs", "set",
+                    page_item(against=None, departs=None), (DEPARTS_RULE, "Departs"))
+    challenged_page("an empty Against line is refused", "set", page_item(against="Against the pick (sonnet):"),
+                    CHALLENGED_REFUSAL)
+    challenged_page("the Against line in why, not in context, is refused", "set",
+                    page_item(against=None, why=AGAINST), CHALLENGED_REFUSAL)
+    options = copy.deepcopy(ITEM92["options"])
+    options[0]["how"] = AGAINST
+    challenged_page("the Against line in an option, not in context, is refused", "set",
+                    page_item(against=None, options=options), CHALLENGED_REFUSAL)
+    challenged_page("a well formed Against line passes", "set", page_item(), None)
+    context_replace("that drops the Against line from context is refused", AGAINST, "", CHALLENGED_REFUSAL)
+    context_replace("that leaves an empty Against line is refused", AGAINST, "Against the pick (sonnet):",
+                    CHALLENGED_REFUSAL)
+    context_replace("that swaps the line for another well formed line is allowed", AGAINST,
+                    "Against the pick (opus): a second job adds a wait.", None)
+    context_replace("whose old_str holds no Against line is allowed", "The lane merge-role-allow would do it.",
+                    "The lane would do it.", None)
+
+
+def case_challenged_reason_names_the_refuter():
+    table = getattr(question_form, "PAGE_REASONS", None) or {}
+    text = table.get(CHALLENGED_RULE)
+    words = ("Against the pick", "refuter", "Goal", "Problem", "Based on", "options", "pick")
+    missing = [word for word in words if not (isinstance(text, str) and word in text)]
+    check("challenged reason: the page reasons table holds a question-challenged reason that names the refuter's "
+          "inputs and the line", not missing, "missing from the reason: %s" % (missing or sorted(table)))
+
+
+# Text that reads as a placeholder but is only a word: none, TBD, todo, n/a, an ellipsis and a lone em dash.
+# Real text that holds one of those words is not a placeholder, and an edit that empties the text is refused.
+CHALLENGED_PLACEHOLDER_TEXTS = ("none", "TBD", "todo", "n/a", "...", "—")
+CHALLENGED_REAL_TEXT = "Against the pick (sonnet): none of the options keep the lint gate"
+
+
+def case_challenged_placeholder_words():
+    for text in CHALLENGED_PLACEHOLDER_TEXTS:
+        line = "Against the pick (sonnet): " + text
+        challenged_text("the Against the pick text %r is a miss" % text, line, False)
+        challenged_decision("a decision whose Against the pick text is %r is refused" % text, "set",
+                            page_item(against=line), CHALLENGED_REFUSAL)
+        challenged_page("a page decision whose Against the pick text is %r is refused" % text, "set",
+                        page_item(against=line), CHALLENGED_REFUSAL)
+    challenged_text("real text that starts with none, and says more, passes", CHALLENGED_REAL_TEXT, True)
+    challenged_page("a page decision whose text starts with none, and says more, passes", "set",
+                    page_item(against=CHALLENGED_REAL_TEXT), None)
+    context_replace("that leaves the Against the pick text empty, after a space, is refused", AGAINST,
+                    "Against the pick (sonnet): ", CHALLENGED_REFUSAL)
+    context_replace("that swaps the line for a lone placeholder word is refused", AGAINST,
+                    "Against the pick (sonnet): TBD", CHALLENGED_REFUSAL)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_challenged_predicate, case_challenged_decision_form, case_challenged_item_hit,
+                 case_challenged_reason_names_the_refuter, case_challenged_placeholder_words,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,

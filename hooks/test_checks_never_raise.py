@@ -229,12 +229,13 @@ def draw_text(rng):
 
 
 def decision_item(text):
-    """A well-formed decision item whose Goal holds `text`. Its form lines and option effects pass, so each check
-    reaches the Departs from line (question_form.departs_hit), whose change side holds no `;`."""
+    """A well-formed decision item whose Goal holds `text`. Its form lines, option effects, Departs from line and
+    Against the pick line pass, and it carries a pick, so each check reaches the Departs from line
+    (question_form.departs_hit), whose change side holds no `;`, and the Against the pick line (challenged_hit)."""
     goal = " ".join(text.split()) or "x"
-    return {"kind": "decision",
+    return {"kind": "decision", "pick": "a",
             "context": "Goal: %s\nProblem (goal): why the owner judges it\nBased on (read): one premise\n"
-                       "Departs from: main — adds a check" % goal,
+                       "Departs from: main — adds a check\nAgainst the pick (sonnet): one refuter's case" % goal,
             "options": [{"label": "a", "gain": "saves time", "lose": "one more check"}]}
 
 
@@ -614,6 +615,10 @@ def fixture_proof():
            lambda: any(keys.get("name") == "builder" for keys in guard.role_agent_keys(CONFIG)))
     _probe(problems, "the decision item's form lines refuse it, so the Departs from check never runs (the form moved)",
            lambda: question_form._lines_hit(decision_item("x")["context"]) == question_form.PASS)
+    _probe(problems, "the decision item's Against the pick line is not well formed, or question_form.challenged_hit is "
+                     "missing, so the question-challenged check never passes it",
+           lambda: getattr(question_form, "challenged_hit", None) is not None
+           and question_form.challenged_hit(decision_item("x")["context"]) == "")
     _probe(problems, "WORKFLOW_STEP's continue-on-error line is no disabling step (WORKFLOW_DISABLE_STEP moved)",
            lambda: guard.workflow_step_disables("        continue-on-error: true"))
     _probe(problems, "SETTINGS_PATH is no settings file (the settings basenames moved)",

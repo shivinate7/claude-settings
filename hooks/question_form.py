@@ -18,6 +18,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
     Problem (<stake>): <the problem in one plain sentence, and why it needs his word>
     Based on (<kind>): <one premise>                                  one to three lines
     Departs from: <what on main> — <what changes>                     after the form; every such line must be valid
+    Against the pick (<model>): <a refuter's case>                    page decision with a pick, in `context`, after Departs
 
 <stake> is one of OWNER_STAKES. A stood pick (`stands: true`) may write `Problem: <text>` with no stake.
 <kind> is one of PREMISE_KINDS. Each option states its gain and its loss: page `gain` and `lose` fields;
@@ -35,6 +36,8 @@ or empty `Departs from:` line (a bullet or bold label is read), a line with no s
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
+A page decision with a pick (not a stood pick, not a port item) then needs one valid `Against the pick (sonnet|opus):`
+line in `context`, or refuses as `question-challenged`; challenged_hit is its predicate. The chat box is not judged.
 The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
 key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
@@ -910,6 +913,56 @@ def task_str_replace_hit(entry):
     return (WHY_RULE, cause) if cause else PASS
 
 
+# ------------------------------------------------------------------ a page decision carries the case against its pick
+#
+# docs/decisions/question-form.md, rule `question-challenged` (row refuter-page-against of
+# docs/plans/debate-model-tiers.md): a refuter that was given only the item's Goal, Problem, Based on, options and pick writes
+# its best case against the pick, and the case sits in `context` as one line at a line start,
+# `Against the pick (<model>): <case>`. Code reads that the line is there and well formed. It cannot read whether the
+# refuter was blind, or whether one ran at all, so the line is evidence the writer owns.
+CHALLENGED_RULE = "question-challenged"
+CHALLENGED_MODELS = ("sonnet", "opus")
+# Same line shape as DEPARTS_LINE (optional bullet, optional bold label). Group 1 is the model word in parentheses, or
+# None with no parentheses; group 2 is the rest of the line.
+CHALLENGED_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Against the pick(?:\*\*)?[ \t]*(?:\(([^()\n]*)\))?[ \t]*"
+                             r"(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
+# A case that is only a filler word, or only dots or dashes, is no case. Real text that holds such a word passes.
+CHALLENGED_FILLER = re.compile(r"(?:none|nothing|n/?a|tbd|todo|\.+|\u2026|[-\u2013\u2014]+)[.!]*", re.I)
+CHALLENGED_REASON = ("A decision with a pick carries the case against it. Spawn one refuter and give it only the item's "
+                     "Goal, Problem, Based on, options and pick, never `why`. Write its case in a line that starts "
+                     "\"Against the pick (<model>): <case>\", where model is %s. "
+                     "On the waiting page the line goes in `context`. "
+                     "(decision question-form, a page decision carries a refuter's case against its pick)"
+                     % " or ".join(CHALLENGED_MODELS))
+
+
+def challenged_hit(text) -> str:
+    """The miss reason when `text` lacks a valid Against the pick line, else "". Every such line names sonnet or
+    opus in parentheses and holds text that is not only a placeholder."""
+    lines = CHALLENGED_LINE.findall(str(text or ""))
+    if not lines:
+        return "no Against the pick line"
+    for model, rest in lines:
+        if model.strip().lower() not in CHALLENGED_MODELS:
+            return "Against the pick line with no model word, or one outside %s" % ", ".join(CHALLENGED_MODELS)
+        rest = rest.strip()
+        if not rest:
+            return "Against the pick line with no text"
+        if is_placeholder(rest) or CHALLENGED_FILLER.fullmatch(rest):
+            return "Against the pick line whose text is only a placeholder" + PLACEHOLDER_HINT
+    return ""
+
+
+def _challenged_judged(op: str, data) -> bool:
+    """Whether this write of a decision owes the line: it has a recommended option (`recommended`, or its old name
+    `pick`; a non-empty str or list), and is not a stood pick or a port item. An update owes it only when it carries
+    both that field and the context."""
+    has_recommended = any(isinstance(data.get(f), (str, list)) and data.get(f) for f in RECOMMENDED_FIELDS)
+    if not has_recommended or data.get("stands") is True or data.get("port"):
+        return False
+    return op == "set" or "context" in data
+
+
 # ------------------------------------------------------------------ a page decision states the form
 
 
@@ -939,6 +992,10 @@ def decision_form_hit(op: str, data):
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
+    if _challenged_judged(op, data):
+        miss = challenged_hit(str(data.get("context") or ""))
+        if miss:
+            return CHALLENGED_RULE, miss
     return PASS
 
 
@@ -976,6 +1033,11 @@ def form_str_replace_hit(entry):
         miss = departs_hit(new)
         if miss:
             return DEPARTS_RULE, "context edit that leaves no valid Departs from line (%s)" % miss
+    # The same for an Against the pick line: an edit with none in old_str or new_str is not judged.
+    if CHALLENGED_LINE.search(old) or CHALLENGED_LINE.search(new):
+        miss = challenged_hit(new)
+        if miss:
+            return CHALLENGED_RULE, "context edit that leaves no valid Against the pick line (%s)" % miss
     return PASS
 
 
@@ -1815,7 +1877,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 "item-field-page-only": PAGE_ONLY_REASON,
-                DEPARTS_RULE: PAGE_DEPARTS_REASON,
+                DEPARTS_RULE: PAGE_DEPARTS_REASON, CHALLENGED_RULE: CHALLENGED_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
                 LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "

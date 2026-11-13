@@ -28,14 +28,18 @@ OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 # The Departs from line a question carries (rule question-departs, its cases in that section). A port item
 # carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
 QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The Against the pick line a decision with a pick carries (rule question-challenged, its cases in that section).
+# It sits beside the Departs from line, the one home of both fixture lines.
+OJ_AGAINST = ("Against the pick (sonnet): the lint job already holds the other format checks, so moving the stamp "
+              "check splits them across two jobs")
 
 
 def with_stake(item, departs=True):
-    """The item with OJ_FORM on the lines before its context, a Departs from line after them unless `departs`
-    is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
-    stays as it is."""
+    """The item with OJ_FORM on the lines before its context, a Departs from line and an Against the pick line
+    after them unless `departs` is False, and a gain and a lose on each option that lacks one. An item with no
+    context, or no options, stays as it is."""
     if isinstance(item.get("context"), str):
-        lines = [OJ_FORM] + ([QD_LINE] if departs else [])
+        lines = [OJ_FORM] + ([QD_LINE, OJ_AGAINST] if departs else [])
         item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o

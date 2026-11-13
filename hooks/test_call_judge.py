@@ -351,6 +351,9 @@ PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your w
 BASED_LINES = ("Based on (read): the diff changes one rule",)
 # The line a question to the owner carries (rule question-departs): what is on main, and what changes.
 DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The line a page decision with a pick carries (rule question-challenged): the refuter's case against the pick.
+AGAINST_LINE = ("Against the pick (sonnet): the lint job already holds the other format checks, so moving "
+                "the stamp check splits them across two jobs")
 
 
 def good_options():
@@ -419,7 +422,7 @@ def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
-    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
+    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, AGAINST_LINE))
     item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},

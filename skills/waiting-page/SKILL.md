@@ -120,10 +120,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with `recommended` (old name `pick`) also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`); the page draws that line as its own block under the options. A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
-    the guard cannot see the stored fields.
+    the guard cannot see the stored fields. An update that carries `kind: decision`, `recommended` and `context` also carries the Against line,
+    and carries `stands: true` again on a stood pick.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
     strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
@@ -319,6 +320,13 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
      Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
      A question that changes nothing is not asked: act on main's behaviour.
+   - A decision with `recommended` and no `stands: true` gets the case against its pick, before you write it. Spawn one Sonnet agent
+     (general-purpose, model sonnet). Its brief holds only the item's Goal, Problem, Based on lines, each option's key, label,
+     how, gain and lose, and the pick. Leave out `why` and your own reasoning, so it argues from the same facts the owner has.
+     Ask for the strongest case against the pick in under 80 words. Copy it into `context` as one line:
+     `Against the pick (sonnet): <the case>`. The writer refuses a decision with a pick and no such line (guard rule
+     `question-challenged`). It checks that the line is there and well formed, not that the agent was blind. The page takes the line out of the context and draws it as its own block under the options. A port item and
+     a closed item need none (decision `question-form`, which holds the other exemptions).
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
@@ -478,14 +486,14 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option.
    Do this before the write:
    the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new
-   labels to the newest chat question's lines. Then write the new options and set `added` to now. Write `lastAnswer`
+   labels to the newest chat question's lines. Then write the new options and set `added` to now. Carry `kind: decision` and `context` again, with a fresh "Against the pick (sonnet): <case>" line for the new `recommended` option (the old case argues against the old one). Write `lastAnswer`
    from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Then delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal that the item has new
    options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
-4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
+4. If any other answer is not clear, rewrite the item's `context` (keep its Against the pick line), write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
@@ -493,7 +501,8 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
      recommendation.
    - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
-     guard refuses an update with `kind` `decision` and `context` that lacks it.
+     guard refuses an update with `kind` `decision` and `context` that lacks it. This update carries a new `recommended`, so it also needs the
+     case against that pick: spawn the Sonnet agent for the new pick (see "Add an item") and add the line "Against the pick (sonnet): <the case>".
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
