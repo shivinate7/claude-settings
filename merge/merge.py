@@ -88,8 +88,8 @@
                           ci-done count toward the state but are never the first red: a red fan-in alone reads `red` with `merge: first
                           red: none named (JOB failed)`, a fan-in not finished reads running, and all green needs all-jobs-passed present
                           and finished with success, neutral or skipped (no all-jobs-passed row yet reads running). A failed read, a red job
-                          whose end time cannot be read, or, with no red job, a finished job whose conclusion is neither red nor success,
-                          neutral or skipped prints `merge: run state unknown (WHY)` (exit 1); every state read exits 0. Stands alone; takes no lock and no merge role, merges and pushes
+                          whose end time cannot be read (a red fan-in's end time is never read), or, with no red job, a finished job whose
+                          conclusion is neither red nor success, neutral or skipped prints `merge: run state unknown (WHY)` (exit 1); every state read exits 0. Stands alone; takes no lock and no merge role, merges and pushes
                           nothing; any session may run it. Cost per call: one pulls/N read and one paged check-runs read (one call per
                           100 jobs). No file, process or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
@@ -208,6 +208,7 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 import local_time  # noqa: E402  the one home of the US Central clock (hooks/local_time.py); --run-state prints an end time with it
+from all_jobs_passed_rules import FAN_IN  # noqa: E402  the one home of the ci-done fan-in job's name (lint/all_jobs_passed_rules.py); --run-state never names it the first red
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -4710,7 +4711,7 @@ def release_check(root, h, numbers, lints, root_why=None):
 
 RUN_RED = ("failure", "timed_out", "cancelled")  # the conclusions of a job that failed the run
 RUN_CLEAR = ("success", "neutral", "skipped")  # the conclusions of a job that holds the run back from nothing
-RUN_FAN_IN = (ROLLUP_JOB, "ci-done")  # jobs that only roll up the others (checks.yml): their red names no cause, so they are never the first red
+RUN_FAN_IN = (ROLLUP_JOB, FAN_IN)  # jobs that only roll up the others (checks.yml): their red names no cause, so they are never the first red
 
 def run_state(jobs):
     """-> (state, first_red) of `merge --run-state` for `jobs`, the {name: check run row} of one head (Host.job_runs). Every row counts toward the state,
