@@ -1,0 +1,10 @@
+{
+ "id": "push-cost-three-rev-parse",
+ "at": "2026-11-09T13:38:00-06:00",
+ "title": "A push to a lane branch may spawn 3 rev-parse calls instead of 1.",
+ "ruling": "Coordinator ruling a (time not given; time here is PR 2463's creation, 13:38 CST Nov 9): \"Push cost counts re-pointed: a push to a lane branch spawns 3 rev-parse where it spawned 1 (coordinator ruling a). Decisions batch-freeze-lane-set and plain-push-asks updated in place.\" The question ruled a on is not named in the PR.",
+ "quote": "a push to a lane branch spawns 3 rev-parse where it spawned 1 (coordinator ruling a)",
+ "source": "PR 2463 body (https://github.com/shivinate7/claude-settings/pull/2463). Who said it: coordinator, quoted by lane (time estimated).",
+ "status": "open",
+ "step": "lane-push-frozen-in-batch"
+}

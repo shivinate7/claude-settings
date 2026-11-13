@@ -1,0 +1,10 @@
+{
+ "id": "mutation-harness-lane-run",
+ "at": "2026-11-09T13:09:33-06:00",
+ "title": "A lane that changes the mutation harness may run the mutation job before its batch, as a named exception to lanes-run-no-full-ci-job.",
+ "ruling": "Owner page answer to item 463 (mutate-harness-lane-run), 2026-11-09 13:09 CST, pick a: ruling lanes-run-no-full-ci-job gains one exception: a harness change's own suite is the mutation job. PR 2733 quotes it as \"for a lane that changes the mutation harness, its own suite is the mutation job, run before the batch\" (the decision's paraphrase). Not ruled: up to three runs per touched lane, a 75 min cap and 225 min worst case, asked of the coordinator.",
+ "quote": "a",
+ "source": "waiting/answers/mutate-harness-lane-run.json (at 2026-11-09T19:09:33Z, choice a); waiting/items/mutate-harness-lane-run.json option a; PR 2733 body. Who said it: owner (page).",
+ "status": "open",
+ "step": "mutate-harness-change-timed-run"
+}

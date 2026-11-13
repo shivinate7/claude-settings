@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-fix-1958-notes",
+ "at": "2026-11-08T07:22:00-06:00",
+ "title": "The gaps that PR 1958's review rounds left as notes get fixed in lane timing-tests.",
+ "ruling": "Coordinator 07:22 CST Nov 8: PR 2002 \"fixes the gaps the #1958 review rounds left as notes (coordinator, 2026-11-08 07:22 CST)\". Process-only order, under the owner ruling that a found gap gets a fix.",
+ "quote": "Fixes the gaps the #1958 review rounds left as notes (coordinator, 2026-11-08 07:22 CST).",
+ "source": "PR 2002 body (https://github.com/shivinate7/claude-settings/pull/2002). Who said it: coordinator, quoted by lane.",
+ "status": "closed",
+ "step": "timing-tests"
+}

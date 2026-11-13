@@ -1,0 +1,10 @@
+{
+ "id": "guard-pr-rounds-at-live-head",
+ "at": "2026-11-08T06:28:00-06:00",
+ "title": "A guard or check PR runs review rounds 1 to 3 at its live head.",
+ "ruling": "Coordinator ruling 2026-11-08 06:28 CST: \"a guard or check PR runs rounds 1-3 at its live head.\" PRs 1708 and 1729 replaced their earlier review chains with a fresh chain on that basis. Later coordinator rulings on records (record-own-rounds-withdrawn, 15:56 CST Nov 8) may refine it; unchecked.",
+ "quote": "coordinator ruling 2026-11-08 06:28 CST: a guard or check PR runs rounds 1-3 at its live head",
+ "source": "PR 1708 comment 6722673638 and PR 1729 comment 6722707172. Who said it: coordinator, quoted by lane.",
+ "status": "open",
+ "step": "merge-lock-expired-delete-race"
+}

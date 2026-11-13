@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-routes-1900-round3",
+ "at": "2026-11-08T06:50:00-06:00",
+ "title": "The coordinator routed two round-3 items of PR 1900 back to lane runner-repos-in-parallel.",
+ "ruling": "Coordinator 06:50 CST Nov 8, citing owner items 386 and 410 a: \"routed back two items from #1900's round 3\" (a glued ) or & flag read by merge_args_of; two narrating test comments deleted). Built in PR 1995. Process-only.",
+ "quote": "The coordinator (06:50 CST, owner items 386 and 410 a) routed back two items from #1900's round 3",
+ "source": "PR 1995 body (https://github.com/shivinate7/claude-settings/pull/1995). Who said it: coordinator, quoted by lane.",
+ "status": "closed",
+ "step": "runner-repos-in-parallel"
+}

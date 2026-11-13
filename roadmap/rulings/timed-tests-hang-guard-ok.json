@@ -1,0 +1,10 @@
+{
+ "id": "timed-tests-hang-guard-ok",
+ "at": "2026-11-07T13:00:00-06:00",
+ "title": "A timed test is allowed, and a hang guard is a good use of one; a speed-dependent verdict uses a synthetic clock.",
+ "ruling": "Owner chat answer, 2026-11-07 13:00 CST, to page item 345 (time-pinned-hang-guards), with none of the options: \"P5 never meant to ban timed waits. A timed test is allowed, and catching a hung test is a good reason for one. A test whose verdict depends on speed uses a synthetic clock, so machine load cannot change it.\" Decision test-practices P5 is rewritten to this in PR 1958 (replaces 1177). The words are triage's relay of the chat answer, not the owner's typed text. Covers PRs 1147, 1958, 2002.",
+ "quote": "P5 never meant to ban timed waits. A timed test is allowed, and catching a hung test is a good reason for one. A test whose verdict depends on speed uses a synthetic clock, so machine load cannot change it.",
+ "source": "waiting/items/time-pinned-hang-guards.json (n 345, reply field, triage relay of owner chat 13:00 CST); PR 1958 body (\"owner's ruling (2026-11-07 13:00 CST)\"); PR 1147 body. Who said it: owner, relayed by triage.",
+ "status": "open",
+ "step": "timing-tests"
+}

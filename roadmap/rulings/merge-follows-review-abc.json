@@ -1,0 +1,10 @@
+{
+ "id": "merge-follows-review-abc",
+ "at": "2026-11-07T22:25:43-06:00",
+ "title": "Owner picked all three parts of making merges keep pace with reviews.",
+ "ruling": "Owner page answer to item 386 (merge-follows-review), 2026-11-07 22:25 CST (answer time 04:25:43Z Nov 8; the triage reply says 22:28 CST): picks a, b and c. (a) the merge tool builds each batch from PR state (step merge-builds-batches); (b) a lane's findings ride in its own PR or one follow-up per topic, so a found gap gets a fix and starts no new lane (step findings-ride-in-lane); (c) every runner and coordinator report gives three backlog counts (step pr-state-is-on-the-pr). PRs 1900, 1971, 1995 and 2099 cite it as \"item 386\". Home: step pr-backlog-clear.",
+ "quote": "a, b, c",
+ "source": "waiting/items/merge-follows-review.json (lastAnswer at 2026-11-08T04:25:43Z, choice a,b,c; reply by triage 22:28 CST); PR 1900, 1971, 1995, 2099 bodies. Who said it: owner (page).",
+ "status": "open",
+ "step": "pr-backlog-clear"
+}

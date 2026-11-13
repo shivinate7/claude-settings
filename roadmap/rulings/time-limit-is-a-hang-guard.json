@@ -1,0 +1,10 @@
+{
+ "id": "time-limit-is-a-hang-guard",
+ "at": "2026-11-07T13:32:00-06:00",
+ "title": "A per-test or per-suite time limit counts as a hang guard under test-practices P5.",
+ "ruling": "Coordinator pick, 13:32 CST (date inferred as Nov 7, the day of the owner 13:00 ruling; PR 1958 was created 06:28 CST Nov 8): \"A per-test or per-suite time limit is a hang guard too.\" Extends the owner ruling timed-tests-hang-guard-ok.",
+ "quote": "A per-test or per-suite time limit is a hang guard too (coordinator pick, 13:32 CST).",
+ "source": "PR 1958 body, first bullet (https://github.com/shivinate7/claude-settings/pull/1958). Who said it: coordinator, quoted by lane timing-tests.",
+ "status": "open",
+ "step": "timing-tests"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "repoint-push-report-tests-0955",
+ "at": "2026-11-08T09:55:00-06:00",
+ "title": "Two push-report tests that pinned the D2 defect as unknown are re-pointed to the local-head read.",
+ "ruling": "Lane pick 2026-11-08 09:55 CST: \"two tests pinned the D2 defect as `unknown`. They are re-pointed to the local-head read, under the 13:20 ruling.\" A first push of a branch on a single-branch clone reads the local branch head, not unknown. Built in PR 2129. Not a coordinator or owner word: lane pick only.",
+ "quote": "Lane pick (2026-11-08 09:55 CST): two tests pinned the D2 defect as `unknown`. They are re-pointed to the local-head read, under the 13:20 ruling",
+ "source": "PR 2129 body (https://github.com/shivinate7/claude-settings/pull/2129). Who said it: lane (push-report lane, session_013NEJL1rKuNDSwMxwArjXHb).",
+ "status": "open",
+ "step": "notes-fix-large-3"
+}

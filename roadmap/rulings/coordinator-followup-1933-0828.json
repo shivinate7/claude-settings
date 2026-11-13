@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-followup-1933-0828",
+ "at": "2026-11-08T08:28:00-06:00",
+ "title": "The coordinator ordered a follow-up in the after-cd lane for the gaps of PR 1933.",
+ "ruling": "Coordinator ruling 2026-11-08 08:28 CST: \"A follow-up in lane git-write-after-failed-cd (item 386), from the coordinator's ruling at 2026-11-08 08:28 CST.\" Built in PR 2099 (a cd after && or || no longer reads as the shell's exit). The ruling's own words are not in the PR; only the lane's citation. Process-only.",
+ "quote": "A follow-up in lane git-write-after-failed-cd (item 386), from the coordinator's ruling at 2026-11-08 08:28 CST.",
+ "source": "PR 2099 body (https://github.com/shivinate7/claude-settings/pull/2099). Who said it: coordinator, quoted by lane (words not in PR).",
+ "status": "closed",
+ "step": "git-write-after-failed-cd"
+}

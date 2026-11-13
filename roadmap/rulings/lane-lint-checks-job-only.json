@@ -1,0 +1,10 @@
+{
+ "id": "lane-lint-checks-job-only",
+ "at": "2026-11-08T02:57:00-06:00",
+ "title": "Lane lint covers the checks job only.",
+ "ruling": "Coordinator ruling, 02:57 CST Nov 8: \"lane lint covers the `checks` job only.\" A picked suite whose CI step is in another job prints one `not run` line naming the job and its suites. A follow-up PR in this lane runs the merge and guard suites under their own time limit.",
+ "quote": "Coordinator ruling, 02:57 CST Nov 8: lane lint covers the `checks` job only.",
+ "source": "PR 1844 body (https://github.com/shivinate7/claude-settings/pull/1844). Who said it: coordinator, quoted by lane.",
+ "status": "open",
+ "step": "lane-lint-hook-suites"
+}

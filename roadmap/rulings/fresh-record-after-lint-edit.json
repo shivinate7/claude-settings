@@ -1,0 +1,10 @@
+{
+ "id": "fresh-record-after-lint-edit",
+ "at": "2026-11-07T23:36:00-06:00",
+ "title": "A lint-only change that cannot take a second fix check starts a fresh review record.",
+ "ruling": "Process line, coordinator 23:36 CST Nov 7: \"A lint-only change at 96f4fcc4f could not take a second fix check, so this record starts fresh.\" Applied on PR 1585.",
+ "quote": "A lint-only change at 96f4fcc4f could not take a second fix check, so this record starts fresh (coordinator 23:36 CST).",
+ "source": "PR 1585 comment 6718192667 (https://github.com/shivinate7/claude-settings/pull/1585#issuecomment-6718192667), posted by the lane (00:23 CST Nov 8). Who said it: coordinator, quoted by lane.",
+ "status": "closed",
+ "step": "notes-fix-large-3"
+}

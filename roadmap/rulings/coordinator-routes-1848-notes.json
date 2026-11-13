@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-routes-1848-notes",
+ "at": "2026-11-08T03:49:00-06:00",
+ "title": "The coordinator sent the round-3 notes of PR 1848 back to lane runner-repos-in-parallel as fixes.",
+ "ruling": "Coordinator 03:49 CST Nov 8: \"owner 13:20 ruling and item 386 say a found gap gets a fix.\" PR 1900 carries #1848's round 3 notes as fixes, not notes. Process-only.",
+ "quote": "coordinator 03:49 CST: owner 13:20 ruling and item 386 say a found gap gets a fix",
+ "source": "PR 1900 body (https://github.com/shivinate7/claude-settings/pull/1900). Who said it: coordinator, quoted by lane.",
+ "status": "closed",
+ "step": "runner-repos-in-parallel"
+}

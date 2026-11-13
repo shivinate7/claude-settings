@@ -1,0 +1,10 @@
+{
+ "id": "refuters-all-sonnet-for-now",
+ "at": "2026-11-06T13:59:40-06:00",
+ "title": "For now every refuter from item 284 runs Sonnet.",
+ "ruling": "Owner page answer to item 289 (debate-model-tiers), 2026-11-06 13:59 CST, choice none with note: \"for now let's do sonnet for all\". The note refuses the Opus tiers on offer. PR 1377 cites it as \"item 289 (Sonnet for all)\". Sonnet is the ceiling for these roles until the owner says otherwise.",
+ "quote": "for now let's do sonnet for all",
+ "source": "waiting/items/debate-model-tiers.json (lastAnswer at 2026-11-06T19:59:40Z, choice none, note); PR 1377 body. Who said it: owner (page).",
+ "status": "open",
+ "step": "challenger-page-against"
+}

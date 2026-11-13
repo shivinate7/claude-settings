@@ -1,0 +1,10 @@
+{
+ "id": "fresh-chain-no-second-fix-check",
+ "at": "2026-11-08T11:34:00-06:00",
+ "title": "When the merge tool takes no second fix check, a fresh review chain from round 1 runs on the whole diff at the live head.",
+ "ruling": "Coordinator ruling, 11:34 CST Nov 8: \"The merge tool takes no second fix check, so a fresh chain from round 1 runs on the whole diff at the live head.\" Applied on PR 1844 after a main merge needed one more commit.",
+ "quote": "The merge tool takes no second fix check, so a fresh chain from round 1 runs on the whole diff at the live head (coordinator ruling, 11:34 CST Nov 8).",
+ "source": "PR 1844 comment 6725170107 (https://github.com/shivinate7/claude-settings/pull/1844#issuecomment-6725170107). Who said it: coordinator, quoted by lane.",
+ "status": "open",
+ "step": "lane-lint-hook-suites"
+}

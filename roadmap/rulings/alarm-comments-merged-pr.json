@@ -1,0 +1,10 @@
+{
+ "id": "alarm-comments-merged-pr",
+ "at": "2026-11-12T13:12:00-06:00",
+ "title": "A CI alarm on a push to main comments on the merged pull request that produced the run's head commit.",
+ "ruling": "Coordinator pick, 13:12 CST Nov 12, under owner R53 (13:07): \"wake.sh comments on the merged pull request that produced the run's head commit.\" A commit with no pull request exits non-zero, so the alarm job ends red. Not in r53, which holds the owner 13:07 words and the wake of the batch runner only. Built in PR 2875.",
+ "quote": "comments on the merged pull request that produced the run's head commit (coordinator pick, 13:12 CST)",
+ "source": "PR 2875 body (https://github.com/shivinate7/claude-settings/pull/2875). Who said it: coordinator, quoted by lane.",
+ "status": "open",
+ "step": "main-push-wakes-runner"
+}

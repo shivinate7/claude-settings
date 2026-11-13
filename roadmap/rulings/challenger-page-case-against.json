@@ -1,0 +1,10 @@
+{
+ "id": "challenger-page-case-against",
+ "at": "2026-11-06T13:08:48-06:00",
+ "title": "Owner picked all three new places for an agent that argues back, and said some should run Opus.",
+ "ruling": "Owner page answer to item 284 (challenger-more-places), 2026-11-06 13:08 CST: picks a, b and c. (a) a blind Sonnet writes the best case against the pick on each page decision; (b) a Sonnet confirms that a ruling-based skip names that exact act; (c) a blind Sonnet reads each brief's ask and done-check line. Owner note: \"some challengers should run Opus, not all Sonnet, and there are probably more places to use them\" (answer file text: \"these are good, i feel like certain debators should be opus btw not all shuold be sonnet and that there are probably more areas this can be used\"). Built in PR 1377 (a), and steps ruling-skip-check (b) and check-line-reader (c).",
+ "quote": "these are good, i feel like certain debators should be opus btw not all shuold be sonnet and that there are probably more areas this can be used",
+ "source": "waiting/answers/challenger-more-places.json (at 2026-11-06T19:08:48Z, choice a,b,c); PR 1377 body \"Owner rulings: item 284 a\". Who said it: owner (page).",
+ "status": "open",
+ "step": "challenger-page-against"
+}

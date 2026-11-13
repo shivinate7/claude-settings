@@ -1,0 +1,10 @@
+{
+ "id": "record-post-one-guard-1805",
+ "at": "2026-11-07T18:05:00-06:00",
+ "title": "One guard judges a review-record post, built on the guard of PR 1601.",
+ "ruling": "Coordinator ruling 2026-11-07 18:05 CST: one guard judges a record post, built on #1601's guard. Incident: records on #1502 and #1535 had prose after the CI line, so merge.parse_review returned None and they were fixed by hand. Built in PR 1706 (step review-record-post-parses). The 18:59 and 19:15 rulings are filed in review-record-drop-mcp-edit.",
+ "quote": "Coordinator ruling 2026-11-07 18:05 CST: one guard judges a record post, built on #1601's guard.",
+ "source": "PR 1706 body (https://github.com/shivinate7/claude-settings/pull/1706). Who said it: coordinator, quoted by lane.",
+ "status": "open",
+ "step": "review-record-post-parses"
+}

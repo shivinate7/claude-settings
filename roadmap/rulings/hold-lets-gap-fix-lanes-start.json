@@ -1,0 +1,10 @@
+{
+ "id": "hold-lets-gap-fix-lanes-start",
+ "at": "2026-11-08T06:11:17-06:00",
+ "title": "During the hold on new lanes, a lane may start for any fix for a found gap.",
+ "ruling": "Owner page answer to item 410 (hold-which-fixes-start), 2026-11-08 06:11 CST, pick a: \"during the hold on new lanes, a lane may start for your own asks and for any fix for a found gap; other new work waits\" (triage reply text, closed 06:14 CST). This widens the coordinator's earlier reading that only a fix that unblocks a merge starts a lane. Record home named in the page reply: lane-inflow-hold (PR 1768). PRs 2052, 2097 and 1995 cite it as \"item 410 a\" / \"gap-fix lanes start during the hold\".",
+ "quote": "a",
+ "source": "waiting/answers/hold-which-fixes-start.json (at 2026-11-08T12:11:17Z, choice a); waiting/items/hold-which-fixes-start.json option a and reply; PR 2052 body. Who said it: owner (page).",
+ "status": "open",
+ "step": "pr-backlog-clear"
+}

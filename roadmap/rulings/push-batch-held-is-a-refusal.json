@@ -1,0 +1,10 @@
+{
+ "id": "push-batch-held-is-a-refusal",
+ "at": "2026-11-09T13:38:00-06:00",
+ "title": "A lane push to a branch held by a ready batch PR is refused, not asked.",
+ "ruling": "Coordinator choice (time not given; time here is PR 2463's creation, 13:38 CST Nov 9; incident 05:12-05:25 CST Nov 9): \"The coordinator chose a refusal, not an ask.\" Guard rule push-batch-held is a final deny of a non-forced push to a non-default branch whose tip is held by the head of an open, non-draft PR. The coordinator's own words are not in the PR; only the lane's sentence.",
+ "quote": "The coordinator chose a refusal, not an ask.",
+ "source": "PR 2463 body (https://github.com/shivinate7/claude-settings/pull/2463). Who said it: coordinator, quoted by lane (time estimated).",
+ "status": "open",
+ "step": "lane-push-frozen-in-batch"
+}
