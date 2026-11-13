@@ -138,7 +138,7 @@ brief follows the same rule (owner chat, 2026-11-10 13:19 CST, "B is good", page
 started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
 that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH), pick a: liftable). The kind rows are the one home of the lane effort: the guard reads each kind's effort from them, never from a copy in code. `lint/check_agent_models.py` fails when a kind row's effort cell does not start with its kind's effort.
-Other tiers keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
+Every session row (coordinator, triage, batch runner, lane kinds, arbiter, consultant) carries its effort; the guard pins only the lane's. Ruled out: `effortLevel` in user settings does not count for Opus
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
 SessionStart hook reaches only Bash.
 
@@ -168,9 +168,23 @@ whose input has no `model` or no `source_url`, or whose `model` is not its kind 
 An empty or whitespace-only value counts as missing. A lane with no
 repo has nothing to work in. A lane with no model starts on the coordinator's model, not its kind row's. The coordinator
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
-Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
-judged (both inherited from the lane effort pin and the lane repo tag). The rule also checks that the model is the model of the lane's kind row.
+Known gaps: a lane tag set after the start is not judged, and `start_session` is not judged (both inherited from the
+lane effort pin and the lane repo tag). Only `create_session` tagged `cs-build:lane` is a lane start to the guard,
+because `start_session` carries no tags field. Mac lanes start by `start_session` (decision `lanes-start-as-agents`),
+so they pass this rule unjudged; the owner decides whether to judge them. The rule checks that the model is the model of the
+lane's kind row.
 Kind of risk: likely. Landed 2026-11-08.
+
+**The lane title.** Guard rule `lane-title-slug` refuses a `create_session` call tagged `cs-build:lane` whose `title`
+does not open with `Lane <branch slug>:` (`LANE_TITLE_FORM` in `hooks/shared_names.py`). The form is the word `Lane`, a slug of
+lower-case letters and digits joined by single hyphens, and a colon. A missing, empty or placeholder title (`Lane <branch
+slug>: <task>`) is refused. The deny reason prints `LANE_TITLE_FORM`; `LANE_TITLE_OPENING` is cut from that same string, so one source feeds the remedy and the check.
+The rule runs after `lane-start-settings`. An owner override lifts it. Outcome: the owner reads a lane's branch in his
+session list (rule `git-slug-then-claim-number`, name a lane by its branch slug). Lane start text: `templates/brief.md`
+and `templates/operating-model.md` in skill `project-ops`. Known gaps: the rule reads the form, not that the slug is the
+lane's real branch. A title set after the start is not judged. `start_session` has no tags, so no call of it is a lane
+start and none is judged.
+Kind of risk: likely.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the

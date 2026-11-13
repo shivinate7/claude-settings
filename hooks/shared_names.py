@@ -100,6 +100,16 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane start's title opens with LANE_TITLE_FORM, so the owner's sidebar shows which branch a lane runs (rule
+# lane-title-slug). The check's pattern is cut from the form, so the form the remedy prints and the opening the
+# guard accepts cannot differ: the text round the placeholder is kept literal, and the placeholder reads a branch
+# slug (lower-case letters and digits, joined by single hyphens).
+LANE_TITLE_FORM = "Lane <branch slug>:"
+LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+_FORM_HEAD, _FORM_TAIL = LANE_TITLE_FORM.split("<branch slug>")
+LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))
+# The remedy's example opening: the form with a slug filled in, so an edit of the form cannot leave an example the check refuses.
+LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
