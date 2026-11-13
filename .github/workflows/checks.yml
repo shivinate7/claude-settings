@@ -1649,6 +1649,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
 
+      - name: Reviewed-cursor fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python merge/test_reviewed_cursor.py
+
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
