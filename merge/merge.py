@@ -4150,7 +4150,7 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or open at neither 1 nor REVIEW_LAST_ROUND, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
+    malformed or out of order, Kind is docs-only with Guard or check yes, round numbers skip or open at neither 1 nor REVIEW_LAST_ROUND, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
     optional `Grant: #<pr>, <REVIEW_GRANT>` line directly after Guard or check, whose PR is the record's own; with it the rounds must reach round REVIEW_LAST_ROUND + 1, and without it
     they stop at REVIEW_LAST_ROUND. The rounds open at 1, or at REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
@@ -4170,6 +4170,8 @@ def parse_review(text):
         return None
     n, head, kind, guard = (m.group(1) for m in fields)
     if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
+        return None
+    if kind == "docs-only" and guard == "yes":  # a docs-only change touches no guard or check (decision docs-only-prs-skip-review)
         return None
     g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
     bound = grant_pr(g.group(1)) if g else None
@@ -4255,11 +4257,13 @@ def review_state(rec, head):
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 def round_three_refusal(a, earlier):
-    """-> the reason a new record's round 3 is refused, or "" (owner ruling 2026-11-13 14:01 CST: every change is done at the first round or fix check that
+    """-> the reason a new record's round 3 is refused, or "" (decision pr-review-record, the done rules: every change is done at the first round or fix check that
     passes, and round 3 follows only a failed round 2). `a` is the parsed command line, `earlier` this pull request's parsed earlier records, oldest first.
-    A record that holds round 2 and round 3 is refused when its rounds up to 2 already read done. A record that opens at round 3 stands on the
-    chain: the newest earlier record holding round 2 must not read done, or, with no round 2 written, round 1 must have failed and every earlier
+    An earlier entry that did not parse is None and is skipped. A record that holds round 2 and round 3 is refused when its rounds up to 2 already
+    read done. A record that opens at round 3 stands on the chain: no record from the newest one holding round 2 onward may read done (a passed
+    fix check after a failed round 2 reads done), or, with no round 2 written, round 1 must have failed and every earlier
     fix check must have failed (a failed fix check stands in for a failed round 2). Round 3 after an earlier round 3 is refused. Reads no host."""
+    earlier = [e for e in earlier if e]
     rounds = [r for r in a.round if r[0] <= 2]
     if not any(r[0] == REVIEW_LAST_ROUND for r in a.round):
         return ""
@@ -4270,9 +4274,11 @@ def round_three_refusal(a, earlier):
         return "round 3 follows a passed round 2, and a pass ends the review." if rounds and done(shown) else ""
     if any(r[0] >= REVIEW_LAST_ROUND for e in earlier for r in e["rounds"]):
         return "this pull request already holds a round 3."
-    two = [e for e in earlier if any(r[0] == 2 for r in e["rounds"])]
+    two = [i for i, e in enumerate(earlier) if any(r[0] == 2 for r in e["rounds"])]
     if two:
-        return "round 3 follows a passed round 2, and a pass ends the review." if done(two[-1]) else ""
+        if any(done(e) for e in earlier[two[-1]:]):
+            return "round 3 follows a failed round 2, and a passed round or fix check after it ends the review."
+        return ""
     one = [e for e in earlier if any(r[0] == 1 for r in e["rounds"])]
     fixes = [e["fix"] for e in earlier if e["fix"]]
     if not one or done(dict(one[-1], fix=None)):
@@ -5675,6 +5681,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--review-record takes no --confirm and no --unlock")
         if a.head is None or a.kind is None or a.guard is None:
             p.error("--review-record needs --head, --kind and --guard")
+        if a.kind == "docs-only" and a.guard == "yes":
+            p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.grant and grant_pr(a.grant)[0] != int(a.pr):
             p.error("--grant: the PR in the grant must be the pull request number")
         if a.fix_check and a.fix_check[0] == a.head:
@@ -5691,8 +5699,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
                     p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
-            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
-                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
+            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; a record may open at round 3 after a failed round 2 or a failed fix check" if not a.grant
+                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; a record may open at round 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
@@ -5791,7 +5799,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
-                    ok = True
+                    ok = bool(a.round or last["rounds"])  # a fix check alone needs a recorded round before it: a round-less record has nothing to fix
                 else:  # a fix after a FAIL fix is refused. After a PASS fix, a plain commit takes a further fix check; a merge head qualifies only as a merge of the base: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
                     parents, tree = h.commit_read(a.head) if last["fix"][3] == "PASS" else ([], None)
                     plain = last["fix"][3] == "PASS" and len(parents) != 2
@@ -5817,7 +5825,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A fix check with no round line needs that log to hold a round. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

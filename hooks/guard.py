@@ -3794,7 +3794,7 @@ REVIEW_POLICY_KINDS = ("normal", "delete-only", "docs-only")
 REVIEW_POLICY_CAP = 3  # rule roles-review-cap-three: no row names a last round above this
 REVIEW_POLICY_FALLBACK = {("normal", "no"): (1, 3, False), ("normal", "yes"): (1, 3, True),
                           ("delete-only", "no"): (1, 1, False), ("delete-only", "yes"): (1, 3, True),
-                          ("docs-only", "no"): (0, 3, False), ("docs-only", "yes"): (0, 3, True)}
+                          ("docs-only", "no"): (0, 3, False)}  # docs-only has no yes row: it touches no guard or check
 
 
 def review_policy_rows(pointer_root):
@@ -3819,11 +3819,13 @@ def review_policy_rows(pointer_root):
 def review_policy_row(cells):
     """((kind, guard), (owed, last, net)) of one review row's cells, or None when the row is malformed: not five cells, a kind outside
     REVIEW_POLICY_KINDS, a guard word other than yes or no, a round cell that is not a number, a last round outside 1..REVIEW_POLICY_CAP,
-    owed above last, or a net word other than yes or no."""
+    owed above last, or a net word other than yes or no, or a docs-only row with Guard or check yes (a docs-only change has none)."""
     if len(cells) != len(REVIEW_POLICY_HEADER):
         return None
     kind, guard, owed, last, net = cells
     if kind not in REVIEW_POLICY_KINDS or guard not in ("yes", "no") or net not in ("yes", "no"):
+        return None
+    if kind == "docs-only" and guard == "yes":
         return None
     if not (re.fullmatch(r"\d+", owed, re.ASCII) and re.fullmatch(r"\d+", last, re.ASCII)):
         return None
@@ -3850,11 +3852,28 @@ def review_policy(rows, kind, guard):
 
 
 def review_policy_drift(pointer_root):
-    """One line per malformed review row, [] when none or when the record cannot be read (the lint check reports that as unknown).
+    """One line per problem in the review rows, [] when none or when the record cannot be read (the lint check reports that as unknown):
+    a malformed row, a (kind, guard) key that two well-formed rows hold (the first wins, so the second is dead), and a record that holds no
+    review row at all (a missing table, a renamed header or a header with no row), where the guard runs on REVIEW_POLICY_FALLBACK.
     Lint-time only, like role_round_drift."""
-    return ["review row is malformed (a kind of %s, a Guard or check of yes or no, whole-number round cells with a last round of 1 to %d "
-            "and no more owed than last, and a net value of yes or no): %s" % (", ".join(REVIEW_POLICY_KINDS), REVIEW_POLICY_CAP, text)
-            for cells, text in review_policy_rows(pointer_root) or () if review_policy_row(cells) is None]
+    rows = review_policy_rows(pointer_root)
+    if rows is None:
+        return []
+    if not rows:
+        return ["the record holds no review row (a missing table, a header other than `%s`, or a header with no row), so the guard runs on "
+                "its built-in fallback" % " | ".join(REVIEW_POLICY_HEADER)]
+    lines, seen = [], set()
+    for cells, text in rows:
+        row = review_policy_row(cells)
+        if row is None:
+            lines.append("review row is malformed (a kind of %s, a Guard or check of yes or no, docs-only with Guard or check no, whole-number "
+                         "round cells with a last round of 1 to %d and no more owed than last, and a net value of yes or no): %s"
+                         % (", ".join(REVIEW_POLICY_KINDS), REVIEW_POLICY_CAP, text))
+        elif row[0] in seen:
+            lines.append("review row repeats the key %s, Guard or check %s, which an earlier row holds: %s" % (row[0] + (text,)))
+        else:
+            seen.add(row[0])
+    return lines
 
 
 def role_round_drift(pointer_root):
