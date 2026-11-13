@@ -11378,11 +11378,11 @@ class RedMainBrake(Env):
         self.assertNotIn("run 906", out)
         self.assertNotIn("actions/runs/906/jobs", self.host.reads, "a run in progress is not judged")
 
-    def test_a_green_latest_run_reads_no_jobs_and_merges(self):
-        rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {})
+    def test_a_green_newest_push_run_that_ran_its_suites_reads_its_jobs_once_and_merges(self):
+        rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {908: ran_suites_jobs()})
         self.merged(rc, out)
         self.assertEqual([r.count("actions/runs") for r in self.run_reads], [1, 1], "the latest-run list: one read in each run")
-        self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
+        self.assertEqual([r.count("actions/runs/908/jobs") for r in self.run_reads], [1, 1], "the green run's jobs: one read in each run")
 
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
         rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the checks fix")
