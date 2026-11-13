@@ -16086,9 +16086,9 @@ class ReviewNoRestart(ReviewEnv):
         """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
         return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head())
 
-    def review_argv(self, *rounds, fix=None, grant=None):
+    def review_argv(self, *rounds, fix=None, grant=None, kind="normal"):
         """The argv of `--review-record` for the live head: the --round values in order, then --fix-check and --grant when given."""
-        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head()]
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", self.head()]
         argv += [flag for r in rounds for flag in ("--round", r)]
         if fix is not None:
             argv += ["--fix-check", fix]
@@ -16280,6 +16280,23 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_accepted(rc, out, err)
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two, fix_verifier))
         self.assert_refused_with_no_record(rc, out, err)
+
+    def removed_host(self, *bodies):
+        """host_with(*bodies) for a pull request whose only file is removed, which a delete-only record reads as a delete."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head(),
+                                files=[pr_file("old.txt", status="removed")])
+
+    def test_a_delete_only_record_that_repeats_round_one_is_refused_unless_a_fix_verifier_comes_with_it(self):
+        # The restart refusal stops at the last round of every change, as main does. A delete-only change owes one round, so the cap is still
+        # the last round of the review, not its row's: a repeat of round one with no fix verifier is refused. The control is the same record
+        # with a fix verifier that starts at the earlier head.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), kind="delete-only")
+        host = self.removed_host(earlier)
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", kind="delete-only", fix=fix), host=host)
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", kind="delete-only"), host=host)
+        self.assert_refused(rc, out, err)
 
 class ReviewFixAfterRoundThree(ReviewEnv):
     """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
