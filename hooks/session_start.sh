@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. On resume it says when the worktree is gone. Names the clone to cd to when the checkout is the pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin (each with the install log's pin-update note); the default branch or local main behind or off origin; more than 50 agent worktrees; a check that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level and facts, or says unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. On resume it says when the worktree is gone. Names the clone to cd to when the checkout is the pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main, behind origin or not found (with the install log's pin-update note); the default branch or local main behind or off origin; over 50 agent worktrees; a check that could not run; a waiting page or grant file unlike main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level and facts, or says unknown.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed-commits nudge skips a merged branch; it prints a line when the platform text changed and the patch cannot apply.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -285,6 +285,9 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       fetch_mark_reported "$d"
     fi
   fi
+else
+  # No clone to name (no pin line, a missing folder, or no .git): the pull's skip line is the only reason on offer.
+  pin_update_note
 fi
 
 # The repo's caution level, once per session: its facts and expected acts, so the session reads them and

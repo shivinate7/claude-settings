@@ -22,10 +22,12 @@
 
 7. The SessionStart pull (`settings.json`, matcher `startup|resume`) writes a line to the install log at each silent exit: no
    clone path in `CLAUDE.md`, clone not found, another pull holds the lock. A skip never removes a held lock. The cloud exit stays
-   silent. The line names its reason, so a pin that stays stale says why. Cost: at most one line per skip, only on a skip, in the
-   existing log, with no new file and no process (`merge/test_install_from_main.sh`, cases 46 to 49, pins it). Reader: the session
-   that starts. `hooks/session_start.sh` prints the newest `session-start hook:` line as `last pin-update note` beneath its
-   behind-origin or off-main pin alarm, by a grep and a tail that write no file (`hooks/test_session_start.py` pins it).
+   silent. The line names its reason, so a pin that stays stale says why. Cost: at most one line per skip, only on a skip, appended
+   to the install log (`>>` creates the log if absent). The skip runs `date` and `tr`, writes no other file and starts no long-lived
+   process (`merge/test_install_from_main.sh`, cases 46 to 49, pins it). Reader: the session that starts. `hooks/session_start.sh`
+   prints the newest `session-start hook:` line as `last pin-update note` for each of the three exits: beneath its behind-origin or
+   off-main pin alarm, and alone when no clone is found, by a grep and a tail that write no file
+   (`hooks/test_session_start.py` pins it).
 
 Open: a refresh child that outlives 10 minutes can remove a
 newer start's lock (debt `refresh-lock-untested`).
