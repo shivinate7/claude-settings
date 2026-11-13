@@ -7,6 +7,11 @@
   "home": "lane qmax-browser-main-red (session_013NEJL42jmjfd1eLhrpSQx6)",
   "id": "qmax-local-postgres-mac",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-13T04:03:00Z",
+    "choice": "a",
+    "note": "install run 22:03 CST; harness Ready"
+  },
   "n": 354,
   "options": [
     {
@@ -26,9 +31,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 332",
-  "reply": "12:31 CST Nov 8: you picked a. The command is in the box below this item: paste it into Terminal on your Mac. It is yours to run because it installs software on your Mac and no cloud session can reach your Mac (runner 9 and the coordinator found that today). It installs Postgres 17 and pgvector, starts Postgres in the background, makes a passwordless local postgres user, then runs q_max's harness/local-postgres.sh. Routed to the coordinator for lane qmax-browser-main-red.",
+  "reply": "Closed 22:04 CST Nov 12 by triage: done. You ran the install at 22:03 CST. Postgres 17 with pgvector now serves port 5432, and q_max's setup script printed Ready (database agent_q created). Postgres 16 is stopped, with its data kept. Left on step qmax-browser-main-red: the browser verify tier needs a second, empty Postgres (port 5433 in .env.example), and the item's command assumed ~/q_max, which is not where your clone lives.",
   "short": "Local Postgres on the Mac?",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open Terminal on your Mac.",
     "Paste the command below and press Return. Homebrew may ask for your Mac password.",
