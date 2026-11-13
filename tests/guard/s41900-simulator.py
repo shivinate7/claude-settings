@@ -45,8 +45,11 @@ SIM_UG = "1A2B3C4D-0000-4000-8000-0000000000D7"  # Gamma Pad, booted in the leas
 LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005, SIM_UG: 4006}
 LSTART = "Sat Oct 10 07:00:00 2026"
 # The machine readings a simulator case runs under (see decide, and add's `load`). SIM_BUSY is over the memory bar of
-# the load brake (85%), SIM_UNREAD leaves every reading unread, which counts as normal.
+# the load brake (85%), SIM_UNREAD leaves every reading unread, which counts as normal. SIM_DISK_BUSY is over the disk
+# bar only (9.4 GB free of 926: under the busy line, above the full line). SIM_BOTH_BUSY is over both bars.
 SIM_BUSY = {"memory_pct": 91.7, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
+SIM_DISK_BUSY = {"memory_pct": 40.0, "disk_free_gb": 9.4, "disk_total_gb": 926.0}
+SIM_BOTH_BUSY = {"memory_pct": 91.7, "disk_free_gb": 9.4, "disk_total_gb": 926.0}
 SIM_UNREAD = {"memory_pct": None, "disk_free_gb": None, "disk_total_gb": None}
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -136,26 +139,26 @@ def register_simulator_boot_cases():
             (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
             (SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UDB, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT)]), [twin_idle_rec]),
-        # Two booted at the cap, plus a booted device named like the shut-down target's UDID.
+        # Two booted, plus a booted device named like the shut-down target's UDID.
         "cap_udid_name": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_udid_name"), [
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
             (SIM_UE, SIM_UC, "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT)]), None),
-        # Two booted at the cap, plus a Gamma Mini booted on one runtime beside a shut-down one on
+        # Two booted, plus a Gamma Mini booted on one runtime beside a shut-down one on
         # another runtime.
         "cap_name_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_name_split"), [
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
-        # Exactly two booted (the cap is full): the booted Gamma Mini is on RT (26.0), its shut-down
+        # Exactly two booted: the booted Gamma Mini is on RT (26.0), its shut-down
         # twin on RT_OLD (25.0). OS= in a -destination picks which copy the boot names.
         "cap_os_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_os_split"), [
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
-        # Exactly two booted (the cap is full). Delta is shut down on one runtime only.
+        # Exactly two booted. Delta is shut down on one runtime only.
         "cap_latest": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_latest"), [
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
@@ -192,6 +195,21 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
        "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg,
        carries=(SIM_UA, SIM_UB))
+    # The refusal's remedy matches the reading that tripped it: memory busy waits, disk busy frees disk space, both do both.
+    # Memory-only is the control (its remedy already holds); the other two are red until the remedy matches the reading.
+    sh("boot a third simulator with a busy memory and a disk under the bar: the remedy waits, names no disk space",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg,
+       carries=("memory 91.7%", "until the load"), lacks=("free disk space", "Free disk space"))
+    sh("boot a third simulator with a busy disk and a memory under the bar: the remedy frees disk space, no wait",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-cap", load=SIM_DISK_BUSY, env_path=cap_path, config=cap_cfg,
+       carries=("disk 9.4 GB free of 926 GB", ("free disk space", "Free disk space")), lacks=("until the load",))
+    sh("boot a third simulator with a busy memory and a busy disk: the remedy waits and frees disk space",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-cap", load=SIM_BOTH_BUSY, env_path=cap_path, config=cap_cfg,
+       carries=("memory 91.7%", "disk 9.4 GB free of 926 GB", "until the load",
+                ("free disk space", "Free disk space")))
     add("boot a third simulator with two booted and a busy machine: simulator MCP launch",
         "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
@@ -228,13 +246,13 @@ def register_simulator_boot_cases():
     sh("control: OS= picks the booted copy of a name, the boot is a no-op: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=26.0'",
        "allow", env_path=os_split_path, config=os_split_cfg)
-    # OS=25.0 names the shut-down copy with the cap full and busy: the boot is refused.
+    # OS=25.0 names the shut-down copy on a busy machine: the boot is refused.
     sh("boot the shut-down copy by OS= with the cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=25.0'",
        "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=os_split_path, config=os_split_cfg,
        carries=(SIM_UA, SIM_UE))
     # OS=latest is no version, so it matches no runtime. The guard must not allow a boot on it
-    # when the only Delta copy is shut down: the cap is full, so the boot is refused.
+    # when the only Delta copy is shut down: a busy machine refuses the boot.
     latest_path, latest_cfg = on("cap_latest")
     sh("boot a shut-down device by name with OS=latest, cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
