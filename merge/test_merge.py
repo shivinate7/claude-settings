@@ -2287,6 +2287,19 @@ class CutLanes(Env):
         self.assert_deleted(out, "lane1", "lane2")
         self.assertNotIn(WHY["open"], out)
 
+    def test_a_merged_tip_shared_with_an_open_lane_keeps_that_lane(self):
+        """A merged PR's tip that another open lane's branch also sits at: the merged lane's own branch goes, and the open lane's branch stays,
+        with its open PR. Deleting that branch closes its PR. A lane is named by its branch, so a shared tip never picks a second branch."""
+        tips = lane_batch(self, "lane1")
+        shared = tips["lane1"]
+        sh(self.other, "git", "push", "-q", "origin", f"{shared}:refs/heads/lane2")  # lane2 now sits at lane1's merged tip
+        self.host.open = {"lane2": (shared, "main")}  # lane2's own open PR, at its tip, into the batch's base
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotEqual(self.head("lane2"), "", "the open lane whose tip a merged PR shares was deleted, which closes its PR: %s" % out)
+        self.assert_deleted(out, "lane1")
+        self.assert_kept_line(out, "lane2")
+
     def test_a_lane_with_an_open_pr_at_a_newer_sha_is_kept(self):
         # The control: this passes on the old code, which blocks on any open PR. A fix that ignores the sha fails it.
         lane_batch(self, "lane1", "lane2")
@@ -12410,6 +12423,16 @@ class ExpressPath(ScopedRepo, Env):
     def test_the_store_path_is_one_constant(self):
         self.assertEqual(getattr(merge, "RULED_STORE_PATH", None), "roadmap/rulings/{id}.json",
                          "merge.RULED_STORE_PATH is not the one store path the express check reads")
+
+    def test_the_express_usage_text_no_longer_says_the_batch_brake_still_holds(self):
+        """The --express block of merge's usage text (its docstring, the block that starts at `merge <pr> --confirm --express`) no longer
+        says the batch brake still holds: act 4 removes that brake. The block is read on its own, up to the next usage line."""
+        doc = merge.__doc__ or ""
+        start = doc.find("merge <pr> --confirm --express")
+        self.assertNotEqual(start, -1, "the usage text has no --express block")
+        end = doc.find("  merge --unlock", start)
+        block = doc[start:end] if end != -1 else doc[start:]
+        self.assertNotIn("The batch brake still holds", block, "the --express usage text still says the batch brake holds: %s" % block)
 
     def test_the_parser_takes_a_bare_express_flag(self):
         self.require_express_flag()
