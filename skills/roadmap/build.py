@@ -1668,9 +1668,10 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     read = zoned_time(work["read"])
-    # A draft that names a step still doing is that step's live pull, not a stale one.
+    # A draft that names a step still doing is that step's live pull, not a stale one, under any lane or none. A merged
+    # pull that puts the step in marks does not end it: the draft may be its follow-up.
     doing_open = [k for k, d in steps.items() if isinstance(d.get("status"), str)
-                  and d["status"].strip().casefold() in LIVE_STATUS and k not in marks]
+                  and d["status"].strip().casefold() in LIVE_STATUS]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
     ours = [row for row in work.get("laneSessions") or []
             if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
