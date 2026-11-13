@@ -750,9 +750,10 @@ def answered_problem(text):
 PROGRESS_SUBJECT_RE = re.compile(
     r"\b(?:steps?|lanes?|batch(?:es)?)\b|\bPRs?\s*#?\d+|(?<![\w/&])#\d+\b|`[a-z0-9]+(?:-[a-z0-9]+)+`", re.I)
 PROGRESS_PHRASE_RE = re.compile(
-    r"\b(?:(?<!work\s)in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:done|finished|complete|there)"
-    r"|waiting\s+(?:on|for)\s+(?!(?:you|your|the\s+owner)\b|owner['’]s\b)|in\s+flight|stalled|(?:hasn['’]t|has\s+not)\s+finished)\b"
-    r"|\b\d{1,3}\s*%\s*(?:done|complete)", re.I)
+    r"\b(?:(?<!work\s)in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:%s)"
+    r"|waiting\s+(?:on|for)\s+(?!(?:%s)\b)|in\s+flight|stalled|(?:hasn['\u2019]t|has\s+not)\s+finished)\b"
+    r"|\b\d{1,3}\s*%%\s*(?:done|complete)" % (
+        "|".join(_clause.PROGRESS_END_WORDS), "|".join(_clause.form_pattern(w) for w in _clause.OWNER_WAIT_WORDS)), re.I)
 PROGRESS_READ_RE = re.compile(
     r"\b(?:get_session|list_events|pull_request_read|list_pull_requests|unmeasured|unknown)\b|\bnot\s+read\b"
     r"|(?<![\w-])(?-i:REST)\s+(?:API|reads?)\b|https?://\S*/pull/\d+", re.I)

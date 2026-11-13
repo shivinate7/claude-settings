@@ -6,4 +6,4 @@
 
 **Decision.** progress-claims-cite-live-read (a progress claim cites a named live read).
 
-**Retire.** A case with a non-owner wait in the Next block after a Done PR (for example `waiting on CI for the deploy`) that fails when the reset is removed. Proof: `lint/test_report_guard_progress.py`.
+**Retire.** Add a case with a non-owner wait in the Next block after a Done PR (for example `waiting on CI for the deploy`). The case fails once the reset is removed. Proof: `lint/test_report_guard_progress.py`.
