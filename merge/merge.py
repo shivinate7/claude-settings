@@ -85,9 +85,11 @@
                           running | all green | red | none yet`, and when a job is red `merge: first red: JOB (CONCLUSION) ended HH:MM CST`
                           (CDT in summer) for the red job with the earliest completed_at. Red is failure, timed_out or cancelled; red beats
                           running. Of rows that share a job name only the newest counts (a re-run). The fan-in jobs all-jobs-passed and
-                          ci-done are never the first red and do not count. A failed read, a red job whose end time cannot be read, or a
-                          finished job whose conclusion is neither red nor success, neutral or skipped prints `merge: run state unknown
-                          (WHY)` (exit 1); every state read exits 0. Stands alone; takes no lock and no merge role, merges and pushes
+                          ci-done count toward the state but are never the first red: a red fan-in alone reads `red` with `merge: first
+                          red: none named (JOB failed)`, a fan-in not finished reads running, and all green needs all-jobs-passed present
+                          and finished with success, neutral or skipped (no all-jobs-passed row yet reads running). A failed read, a red job
+                          whose end time cannot be read, or, with no red job, a finished job whose conclusion is neither red nor success,
+                          neutral or skipped prints `merge: run state unknown (WHY)` (exit 1); every state read exits 0. Stands alone; takes no lock and no merge role, merges and pushes
                           nothing; any session may run it. Cost per call: one pulls/N read and one paged check-runs read (one call per
                           100 jobs). No file, process or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
@@ -4711,17 +4713,22 @@ RUN_CLEAR = ("success", "neutral", "skipped")  # the conclusions of a job that h
 RUN_FAN_IN = (ROLLUP_JOB, "ci-done")  # jobs that only roll up the others (checks.yml): their red names no cause, so they are never the first red
 
 def run_state(jobs):
-    """-> (state, first_red) of `merge --run-state` for `jobs`, the {name: check run row} of one head (Host.job_runs). Fan-in jobs (RUN_FAN_IN) are left out.
-    State: `red` when a job ended in RUN_RED (it beats running; first_red is the line naming the red job with the earliest completed_at and its end time
-    in US Central, else None), else `running` when a job has not finished, else `all green`; `none yet` when no job is there. A ValueError says why the
-    state is unknown: a red job's end time cannot be read, or a finished job has a conclusion in neither RUN_RED nor RUN_CLEAR (checked before running,
-    so an unread conclusion is never read as clear)."""
-    rows = sorted((n, r) for n, r in jobs.items() if n not in RUN_FAN_IN)
+    """-> (state, first_red) of `merge --run-state` for `jobs`, the {name: check run row} of one head (Host.job_runs). Every row counts toward the state,
+    the fan-in rows (RUN_FAN_IN) too, but a fan-in is never the first red: its failure names no cause.
+    State: `red` when a row ended in RUN_RED (it beats running), else `running` when a row has not finished or no ROLLUP_JOB row is listed yet (the
+    other jobs may not be), else `all green` when ROLLUP_JOB and every other row ended in RUN_CLEAR; `none yet` when no row is there. first_red is the
+    line naming the red non-fan-in job with the earliest completed_at and its end time in US Central; when only fan-in rows are red it reads
+    `merge: first red: none named (<fan-in name> failed)`; else None. A ValueError says why the state is unknown: a red job's end time cannot be
+    read, or a finished row has a conclusion in neither RUN_RED nor RUN_CLEAR (checked after red, before running, so an unread conclusion is never
+    read as clear)."""
+    rows = sorted(jobs.items())
     done = [(n, r) for n, r in rows if r.get("status") == "completed"]
     red = [(n, r) for n, r in done if r.get("conclusion") in RUN_RED]
     if red:
         ended = []
         for n, r in red:
+            if n in RUN_FAN_IN:
+                continue
             raw = r.get("completed_at")
             try:
                 at = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -4731,14 +4738,19 @@ def run_state(jobs):
             if not shown:
                 raise ValueError(f"the end time of job {n} is not readable: {raw!r}")
             ended.append((at, n, r["conclusion"], shown))
-        _, name, conclusion, shown = min(ended)
-        return "red", f"merge: first red: {name} ({conclusion}) ended {shown}"
+        if ended:
+            _, name, conclusion, shown = min(ended)
+            return "red", f"merge: first red: {name} ({conclusion}) ended {shown}"
+        fan_in = next(n for n in RUN_FAN_IN if any(m == n for m, _ in red))
+        return "red", f"merge: first red: none named ({fan_in} failed)"
     for n, r in done:
         if r.get("conclusion") not in RUN_CLEAR:
             raise ValueError(f"job {n} ended {r.get('conclusion') or 'with no conclusion'}, which is neither red nor clear")
-    if len(done) < len(rows):
+    if not rows:
+        return "none yet", None
+    if len(done) < len(rows) or ROLLUP_JOB not in jobs:
         return "running", None
-    return ("all green" if rows else "none yet"), None
+    return "all green", None
 
 def run_state_lines(h, n):
     """-> (lines, ok) of `merge --run-state N`: `merge: #N <sha7> run: <state>`, then the first red line when a job is red (run_state), or one
