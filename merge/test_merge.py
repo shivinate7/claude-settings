@@ -154,11 +154,15 @@ class FakeHost:
         self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+        self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
             raise merge.Stop(self.files_error)
         return list(self.changed)
+
+    def review_comments(self, since):  # {PR number: [review record bodies]}: none here, so a record run reads no earlier record; the record cases pass theirs through PullsHost
+        return {}
 
     def pages(self, rel, key=None, fields=None):  # the open pull list reviewed_read reads; none open unless a case scripts one (LeftOutHost serves its own)
         return []
@@ -269,6 +273,39 @@ class FakeHost:
 
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
+
+    def draft_run_state(self, sha):  # the draft's touched-tests run at `sha` -> (state, lines), as Host.draft_run_state judges it
+        """A case that scripts no rows (draft_rows None) reads a pass, so every other case keeps its lane. With `draft_rows`, the real judge
+        reads them through DraftRunReads, and each read lands in draft_reads."""
+        if self.draft_rows is None:
+            return "pass", []
+        return DraftRunReads(self.draft_rows, self.draft_reads).draft_run_state(sha)
+
+DRAFT_RUN = 4300  # the run id that a draft's lane-touched-tests rows link to
+
+def draft_row(name, conclusion="success", status="completed", job=1):
+    """One check run of a draft head, as `pages("commits/<sha>/check-runs")` lists it. Its links name run DRAFT_RUN and job `job`; html_url and
+    details_url both carry the link, as GitHub gives them. An unfinished run has no conclusion."""
+    link = job_link(DRAFT_RUN, job)
+    done = status == "completed"
+    return {"id": 4000 + job, "name": name, "status": status, "conclusion": conclusion if done else None, "html_url": link, "details_url": link}
+
+class DraftRunReads(merge.Host):
+    """The real Host with its one read scripted: `pages` answers `commits/<sha>/check-runs` from `rows` (a head with no entry has no runs) and
+    records each read's path in `reads`. Any other read answers []. The judge is merge.Host.draft_run_state itself, never a copy of it."""
+
+    def __init__(self, rows, reads):
+        super().__init__(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+        self.rows, self.reads = rows, reads
+
+    def pages(self, rel, key=None, fields=None):
+        self.reads.append(rel)
+        m = re.fullmatch(r"commits/([0-9a-f]+)/check-runs", rel)
+        return list(self.rows.get(m.group(1), [])) if m else []
+
+def check_run_reads(reads):
+    """The shas whose check runs were read, in the order read. A read of any other path is not in it."""
+    return [m.group(1) for r in reads if (m := re.fullmatch(r"commits/([0-9a-f]+)/check-runs", r))]
 
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 
@@ -15964,6 +16001,126 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
         self.assertNotIn("Traceback", err)
 
+class ReviewNoRestart(ReviewEnv):
+    """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
+    rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
+    record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it
+    below REVIEW_LAST_ROUND without a --fix-check. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2
+    and prints nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
+
+    EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
+    GRANT = "#7, item 1 a, owner, 2026-11-08 06:08 CST"  # the owner's grant of a fourth review pass, bound to this pull request
+    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the --round values of rounds 1-3, all FAIL
+
+    def host_with(self, *bodies):
+        """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head())
+
+    def review_argv(self, *rounds, fix=None, grant=None):
+        """The argv of `--review-record` for the live head: the --round values in order, then --fix-check and --grant when given."""
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head()]
+        argv += [flag for r in rounds for flag in ("--round", r)]
+        if fix is not None:
+            argv += ["--fix-check", fix]
+        if grant is not None:
+            argv += ["--grant", grant]
+        return argv
+
+    def assert_refused(self, rc, out, err):
+        self.assertEqual(rc, 2, "the record was not refused, so its rounds restart on a pull request that holds rounds:\n" + out + err)
+        self.assertEqual(out, "", "a refused record printed to stdout")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(merge.REVIEW_CITE, err)
+        self.assertRegex(err, re.compile("round", re.I))
+        self.assertRegex(err, re.compile("new branch", re.I))
+        self.assertRegex(err, re.compile("new PR", re.I))
+
+    def assert_accepted(self, rc, out, err):
+        self.assertEqual(rc, 0, "a record the rule allows was refused:\n" + out + err)
+        parse_text(self, posted_body(self, out))
+
+    def test_a_fresh_round_one_after_an_earlier_fix_verifier_pass_is_refused(self):
+        # the #3060 incident: a record that restarts at the first pass, posted at the new head after a PASS fix verifier on an earlier record
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, haiku, PASS",), fix=(fix_verifier_line(head=self.EARLIER_FIX_FROM),))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:haiku:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_fewer_rounds_than_the_earlier_top_round_are_refused(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_record_with_no_rounds_is_refused_after_an_earlier_record_with_rounds(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.run_args(*self.review_argv(), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_the_first_record_on_a_pull_request_is_accepted(self):
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with())
+        self.assert_accepted(rc, out, err)
+
+    def test_rounds_that_go_past_an_earlier_round_one_fail_are_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+                                     host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fix_verifier_after_the_full_earlier_rounds_is_accepted(self):
+        # the earlier record has no Fix check line, so a record that repeats its three rounds and names its head as the fix base is allowed
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, fix=fix), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_an_unparseable_earlier_comment_is_ignored(self):
+        broken = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE, kind="bogus")  # three rounds, but the Kind line does not parse
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(broken))
+        self.assert_accepted(rc, out, err)
+
+    def test_rounds_below_a_granted_round_four_are_refused(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=(*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {self.GRANT}",))
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_granted_round_four_after_an_earlier_round_three_is_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_an_equal_top_below_round_three_with_no_fix_verifier_is_refused(self):
+        # Control: the same one-round record after the same earlier record is accepted with a fix verifier that starts at the earlier head,
+        # so the refusal below comes from the missing fix verifier alone (decision pr-review-record).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), guard="yes")
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", fix=fix), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_record_for_another_pr_on_this_pr_is_not_an_earlier_record(self):
+        # Control: this pull request's own record with rounds 1 to 3 refuses a fresh round one. The record for pull request 9, posted as a
+        # comment here, must parse, so its acceptance below comes from the other-pull-request skip and from nothing else.
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(record_text(rounds=REVIEW_FAILED_THREE)))
+        self.assert_refused(rc, out, err)
+        other = record_text(n=9, rounds=REVIEW_FAILED_THREE)
+        parse_text(self, other)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(other))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fresh_full_review_at_an_equal_top_of_three_is_accepted(self):
+        # Control: a one-round record after the same earlier record is refused, so the acceptance below is the equal-top exception at the
+        # last allowed round. A head that moved after the last round owes a fresh full review, which repeats the earlier rounds (decision pr-review-record).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -17188,11 +17345,12 @@ class ReviewGuardHostFiles(unittest.TestCase):
             fn(7, 1)
 
 class ReviewGuardCost(ReviewEnv):
-    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
-    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+    """`--review-record` without --fix-check makes exactly three gh reads, for a pull request of up to 100 files: the pull request, then its files
+    list (one page up to 100 files), then its comments (issues/comments). They are counted at the one seam every call goes through (PullsHost in
+    count mode), as ReviewedList counts its reads."""
 
-    def test_the_record_makes_two_gh_reads(self):
-        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+    def test_the_record_makes_three_gh_reads(self):
+        # a PR of 100 files is one page, so its whole list is still one read: three reads for any PR of up to 100 files
         hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
         for guard, files in (("no", None), ("yes", None), ("no", hundred)):
             with self.subTest(guard=guard, files=len(files) if files else 1):
@@ -17201,7 +17359,7 @@ class ReviewGuardCost(ReviewEnv):
                                              "--round", "1:reviewer:sonnet:PASS", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
-                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", "issues/comments"], "the record's gh reads, in order")
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
@@ -20843,6 +21001,238 @@ def cost_host(**reads):
 def unit_failed_line(name):
     """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
     return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
+
+class BatchDraftRuns(BatchFreeze):
+    """merge --batch-build reads each lane's draft run at the lane's head, before it builds, pushes or readies anything (decision
+    lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A failed windows or macOS run refuses the batch, names the lane and its link,
+    and pushes nothing. A run not finished, or no touched row, refuses --ready unless --lint-unknown-ok gives a reason (a plain build takes
+    no such flag). The reads are one check-runs read per lane head, and the batch's own head is never read. Each case scripts the rows of
+    the lane heads in draft_rows; FakeHost's default passes the others."""
+
+    def passing_rows(self, *numbers):
+        """Rows for each lane in `numbers`: its touched job passed, and it ran no test job."""
+        return {self.heads[n]: [draft_row("touched")] for n in numbers}
+
+    def script(self, rows):
+        self.host.draft_rows, self.host.draft_reads = rows, []
+
+    def test_a_failed_windows_run_on_one_lane_refuses_the_build_and_pushes_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        rows = self.passing_rows(101, 103)
+        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)]
+        self.script(rows)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "a failed windows run on lane #102 did not refuse the build (exit %s):\n%s" % (rc, out))
+        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly:\n" + out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed:\n" + out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request:\n" + out)
+
+    def test_a_failed_macos_run_on_a_lane_refuses_ready_before_the_batch_is_rebuilt_or_pushed(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready would rebuild it and push
+        rows = self.passing_rows(101)
+        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)]
+        self.script(rows)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "a failed macOS run on lane #102 did not refuse --ready (exit %s):\n%s" % (rc, out))
+        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_build_reads_one_check_run_list_per_lane_head_and_no_status_and_never_the_batch_head(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.script(self.passing_rows(101, 102, 103))
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "a build of three passing lanes exited %s:\n%s" % (rc, out))
+        reads = self.host.draft_reads
+        self.assertEqual(sorted(check_run_reads(reads)), sorted(self.heads.values()),
+                         "the build did not read each lane head's check runs once, and nothing else:\n" + out)
+        self.assertEqual([r for r in reads if r.endswith("/status")], [], "the build read commit statuses, which the draft run does not use:\n" + out)
+
+    def test_a_ready_reads_each_lane_head_and_never_the_batch_head(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        batch_head = self.head("batch-nightly")
+        self.script(self.passing_rows(101, 102))
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        reads = check_run_reads(self.host.draft_reads)
+        self.assertEqual(sorted(reads), sorted([self.heads[101], self.heads[102]]), "--ready did not read each lane head's check runs once:\n" + out)
+        self.assertNotIn(batch_head, reads, "--ready read the batch's own head's check runs:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with every lane green did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with every lane green exited %s:\n%s" % (rc, out))
+
+    def unfinished_lane_setup(self, rows_102=None):
+        """Lanes #101 and #102 in a draft batch-nightly, reset to main so --ready rebuilds and pushes it. #102's draft rows are `rows_102`
+        (default: its touched job still running). -> the batch's pull request number and its snapshot."""
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.drift_batch("nightly", [])
+        rows = self.passing_rows(101)
+        rows[self.heads[102]] = [draft_row("touched", status="in_progress")] if rows_102 is None else rows_102
+        self.script(rows)
+        return pr, self.snapshot(pr)
+
+    def plain_build(self, rows_by_lane):
+        """Lanes #101, #102 and #103 built as a plain batch (no --ready), each lane's draft rows from `rows_by_lane` (a lane not named
+        passes its touched job). No ready check and no lint runs. -> (rc, output)."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.script({self.heads[n]: rows_by_lane.get(n, [draft_row("touched")]) for n in (101, 102, 103)})
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            return self.run_batch("--batch-build", "nightly", "101", "102", "103")
+
+    def test_a_plain_build_with_a_lane_whose_touched_run_is_unfinished_builds_the_batch(self):
+        """A plain build checks only a failed run. An unfinished run is for --ready, so the plain build opens the batch's pull request."""
+        rc, out = self.plain_build({102: [draft_row("touched", status="in_progress")]})
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 0, "a plain build refused lane #102 for an unfinished touched run, which only --ready checks (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
+
+    def test_a_plain_build_with_a_lane_whose_draft_rows_are_missing_builds_the_batch(self):
+        """A lane with no touched row is unknown, which only --ready checks: the plain build opens the batch's pull request."""
+        rc, out = self.plain_build({102: []})
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 0, "a plain build refused lane #102 for missing draft rows, which only --ready checks (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
+
+    def test_a_plain_build_with_a_failed_lane_and_an_unfinished_one_refuses_before_any_push(self):  # control: green on the old code
+        rc, out = self.plain_build({101: [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)],
+                                    103: [draft_row("touched", status="in_progress")]})
+        self.assertEqual(rc, 1, "a plain build with a failed lane did not refuse (exit %s):\n%s" % (rc, out))
+        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assertEqual(self.pushes(), [], "the refused plain build pushed:\n" + out)
+        self.assertEqual(self.host.created, [], "the refused plain build opened a pull request:\n" + out)
+
+    def test_a_plain_build_takes_no_lint_unknown_ok_so_it_cannot_lift_an_unfinished_lane(self):  # control: green on the old code
+        for n in (101, 102):
+            self.lane(n)
+        self.script({self.heads[101]: [draft_row("touched")], self.heads[102]: [draft_row("touched", status="in_progress")]})
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--lint-unknown-ok", "the run is still going")
+        self.assertEqual(rc, 2, "a plain build took --lint-unknown-ok (exit %s):\n%s" % (rc, out))
+        self.assertEqual(self.pushes(), [], "the plain build with --lint-unknown-ok pushed:\n" + out)
+
+    def test_a_ready_with_an_unknown_lane_refuses_without_a_reason_and_names_the_flag(self):  # control: green on the old code
+        pr, snap = self.unfinished_lane_setup(rows_102=[])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "--ready with lane #102's draft rows missing did not refuse (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of missing draft rows cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_an_unknown_lane_goes_on_with_a_reason_and_the_reason_is_logged(self):  # control: green on the old code
+        pr, _ = self.unfinished_lane_setup(rows_102=[])
+        reason = "no touched run for lane 102 yet"
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
+        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the missing draft rows:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with a reason for missing draft rows did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with a reason for missing draft rows exited %s:\n%s" % (rc, out))
+
+    def test_a_ready_with_a_skipped_touched_row_and_no_test_rows_is_refused_without_a_reason(self):
+        """A skipped touched job, as a ready lane's is, proves no touched test ran: --ready refuses it as unknown, as it refuses missing rows."""
+        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched", "skipped")])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "--ready passed lane #102, whose touched job was skipped, so no touched test ran (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of a skipped touched job cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_a_failed_lane_and_a_reason_still_refuses_and_names_the_job(self):  # control: green on the old code
+        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "the macos run is still going")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed macOS run on --ready (exit %s):\n%s" % (rc, out))
+        lane = [line for line in out.splitlines() if "#102" in line]
+        self.assertTrue(lane, "the refusal does not name lane #102:\n" + out)
+        self.assertIn("failed", "\n".join(lane), "the refusal of lane #102 does not say its run failed:\n" + out)
+        self.assertFalse(any("unknown" in line or "not finished" in line for line in lane), "a failed lane is named as unknown or unfinished:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_an_unfinished_lane_is_refused_without_a_reason_and_pushes_nothing(self):
+        pr, snap = self.unfinished_lane_setup()
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "an unfinished draft run did not refuse --ready without a reason (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of an unfinished draft run cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_an_unfinished_lane_goes_on_only_with_a_reason_and_the_reason_is_logged(self):
+        pr, _ = self.unfinished_lane_setup()
+        reason = "the windows run is still going"
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the unfinished draft run:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with a reason did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with a reason for an unfinished draft run exited %s:\n%s" % (rc, out))
+
+
+class DraftRunJudge(unittest.TestCase):
+    """merge.Host.draft_run_state judges one head's draft rows (decision lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A touched job
+    that was skipped, as a ready pull request's is, proves no touched test ran, so the verdict is unknown. Rows that share a name are one job's
+    runs, and the newest id decides, whatever order the rows come in. Each case scripts its rows and reads them through DraftRunReads, which runs
+    the real judge."""
+
+    SHA = "c" * 40
+
+    def judge(self, rows):
+        return DraftRunReads({self.SHA: rows}, []).draft_run_state(self.SHA)
+
+    def test_a_touched_row_skipped_with_no_test_rows_is_unknown_not_a_pass(self):
+        state, lines = self.judge([draft_row("touched", "skipped")])
+        self.assertEqual(state, "unknown", "a skipped touched job with no test rows was judged %r, a pass with no proof a touched test ran: %s" % (state, lines))
+
+    def test_a_touched_row_that_succeeded_with_no_test_rows_passes(self):  # control: green on the old code
+        state, lines = self.judge([draft_row("touched")])
+        self.assertEqual(state, "pass", "a touched job that succeeded with no test rows was judged %r: %s" % (state, lines))
+
+    def test_a_failed_older_run_and_a_passed_newer_run_of_one_job_pass_in_either_order(self):  # control: green on the old code
+        older, newer = draft_row("run (windows-latest)", "failure", job=2), draft_row("run (windows-latest)", job=5)
+        self.assertLess(older["id"], newer["id"], "precondition: the passed run is not the newer one, so the case probes nothing")
+        for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a re-run that passed after a failed run was judged %r, not pass: %s" % (state, lines))
+
+    def test_a_passed_older_run_and_a_failed_newer_run_of_one_job_fail_in_either_order_and_name_the_newer_link(self):  # control: green on the old code
+        older, newer = draft_row("run (windows-latest)", job=2), draft_row("run (windows-latest)", "failure", job=5)
+        self.assertLess(older["id"], newer["id"], "precondition: the failed run is not the newer one, so the case probes nothing")
+        for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "fail", "a re-run that failed after a passed run was judged %r, not fail: %s" % (state, lines))
+                self.assertIn(job_link(DRAFT_RUN, 5), "\n".join(lines), "the failure does not name the newer run's link: %s" % lines)
 
 class LeftOutHost(FakeHost):
     """FakeHost plus the reads `merge --reviewed` makes, so a batch build can name the done pull requests it leaves out: the open pull list and the
