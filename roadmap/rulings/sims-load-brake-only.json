@@ -1,0 +1,16 @@
+{
+ "id": "sims-load-brake-only",
+ "at": "2026-11-12T21:59:00-06:00",
+ "title": "Run as many simulators as the work needs; only the load brake limits them",
+ "ruling": "Owner 21:59 CST Nov 12: No hard-coded simulator limit or pairing. Run as many simulators as the work needs, limited only by the load brake. Covers the slot rules in bin/sim-lease, the cross-role refusal in bin/sim-test, guard simulator-boot-cap's 2-device cap, and the boot bars in skill ios-apps. Degen's shared-sim-lease rule gets a paste prompt once this lands. Home: step sim-lease-load-brake.",
+ "quote": "q1 d22 - there shud be as many sims there needs to be it shudnt be hard coded to a certain sim just load related brake",
+ "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "owner 2026-11-02 13:51 CST, \"The 18 Pro never runs beside a Duo\" (decision sim-lease-tool, skill ios-apps)"
+  }
+ ],
+ "step": "sim-lease-load-brake"
+}

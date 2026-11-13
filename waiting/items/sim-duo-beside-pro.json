@@ -4,6 +4,11 @@
   "home": "step sim-lease-gaps",
   "id": "sim-duo-beside-pro",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:59:00Z",
+    "choice": "other",
+    "note": "q1 d22 - there shud be as many sims there needs to be it shudnt be hard coded to a certain sim just load related brake"
+  },
   "n": 677,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "a",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "reply": "Closed 22:01 CST Nov 12 by triage: your answer (other) in chat at 21:59 CST (\"q1 d22 - there shud be as many sims there needs to be it shudnt be hard coded to a certain sim just load related brake\"). Stored as ruling sims-load-brake-only; it goes ahead on step sim-lease-load-brake.",
   "repo": "shivinate7/claude-settings",
   "short": "Duo simulator beside the 18 Pro",
-  "status": "open",
+  "status": "closed",
   "title": "Should a Duo simulator run beside the iPhone 18 Pro simulator?",
   "why": "It reverses your ruling that the 18 Pro never runs beside a Duo."
 }

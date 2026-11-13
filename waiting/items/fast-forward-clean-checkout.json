@@ -4,6 +4,11 @@
   "home": "step grants-read-from-main",
   "id": "fast-forward-clean-checkout",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:59:00Z",
+    "choice": "l",
+    "note": "Q6 B \u2014 but theres probs some nuance here ponder it!"
+  },
   "n": 681,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "k",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "reply": "Closed 22:01 CST Nov 12 by triage: your answer (l) in chat at 21:59 CST (\"Q6 B \u2014 but theres probs some nuance here ponder it!\"). Stored as ruling fast-forward-clean-start; it goes ahead on step grants-read-from-main.",
   "repo": "shivinate7/claude-settings",
   "short": "Fast-forward clean checkouts at start",
-  "status": "open",
+  "status": "closed",
   "title": "Should a session fast-forward a clean checkout with no commits of its own to the newest main when it starts?",
   "why": "It reverses your ask to report a stale checkout and never move it."
 }

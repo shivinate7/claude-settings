@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Degen ledger D26: the Words probe lists every tracked file, not the added lines the check flags, so its report is noise.",
  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D26",
- "note": "The Words probe reports added lines only, as the check does. This is the part with no owner call; the skip scope is an owner call (D26) and waits for it. Owner item words-probe-skip-names (n 678) posted 21:55 CST Nov 12 for the skip scope.",
- "updatedAt": "2026-11-12T21:57:36-06:00"
+ "note": "The Words probe reports added lines only, as the check does. This is the part with no owner call; the skip scope is an owner call (D26) and waits for it. Owner item words-probe-skip-names (n 678) posted 21:55 CST Nov 12 for the skip scope. Owner 21:59 CST Nov 12 (chat with the retrospective, relayed 22:01 CST): Q2 a, keep reading names; only the probe-scope fix ships (store entry words-probe-keep-names).",
+ "updatedAt": "2026-11-12T22:01:34-06:00"
 }

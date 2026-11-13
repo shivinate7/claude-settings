@@ -4,6 +4,11 @@
   "home": "step sim-lease-gaps",
   "id": "ios-runtime-27-2-duo",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:59:00Z",
+    "choice": "i",
+    "note": "Q5 A"
+  },
   "n": 680,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "i",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "reply": "Closed 22:01 CST Nov 12 by triage: your answer (i) in chat at 21:59 CST (\"Q5 A\"). Stored as ruling ios-27-2-duo; it goes ahead on step sim-lease-gaps.",
   "repo": "shivinate7/claude-settings",
   "short": "iOS 27.2 runtime and a new Duo",
-  "status": "open",
+  "status": "closed",
   "title": "Install the iOS 27.2 simulator runtime on your Mac and make a new Duo beside the old one?",
   "why": "It downloads and installs on your Mac, which only you approve."
 }

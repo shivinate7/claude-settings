@@ -4,6 +4,11 @@
   "home": "step words-probe-skips-kept-names",
   "id": "words-probe-skip-names",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:59:00Z",
+    "choice": "c",
+    "note": "q2 A"
+  },
   "n": 678,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "c",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "reply": "Closed 22:01 CST Nov 12 by triage: your answer (c) in chat at 21:59 CST (\"q2 A\"). Stored as ruling words-probe-keep-names; it goes ahead on step words-probe-skips-kept-names.",
   "repo": "shivinate7/claude-settings",
   "short": "Words probe skips slugs and names",
-  "status": "open",
+  "status": "closed",
   "title": "Should the Words probe also skip slugs and code names?",
   "why": "It touches your ruling that record names are still read."
 }

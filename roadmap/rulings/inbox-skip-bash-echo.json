@@ -1,0 +1,11 @@
+{
+ "id": "inbox-skip-bash-echo",
+ "at": "2026-11-12T21:59:00-06:00",
+ "title": "The feedback inbox skips echoes of commands the owner ran",
+ "ruling": "Owner 21:59 CST Nov 12: The feedback inbox skips bash-input echoes. The owner is open to one item covering a run of messages \"if done right\"; proposed meaning: only a run with no ruling, grant or question word in it, with each message still listed under the item. Home: step inbox-skip-bash-echo.",
+ "quote": "q7 A, and im open to B too if done right",
+ "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
+ "status": "open",
+ "supersedes": [],
+ "step": "inbox-skip-bash-echo"
+}

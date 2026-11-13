@@ -1,0 +1,11 @@
+{
+ "id": "words-probe-keep-names",
+ "at": "2026-11-12T21:59:00-06:00",
+ "title": "The Words probe keeps reading names; only its scope fix ships",
+ "ruling": "Owner 21:59 CST Nov 12: The Words probe keeps reading slugs and code names (pick o13 a and decision glossary-meets-owner-halfway stand). Only the probe-scope fix ships: it reports what the check would flag, added lines only. Home: step words-probe-skips-kept-names.",
+ "quote": "q2 A",
+ "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
+ "status": "open",
+ "supersedes": [],
+ "step": "words-probe-skips-kept-names"
+}

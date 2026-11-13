@@ -1,0 +1,16 @@
+{
+ "id": "builder-test-comments",
+ "at": "2026-11-12T21:59:00-06:00",
+ "title": "A builder may make a comment-only test diff, proven by the parser",
+ "ruling": "Owner 21:59 CST Nov 12: A builder may change a test file when the diff changes comments only, proven by the language's own parser or tokenizer. Revisits decision builders-cannot-edit-tests for comments only; builders still never write test content. Home: step builder-test-comment-edit.",
+ "quote": "q4 A",
+ "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "decision builders-cannot-edit-tests (owner 2026-11-08): builders never write test content, for comment-only diffs"
+  }
+ ],
+ "step": "builder-test-comment-edit"
+}

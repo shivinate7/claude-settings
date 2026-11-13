@@ -1,0 +1,11 @@
+{
+ "id": "ios-27-2-duo",
+ "at": "2026-11-12T21:59:00-06:00",
+ "title": "Install the iOS 27.2 runtime and make a new Duo beside the old",
+ "ruling": "Owner 21:59 CST Nov 12: Install the iOS 27.2 simulator runtime on the owner's Mac and make a new Duo beside the old one. Switch the device IDs in skill ios-apps only after it proves out. Needs the owner's Mac. Home: step sim-lease-gaps.",
+ "quote": "Q5 A",
+ "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
+ "status": "open",
+ "supersedes": [],
+ "step": "sim-lease-gaps"
+}

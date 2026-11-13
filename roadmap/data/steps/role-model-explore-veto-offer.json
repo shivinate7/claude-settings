@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Degen ledger D7 with D18: guard.py offers an override for an Explore spawn above Sonnet, but call_judge.py refuses that spawn with no override, so the offered remedy never works.",
  "source": "retrospective 21:53 CST Nov 12, Q3; plans/degen-report-2026-11-12.md",
- "note": "Settled with no owner item (triage 21:57 CST): rule roles-sonnet-is-the-ceiling allows any agent above Sonnet \"only on my grant for the spawn I name, or by override\". So call_judge.py must let the owner override lift the veto, matching guard.py; a test shows a named, overridden Fable Explore spawn passing and an un-overridden one refused.",
- "updatedAt": "2026-11-12T21:57:36-06:00"
+ "note": "Settled with no owner item (triage 21:57 CST): rule roles-sonnet-is-the-ceiling allows any agent above Sonnet \"only on my grant for the spawn I name, or by override\". So call_judge.py must let the owner override lift the veto, matching guard.py; a test shows a named, overridden Fable Explore spawn passing and an un-overridden one refused. Owner 21:59 CST Nov 12 (chat with the retrospective, relayed 22:01 CST): Q3 a confirms it (store entry explore-veto-override).",
+ "updatedAt": "2026-11-12T22:01:34-06:00"
 }

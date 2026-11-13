@@ -1,7 +1,7 @@
 {
  "id": "builder-test-comment-edit",
  "title": "A builder may change only comments in a test file, if the owner allows it",
- "status": "blocked",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -11,6 +11,7 @@
  ],
  "why": "Degen ledger D9: the builder-test-edit guard refuses a comment-only test edit, so a comment fix costs a test-author agent.",
  "source": "retrospective 21:53 CST Nov 12, Q4; plans/degen-report-2026-11-12.md",
- "note": "Waits on owner item builder-test-comment-edit (n 679, posted 21:55 CST Nov 12). On a: the guard allows a test-file diff whose only changes are comments, proven by the language tokenizer (rule building-scanner-respects-strings). Departs from decision builders-cannot-edit-tests.",
- "updatedAt": "2026-11-12T21:57:49-06:00"
+ "note": "Waits on owner item builder-test-comment-edit (n 679, posted 21:55 CST Nov 12). On a: the guard allows a test-file diff whose only changes are comments, proven by the language tokenizer (rule building-scanner-respects-strings). Departs from decision builders-cannot-edit-tests. Owner 21:59 CST Nov 12 (chat with the retrospective, relayed 22:01 CST): Q4 a: allowed, comment-only diffs proven by the language parser (store entry builder-test-comments). Ready.",
+ "updatedAt": "2026-11-12T22:01:34-06:00",
+ "blocked": []
 }

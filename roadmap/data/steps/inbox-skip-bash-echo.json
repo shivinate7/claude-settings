@@ -1,0 +1,14 @@
+{
+ "id": "inbox-skip-bash-echo",
+ "title": "The feedback inbox skips echoes of commands the owner ran",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Every echo of a command the owner ran, and every long paste, needs a hand-written feedback item, which blocks turns for text that is not an instruction.",
+ "source": "owner 21:59 CST Nov 12, Q7 a (store entry inbox-skip-bash-echo)",
+ "note": "Ship a: the feedback guard skips bash-input echoes. The owner is open to b, one item covering a run of messages, \"if done right\": only a run with no ruling, grant or question word in it, each message still listed under the item. Decision owner-feedback-inbox is the home.",
+ "updatedAt": "2026-11-12T22:01:34-06:00"
+}

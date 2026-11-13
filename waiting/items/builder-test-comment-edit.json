@@ -4,6 +4,11 @@
   "home": "step builder-test-comment-edit",
   "id": "builder-test-comment-edit",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:59:00Z",
+    "choice": "g",
+    "note": "q4 A"
+  },
   "n": 679,
   "options": [
     {
@@ -27,9 +32,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "h",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "reply": "Closed 22:01 CST Nov 12 by triage: your answer (g) in chat at 21:59 CST (\"q4 A\"). Stored as ruling builder-test-comments; it goes ahead on step builder-test-comment-edit.",
   "repo": "shivinate7/claude-settings",
   "short": "Builder edits test comments only",
-  "status": "open",
+  "status": "closed",
   "title": "May a builder change only the comments in a test file?",
   "why": "It opens a path in your ruling that builders never edit tests."
 }
