@@ -160,6 +160,9 @@ class FakeHost:
             raise merge.Stop(self.files_error)
         return list(self.changed)
 
+    def review_comments(self, since):  # {PR number: [review record bodies]}: none here, so a record run reads no earlier record; the record cases pass theirs through PullsHost
+        return {}
+
     def pr(self, n):
         self.pr_calls.append(n)
         if n in self.batch_pulls:  # a batch case's pull request, read from its own entry
