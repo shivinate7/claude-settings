@@ -22040,22 +22040,23 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
 
     def test_docs_only_over_a_decision_record_refuses(self):
         self.use_layout(True)
-        self.host.changed = [("docs/decisions/x.md", "modified")]
+        self.host.changed = [("docs/decisions/x.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/x.md", holds="decision record")
 
     def test_docs_only_over_a_legacy_decision_record_refuses(self):
         self.use_layout(False)
-        self.host.changed = [("decisions/x.md", "added")]
-        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "decisions/x.md", holds="decision record")
+        self.host.changed = [("decisions/x.md", "added", 0)]
+        # A legacy record is not a doc, so kind_misfits refuses it before the decision check runs: the reason is the misfit.
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "decisions/x.md", holds="breaks --kind docs-only")
 
     def test_docs_only_over_a_renamed_decision_record_refuses(self):
         self.use_layout(True)
-        self.host.changed = [("docs/decisions/y.md", "renamed"), ("docs/x.md", "removed")]
+        self.host.changed = [("docs/decisions/y.md", "renamed", 0), ("docs/x.md", "removed", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/y.md", holds="decision record")
 
     def test_docs_only_with_an_unreadable_layout_refuses(self):
         extras = os.path.join(self.co, ".claude", "layout-extras.json")
-        self.host.changed = [("docs/debts/a.md", "added")]
+        self.host.changed = [("docs/debts/a.md", "added", 0)]
         for text in ("{", json.dumps({"rolled-out": True}), json.dumps({"kinds": {}, "rolled-out": "true"})):  # not JSON, JSON with no kinds object, and a string mark
             with self.subTest(extras=text):
                 put(extras, text)
@@ -22070,14 +22071,14 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
         for rolled, path in ((True, "docs/decisions/x.md"), (False, "decisions/x.md")):
             with self.subTest(rolled=rolled):
                 self.use_layout(rolled)
-                self.host.changed = [(path, "modified")]
+                self.host.changed = [(path, "modified", 0)]
                 rc, out, err = self.run_args(*self.review_argv("normal"))
                 self.assertEqual(rc, 0, out + err)
                 self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "normal")
 
     def test_a_decision_record_shown_as_removed_or_renamed_out_is_accepted(self):
         self.use_layout(True)
-        for changed in ([("docs/decisions/x.md", "removed")], [("docs/moved.md", "renamed"), ("docs/decisions/x.md", "removed")]):
+        for changed in ([("docs/decisions/x.md", "removed", 0)], [("docs/moved.md", "renamed", 0), ("docs/decisions/x.md", "removed", 0)]):
             with self.subTest(changed=changed):
                 self.host.changed = changed
                 rc, out, err = self.run_args(*self.review_argv("docs-only"))
@@ -22086,7 +22087,7 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
 
     def test_docs_only_over_a_debt_is_accepted(self):
         self.use_layout(True)
-        self.host.changed = [("docs/debts/a.md", "added")]
+        self.host.changed = [("docs/debts/a.md", "added", 0)]
         rc, out, err = self.run_args(*self.review_argv("docs-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
