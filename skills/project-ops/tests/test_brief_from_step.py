@@ -50,8 +50,9 @@ BASELINE_WORDS = 821
 PASTED_LINES = 40  # a pasted file body in a step note: the brief never carries it
 PATH_IN_NOTE = "skills/project-ops/scripts/brief_from_step.py"  # a path in a note: Files keeps it
 SECTIONS = ["Task", "Files", "Rulings", "Failure classes", "Done-check", "Report cap"]  # after Grant and Lane brief
-RESTATED = ["Standing rules for this agent", "Co-Authored-By", "git stash", "Never run git",
-            "A fix round is a fresh isolated spawn"]  # what the agent already loads: the brief never restates it
+# What a spawn already gets from hooks/agent_brief.py. The brief never restates these.
+# Co-Authored-By comes only to the types that commit.
+RESTATED = ["Standing rules for this agent", "Co-Authored-By", "git stash", "Never run git"]
 
 Q_OPEN = "Coordinator ruling, 2026-11-08 07:16 CST: the brief is built from the step, never hand-written."
 Q_CLOSED = "Owner: one brief template, filled by the tool and never a second copy."
@@ -510,11 +511,16 @@ class TemplateTail(unittest.TestCase):
 
 
 class TemplateRules(unittest.TestCase):
-    """The template's own lines: the cs-topic tag, no ruling words, the Fences line, the practice decisions, models."""
+    """The template's own lines: the cs-topic tag, the fix-round line, no ruling words, the Fences line,
+    the practice decisions, models."""
 
     def test_template_keeps_the_cs_topic_tag_line(self):
         self.assertTrue(any("cs-topic:" in line for line in read_template().splitlines()),
                         "the template has no line naming the cs-topic tag")
+
+    def test_template_says_each_fix_round_is_a_fresh_isolated_spawn(self):
+        self.assertIn("fresh isolated spawn", read_template(),
+                      "the template does not say each fix round is a fresh isolated spawn")
 
     def test_template_names_no_ruling_id_and_restates_no_ruling_words(self):
         text = read_template()
