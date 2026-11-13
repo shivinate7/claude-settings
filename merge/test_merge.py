@@ -977,9 +977,9 @@ def live_json(read_at, *sessions):
 class ConfirmIdleLanes(Env):
     """After a landed batch merge, `merge --confirm` reads the live file on origin's roadmap branch (roadmap/live/live.json,
     fetched). If its readAt is later than the merge commit's time, the report of `merge --idle-lanes` prints after the merged
-    line. Otherwise one line says the pass is owed and the file is stale or unread. A refused merge prints neither. With no
-    roadmap branch on origin, or a merge onto a base that is not the default, no pass line prints at all. The exit
-    code of a landed merge is 0, as before. Each case runs `merge 7 --confirm` once: the live file is committed after the merge,
+    line. Otherwise one line says the pass is owed and the file is stale or unread. An origin that cannot be read when the pass
+    runs owes the line too, saying unread. A refused merge prints neither. With no roadmap branch on origin, or a merge onto a
+    base that is not the default, no pass line prints at all. The exit code of a landed merge is 0, as before. Each case runs `merge 7 --confirm` once: the live file is committed after the merge,
     as triage commits it at each batch merge."""
 
     def setUp(self):
@@ -1203,6 +1203,30 @@ class ConfirmIdleLanes(Env):
         rc, out, err, _ = self.confirm_in_folder(folder, live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
         self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
         self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is left in the case folder")
+
+    def test_an_origin_gone_before_the_idle_pass_owes_one_unread_line(self):
+        # The merge lands and ff_main moves local main while origin is reachable. Origin is gone when the idle-lane pass runs: its
+        # fetch of origin/roadmap and its listing both fail, so the one owed line says unread, and the merge still exits 0.
+        # Scope first: origin holds the roadmap branch, so no "no roadmap branch" reading explains the owed line.
+        self.push_roadmap(ROADMAP_BASE)
+        self.assertNotEqual(sh(self.t, "git", "ls-remote", self.bare, "refs/heads/roadmap"), "", "scope: origin has no roadmap branch")
+        passes, real_pass = [], merge.idle_lanes_after_merge
+
+        def origin_gone_then_pass(root, commit):
+            passes.append(commit)
+            sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))  # the pass finds origin unreachable
+            return real_pass(root, commit)
+
+        with unittest.mock.patch.object(merge, "idle_lanes_after_merge", origin_gone_then_pass):
+            rc, out, err = self.confirm(base=False, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertEqual(len(passes), 1, "scope: the idle-lane pass did not run after the merge: out %r, err %r" % (out, err))
+        self.assert_landed(rc, out, err)
+        self.assertRegex([line for line in out if line.startswith("merge: #7 merged as ")][0], r"^merge: #7 merged as [0-9a-f]{9}\.$")
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertIn("unread (the fetch of origin/roadmap failed)", owed[0], "the owed line does not say the fetch failed: %r" % owed[0])
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
