@@ -679,6 +679,9 @@ def live_work(path, steps, slug=None):
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
     enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
     kept session rows, or None. Old files without them read as before.
+    Two more optional keys on a sessions row feed the joint line (idle_lanes): `idle_since` (ISO time with a zone, when
+    the lane last did anything) and `unarchived_epoch` (JSON int, the lane's commits not yet archived). `laneSessions`
+    keeps each as the file has it, and idle_lanes reads their type; a missing or wrong-typed one never makes the lane joint.
     One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
     pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
     GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
@@ -780,7 +783,8 @@ def live_work(path, steps, slug=None):
                                          for t in r.get("tags") or []))
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
-                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
+                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None,
+                          **{k: r[k] for k in JOINT_SESSION_KEYS if k in r}}
                          for r in sessions]
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
@@ -1564,6 +1568,39 @@ def running_under(step, sid):
             and isinstance(status, str) and status.strip().casefold() in LIVE_STATUS)
 
 
+# The session keys idle_lanes reads for the joint line; live_work copies them into laneSessions.
+JOINT_SESSION_KEYS = ("idle_since", "unarchived_epoch")
+# A pull whose title or branch holds this word is a records pull: the lane's records may not have landed yet.
+RECORDS_WORD = re.compile(r"(?<![A-Za-z0-9])records(?![A-Za-z0-9])", re.I)
+
+
+def stale_draft_pull(pull, read, doing):
+    """True when `pull` is a draft over STALE_DRAFT_HOURS old at `read`, neither held nor carrying a review log, with a
+    head sha (so it can be shown off main) and no doing step named in its branch or title (`doing`: step ids)."""
+    at = created_at(pull)
+    return (pull.get("draft") is True and pull.get("held") is not True and pull.get("reviewLog") is not True
+            and isinstance(pull.get("head"), str) and bool(pull["head"]) and at is not None
+            and (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600
+            and not any(names_step(pull, k) for k in doing))
+
+
+def joint_pulls(row, blocking, work, read, doing):
+    """The pulls to close on a lane's joint line, or None when the lane is not joint. A lane is joint when `blocking`
+    (the open pulls on its head refs that its landed-draft release leaves) is all stale drafts, no open pull anywhere
+    is a records pull, and its session row is idle over STALE_DRAFT_HOURS (idle_since) with nothing unarchived
+    (unarchived_epoch the JSON int 0, never false or 0.0)."""
+    since = zoned_time(row.get("idle_since"))
+    epoch = row.get("unarchived_epoch")
+    if (since is None or (read - since).total_seconds() <= STALE_DRAFT_HOURS * 3600
+            or type(epoch) is not int or epoch != 0):
+        return None
+    if not all(stale_draft_pull(p, read, doing) for p in blocking):
+        return None
+    if any(RECORDS_WORD.search(p["title"]) or RECORDS_WORD.search(p.get("branch") or "") for p in work["pulls"]):
+        return None
+    return sorted(blocking, key=lambda p: p["number"])
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
@@ -1580,7 +1617,16 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     status `closed` releases an item. When no live
     lane row of this repo carries a SESSION_BUCKETS name, the list reads unknown. `marks_why` is landed_marks' why:
     when main could not be read, no step can be shown landed, so the list reads unknown. `trailer_ids` is the set of
-    step ids named by a Step trailer on main; left out, it is read from main when a lane's step is off the record branch."""
+    step ids named by a Step trailer on main; left out, it is read from main when a lane's step is off the record branch.
+
+    A lane that passes every test above except an open pull, and whose only holders are stale drafts (stale_draft_pull),
+    reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane <session id>)` instead of nothing: the
+    batch runner pushes each branch to archive/<branch>, closes each draft, then archives the lane. It needs the lane's
+    `idle_since` over STALE_DRAFT_HOURS before the live read, its `unarchived_epoch` the int 0 (joint_pulls), and no open
+    pull whose title or branch holds the word records. A stale draft with no head sha gives no joint line: the lane
+    keeps waiting. The merge summary counts a joint line among the lanes to archive.
+    Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own.
+    """
     why = live_why(work)
     if why:
         return [why]
@@ -1600,6 +1646,10 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return pull.get("draft") is True and head_on_main(repo, ref, pull.get("head"), landed_heads)
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
+    read = zoned_time(work["read"])
+    # A draft that names a step still doing is that step's live pull, not a stale one.
+    doing_open = [k for k, d in steps.items() if isinstance(d.get("status"), str)
+                  and d["status"].strip().casefold() in LIVE_STATUS and k not in marks]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
     ours = [row for row in work.get("laneSessions") or []
             if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
@@ -1633,7 +1683,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if any(k in steps and steps[k].get("status") != "done" and k not in marks for k in mine):
             continue
         heads = {name for k in mine for name in lane_head_refs(k)}
-        if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
+        blocking = [p for p in work["pulls"] if p.get("branch") in heads and not head_landed(p)]
+        joint = joint_pulls(row, blocking, work, read, doing_open) if blocking else None
+        if blocking and joint is None:
             continue
         if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
             continue
@@ -1642,6 +1694,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if doing:
             out.append("hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
                        % (" ".join(doing), sid))
+            continue
+        if joint:
+            out.append("joint (close %s; archive %s; archive lane %s)" % (
+                " ".join("#%d" % p["number"] for p in joint),
+                " ".join(sorted({"archive/" + p["branch"] for p in joint})), sid))
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
