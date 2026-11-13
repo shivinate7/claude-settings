@@ -8,9 +8,10 @@ Cost of a turn start: one git process (ls-remote) when the ref has not moved, an
 (ls-remote, fetch, grep, log), and files written only in the cache. The four bounds sum to 10 s, so a hung remote costs the
 prompt at most 10 s. A failure prints "mail unknown: <reason>", never "no mail".
 
-Cost of `mail status <id>`: at most three git processes for an open or unknown id (ls-remote, fetch, ls-tree) and four for a taken one
-(plus one show). No file is written beyond what the fetch puts in the cache, and no log. Pinned by the StatusCommand cases in
-test_mail.py.
+Cost of `mail status <id>`: at most three git invocations for an open or unknown id (ls-remote, fetch, ls-tree) and four for a
+taken one (plus one show). The fetch may spawn upload-pack, rev-list and `maintenance run --auto` children. It writes objects in
+the cache only: status writes no message, no ref and no log. A bad id is refused before any git call. Pinned by the
+StatusCommand cases in test_mail.py.
 
 Cost of `mail wait`: one process, one lock file, and one ls-remote per interval (30 s) while the ref has not moved. A moved
 ref adds one fetch and one grep. A wake adds one show (the subject) and the grep's age lookup, one log. Nothing else is

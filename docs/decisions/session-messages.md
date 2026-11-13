@@ -207,9 +207,10 @@ Design:
   `mail/<addr>/<id>.md`, and `taken <time> by <taker>` for `done/<addr>/<id>.md`, read from its `Taken-by:` line
   (`taken (taker unknown)` when the line is missing or garbled). Both exit 0. An id in no folder, or an empty store, prints
   `unknown` and exits 1, never `open`. An unsafe id prints `bad address or id` and exits 2. A git fault prints
-  `mail unknown: <reason>` on stderr and exits 1. Cost per call: at most four git processes, ls-remote, fetch, `ls-tree -r`
-  and, for a taken message only, one show (`hooks/test_mail.py` pins the counts). No file is written beyond what the fetch
-  puts in the cache, and no log is written.
+  `mail unknown: <reason>` on stderr and exits 1. Cost per call: at most four git invocations, ls-remote, fetch, `ls-tree -r`
+  and, for a taken message only, one show (`hooks/test_mail.py` pins the counts). The fetch may spawn upload-pack, rev-list
+  and `maintenance run --auto` children. It writes objects in the cache only. Status writes no message, no ref and no log. An id
+  that is empty or holds a `/` prints `bad address or id` and exits 2 before git is asked anything.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
   for all `mail` commands: 0 ok; 1 not sent, not taken, a `mail status` id that is unknown, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
