@@ -1038,8 +1038,8 @@ end_case "80 dead holder's lock folder with take.out: taken over, no dead folder
 
 # Wallpaper store: step sim-wallpaper-store-drop. On the own-boot path, before simctl boot, the tool deletes the device's
 # PRBPosterExtensionDataStore folder under devroot (devdir, or the default root in case 89). The xcrun stub records at
-# each boot whether that folder is there (store_at_boot). The reuse, refusal, failed-boot and symlink cases hold on the
-# old code too: they guard against a build that deletes too much.
+# each boot whether that folder is there (store_at_boot). The reuse, refusal, failed-boot and symlink cases guard against
+# a build that deletes too much.
 # support_of UDID: the Application Support folder of UDID under devroot.
 support_of() { echo "$devroot/$1/data/Library/Application Support"; }
 # store_of UDID: the store folder of UDID.
@@ -1185,7 +1185,7 @@ need "exit code" rc_is 0
 end_case "89 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
 
 # Case 90: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
-# stays, and the lease goes back before xcodebuild. The old code reuses it too, so this case is a green control.
+# stays, and the lease goes back before xcodebuild.
 pro_dies_during_duo_wait duo store
 need "destination is the booted Duo" dest_is "$DUO2"
 need "the Duo's store is kept" store_kept "$DUO2"
