@@ -2322,6 +2322,27 @@ class CutLanes(Env):
         self.assert_deleted(out, "lane1")
         self.assert_kept_line(out, "lane2")
 
+    def test_a_github_merge_subject_deletes_only_the_head_it_names_at_a_shared_tip(self):
+        # GitHub's subject for a merged pull request is "Merge pull request #N from <owner>/<branch>". Two heads sit at one lane tip, and the
+        # subject names lane1: lane1 is the merged lane's own and goes; lane2 sits at the same commit, so it stays, with its line.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "lane1", "origin/main")
+        put(os.path.join(o, "lane1.txt"), "lane1\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "lane lane1")
+        tip = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "push", "-q", "origin", "lane1")
+        sh(o, "git", "push", "-q", "origin", f"{tip}:refs/heads/lane2")  # lane2 sits at the same tip
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from owner/lane1", tip)
+        sh(o, "git", "push", "-q", "origin", "feat")
+        self.tips = {"lane1": tip, "lane2": tip}  # the deleted line names each lane's tip, as lane_batch records them
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_merged()
+        self.assert_deleted(out, "lane1")
+        self.assert_kept_line(out, "lane2")
+
     def test_a_lane_with_an_open_pr_at_a_newer_sha_is_kept(self):
         # The control: this passes on the old code, which blocks on any open PR. A fix that ignores the sha fails it.
         lane_batch(self, "lane1", "lane2")
