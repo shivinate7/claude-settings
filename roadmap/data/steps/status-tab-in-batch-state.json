@@ -1,0 +1,14 @@
+{
+ "id": "status-tab-in-batch-state",
+ "title": "The Status tab shows \"in batch N\" for a step whose only live PR is already in a green batch",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective 11:43 CST Nov 13: a step stays \"doing\" when its only live PR is in a green batch, so the tab reads as if a lane were still working. Triage pick (undoable, drop the step): yes, show \"in batch N\".",
+ "source": "retrospective 11:43 CST Nov 13",
+ "note": "Waiting-page and roadmap blocks: when a step's lane is finished and its PR is a lane in an open batch PR, the row says \"in batch N (#PR)\" with the batch PR's state read at build time. The live file (roadmap/live/live.json) already holds the batch lanes; read them there. Cost: no new reads at build time beyond the live file.",
+ "updatedAt": "2026-11-13T11:43:30-06:00"
+}

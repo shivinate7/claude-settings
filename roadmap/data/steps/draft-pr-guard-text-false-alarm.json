@@ -1,11 +1,11 @@
 {
   "title": "The draft-pr guard lets a Write whose text names a PR create",
   "phase": "now",
-  "status": "done",
+  "status": "doing",
   "order": 268.1,
   "owner": "coordinator",
   "lane": "session_013NEJL1EUPEUc4GEmabh7NN",
   "why": "The draft-pr guard (record draft-until-reviewed) refused a Write of a test fixture whose text held the PR-create command words (coordinator, 16:50 CST Nov 7). A guard that cries wolf is spent.",
-  "note": "Same guard as step draft-pr-guard-heredoc (the heredoc false alarm). Done check: a red test on the Write, then green, with a real create still refused. Sighting (triage 13:59 CST Nov 8): draft-pr refused a Bash call whose python heredoc only wrote step text naming the PR-create command; no PR was created. The same text run from a script file passed. Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-draft-pr-guard-text-false-alarm] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:draft-pr-guard-text-false-alarm] at 04:53 CST Nov 10. Done, lane report via coordinator 04:55 CST Nov 10: a probe on main allows every false-alarm form and still denies a real create; the fixing commit is unknown.",
-  "updatedAt": "2026-11-10T04:54:00-06:00"
+  "note": "Same guard as step draft-pr-guard-heredoc (the heredoc false alarm). Done check: a red test on the Write, then green, with a real create still refused. Sighting (triage 13:59 CST Nov 8): draft-pr refused a Bash call whose python heredoc only wrote step text naming the PR-create command; no PR was created. The same text run from a script file passed. Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-draft-pr-guard-text-false-alarm] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:draft-pr-guard-text-false-alarm] at 04:53 CST Nov 10. Done, lane report via coordinator 04:55 CST Nov 10: a probe on main allows every false-alarm form and still denies a real create; the fixing commit is unknown. Reopened as doing (coordinator 11:43 CST Nov 13, from backlog-drain's check): the work is only partly on main. Missing: the Monitor waiter guard (#2226). Coordinator starts a lane and sends its id.",
+  "updatedAt": "2026-11-13T11:43:30-06:00"
 }
