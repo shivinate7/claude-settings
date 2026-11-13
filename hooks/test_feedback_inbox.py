@@ -4192,21 +4192,50 @@ def case_repeat_today_false_pairs_are_not_marked():
     check("today: no flag is printed", "may repeat" not in p.out, p.desc())
 
 
+def prompt_head(name):
+    """One judging Stop on a repo with a step candidate. Returns (Proc, calls, head): head is the model prompt's
+    text before its NEW ITEMS part, lowercased, so the checks read the guard's PROMPT and no item text."""
+    root = repeat_repo(name, step=True)
+    cfg = new_cfg()
+    capture(cfg, name, MSG_ONE, cwd=root)
+    add_item(cfg, name)
+    p, calls = stop(cfg, name, root, answer=ANSWER_NONE)
+    head = (calls[0]["prompt"] if len(calls) == 1 else "").split("\nNEW ITEMS\n", 1)[0].lower()
+    return p, calls, head
+
+
 def case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat():
     """The model is told that a follow-up or detail on the same topic is not a repeat, and that a candidate is named
     only when the new item asks again for a change it already asked for and got an answer. The words are checked in
     the prompt's head, before its NEW ITEMS text, case-insensitively."""
-    root = repeat_repo("repeat-prompt", step=True)
-    cfg, sid = new_cfg(), "repeat-prompt"
-    capture(cfg, sid, MSG_ONE, cwd=root)
-    add_item(cfg, sid)
-    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
-    head = (calls[0]["prompt"] if len(calls) == 1 else "").split("\nNEW ITEMS\n", 1)[0].lower()
+    p, calls, head = prompt_head("repeat-prompt")
     check("prompt: one model call", len(calls) == 1, p.desc())
     check("prompt: a follow-up or detail on the same topic is not a repeat",
           all(w in head for w in ("follow-up", "same topic", "not a repeat")), head[-400:])
     check("prompt: a repeat asks again for a change it already asked for and got an answer",
           all(w in head for w in ("asks again", "already asked", "answer")), head[-400:])
+
+
+def case_repeat_prompt_shared_word_is_no_repeat_and_candidate_covers_the_whole_item():
+    """The model is told that a shared word or a broad topic is not a repeat, that a candidate is named only for the
+    same specific change as the whole new item, and that a candidate covering one of two topics in the item is none.
+    The meaning match ("judged by meaning") and the follow-up sentence stay. Checked in the prompt's head, as above."""
+    p, calls, head = prompt_head("repeat-prompt-whole")
+    check("prompt-whole: one model call", len(calls) == 1, p.desc())
+    check("prompt-whole: a shared word is not a repeat", "shared word" in head,
+          "'shared word' not in the prompt head")
+    check("prompt-whole: a candidate asks for the same specific change as the whole item",
+          all(w in head for w in ("same specific change", "whole")),
+          "missing from the prompt head: " + ", ".join(w for w in ("same specific change", "whole") if w not in head))
+    check("prompt-whole: a candidate covering one of two topics is none",
+          any("two topics" in s and "none" in s for s in head.split(". ")),
+          "no sentence of the prompt head holds both 'two topics' and 'none'")
+    check("prompt-whole: the meaning match stays judged by meaning", "judged by meaning" in head,
+          "'judged by meaning' not in the prompt head")
+    check("prompt-whole: the follow-up sentence stays",
+          all(w in head for w in ("follow-up", "same topic", "not a repeat")),
+          "missing from the prompt head: "
+          + ", ".join(w for w in ("follow-up", "same topic", "not a repeat") if w not in head))
 
 
 def case_repeat_todo_home_is_never_a_candidate_for_its_item():
@@ -4977,6 +5006,7 @@ CASES = (
     case_repeat_other_session_one_minute_away_stays_a_candidate,
     case_repeat_today_false_pairs_are_not_marked,
     case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat,
+    case_repeat_prompt_shared_word_is_no_repeat_and_candidate_covers_the_whole_item,
     case_repeat_todo_home_is_never_a_candidate_for_its_item,
     case_repeat_notes_home_is_never_a_candidate_for_its_item,
     case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
