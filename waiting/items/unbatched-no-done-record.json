@@ -33,6 +33,7 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective 10:07 CST Nov 13",
+  "reply": "Closed 10:43 CST Nov 13 by triage: replaced by item 691 (plan backlog-drain), which answers your 10:41 CST question on how to finish this mechanically. Pick there. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Built lane PRs with no done review",
   "shown": [
@@ -53,7 +54,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "What happens to 177 built lane PRs whose review record is missing, open or stale?",
   "why": "Your 09:26 CST call covers PRs with a done review: they join batches mechanically. These 177 have no done review, and no ruling of yours says whether to review them or rebuild them."
 }
