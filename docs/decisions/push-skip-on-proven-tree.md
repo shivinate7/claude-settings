@@ -20,6 +20,7 @@ Why: every merge to main re-ran suites that a passing PR run had passed on the s
 
 - Risk: accepted (owner reading of 16:03 CST). A red from an untouched suite shows only on a later change that touches it, since a narrowed PR run does not run it and main skips.
 - Risk: none from the nightly. CI has no nightly (`test-strategy-reset`), so a skipped push run cannot make a nightly skip.
+- Risk: accepted (coordinator, 16:37 CST Nov 13, reviewer-recommended). A skipped push run reads as evidence for the red-main check after a narrowed PR run too, so a revert whose PR run scoped out the broken suite can clear a red main with that suite never re-run. A revert usually touches the broken paths, so the suite usually runs. Filed as note `push-skip-narrowed-clears-red-main`.
 - Risk: a PR run re-run after a push cannot change that push's decision. The push reads the newest run at push time.
 
 Check: `lint/test_push_skip.py` (the decision, the event refusal, the caller workflow read, the wiring), `merge/test_merge.py` class `RedMainBrake`, `actions/ci-alarm/test_clear_rule.py`.
