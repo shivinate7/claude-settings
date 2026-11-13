@@ -11,6 +11,6 @@
  ],
  "why": "lane ruled-store-one-home 16:30 CST Nov 12; retrospective asked for it. The store lookup is built (#2992) but no guard calls it.",
  "source": "lane ruled-store-one-home 16:30 CST Nov 12",
- "note": "Wire the shared guard core to ruling_for_guard / guard_ruling_line (\"allowed by ruling <id>\", \"a newer ruling may apply: <id>\"), plus the CLAUDE.md line that an open, checked store entry outranks main's text (R59 parts 2-3). Also: lifted_guards / ruling_for_guard should honour lands_in; tighten the duplicate-supersedes check to key full refs, not the first token.",
- "updatedAt": "2026-11-12T16:32:13-06:00"
+ "note": "Wire the shared guard core to ruling_for_guard / guard_ruling_line (\"allowed by ruling <id>\", \"a newer ruling may apply: <id>\"), plus the CLAUDE.md line that an open, checked store entry outranks main's text (R59 parts 2-3). Also: lifted_guards / ruling_for_guard should honour lands_in; tighten the duplicate-supersedes check to key full refs, not the first token. Lane ruled-store-one-home 19:11 CST Nov 12: hooks/question_form.py:1533 still says \"Cost: one git process\"; the store read added a second. Reword it in the next lane that touches that file.",
+ "updatedAt": "2026-11-12T19:11:02-06:00"
 }
