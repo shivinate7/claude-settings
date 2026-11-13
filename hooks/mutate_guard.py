@@ -408,7 +408,7 @@ MUTATIONS = [
     ("push-needs-review-record: a descendant log never supersedes a stale report",
      'pending = [report for report in pending if report not in held and not held.supersedes(report, where)]',
      'pending = [report for report in pending if report not in held]', "guard",
-     'a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its record posted at D2'),
+     'a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its review log posted at D2'),
     ("push-needs-review-record: a round report is cleared by any posted fix check line",
      '            if head is None:\n                return False',
      '            if head is None:\n                return bool(self.fix)', "guard",
