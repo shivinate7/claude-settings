@@ -56,6 +56,8 @@ from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.pat
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
 HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")
@@ -360,22 +362,32 @@ def clean_env(**extra):
 
 
 def split_tree(mutant):
-    """A scratch folder holding guard.py and its guard_* siblings, the way mutate_guard copies them.
+    """A scratch checkout for the split cases, laid out the way mutate_guard lays out a guard mutant:
+    hooks/ holds guard.py and its guard_* siblings, and merge/, lint/ and actions/ci-alarm/ sit beside it,
+    each copied as git tracks it.
+    guard_merge loads merge/merge.py from one folder above the copy's hooks/. merge.py imports
+    lint/hook_catalog.py at import and reads events.json, so a copy without them reads the merge tool as
+    unloadable. The split check's materialize_all builds every lazy fixture, so the review-record one raises
+    before the check runs.
     With `mutant`, the sibling guard_core.py (created if absent) ends in SPLIT_MUTANT, so a load that
-    takes split_segments from that sibling shows it. Without it, the sibling is left as it is."""
-    tree = tempfile.mkdtemp(prefix="guard-split-")
-    guard_tree(tree)
+    takes split_segments from that sibling shows it. Without it, the sibling is left as it is.
+    Returns the checkout root. The guard under test is root/hooks/guard.py."""
+    root = tempfile.mkdtemp(prefix="guard-split-")
+    hooks = os.path.join(root, "hooks")
+    guard_tree(hooks)
+    tracked_tree.copy_tracked(root, "merge", "lint", "actions/ci-alarm", root=os.path.dirname(HERE))
     if mutant:
-        with open(os.path.join(tree, "guard_core.py"), "a", encoding="utf-8") as handle:
+        with open(os.path.join(hooks, "guard_core.py"), "a", encoding="utf-8") as handle:
             handle.write(SPLIT_MUTANT)
-    return tree
+    return root
 
 
-def drive_test_guard(tree):
-    """Run test_guard.py on the guard copy at `tree`, filtered to the split_segments log check."""
+def drive_test_guard(root):
+    """Run test_guard.py on the guard copy at root/hooks/guard.py, filtered to the split_segments log check.
+    The config folder is fresh, so no pointer to a real clone can supply merge/merge.py."""
     cfg = tempfile.mkdtemp(prefix="guard-split-cfg-")
     try:
-        env = clean_env(GUARD_UNDER_TEST=os.path.join(tree, "guard.py"), MUTATE_ONLY=SPLIT_LABEL,
+        env = clean_env(GUARD_UNDER_TEST=os.path.join(root, "hooks", "guard.py"), MUTATE_ONLY=SPLIT_LABEL,
                         CLAUDE_CONFIG_DIR=cfg)
         return subprocess.run([sys.executable, os.path.join(HERE, "test_guard.py")],
                               capture_output=True, text=True, env=env, timeout=900)
@@ -389,32 +401,40 @@ def split_row(run):
     return rows[0] if rows else None
 
 
+def split_note(run, row, cause):
+    """Why a split case failed, in one line. With no check row, test_guard ended before the check ran, so its
+    last stderr line names the cause (a merge tool that will not load, say). With a row, the check ran and
+    `cause` holds."""
+    if row is None:
+        last = run.stderr.strip().splitlines()[-1:] or ["no stderr"]
+        return "exit %d: test_guard ended before the split check ran: %s" % (run.returncode, last[0][:160])
+    return "exit %d, row %r: %s" % (run.returncode, row[:100], cause)
+
+
 def split_mutant_case():
     """A copied guard.py loads split_segments from its scratch sibling, not from the real hooks/."""
-    tree = split_tree(mutant=True)
+    root = split_tree(mutant=True)
     try:
-        run = drive_test_guard(tree)
+        run = drive_test_guard(root)
     finally:
-        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
     row = split_row(run)
     if run.returncode == 1 and row and row.startswith("FAIL"):
         return True, "the mutant sibling's split_segments reached the check: " + row[:100]
-    return False, "exit %d, row %r: the copy did not take split_segments from its sibling" % (
-        run.returncode, row)
+    return False, split_note(run, row, "the copy did not take split_segments from its sibling")
 
 
 def split_control_case():
     """Control for split_mutant_case: the same copy with its sibling unmutated passes the check."""
-    tree = split_tree(mutant=False)
+    root = split_tree(mutant=False)
     try:
-        run = drive_test_guard(tree)
+        run = drive_test_guard(root)
     finally:
-        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
     row = split_row(run)
     if run.returncode == 0 and row and row.startswith("PASS"):
         return True, "the unmutated copy passes the check"
-    return False, "exit %d, row %r: the unmutated copy does not pass the check" % (
-        run.returncode, row)
+    return False, split_note(run, row, "the unmutated copy does not pass the check")
 
 
 def missing_sibling_case():
