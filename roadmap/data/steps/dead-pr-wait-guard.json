@@ -1,0 +1,14 @@
+{
+ "id": "dead-pr-wait-guard",
+ "title": "A guard flags a step that waits on a dead PR, without rebuilding main's wait check",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Backlog-drain lane verdict on #2729 (group fan-prose-unmapped-1), 11:33 CST Nov 13: rebuild, keep the guard half.",
+ "source": "backlog-drain verdicts.tsv in #3154, row 2729",
+ "note": "Keep the guard half of #2729 (dead_pr_wait_hit, shared_names, decision dead-pr-waits, test s42907). Drop the build half (dead_pr_waits, prStates): it duplicates main's waits_on_closed_pulls.",
+ "updatedAt": "2026-11-13T11:34:14-06:00"
+}

@@ -1,10 +1,11 @@
 {
   "title": "A commit-time guard refuses a commit whose staged diff holds conflict markers",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 260.7,
   "owner": "coordinator",
   "why": "Incident, lane merge-waits-required-only, 2026-11-07 02:36 CST, relayed by the coordinator 02:38 CST: a conflict-fix script failed, and the next chained command still committed the conflict markers (locally only). A fix commit removed them before any push.",
-  "note": "The guard runs `git diff --cached --check` at commit time and refuses when it finds conflict markers. Done check: a red test on a staged marker, and green on a clean commit. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question.",
-  "updatedAt": "2026-11-07T08:38:00Z"
+  "note": "The guard runs `git diff --cached --check` at commit time and refuses when it finds conflict markers. Done check: a red test on a staged marker, and green on a clean commit. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question. Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL3ft9jVJesHu5785Yz. Lane note 11:33 CST: the step text (git diff --cached --check at commit) is already on main (conflict_markers_hit). #2083 is the follow-up \"an unread git read must ask, not allow\"; the lane rebuilds that behaviour fresh on main fccff95e6 unless ruled otherwise. No owner rulings in #2083 comments.",
+  "updatedAt": "2026-11-13T11:34:14-06:00",
+  "lane": "session_013NEJL3ft9jVJesHu5785Yz"
 }

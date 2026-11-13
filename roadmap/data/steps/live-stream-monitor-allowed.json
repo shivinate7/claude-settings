@@ -1,11 +1,11 @@
 {
   "title": "The live-stream guard allows the Monitor tool and names it in its remedy",
   "why": "Lane draft-pr-guard-text-false-alarm ([ended:lane:-draft-pr-guard-text-false-alarm]), from the round-2 review of #2226, 13:29 CST Nov 8: the live-stream rule in hooks/guard.py (~line 3729) refuses the Monitor tool's own first example, `tail -f <log> | grep --line-buffered ERROR`, and its remedy never names Monitor. Main does the same. Step waiter-remedy-monitor-refused covers the waiter guard, not this rule.",
-  "note": "Coordinator started its lane 13:33 CST Nov 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL47tLSmUKDXddQy9Pf.md on archive/session-handoffs-2026-11-10).",
+  "note": "Coordinator started its lane 13:33 CST Nov 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL47tLSmUKDXddQy9Pf.md on archive/session-handoffs-2026-11-10). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL28TWNghm1s7AnzWsQ.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "ready",
+  "lane": "session_013NEJL28TWNghm1s7AnzWsQ",
+  "status": "doing",
   "order": 809,
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

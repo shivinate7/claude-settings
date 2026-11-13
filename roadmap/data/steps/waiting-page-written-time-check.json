@@ -1,0 +1,14 @@
+{
+ "id": "waiting-page-written-time-check",
+ "title": "The waiting page refuses a written time that is blank or not an ISO date",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Backlog-drain lane verdict on #2720 (group fan-code-waiting-page), 11:33 CST Nov 13: rebuild.",
+ "source": "backlog-drain verdicts.tsv in #3154, row 2720",
+ "note": "Rebuild #2720: a written-time blank or non-ISO check. The code merges clean with one decision-file conflict (the Cost line). Mark the read-count clause \"(unmeasured)\". Check against main first.",
+ "updatedAt": "2026-11-13T11:34:14-06:00"
+}

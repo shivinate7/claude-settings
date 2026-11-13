@@ -1,11 +1,11 @@
 {
   "title": "A record's claim about what a tool reads or costs cites the code line that states it",
-  "status": "ready",
+  "status": "doing",
   "phase": "now",
   "order": 270.0,
-  "lane": "",
+  "lane": "session_013NEJKzdPkE6jyZTb1SnESP",
   "why": "Incident 15:00 CST Nov 7, lane pr-state-is-on-the-pr: a record-writer added \"the ledger reads no CI state\" to decision pr-ledger (#1419), while the code on that branch reads main's latest CI run. Caught by reading; no check compares a record's claim about a tool's reads with the tool's code.",
   "note": "Candidate: each record that claims a tool's reads or cost cites the docstring line that states it, as fresh-prose binds claims to checks. Done step prose-governance-workflow bound prose to code in general; this is the gap it left for read and cost claims. Coordinator to judge scope: fold into the fresh-prose skill or a lint. Coordinator scope, 15:05 CST: it goes into the fresh-prose skill and its existing record check, not a new lint. A record sentence about what code does cites the code symbol; the check confirms the symbol exists; the reviewer checks the sentence is true. Follow-up in progress (lane, 04:03 CST Nov 8): a guard that turns lane-lint red when a PR adds a Markdown cite to a Python code name missing in the PR's own tree; its PR branches from #1893's head with Merge after: #1893. A queue fix under item 387 a (lane-inflow-hold): #1553 cites CODE_CLAIM before #1893 lands, and the fix rides in the lane that found it (coordinator, 04:04 CST Nov 8). Built and reviewed as #1893, with runner 8, after #1893 (lane, 05:28 CST Nov 8). 09:31 CST Nov 8 (lane): #2063 closes debt stale010-no-top-folder and is with runner 8, Merge after: #1893. #1893 files debt stale010-dotted-cite (a Class.method cite is not read). New notes: stale010-top-folder-typo, stale010-subfolder-relative-cite, stale010-missing-rev-silent, stale010-top-folder-head-untested, stale010-doc-relative-cite. Set done when #1893 and #2063 merge. Sighting 09:53 CST Nov 8 (lane fix-none-cite-check, [ended:lane:-fix-none-cite-check], proposed step record-matches-code): a decision bullet in aee40063c (the Cite part of notes-name-their-fix) claimed more than the code reads (a run URL as check output; spelled numbers with any unit); a fix check caught it and 3f1ac66ad corrected it. The lane answered 09:55 CST: no; STALE009 only reports an uncited code claim and never fails, STALE010 fails only a cite to a missing name or file, and neither reads whether a cited claim is true. Filed apart as step record-matches-code. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1539 closed unmerged; #1893 holds every #1539 commit.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-12T08:59:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

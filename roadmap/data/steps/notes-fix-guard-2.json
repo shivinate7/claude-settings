@@ -1,11 +1,11 @@
 {
   "title": "Fix the small guard findings, part 2, from the notes sort",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1.01,
   "owner": "coordinator",
   "why": "Item 355 sort, coordinator 14:05 CST Nov 7: 9 Sonnet agents sorted 1,629 notes and debts on main 174b005c1. Fix 184 (166 small, 18 large), delete 86, keep 1,359 (146 of them unverified). Lists: branch claude/clever-planck-oynpfh 759486de5, docs/plans/notes-sort/.",
-  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-guard-2. #1532, #1639 and #1534 are back with runner 8 (coordinator, 00:00 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was notes-fix-guard-2).",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-guard-2. #1532, #1639 and #1534 are back with runner 8 (coordinator, 00:00 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was notes-fix-guard-2). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL1YTNCNQU7NraYhkcv.",
+  "lane": "session_013NEJL1YTNCNQU7NraYhkcv",
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

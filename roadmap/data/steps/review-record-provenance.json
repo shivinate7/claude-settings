@@ -1,11 +1,11 @@
 {
   "title": "Only the merge tool may post a review record",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 45,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKyj7W9KzfTxBFwwmuL",
   "why": "Third incident of a hand-written review record: lane notes-fix-reverify-large on #1494, #1506, #1597, #1667 and #1668, after #1512 and #1472.",
   "note": "Fix: the guard refuses `gh pr comment` or `gh api …/comments` whose body has the review-record header, unless the merge tool sends it. The coordinator reverses its earlier `Fix: none` (its own pick, 18:42 CST Nov 7, can be undone). The five PRs wait for #1634 and records re-posted from the tool. Same post point as step review-record-post-parses (lane [ended:lane:-notes-fix-large-3]), which checks that a posted record parses: one guard home for both. Coordinator 18:43 CST: stacked on #1601 (review-record-from-render); it adds the marker only the tool writes, not a second guard. 18:45 CST: stacked on #1671, not #1601 directly. Coordinator 18:50 CST: also covers `--review-record` refusing PASS unless `--lane-lint` passes on the head (incident #1502). #1634 (step merge-page-by-number) merged in batch 61, 21:30 CST Nov 7. Fourth incident (coordinator, 03:08 CST Nov 8): lane fail-record-ancestor-head hand-wrote #1839's round-1 record with a short head, then edited it in place to the tool's printed body (comment 6719462068). Fix this step owns: a review-record comment whose body is not exactly what `merge --review-record` prints is refused, or the tool reads the record back and checks it. Lane was idle since 23:13 CST Nov 7, waiting on #1758; now stacks on #1758's head with the new scope (coordinator, 03:10 CST Nov 8). Sighting (coordinator, 07:46 CST Nov 9): #2435's lane re-posted a review record naming new head 08945b8b2 (a records-only STE fix) with round 3 PASS, but round 3 read a943992f6; `merge --reviewed` reads it as done. Nothing ties a round line to the head its reviewer read. The coordinator sent the lane a Sonnet fix check for the delta. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzUe9U19voH62VbCNA.md on archive/session-handoffs-2026-11-10).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "The guard reads two more path forms: a default-valued config dir and a getcwd join",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 266.1,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL3fTr6GfjpsmeduH3W",
   "why": "Lane notes-fix-guard-1 found two guard gaps (coordinator, 15:32 CST Nov 7). The config-dir write rule misses `${CLAUDE_CONFIG_DIR:-...}`. guard_frozen misses `os.getcwd() + '/tests/...'`.",
-  "note": "Done check: each form is red on main's guard, then refused. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). 19:06 CST: #1636 reverted to its reviewed tree at 1ddd703f4; its notes moved to docs PR #1696. All with runner 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:Lane:-guard-path-expand-forms]).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Done check: each form is red on main's guard, then refused. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). 19:06 CST: #1636 reverted to its reviewed tree at 1ddd703f4; its notes moved to docs PR #1696. All with runner 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:Lane:-guard-path-expand-forms]). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL3fTr6GfjpsmeduH3W.",
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

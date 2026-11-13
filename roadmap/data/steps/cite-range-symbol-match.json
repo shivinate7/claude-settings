@@ -1,11 +1,11 @@
 {
   "title": "A path:line cite whose range lands on the wrong symbol is caught",
   "why": "Lane cannot-claim-needs-tries ([ended:lane:-cannot-claim-needs-tries]), 11:29 CST Nov 8: lint/stale_cites.py passes a `path:line` cite whose range now lands on another symbol. After merges shifted lint/report_guard.py, cites in claims-carry-backing.md (`:1485-1494`, meant for hand_off_problem, now in `_cited_refusal`) and notes (`:642-660`, meant for report_section) passed and only reviewers caught them. Two notes on main also pass while wrong: report-guard-url-string-compare (\"about :591\") and report-guard-lazy-import (\":952\", peer_body no longer exists). Proposed fix: when a backticked symbol sits in the same sentence as a cite, check that the symbol is in or near the cited range. Related: step cite-symbol-anchor-excerpt.",
-  "note": " Doing 05:58 CST Nov 10: open PR #2196 on branch cite-range-symbol-match (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator ([ended:Claude-settings-coordinator-handoff]) to route (outside the finding lane's scope)).",
+  "note": "Doing 05:58 CST Nov 10: open PR #2196 on branch cite-range-symbol-match (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator ([ended:Claude-settings-coordinator-handoff]) to route (outside the finding lane's scope)). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL2fW4GrknXzh9AYKtZ.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "ready",
+  "lane": "session_013NEJL2fW4GrknXzh9AYKtZ",
+  "status": "doing",
   "order": 758,
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

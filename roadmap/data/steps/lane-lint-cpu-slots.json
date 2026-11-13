@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-cpu-slots",
+ "title": "Lane lint limits how many CPU slots it uses",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Backlog-drain lane verdict on #2749 (group fan-code-guard-2), 11:33 CST Nov 13: rebuild; the limit is wanted.",
+ "source": "backlog-drain verdicts.tsv in #3154, row 2749",
+ "note": "Rebuild #2749, a CPU-slot limit for lane lint. It conflicts in merge/merge.py and test_lane_lint.py. Main added run_touched_tests since, so the slot scope must be decided again (one slot per touched suite, or per lint run). Check lane-lint steps first for overlap.",
+ "updatedAt": "2026-11-13T11:34:14-06:00"
+}

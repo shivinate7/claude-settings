@@ -1,11 +1,11 @@
 {
   "title": "The builder-diff guard judges an auto-committed strategy merge or pull",
   "why": "Lane tier-boundaries-enforced ([ended:cs-lane:-tier-boundaries-enforced]), relayed by the coordinator 13:51 CST Nov 8: builder-diff (hooks/guard.py, near builder_diff) reads only reflog entries for commit, amend, merge, initial, cherry-pick and revert. So an auto-committed `git merge -X ours|theirs` or `-s ours`, or a `git pull` with those options (reflog \"merge <x>: ...\"), is never judged at commit, push or stop. A builder that resolves a test conflict by strategy goes unjudged, against owner item 437 a. A builder could do it by mistake. The lane files the debt in #1904. Merge after #1904.",
-  "note": "Coordinator 13:56 CST Nov 8: its own lane, on Sonnet; Merge after #1904. Coordinator 14:30 CST Nov 8: #1904 adds the debt builder-diff-auto-merge-reflog; this lane retires it when its fix merges. Coordinator 14:57 CST Nov 8: #2286 with runner 8, Merge after #1904.",
+  "note": "Coordinator 13:56 CST Nov 8: its own lane, on Sonnet; Merge after #1904. Coordinator 14:30 CST Nov 8: #1904 adds the debt builder-diff-auto-merge-reflog; this lane retires it when its fix merges. Coordinator 14:57 CST Nov 8: #2286 with runner 8, Merge after #1904. Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL4SP5U8aJ9LwgvFAP5.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJL3mV1216ziTuNnhQyH.md on archive/session-handoffs-2026-11-10",
-  "status": "ready",
+  "lane": "session_013NEJL4SP5U8aJ9LwgvFAP5",
+  "status": "doing",
   "order": 813,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

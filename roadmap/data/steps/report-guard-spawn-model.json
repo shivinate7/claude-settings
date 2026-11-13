@@ -4,8 +4,8 @@
   "note": "Coordinator 12:36 CST Nov 8: the fix is already on main (d77b57393, 2026-11-04); the lane adds two green tests only. Likely cause: a session ran a stale installed ~/.claude (659 commits behind at session start) or had CLAUDE_CODE_SUBAGENT_MODEL set; the lane measures which. Possible false alarm, same check (lane bg-tail-loses-verdict, [ended:Lane:-bg-tail-loses-verdict], 14:26 and 14:37 CST Nov 8): it said no model was named for a reviewer on Done items that named only (test-author haiku, builder sonnet) and had no reviewer; each Done item opened a draft PR whose round 1 had just started, and reviewer appeared only under Next. Guess: the check takes review roles from the whole report or the PR, not from the Done item. Workaround used: add \"reviewer haiku: round 1 is still running\" to the Done item. Coordinator 15:29 CST Nov 8: steps report-guard-role-default-model and model-guard-default-model fold into this lane, with the #2260 incident (a false round 1 model written into a review record). Draft #2307 (merge after #2282; coordinator 16:30 CST Nov 8) fixes the cause: the model check read only the spawns after the last human message, so it missed earlier ones. When #2307 merges, close this step and steps report-guard-role-default-model and model-guard-default-model. Sighting (lane stack-cross-measure [ended:lane-lint-stack-holds-base], via the coordinator 05:00 CST Nov 9): the Stop guard said the round 1 reviewer spawns for #2406 and #2410 ran Sonnet; their transcripts show haiku on every assistant message (69 and 57), plus the advisor tool's Opus line. The spawns named no model, and agents/reviewer.md sets `model: haiku` (triage read), so main's guard reading a no-model spawn as Sonnet is this step's defect; #2307 fixes it. The coordinator proposed stop-spawn-model-false; folded here. Cost: a lane nearly posted wrong records. Check after #2307 merges that the advisor line is not read as the agent's model.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJL3DwgdW1HVejfR77Se.md on archive/session-handoffs-2026-11-10",
-  "status": "ready",
+  "lane": "session_013NEJL3XFjYe673XyGPoHnS",
+  "status": "doing",
   "order": 787,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-13T11:34:14-06:00"
 }

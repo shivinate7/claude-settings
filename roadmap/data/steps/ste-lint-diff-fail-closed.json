@@ -1,10 +1,10 @@
 {
   "title": "The ste-lint action fails closed when its git diff read fails",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 501,
   "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 2.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nPromotion lane 2 of 11 (rank = work order). Every child re-pins the action; q_max drops its own base-commit step. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane [ended:lane:-ste-lint-diff-fail-closed], started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1315. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1315).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
-  "lane": ""
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nPromotion lane 2 of 11 (rank = work order). Every child re-pins the action; q_max drops its own base-commit step. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane [ended:lane:-ste-lint-diff-fail-closed], started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1315. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1315). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJKz66pc3h4tjvMm14W8.",
+  "updatedAt": "2026-11-13T11:34:14-06:00",
+  "lane": "session_013NEJKz66pc3h4tjvMm14W8"
 }
