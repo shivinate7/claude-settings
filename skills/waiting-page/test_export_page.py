@@ -3338,6 +3338,33 @@ class StoodPickClosed(Copied):
         self.assertEqual(held_lines(self.check(self.stood(569, "stood-open", status="open"))), [])
         self.assertEqual(held_lines(self.check(self.stood(570, "plain-closed", stands=False))), [])
 
+    def test_a_reply_that_leads_with_marks_or_spaces_still_passes(self):
+        for i, word in enumerate(("**Reversed** by owner", "  Withdrawn: superseded")):
+            self.assertEqual(held_lines(self.check(self.stood(580 + i, "stood-mark-%d" % i, reply=word))), [])
+
+    def test_a_park_lastanswer_passes_and_an_empty_one_is_held(self):
+        parked = self.check(self.stood(582, "stood-park", lastAnswer={"act": "park", "note": "later", "at": "2026-11-12T19:00:00Z"}))
+        self.assertEqual(held_lines(parked), [], "a parked lastAnswer was held. Output:\n" + shown(parked))
+        empty = self.check(self.stood(583, "stood-empty", lastAnswer={}))
+        self.assertEqual([n for n, _ in held_lines(empty)], [583], "an empty lastAnswer was not held. Output:\n" + shown(empty))
+
+    def test_a_ruling_a_group_member_and_a_task_are_not_stood_picks(self):
+        for i, change in enumerate(({"arbiter": True}, {"group": "g1"}, {"kind": "task"})):
+            self.assertEqual(held_lines(self.check(self.stood(590 + i, "stood-other-%d" % i, **change))), [])
+
+    def run_export(self, item, page=True):
+        fetched = self.fetch(items={item["id"]: item}, answers={}, meta={"page": META})
+        args = ["--fetched", fetched, "--out", self.out()]
+        if page:
+            args += ["--page", write_text(os.path.join(self.tmp.name, "page-stood-export.html"), PAGE)]
+        return self.run_cmd(*args)
+
+    def test_an_export_holds_it_with_and_without_a_page(self):
+        for page in (True, False):
+            r = self.run_export(self.stood(565, "stood-export-%s" % page), page)
+            self.assertEqual([n for n, _ in held_lines(r)], [565], "export (page=%s) did not hold it. Output:\n%s" % (page, shown(r)))
+            self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
 
 if __name__ == "__main__":
     unittest.main()
