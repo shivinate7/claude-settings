@@ -57,7 +57,7 @@ pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and
 The row HANDIN_LINE ("handed in STALE_HANDIN_HOURS h or more, in no batch", step handin-cannot-drop) lists each pull row whose
 `reviewLog` and `reviewDone` are true and whose `batched` is not true (triage sets `batched` when a batch integration pull holds the
 pull) and whose `reviewLogAt`, the time its review log was posted, is that far before the live file's readAt, as
-`#N (<H>h)`. `reviewDone` is true when the pull's newest review record reads done: a pull whose record reads open or bad
+`#N (<H>h)`. `reviewDone` is true when the pull's newest review log reads done: a pull whose log reads open or bad
 (false) is not handed in. A pull with `reviewLog` true and no `reviewDone` reads "unknown (#N has no reviewDone)". A pull with no usable
 `reviewLogAt` reads "unknown (#N has no reviewLogAt)". `batched` true takes the pull out before those checks. `batched` and
 `reviewDone` are JSON bools like `held`; a pull row with a non-bool value is skipped. The row reads the
@@ -700,7 +700,7 @@ def live_work(path, steps, slug=None):
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
     stale_drafts skips a draft pull whose `held` or `reviewLog` is true. `reviewDone` (a JSON bool: the newest review
-    record reads done), `reviewLogAt` (ISO time the review log was posted) and `batched` (a JSON bool: a batch integration pull holds the pull) feed stale_handins.
+    log reads done), `reviewLogAt` (ISO time the review log was posted) and `batched` (a JSON bool: a batch integration pull holds the pull) feed stale_handins.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}

@@ -26,7 +26,10 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. It also carries `held` (true when
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
-  JSON bools, omitted when false or unknown. Each item row carries
+  JSON bools, omitted when false or unknown. It carries `reviewDone` (true when the newest review log reads done, false when
+  it reads open or bad, omitted only when unknown),
+  `reviewLogAt` (when the review log was posted) and `batched` (true when an integration PR holds the pull), so the build
+  can list a stale hand-in. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
