@@ -65,7 +65,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    red comment at once. The run is not cancelled, so `--blame` still reads a failed run
    (decision `lanes-run-no-full-ci-job`). The red files name the lane to drop. The next run is the one that merges.
    The batch ready route (`merge --batch-build NAME --ready`) runs the repo's ready checks (`merge.readyChecks`), no lint and no touched tests.
-   A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run.
+   A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
+   satisfy the join.
    The lint counts a clash between two heads only when both merge clean with their base.
    A hand list of checks never stands in for that run: `bin/ci-job` reads its steps from the
    workflow, so it cannot miss one. A lane never runs a whole CI job
