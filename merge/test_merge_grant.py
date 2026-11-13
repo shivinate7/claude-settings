@@ -255,6 +255,15 @@ class ReviewGrantFlag(tm.ReviewEnv):
         out, _err = self.assert_usage_error(*self.granted("--round", "5:reviewer:opus:PASS", "--grant", REVIEW_GRANT))
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
+    def test_round_three_on_opus_is_refused_and_round_three_on_sonnet_passes(self):
+        # The reviewer's round 3 runs Sonnet high and Opus is never an option (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13
+        # 14:05 CST). The control, round 3 on sonnet, must exit 0, so only the model of round 3 differs between the two forms.
+        head = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL")
+        rc, out, err = self.run_args(*self.granted(rounds=(*head, "--round", "3:reviewer:sonnet:PASS")))
+        self.assertEqual(rc, 0, "merge refused the control, round 3 on sonnet:\n" + out + err)
+        out, _err = self.assert_usage_error(*self.granted(rounds=(*head, "--round", "3:reviewer:opus:PASS")))
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+
     def test_grant_needs_review_record(self):
         argv = self.granted("--grant", REVIEW_GRANT)
         rc, out, err = self.run_args(*argv)
