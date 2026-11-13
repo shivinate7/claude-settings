@@ -15716,6 +15716,97 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
         self.assertNotIn("Traceback", err)
 
+class ReviewNoRestart(ReviewEnv):
+    """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
+    rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
+    record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it while
+    that earlier record has a Fix check line and the new record has no --fix-check. A comment that does not parse is skipped. A refusal exits 2
+    and prints nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
+
+    EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
+    GRANT = "#7, item 1 a, owner, 2026-11-08 06:08 CST"  # the owner's grant of round 4, bound to this pull request
+    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the --round values of rounds 1-3, all FAIL
+
+    def host_with(self, *bodies):
+        """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head())
+
+    def review_argv(self, *rounds, fix=None, grant=None):
+        """The argv of `--review-record` for the live head: the --round values in order, then --fix-check and --grant when given."""
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head()]
+        argv += [flag for r in rounds for flag in ("--round", r)]
+        if fix is not None:
+            argv += ["--fix-check", fix]
+        if grant is not None:
+            argv += ["--grant", grant]
+        return argv
+
+    def assert_refused(self, rc, out, err):
+        self.assertEqual(rc, 2, "the record was not refused, so its rounds restart on a pull request that holds rounds:\n" + out + err)
+        self.assertEqual(out, "", "a refused record printed to stdout")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(merge.REVIEW_CITE, err)
+        self.assertRegex(err, re.compile("round", re.I))
+        self.assertRegex(err, re.compile("new branch", re.I))
+        self.assertRegex(err, re.compile("new PR", re.I))
+
+    def assert_accepted(self, rc, out, err):
+        self.assertEqual(rc, 0, "a record the rule allows was refused:\n" + out + err)
+        parse_text(self, posted_body(self, out))
+
+    def test_a_fresh_round_one_after_an_earlier_fix_check_pass_is_refused(self):
+        # the #3060 incident: a round 1 record posted at the new head after a PASS fix check on an earlier record
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, haiku, PASS",), fix=(fix_verifier_line(head=self.EARLIER_FIX_FROM),))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:haiku:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_fewer_rounds_than_the_earlier_top_round_are_refused(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_record_with_no_rounds_is_refused_after_an_earlier_record_with_rounds(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.run_args(*self.review_argv(), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_the_first_record_on_a_pull_request_is_accepted(self):
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with())
+        self.assert_accepted(rc, out, err)
+
+    def test_rounds_that_go_past_an_earlier_round_one_fail_are_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+                                     host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fix_check_after_the_full_earlier_rounds_is_accepted(self):
+        # the earlier record has no Fix check line, so a record that repeats its three rounds and names its head as the fix base is allowed
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, fix=fix), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_an_unparseable_earlier_comment_is_ignored(self):
+        broken = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE, kind="bogus")  # three rounds, but the Kind line does not parse
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(broken))
+        self.assert_accepted(rc, out, err)
+
+    def test_rounds_below_a_granted_round_four_are_refused(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=(*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {self.GRANT}",))
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_granted_round_four_after_an_earlier_round_three_is_accepted(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
