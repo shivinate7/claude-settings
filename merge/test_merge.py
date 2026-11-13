@@ -12013,7 +12013,7 @@ class SkippedPushRun(unittest.TestCase):
 
     def suites_of(self, jobs):
         """The suite jobs of a run: each job other than `scope` that did not skip, as the gate judges a run from its job conclusions."""
-        return [j["name"] for j in jobs if j["conclusion"] != "skipped" and j["name"] != "scope"]
+        return [j["name"] for j in jobs if j["conclusion"] != "skipped" and j["name"] != merge.SUITE_GATE_JOB]
 
     def test_a_zero_job_green_push_run_over_a_red_run_that_ran_its_suites_is_unknown_not_green(self):
         runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
@@ -12030,6 +12030,13 @@ class SkippedPushRun(unittest.TestCase):
         self.assertEqual([r["id"] for r in runs[1:] if self.suites_of(jobs[r["id"]])], [], "the scope: no run behind it on the page ran its suites")
         verdict, detail = self.read(runs, jobs)
         self.assertEqual(verdict, "unknown", f"a green push run that lists no jobs, with no earlier run on the page that ran its suites, is unknown, not green: got {verdict}: {detail}")
+
+    def test_a_lone_zero_job_green_push_run_with_nothing_earlier_is_unknown_not_green(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH)]  # the page holds this one run
+        jobs = {2002: []}
+        self.assertEqual(jobs[2002], [], "the scope: the newest push run lists no jobs")
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "unknown", f"a green push run that lists no jobs, with nothing earlier on main, is unknown, not green: got {verdict}: {detail}")
 
     def test_a_green_pull_request_run_whose_suites_were_all_skipped_does_not_cover_a_skipped_push_run(self):
         runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
