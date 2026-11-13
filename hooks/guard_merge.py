@@ -1277,7 +1277,7 @@ RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
 RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
-    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "record does not prove it is triage. Remedy: Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
     "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
 )
@@ -1385,7 +1385,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
 TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude-code-remote__request_computer_folder")
 TRUST_REASON = (
     "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
-    "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
+    "this session's own record does not prove it has no cs-build tag. Remedy: A cs-build session hands the act to "
     "the owner or to an untagged session. A session with no record yet: run get_session (no "
     "argument) alone in its own turn, then retry."
 )
@@ -1843,7 +1843,7 @@ _STAMP_HEADER = re.compile(
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
     "this message's header stamp is wrong for the clock: {why}. "
-    "The time is {now}: re-stamp your own header with that time, then send it again. Read the time with "
+    "Remedy: The time is {now}: re-stamp your own header with that time, then send it again. Read the time with "
     "`~/.claude/bin/now-central`, never from memory. If the first line quotes "
     "someone else's time in header form, open the message with your own label first. "
     "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
@@ -1919,7 +1919,7 @@ _STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
 WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
 WRITTEN_REASON = (
     "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
-    "The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
+    "Remedy: The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
     "Read the time with `~/.claude/bin/now-central --iso`, never from memory. "
     "(decision local-time-central, sessions speak times in US Central)"
 )

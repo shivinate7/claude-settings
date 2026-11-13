@@ -1004,7 +1004,7 @@ def playwright_install_hit(stripped: str, agent: bool) -> str:
 
 PLAYWRIGHT_INSTALL_REASON = (
     "the Playwright browsers are shared in ~/Library/Caches/ms-playwright, and a parallel install "
-    "fights over its lock. An agent asks the orchestrator for the install. The orchestrator "
+    "fights over its lock. Remedy: An agent asks the orchestrator for the install. The orchestrator "
     "installs once, with `npx -y node@22 node_modules/playwright/cli.js install`."
 )
 

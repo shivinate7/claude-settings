@@ -3890,9 +3890,10 @@ GIB = 2 ** 30
 LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
 LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
+LOAD_BUSY_REMEDY = "Remedy: "
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: Wait with `bin/wait-until <time>` until the load drops, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -3987,8 +3988,8 @@ def load_hit(tool: str, tool_input) -> tuple:
         waits = [t for t in busy if not t.startswith("disk")]
         remedy = " and ".join((["wait until the load drops"] if waits else [])
                               + (["free disk space"] if len(waits) < len(busy) else []))
-        text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
-                else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
+        text = (LOAD_BUSY_NO_FOREGROUND + LOAD_BUSY_REMEDY + remedy.capitalize() if tool == "Workflow"
+                else LOAD_BUSY_REMEDY + remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
 
@@ -3999,7 +4000,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
 RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
-LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now. Remedy: End your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
@@ -4018,7 +4019,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
-LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane. Remedy: End your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
                             "load to drop. " + LOAD_LANE_CITE)
 
@@ -4110,7 +4111,7 @@ def opus_without_grant(tool_input) -> bool:
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
-                    "other commands. Run that command alone, in its own call, or drop it. "
+                    "other commands. Remedy: Run that command alone, as the only command of its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
@@ -4948,8 +4949,9 @@ SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage m
 # docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
-IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
-                     "screens; make any change to the design by hand.")
+IMPECCABLE_REASON = ("impeccable is for a design review only. Remedy: Run the skill with `audit` or "
+                     "`critique` as the first word of its args, on the rendered screens; make any change "
+                     "to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
 # The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
@@ -5152,7 +5154,7 @@ def sim_bypass_hit(segment: str) -> str:
 
 SIM_BYPASS_REASON = (
     "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
-    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "tests and shuts down. Remedy: Run `sim-test -scheme <scheme>` instead. "
     "(decision sim-test-is-the-one-boot-path)"
 )
 
@@ -5257,7 +5259,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
         booted = [d for d in devices if d["state"] == "Booted"]
         if len(booted) >= SIM_BOOT_CAP:
             refuse(tool, "deny", "simulator-boot-cap",
-                   "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
+                   "%d simulators are already booted: %s. Remedy: Use one of them, with "
+                   "`-destination 'platform=iOS Simulator,id=<its id above>'`, or ask the owner to stop one, "
                    "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
                    name)
         boots, table, now = (sweep.sim_read_boots(os.path.join(guard_core.config_dir(), "state", "sim-boots.jsonl")),
@@ -5267,8 +5270,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                     and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
                     and sweep.sim_keep_code(twin, boots, table, now) is None):
                 refuse(tool, "deny", "simulator-boot-twin",
-                       "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
-                       "instead of booting another." % (twin["name"], twin["udid"]), name)
+                       "An idle booted simulator of the same type and runtime exists: %s (%s). Remedy: Use it "
+                       "instead of booting another, with `-destination 'platform=iOS Simulator,id=<its id>'`." % (twin["name"], twin["udid"]), name)
         shut_down.append((name, [h["udid"] for h in hits]))
     for name, udids in shut_down:
         if tool == SIM_MCP:
@@ -5276,12 +5279,12 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                 continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
-                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Remedy: Run `sim-test`, "
                    "which boots it under the lock, or launch a simulator that is already booted. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
-                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
+                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. Remedy: %s "
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
@@ -6024,7 +6027,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
 WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
 WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
 WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
-                        "Replace it with the real value, then start the Workflow again. "
+                        "Remedy: Replace it with the real value, then start the Workflow again. "
                         "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
 
 
