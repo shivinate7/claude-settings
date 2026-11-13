@@ -23,13 +23,13 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 - **Logged only.** A replay the builder resolved or chose: a hand-resolved cherry-pick, a revert, a rebase squash, fixup or continue. The working tree while a replay is in progress (a cherry-pick, revert, squash or rebase). A path that a rebase replayed and that holds the upstream side again, as the builder left it during the rebase (a conflict it resolved to the upstream side).
 - **Not read.** A plain cherry-pick, rebase pick or `am`, a clean merge, a reset, a checkout and a pull. Each brings other people's commits.
 
-**Known limits.** The merge base is the first of `git merge-base` of the parents: a criss-cross merge may pick another. A case one parent changed and the other left at the base is not flagged when the result keeps the unchanged parent's body.
+**Known limits.** The merge base is the first of `git merge-base` of the parents: a criss-cross merge may pick another.
 
 **Known gap.** A squash merge or a `cherry-pick -n`, once committed, is a plain own commit: git removes its marker at the commit. Its test change is refused at push and stop.
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes, plus one `ast` parse per conflicted test path and parent at commit, push and stop (unmeasured). No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list (unmeasured). Commits of the builder's own add one rev-list, and one parent read and one diff each (unmeasured). A merge commit or a merge in progress adds one `merge-tree`, and one `rev-parse --show-prefix` when it left a conflict. A conflicted test path adds one parent read and three `show` calls, and the write tool adds one `merge-tree` for a test path it would refuse (unmeasured). The check starts no timer and no process. `rev-parse` runs on each refused test-author product write, and `merge-tree` runs once per such write while MERGE_HEAD exists (unmeasured). Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 281 cases, 8 red until a test-author re-points them (they expect the refusal the 2026-11-11 ruling lifts).
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 327 cases, all green.
 
 ## Roles
 
@@ -41,7 +41,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
   - a skip or expected-fail mark is added;
   - a test case, or a top-level call statement, is new: neither parent had it;
   - a statement of a parent is missing from the result: a loop, `with`, `try` or `if` block, an assignment, an assert, a fixture, a helper, the `__main__` block, or a `check_*` method of a class. It reads as lost. A same-named def or assignment whose body changed reads as a body change instead. A deliberate deletion of such a statement goes to a test-author;
-  - a case both parents hold, each changed from the merge base and differently (or added under one name with different bodies), is lost whichever body the result keeps;
+  - a case both parents hold, each changed from the merge base and differently (or added under one name with different bodies), is lost whichever body the result keeps; a case only one parent changed is lost when the result keeps the other parent's unchanged body;
   - any other top-level node, such as an import, a helper or a constant, equals no parent's node (a union of import statements passes; comments, imports and bare strings are free);
   - test config (`pytest.ini` and its kind, not `package.json`, `pyproject.toml`, `setup.cfg` or `tox.ini`) is not one parent's version whole. The four named files keep their old content check, so a keep-both union of a dependency line passes and a test-disabling line is still refused;
   - the file is a mutation test, whatever is kept (item 447 a stands);

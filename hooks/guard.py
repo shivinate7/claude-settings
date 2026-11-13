@@ -2802,9 +2802,9 @@ def text_at(root: str, rev, rel: str, top: str = "") -> str:
     return answer.stdout if answer is not None and answer.returncode == 0 else ""
 
 
-# ---- a builder's resolution of a merge conflict in a test file (decision builders-cannot-edit-tests, owner
-# ruling 2026-11-11 11:02 CST). The one home of the reading: `builder_merge_test_why` names the class of loss,
-# or '' when the resolution keeps every test case of both parents as the parents have it.
+# ---- a builder's resolution of a merge conflict in a test file (decision builders-cannot-edit-tests).
+# The one home of the reading: `builder_merge_test_why` names the class of loss, or '' when the resolution
+# keeps every test case of both parents as the parents have it.
 MERGE_TEST_REASONS = {
     "lost": "A test case of a parent is missing from your merge result.",
     "renamed": "Your merge result renames a test case of a parent.",
@@ -2931,11 +2931,13 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         if held and all(dump != h[0] for h in held):
             issues.add("skip" if _skip_marks(node) > max(_skip_marks(h[1]) for h in held) else "body")
     if base is not None:
-        # A case both parents hold, each changed from the base and differently: the result keeps one body at most.
+        # A case both parents hold with different bodies. Both changed it from the base: the result keeps one body
+        # at most. One changed it: the result must keep that body, since the base body drops that parent's edit.
         for key in set(first["cases"]) & set(second["cases"]):
             mine, theirs = first["cases"][key][0], second["cases"][key][0]
             origin = base["cases"].get(key, (None,))[0]
-            if mine != theirs and origin not in (mine, theirs):
+            if mine != theirs and (origin not in (mine, theirs) or (
+                    key in result["cases"] and result["cases"][key][0] == origin)):
                 issues.add("lost")
     # A statement a parent holds (not an import, not a comment) that the result no longer holds.
     have = _key_counts(result)
