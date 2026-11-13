@@ -83,7 +83,7 @@ Coordinator, 2026-11-13 12:14 CST, from the retrospective's blind review. This r
 1. A page writer exports the same document to git and pushes in the same turn, before any relay. Step `waiting-export-miss-cloud` makes the Stop check catch a cloud writer.
 2. The `receipts` collection joins the exported ones. `lint/layout.py:275` drops it today.
 3. Readers move from the page database to git: the answer check in `page_grant.py` and the Relayed Grant entry. This needs the owner's ruling first. Step `page-one-store-answers` holds it.
-4. Every repo registers every artifact with its account label. Each account's sessions export their own, with `export_page.py --all --account`. The label "current" names a different account in each repo, so it is replaced. A label names the account itself, one fixed name per account, never an email. The copy-age reader reports per account.
+4. Every repo registers every artifact with its account label. Each account's sessions export their own, with `export_page.py --all --account`. A label names the account itself, one fixed name per account, never an email. The copy-age reader reports per account.
 5. The cite check covers handoffs and CLAUDE.md, or they resolve links through `lint/layout.py`. This changes the line in `waiting-data-in-repo` that the cite check does not read briefs and handoffs.
 6. The copy-age reader (step `waiting-copy-age-read`) flags a copy older than its page's last write.
 
