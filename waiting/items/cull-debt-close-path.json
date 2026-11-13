@@ -27,9 +27,10 @@
   "owner": "lane guard-false-alarm-cull (session_013NEJL1y8fceJxUrwF8GxWY), via coordinator",
   "pick": "a",
   "ref": "coordinator 18:37 CST Nov 12",
+  "reply": "Closed 18:53 CST: withdrawn, already settled by your cull ruling of Nov 10 15:04 CST (decision cull-guard-wrong-refusals): after the cull, a wrong refusal is a note only, with no red test. The debt check is brought in line with that ruling.",
   "repo": "shivinate7/claude-settings",
   "short": "Close wrong-refusal debts",
-  "status": "open",
+  "status": "closed",
   "title": "How do four debts about wrong refusals close, when the debt check wants a test and the cull says a note needs none?",
   "why": "Two of your rules disagree: the debt check and the cull decision."
 }

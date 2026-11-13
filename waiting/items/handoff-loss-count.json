@@ -26,9 +26,10 @@
   "owner": "lane guard-false-alarm-cull (session_013NEJL1y8fceJxUrwF8GxWY), via coordinator",
   "pick": "a",
   "ref": "coordinator 18:37 CST Nov 12",
+  "reply": "Closed 18:54 CST: withdrawn, already settled by your item 109 pick b (Nov 1): keep a way to see whether to revisit handoff losses. The cull lane keeps a count elsewhere, read on demand (decision precompact-handoff item 13).",
   "repo": "shivinate7/claude-settings",
   "short": "Keep the handoff loss count",
-  "status": "open",
+  "status": "closed",
   "title": "The cull drops the check that counted what a session lost at each handoff. Keep a count somewhere else?",
   "why": "You asked on Nov 1 for a log so you could revisit the handoff point."
 }
