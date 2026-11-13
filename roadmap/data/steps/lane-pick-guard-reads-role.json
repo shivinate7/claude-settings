@@ -1,0 +1,14 @@
+{
+ "id": "lane-pick-guard-reads-role",
+ "title": "The Stop lane-pick guard reads the session's role record, not assume lane",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro 12:33 CST Nov 13: the Stop \"lane pick guard\" called the retrospective consultant a lane whose chat does not reach the owner, because its reply restated page item 734. The owner talks to that session directly.",
+ "source": "retrospective 12:33 CST Nov 13",
+ "note": "Todo, possible false alarm (verification-cry-wolf-guard-is-spent). The guard should read the session's role record, not assume lane. Read the guard record first; the retro supplies the exact refusal text. Unconfirmed until read.",
+ "updatedAt": "2026-11-13T12:34:33-06:00"
+}
