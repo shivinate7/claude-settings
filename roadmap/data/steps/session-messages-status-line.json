@@ -1,14 +1,14 @@
 {
  "id": "session-messages-status-line",
  "title": "Decision session-messages says its true status now",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1DRP6iuAWdxmWVKib",
  "owner": "triage",
  "blockedBy": [],
  "why": "docs/decisions/session-messages.md line 6 on main a11bafe09 reads \"Status: draft until build step 2 and the 20-message trial run\". #2849 (mailbox default for cloud and Windows) merged at a11bafe09, so the line may now be stale.",
  "source": "coordinator 23:44 CST Nov 12; close duty named on step mail-mac-unhold",
  "note": "Prose fix: read whether build step 2 and the 20-message trial run happened (git log on main, the trial record if any), then rewrite line 6 in place to say what is true now, with its source. If the trial has not run, the line says so and names what runs it. Express under R55 only if the coordinator counts it; else normal queue.",
- "updatedAt": "2026-11-12T23:45:19-06:00"
+ "updatedAt": "2026-11-12T23:51:21-06:00"
 }
