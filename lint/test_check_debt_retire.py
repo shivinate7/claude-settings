@@ -5,8 +5,9 @@ Every case builds a throwaway git repo in its own folder under this run's temp r
 commits a base and a head, and asks the check for its findings. A fixture test script appends its own name and its
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
+The CI entry cases (CiEntry, CiWorkflow) run the CLI on a PATH with no gh, and read checks.yml by its steps.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -14,6 +15,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 import check_debt_retire as D  # noqa: E402  the module under test
 import layout  # noqa: E402  the one layout: where the debts folder is (lint/layout.py)
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_key  # noqa: E402  the one step parser
 
 RUN = os.path.realpath(_test_temp.run_folder())
 atexit.register(shutil.rmtree, RUN, True)
@@ -136,17 +138,23 @@ class Case(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def cli(self):
+    def cli(self, env=None):
+        """The CLI on this repo. The runner's own GITHUB_EVENT_PATH never reaches a case: `env` adds the variables a case sets."""
+        child = {k: v for k, v in os.environ.items() if k != "GITHUB_EVENT_PATH"}
+        child.update(env or {})
         return subprocess.run([sys.executable, os.path.join(HERE, "check_debt_retire.py"), "--upstream", self.base, "--head", self.head],
-                              cwd=self.dir, capture_output=True, text=True)
+                              cwd=self.dir, capture_output=True, text=True, env=child)
+
+    def tools_only(self, *tools):
+        """A folder that holds the named tools and no others, for a PATH: a case names what can run, and nothing else can."""
+        bindir = tempfile.mkdtemp(prefix="bin-", dir=self.folder)
+        for tool in tools:
+            os.symlink(shutil.which(tool), os.path.join(bindir, tool))
+        return bindir
 
     def no_node(self):
         """PATH holds git and python3 alone: node is not found, so a .mjs check cannot run, and a .py check still can."""
-        bindir = os.path.join(self.folder, "bin")
-        os.makedirs(bindir, exist_ok=True)
-        for tool in ("git", "python3"):
-            os.symlink(shutil.which(tool), os.path.join(bindir, tool))
-        patch = unittest.mock.patch.dict(os.environ, {"PATH": bindir})
+        patch = unittest.mock.patch.dict(os.environ, {"PATH": self.tools_only("git", "python3")})
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -577,6 +585,54 @@ class TemplateExcuses(unittest.TestCase):
                        .replace(self.DROPS_LINE, "Drops-lines: docs/a.md -- gone"))
         self.assertNotEqual(mutated, text, "scope: the template has no placeholder line to replace, so nothing was mutated")
         self.assertEqual(self.live(mutated), ["a-debt", "docs/a.md"], "the excuse read misses a live Retire-run or Drops-lines line")
+
+
+CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+RETIRE_RUN_STEP = re.compile(r"(?:^|\s)lint/check_debt_retire\.py(?:\s|$)", re.M)  # the CLI, not test_check_debt_retire.py
+
+
+class CiEntry(Case):
+    """The CI entry is the CLI on a pull request. It reads the PR body from GitHub's event payload (GITHUB_EVENT_PATH), so a
+    Retire-run cite in the body reaches the check in CI as it does at merge (decision debt-close-runs-retire)."""
+
+    def event(self, body):
+        """A pull request event file whose PR body is `body`; None is the body GitHub sends for an empty description."""
+        path = os.path.join(self.folder, "event.json")
+        put(path, json.dumps({"pull_request": {"body": body}}))
+        return path
+
+    def closed_prose(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+
+    def test_c1_the_ci_entry_reads_the_retire_run_cite_from_the_pull_request_event(self):
+        self.closed_prose()
+        bare = {"PATH": self.tools_only("git", "python3")}  # no gh: a read of the cited run cannot reach GitHub from a case
+        plain = self.cli(env={**bare, "GITHUB_EVENT_PATH": self.event("Summary.\n")})
+        self.assertIn("names no runnable check", plain.stdout, "scope: a PR body with no cite did not leave the prose debt standing")
+        cited = self.cli(env={**bare, "GITHUB_EVENT_PATH": self.event("Summary.\n\nRetire-run: d-prose -- %s\n" % RUN_URL)})
+        self.assertNotIn("names no runnable check", cited.stdout, "the CI entry did not read the Retire-run cite from the pull request event")
+
+    def test_c2_a_null_pull_request_body_reads_as_no_cite_without_a_traceback(self):
+        self.closed_prose()
+        got = self.cli(env={"PATH": self.tools_only("git", "python3"), "GITHUB_EVENT_PATH": self.event(None)})
+        self.assertNotIn("Traceback", got.stderr, "a null PR body crashed the CI entry: " + got.stderr)
+        self.assertIn("names no runnable check", got.stdout, "a null PR body did not read as no cite")
+        self.assertEqual(got.returncode, 1, got.stdout + got.stderr)
+
+
+class CiWorkflow(unittest.TestCase):
+    """checks.yml runs the Retire check on a pull request, so a debt close is judged in CI and not only when merge runs."""
+
+    def test_c3_checks_yml_has_a_pull_request_step_that_runs_the_retire_check(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = gating_text(f.read())  # a step that cannot fail a pull request does not count
+        blocks = [job_block(text, job) or "" for job in CHECKS_SUITE_JOBS]
+        self.assertTrue(any(blocks), "scope: checks.yml has none of the jobs %s" % ", ".join(CHECKS_SUITE_JOBS))
+        steps = [st for block in blocks for st in step_blocks(block) if RETIRE_RUN_STEP.search(run_body(st) or "")]
+        self.assertTrue(steps, "checks.yml has no step that runs lint/check_debt_retire.py, so a debt close is judged only at merge")
+        self.assertTrue(any("github.event_name == 'pull_request'" in (step_key(st, "if") or "") for st in steps),
+                        "the Retire step does not gate on a pull request, where its base ref exists")
 
 
 if __name__ == "__main__":
