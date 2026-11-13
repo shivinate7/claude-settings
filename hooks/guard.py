@@ -365,9 +365,10 @@ Other tools, in `judge` order:
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
-                       `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
-                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
-                       fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
+                       `model` or no `source_url`, or whose tags hold no `cs-step:<slug>` tag (shared_names.STEP_TAG
+                       read exactly, no strip, no case fold; the slug is non-empty with no whitespace and no `<`);
+                       a value that is not text, or is empty or only whitespace once stripped, counts as missing.
+                       A call with no lane tag passes. The deny reason names the fields and the cs-step tag. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -2931,9 +2932,10 @@ LANE_REPO_TAG_REASON = (
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
-    "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
-    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
-    "`model` (the model that row names) and `source_url` (the repo) on create_session."
+    "A lane's start names `model`, `source_url` and a `cs-step` tag. With no repo a lane has nothing to work in; "
+    "with no model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. "
+    "Pass `model` (the model that row names) and `source_url` (the repo) on create_session. Put the lane's step "
+    "slug in a `cs-step:<slug>` tag (no spaces, no `<`), so the archive guard can find the lane's records PR."
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
@@ -3104,14 +3106,23 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
 
 
 def lane_start_settings_hit(tool: str, tool_input) -> str:
-    """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
-    A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
-    stripped. A call with no lane tag is not judged."""
+    """The settings a lane `create_session` call leaves out, from "model", "source_url" and "cs-step", joined by ", ",
+    or "". A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
+    stripped. The cs-step tag counts as missing unless some string tag starts exactly with STEP_TAG (no strip, no case
+    fold) and a slug follows with no whitespace and no `<`. A call with no lane tag is not judged."""
     if not is_lane_create_session(tool, tool_input):
         return ""
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
+    if not any(isinstance(t, str) and t.startswith(STEP_TAG) and _step_slug_ok(t[len(STEP_TAG):])
+               for t in lane_tags(tool_input)):
+        missing.append("cs-step")
     return ", ".join(missing)
+
+
+def _step_slug_ok(slug: str) -> bool:
+    """True for a non-empty slug with no whitespace and no `<` (a template placeholder)."""
+    return bool(slug) and "<" not in slug and not any(c.isspace() for c in slug)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -3644,7 +3655,7 @@ ROLE_DEFAULT = "general-purpose"
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 from shared_names import REVIEW_GUARD_MARKER  # noqa: E402  the one home of the guard marker, beside the audit marker
-from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
+from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"

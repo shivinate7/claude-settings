@@ -25,7 +25,7 @@ LANE_ORIGINS = {
 # The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
 # A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
 RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
-OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings"]
 # A lane call names the model it starts on and the repo it starts from. Each allow case below carries both.
 LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
 # The lane start's prompt: the owner's grant as its first non-blank line, then the brief. The lane's effort is
@@ -89,10 +89,10 @@ add("lane-effort-pin: lane tag with the effort command and a trailing newline, a
     effort=LANE_EFFORT_FIELD, carries="Grant")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
-    tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
+    tags=["cs-build:lane ", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
-    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
+    tags=["CS-BUILD:LANE", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
@@ -143,37 +143,37 @@ add("lane-one-topic: a create_session start with only the lane tag is denied, an
 # The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
 # on an origin it cannot parse turns a case red.
 add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings"])
 add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:claude-settings"])
 add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane")
 add("lane-repo-tag: origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:Shivinate7/Claude-Settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"],
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"],
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:triage"])
 add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 
 # No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
 # With no origin to compare to, a full `cs-repo:<owner>/<name>` tag passes; the short form and no repo tag
@@ -189,55 +189,55 @@ def _build_lane_no_origin():
 lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
 add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:claude-settings"])
 add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings"])
 add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:claude-settings"])
 add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings"])
 
 # Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
 # without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
 add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings "])
 add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", " cs-repo:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "CS-REPO:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
     "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings "])
 
 # A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
 add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 
 # The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
 add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:shivinate7/q_max"])
 
 # An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
 # extras() and github_slug()), so that name wins over the origin's path. The origin here is not a GitHub URL.
@@ -257,14 +257,14 @@ def _build_lane_extras():
 lazy_fixture([LANE_EXTRAS], _build_lane_extras)
 add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:org/name"], model="sonnet", source_url=LANE_SOURCE_URL)
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:org/name"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
     "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-build:lane", "cs-repo:x/y"])
+    tags=["cs-build:lane", "cs-step:lane-start-settings", "cs-repo:x/y"])
 
 # A denial names the tag the call must carry, so the agent can add it.
 add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"],
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-step:lane-start-settings"],
     carries="cs-repo:shivinate7/claude-settings")
 
 

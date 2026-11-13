@@ -112,7 +112,7 @@ add("lane-start-settings: lane tag with a no-break-space-only source_url is deni
     model="sonnet", source_url="\u00a0")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
+    tags=["CS-BUILD:LANE", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet")
@@ -129,6 +129,42 @@ add("lane-start-settings: lane tag among several tags with a model and a source_
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
     model="sonnet", source_url=LANE_SOURCE_URL)
+# A lane create_session carries a `cs-step:<slug>` tag: the step the lane builds. The archive guard finds a lane's
+# records by it, so a lane with none is denied by this rule, and the reason names `cs-step`. A slug is the text after
+# `cs-step:`: non-empty, with no whitespace and no `<`. The tag is read exactly, so `cs-step:` must start the tag.
+# Each deny below carries the model and the source_url, so cs-step is the only input it lacks.
+CS_STEP_BASE = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+for _name, _tags in (
+        ("no cs-step tag", CS_STEP_BASE),
+        ("an empty cs-step slug", CS_STEP_BASE + ["cs-step:"]),
+        ("a cs-step placeholder", CS_STEP_BASE + ["cs-step:<slug>"]),
+        ("a cs-step slug with a space", CS_STEP_BASE + ["cs-step: x"]),
+        ("cs-step with no colon", CS_STEP_BASE + ["cs-step"])):
+    add("lane-start-settings: lane with %s is denied" % _name, "deny", "lane-start-settings",
+        tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=_tags,
+        model="sonnet", source_url=LANE_SOURCE_URL, carries="cs-step")
+# A lane tag given as one string holds no second tag, so no cs-step can ride with it. The repo tag rule (lane-repo-tag)
+# runs before this rule and denies it first; the case pins that the string is read as a lane at all.
+add("lane-start-settings: lane tag given as one string is read as a lane (repo tag denies it first)", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane with cs-step:some-slug among several tags is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-repo:shivinate7/claude-settings", "cs-step:some-slug", "cs-build:lane"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane with an upper-case CS-STEP:slug tag is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=CS_STEP_BASE + ["CS-STEP:some-slug"],
+    model="sonnet", source_url=LANE_SOURCE_URL, carries="cs-step")
+add("lane-start-settings: upper-case lane tag with a cs-step tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings", "cs-step:some-slug"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
+# False-alarm controls: standing sessions are not lanes and need no cs-step. These pass on the old code too.
+for _tags in (["cs-build:triage"], ["cs-build:batch-runner"], ["cs-build:coordinator"], None):
+    _label = "no tags" if _tags is None else _tags[0]
+    _kw = {} if _tags is None else {"tags": _tags}
+    add("lane-start-settings: create_session tagged %s with no cs-step tag is allowed" % _label, "allow",
+        tool=LANE_TOOL, prompt="do the task", **_kw)
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
 add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
@@ -149,7 +185,7 @@ add("floor lane: a lane refused below the floor names source_url in its reason",
     model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
 add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
+    tags=["CS-BUILD:LANE", "cs-step:lane-start-settings", "cs-repo:shivinate7/claude-settings"],
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
