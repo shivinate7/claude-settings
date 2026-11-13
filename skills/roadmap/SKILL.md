@@ -1,9 +1,9 @@
 ---
 name: roadmap
-description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap", "roadmap page" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
+description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
 ---
 
-A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
+A repo has one page. Its Status tab shows the repo's plan from its homes. This
 skill publishes no page. The script makes one marked roadmap block, and the page writer splices
 it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
 publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
@@ -97,7 +97,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
   in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
-- `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
+- `items`: `ArtifactData list items` of the repo's page, every page, each row copied with only
   `n`, `status`, `home`, `lane` and `owner`. `lane` is where the item's answer went: the lane's slug, a tier name
   such as `batch-runner`, or `null` for none. Copy it when the item has one; leave the key out when the
   page row has none. `owner` is the session that reads the answer, also optional. The build keeps each

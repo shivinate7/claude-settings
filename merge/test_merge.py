@@ -1817,7 +1817,8 @@ class SmallBaseMove(ScopedRepo, Env):
 
     def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
-        lints = merge.lint_steps(root, "origin/main")
+        # HEAD, not origin/main: a batch that edits CLAUDE.md would otherwise plan test_sendmessage_state.py as a lint step, and hit_suites would skip it.
+        lints = merge.lint_steps(root, "HEAD")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
@@ -4373,6 +4374,9 @@ try:
         if S.get("contexts") is None:
             raise Refused(api_error(404, "Branch not protected"))
         finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
+
+    elif method == "GET" and re.fullmatch(r"rules/branches/[^/]+", rel):  # any base: GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
+        answer_list(S.get("main_rules") or [], None)
 
     else:
         raise Refused(api_error(404, "Not Found"))
@@ -12824,14 +12828,32 @@ class PinnedMismatchStopsMain(Env):
         self.assertIn("pins gates", err.getvalue())
         self.assertFalse(self.lock_ref())
 
+def github_read(args, rules, contexts, read_error=None):
+    """-> (code, output) of one `gh api` read of main's rules and classic protection, as GitHub answers it. `rules` is main's effective rules, []
+    when no ruleset applies: the rules/branches/main read gives them, a page at a time. `contexts` is the classic required checks, None for no
+    classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other call fails the case."""
+    rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+    jq = args[args.index("--jq") + 1] if "--jq" in args else None
+    if rel == "branches/main/protection/required_status_checks":
+        if contexts is None:
+            return 1, rest_err(404, "Branch not protected")
+        return 0, REST.one({"contexts": contexts}, jq)
+    if rel == "rules/branches/main" and read_error:
+        return read_error
+    if rel == "rules/branches/main":  # a list read: the page asked for, 30 rules to a page unless per_page asks for more
+        _method, _path, params, flags, _jq = REST.parse(args[1:])
+        return 0, REST.listing(rules, None, params, flags, jq, 100)
+    raise AssertionError("unexpected gh call: " + " ".join(args))
+
 class ProtectionHost(merge.Host):
-    """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
+    """Host whose reads of main answer as GitHub does with no ruleset (see github_read): `contexts` (a list) is the classic required checks,
+    None for no classic protection (a 404). No other gh call is answered."""
     def __init__(self, required, contexts):
         super().__init__(required=required, base="main", pause=lambda s: None)
         self.contexts = contexts
 
     def gh(self, args, cwd=None):
-        return (0, json.dumps(self.contexts)) if self.contexts is not None else (1, "HTTP 404: Not Found")
+        return github_read(args, [], self.contexts)
 
 class MergeChecksFromProtection(unittest.TestCase):
     """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
@@ -12862,6 +12884,121 @@ class MergeChecksFromProtection(unittest.TestCase):
         host = ProtectionHost("protection", ["x"])
         host.gh = lambda *a, **k: self.fail("a gh read was made")
         host.refuse_pinned_mismatch()
+
+REQUIRED_RULE = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}]}}
+NO_CHECK_RULES = [{"type": "deletion"}, {"type": "non_fast_forward"}]  # the blocks ruling r adds that name no check
+
+class RulesHost(merge.Host):
+    """Host whose reads of main answer as GitHub does. `rules` is main's effective rules, [] when no ruleset applies: the rules/branches/main
+    read gives them. `contexts` is the classic required checks,
+    None for no classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other gh call fails the case."""
+    def __init__(self, rules, contexts, read_error=None):
+        super().__init__(required="protection", base="main", pause=lambda s: None)
+        self.rules, self.contexts, self.read_error = rules, contexts, read_error
+
+    def gh(self, args, cwd=None):
+        return github_read(args, self.rules, self.contexts, self.read_error)
+
+class RulesetFirst(unittest.TestCase):
+    """The merge tool reads main's ruleset first and the classic protection second. A repo whose ruleset holds the required checks and that
+    has no classic protection must still merge, so the names come from the ruleset. The ruleset's one check is the rollup, all-jobs-passed (decision `main-branch-protection`)."""
+
+    def read(self, call):
+        try:
+            return call()
+        except merge.Stop as e:
+            self.fail("the merge tool stopped on main's required checks: %s" % e)
+
+    def test_a_ruleset_alone_names_the_required_check(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "a ruleset that requires the rollup, with no classic protection, names the rollup")
+
+    def test_a_ruleset_alone_does_not_stop_the_merge(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.required_names), [REQUIRED_CHECK],
+                         "the wait has names to wait for: a repo with a ruleset and no classic protection merges")
+
+    def test_the_ruleset_is_read_before_the_classic_protection(self):
+        host = RulesHost([REQUIRED_RULE], contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "the ruleset's names come first, so the classic list does not name the checks here")
+
+    def test_a_ruleset_without_a_check_rule_hands_the_names_to_the_classic_protection(self):
+        host = RulesHost(NO_CHECK_RULES, contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), ["checks"],
+                         "a ruleset with no status-check rule leaves the names to the classic protection")
+
+    def test_no_ruleset_and_no_classic_protection_names_nothing(self):
+        host = RulesHost([], contexts=None)
+        self.assertIsNone(self.read(host.protection_names), "no ruleset and no classic protection name no check")
+
+    def test_every_context_the_ruleset_requires_is_named(self):
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        host = RulesHost([two], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the wait names every check the ruleset requires, not only the first")
+
+    def test_a_check_rule_on_page_two_of_the_rules_read_is_named(self):
+        # GitHub gives 30 rules to a page by default, so the check rule (the 31st) is on page 2 and only a read that asks for it holds it
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        rules = [NO_CHECK_RULES[i % 2] for i in range(30)] + [two]
+        self.assertEqual(rules.index(two), 30, "the scope: the check rule is past the first page of 30")
+        host = RulesHost(rules, contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the check rule on page 2 names nothing: the rules read stops at page 1")
+
+    def test_a_failed_ruleset_read_stops_and_does_not_fall_back_to_the_classic_list(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(403, "Resource not accessible by integration")))
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            return
+        self.fail("a failed ruleset read must stop the merge, not fall back to the classic list (got %r)" % (names,))
+
+    def test_an_http_404_on_the_ruleset_read_stops_the_merge(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(404, "Not Found")))
+        reads = []
+        answer = host.gh
+        host.gh = lambda args, cwd=None: (reads.append(args[1]), answer(args, cwd))[1]  # the scope: the routes the merge reads
+        stopped, names = False, None
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            stopped = True
+        self.assertTrue(any(r.endswith("/rules/branches/main") for r in reads), "the merge must read main's ruleset before the classic list")
+        self.assertTrue(stopped, "a 404 on the ruleset read reads as no ruleset, so the classic list answered for it (got %r): the merge must stop" % (names,))
+
+class RulesReadNetwork(unittest.TestCase):
+    """A network error on the rules read is a NetStop: Host.gh raises it once its retries fail. The rules read must keep it a NetStop. A plain Stop
+    is read by the pinned-list check as an unreadable protection, so the run would go on where a network error must stop it."""
+
+    def host(self):
+        return merge.Host(required=["checks"], base="main", pause=lambda s: None)
+
+    def net_down(self):
+        """Every gh call fails with a network text, as a dropped connection does."""
+        return unittest.mock.patch.object(merge, "sh", lambda argv, cwd=None: (1, NET_DEADLINE))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_protection_names(self):
+        with self.net_down():
+            try:
+                names = self.host().protection_names()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped as a plain Stop, not a NetStop: %s" % e)
+        self.fail("a network error on the rules read named %r instead of stopping" % (names,))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_the_pinned_check(self):
+        with self.net_down(), contextlib.redirect_stdout(io.StringIO()):
+            try:
+                self.host().refuse_pinned_mismatch()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped the pinned check as a plain Stop: %s" % e)
+        self.fail("a network error on the rules read let the pinned check go on as an unreadable protection, not a stop")
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
@@ -12951,6 +13088,7 @@ class PullsHost(merge.Host):
         self.commit_reads = []  # the sha of each commits/<sha> read, in order
         self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
+        self.rules = []  # main's effective rules, as rules/branches/main answers them: [] when no ruleset applies
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -13018,6 +13156,8 @@ class PullsHost(merge.Host):
             return self.files_reply(rel, params, flags)
         if rel == "issues/comments":
             return REST.listing(self.comments, None, params, flags, None, 100)
+        if rel == f"rules/branches/{self.base}":
+            return json.dumps(self.rules)
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
@@ -16231,15 +16371,17 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read of
+        # rules/branches/main when no ruleset applies) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         "branches/main/protection/required_status_checks"])
+        self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
+        self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
+        self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -17514,6 +17656,8 @@ if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_
     if r["contexts"] is None:
         answer(api_error(404, "Branch not protected"), 1)
     answer(one({"contexts": r["contexts"]}, jq))
+if method == "GET" and rel == "rules/branches/main":  # no ruleset applies unless the root names rules: GitHub's reply is []
+    answer(listing(r.get("rules", []), None, params, flags, jq, 100))
 cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
 if method == "GET" and cmp:
     answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
