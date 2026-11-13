@@ -12983,12 +12983,24 @@ class ExpressPath(ScopedRepo, Env):
             os.remove(out_file)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
         env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
-        r = subprocess.run(["bash", script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
         flags = {}
         if os.path.exists(out_file):
             with open(out_file, encoding="utf-8") as f:
                 flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
         return r.returncode, flags
+
+    def test_scope_run_finds_bash_through_resolve_program(self):
+        """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
+        bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run takes bash from merge.resolve_program, as the merge tool does."""
+        asked = []
+        real = merge.resolve_program
+        def spy(name, env=None):
+            asked.append(name)
+            return real(name, env)
+        with unittest.mock.patch.object(merge, "resolve_program", spy):
+            self.scope_run()
+        self.assertIn("bash", asked, "scope_run did not find bash through merge.resolve_program")
 
     @staticmethod
     def turned_on(flags):
