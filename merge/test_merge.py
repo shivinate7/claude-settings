@@ -1832,12 +1832,12 @@ class SmallBaseMove(Env):
         with self.assertRaises(merge.Stop, msg="no workflow holds a checks job, and hit_suites named no stop"):
             merge.hit_suites(self.other, ["docs/guide.md"], set())
 
-    def test_a_workflow_without_the_checks_merge_install_job_stops_the_suite_read(self):
-        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that lacks checks-merge-install stops and names
-        it; the control first shows that the workflow with all four of those jobs hits the suite of `checks`, so the stop is the missing job's."""
+    def test_a_workflow_without_a_split_job_stops_the_suite_read(self):
+        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that lacks one of the three split jobs stops and
+        names it; the control first shows that the workflow with all of them hits the suite of `checks`, so the stop is the missing job's."""
         root = tempfile.mkdtemp(dir=self.run_dir)
         put(os.path.join(root, "hooks", "test_reads_guide.py"), DOC_SUITE)
-        put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the merge install step's suite: read, names no path
+        put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the split jobs' suites: read, name no path
         checks = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
                   "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
         merge_install = ("  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
@@ -1845,24 +1845,30 @@ class SmallBaseMove(Env):
         def hits(workflow):
             put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow)
             return [f for f, _ in merge.hit_suites(root, ["docs/guide.md"], set())]
-        split = "".join(merge_install.replace("checks-merge-install", j) for j in ("checks-install-checkout", "checks-merge-git"))
-        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install + split))
-        with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
-            hits(checks + split)
-        self.assertIn("checks-merge-install", str(cm.exception))
+        split = {j: merge_install.replace("checks-merge-install", j) for j in ("checks-merge-install", "checks-install-checkout", "checks-merge-git")}
+        self.assertIn("hooks/test_reads_guide.py", hits(checks + "".join(split.values())))
+        for job in split:
+            with self.subTest(job=job):
+                with self.assertRaises(merge.Stop, msg=f"hit_suites read a workflow with no {job} job and did not stop") as cm:
+                    hits(checks + "".join(text for j, text in split.items() if j != job))
+                self.assertIn(job, str(cm.exception))
 
-    def test_a_suite_only_checks_install_checkout_runs_gets_hit_by_hit_suites(self):
-        """hit_suites reads checks-install-checkout too: the guide suite that only that job runs is a hit, so a list without the job misses it."""
-        workflow = CHECKS_YML.replace("      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n", "").replace(
-            "      - name: Install checkout suite\n        run: python3 hooks/x.py\n",
-            "      - name: Install checkout suite\n        run: python3 hooks/test_reads_guide.py\n")
-        jobs = {name: job_block(workflow, name) or "" for name in ("checks", "checks-merge-install", "checks-install-checkout", "checks-merge-git")}
-        self.assertIn("hooks/test_reads_guide.py", jobs["checks-install-checkout"], "fixture: checks-install-checkout does not run the guide suite")
-        self.assertNotIn("test_reads_guide", "".join(text for name, text in jobs.items() if name != "checks-install-checkout"),
-                         "fixture: a job other than checks-install-checkout runs the guide suite")
-        self.scoped(workflow=workflow)
-        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
-                      "hit_suites did not read the suite of checks-install-checkout")
+    def test_a_suite_only_one_split_job_runs_gets_hit_by_hit_suites(self):
+        """hit_suites reads each split job: the guide suite that only one of them runs is a hit, so a list without that job misses it."""
+        self.scoped()
+        guide = "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n"
+        steps = {"checks-merge-install": "Merge install suite", "checks-install-checkout": "Install checkout suite", "checks-merge-git": "Merge git suite"}
+        for job, step in steps.items():
+            with self.subTest(job=job):
+                x_step = f"      - name: {step}\n        run: python3 hooks/x.py\n"
+                workflow = CHECKS_YML.replace(guide, "").replace(x_step, x_step.replace("hooks/x.py", "hooks/test_reads_guide.py"))
+                jobs = {name: job_block(workflow, name) or "" for name in ("checks", *steps)}
+                self.assertIn("hooks/test_reads_guide.py", jobs[job], f"fixture: {job} does not run the guide suite")
+                self.assertNotIn("test_reads_guide", "".join(text for name, text in jobs.items() if name != job),
+                                 f"fixture: a job other than {job} runs the guide suite")
+                put(os.path.join(self.other, ".github", "workflows", "checks.yml"), workflow)
+                self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
+                              f"hit_suites did not read the suite of {job}")
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
