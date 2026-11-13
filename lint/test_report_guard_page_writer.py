@@ -111,6 +111,26 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         refusal = self.question_refusal(root, acts)
         self.assertEqual(refusal, "", "the page writer's items write to the waiting page was refused: %s" % refusal)
 
+    def test_rw_green_triage_send_to_its_parent_is_not_refused(self):
+        # Catches: the page writer's question sent to its parent refused, so a fix that makes triage owner-facing
+        # drops the parent send the lane rule counted.
+        root, _writer = self.repo_and_writer()
+        os.environ[REMOTE_ENV] = trs.TRIAGE_ENV
+        acts = [*trs.own_record(trs.TRIAGE_ID, ["cs-build:triage"], parent=PARENT_ID),
+                *self.send(session_id=PARENT_ID, result=self.DELIVERED)]
+        refusal = self.question_refusal(root, acts)
+        self.assertEqual(refusal, "", "the page writer's send to its parent was refused: %s" % refusal)
+
+    def test_rw_red_lane_items_write_to_the_page_still_blocks(self):
+        # Catches: any lane passing on an items write, so the parent-send rule goes dead for a session that is
+        # not the page writer.
+        root, _writer = self.repo_and_writer()
+        page = layout.waiting_page(root)
+        os.environ[REMOTE_ENV] = trs.TRIAGE_ENV
+        acts = [*trs.own_record(trs.TRIAGE_ID, ["cs-build:lane"], parent=PARENT_ID), *self.items_write(page)]
+        refusal = self.question_refusal(root, acts)
+        self.assertNotEqual(refusal, "", "a plain lane's items write passed the pick check")
+
 
 if __name__ == "__main__":
     unittest.main()

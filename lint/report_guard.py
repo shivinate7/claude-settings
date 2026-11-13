@@ -1233,14 +1233,16 @@ def question_problem(records, turn, text, hook):
     from override import remote_session_id
     own_id = remote_session_id()
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
-    if lane and _is_page_writer(hook.get("transcript_path")):
-        lane = False  # the triage session names a parent id in its record but is the page writer, so owner-facing
     if lane:
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+        if any(t & wanted for t in sends):
+            return "", ""
+        if not _is_page_writer(hook.get("transcript_path")):
+            return LANE_REFUSAL, ""
+        # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
