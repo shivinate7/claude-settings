@@ -1044,8 +1044,9 @@ def expected_wake(mid):
 
 
 def more_line(count):
-    """The line that counts the new messages past the five named, with the read command for the address."""
-    return "mail: %d more new; read: `mail read --addr %s`" % (count, ADDR)
+    """The line that counts the new messages past the five named. Its read command has no --addr: the waiter watches
+    the session's address and the repo address, and plain mail read lists every own address."""
+    return "mail: %d more new; read: `mail read`" % count
 
 
 class WakeEveryNew(WaitCase):
@@ -1053,21 +1054,23 @@ class WakeEveryNew(WaitCase):
     (by id, for one address), and exits 0. At most five lines: past five, the first five are named and one more line
     counts the rest."""
 
-    def land_at_second_poll(self, new_ids, open_at_start=()):
+    def land_at_second_poll(self, new_ids, open_at_start=(), addr_of=None, waiter_addrs=None):
         """A waiter whose address holds `open_at_start` when it starts. At its second sleep, each of `new_ids` lands
-        as one message. Returns (exit code, printed text, probe)."""
+        as one message, at the address `addr_of` gives it (by default ADDR). `waiter_addrs` is what the waiter watches
+        (by default [ADDR]). Returns (exit code, printed text, probe)."""
         store, machine = self.fixture()
         for mid in open_at_start:
             store.seed(ADDR, mid, "request", SENDER, "Body marker: open at start %s" % mid)
         probe = {}
+        addr_of = addr_of or {}
 
         def land(fake):
             if len(fake.sleeps) == 2 and "sent" not in probe:
                 for mid in new_ids:
-                    store.seed(ADDR, mid, "request", SENDER, wake_subject(mid))
+                    store.seed(addr_of.get(mid, ADDR), mid, "request", SENDER, wake_subject(mid))
                 probe["sent"] = True
 
-        code, text = run_wait(machine.env, FakeTime(hook=land), Procs(), max_seconds=600)
+        code, text = run_wait(machine.env, FakeTime(hook=land), Procs(), addrs=waiter_addrs, max_seconds=600)
         return code, text, probe
 
     def test_two_new_messages_each_get_one_wake_line_in_id_order_and_exit_0(self):
@@ -1116,6 +1119,29 @@ class WakeEveryNew(WaitCase):
         self.assertEqual(code, 0, "five new messages made mail wait exit %r, expected 0" % (code,))
         self.assertEqual(text.splitlines(), [expected_wake(mid) for mid in ids],
                          "five new messages did not print five wake lines and no 'more new' line: %r" % text)
+
+    def test_count_line_for_a_message_at_the_other_address_names_no_addr(self):
+        """The waiter watches the session's address and the repo address. One new message lands at the session's address
+        and five at the repo address, so six are new in one poll. The sixth message sits at the other address from the
+        first one named, so a count line with --addr would miss it."""
+        session, repo = PC_BASE + "/S1", PC_BASE
+        ids = ["0a1b2c3d4e%02x" % n for n in range(0x90, 0x96)]
+        addr_of = {mid: repo for mid in ids[1:]}
+        addr_of[ids[0]] = session
+        code, text, probe = self.land_at_second_poll(ids, addr_of=addr_of, waiter_addrs=[session, repo])
+        self.assertIn("sent", probe, "the sends never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "six new messages at two addresses made mail wait exit %r, expected 0" % (code,))
+        lines = text.splitlines()
+        named = [line for line in lines if line.startswith("mail: new ")]
+        self.assertEqual(len(named), 5, "six new messages named %d messages, expected 5: %r" % (len(named), text))
+        counted = [line for line in lines if not line.startswith("mail: new ")]
+        self.assertEqual(len(counted), 1, "six new messages printed %d count lines, expected 1: %r"
+                         % (len(counted), text))
+        self.assertNotIn("--addr", counted[0],
+                         "the count line names an address with --addr, so it does not list the message at the other "
+                         "address: %r" % counted[0])
+        self.assertEqual(counted[0], more_line(1),
+                         "the count line for one message past five is not the plain mail read form: %r" % counted[0])
 
 
 def lock_state(path):
