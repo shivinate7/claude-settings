@@ -506,8 +506,16 @@ class Homes:
         refs = ruling_home.value_refs(rel, root, self.ref_lists)
         if not refs:
             return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
-        self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
+        if self._counts_for_close(root):
+            self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
         return None
+
+    def _counts_for_close(self, root):
+        """True when main's copy of a home in `root` may close an item: `root` is the session's own repo (the first of
+        `_repos`: where the session worked, else the Stop's cwd), or an absolute home's repo that `_repos` does not
+        hold. The Stop's cwd repo, when it is not the session's, may pass the home check but never proves the close."""
+        own = self._repos()
+        return not own or root == own[0] or root not in own
 
     def closed_problem(self, item_id, rest):
         """None when a closed note's home is a page, a not-a-grant or not-page-form verdict, a `step:<slug>` whose step file
@@ -968,6 +976,11 @@ def page_form_problem(text, items, homes, pages, session):
             % (TEMPLATE_DIR, scope[1], TEMPLATE_DIR, NOT_PAGE_FORM))
 
 
+class Closable(str):
+    """A refusal that `[closed]` settles: the final reason names that mark only when one of these is in it. Only the
+    standing-id refusal is one; typing `[closed]` on a ruling or task line does not clear its home refusal."""
+
+
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
     out, seen = [], {}
     for n, b in enumerate(blocks):
@@ -995,7 +1008,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                 found = None if it[3] else repo_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
                 if found:
                     out.append(found)
-            elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
+            elif homes is not None and it[1].startswith(SETTLING_PREFIXES):
                 found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant, at - 1)
                 if found:
                     out.append(found)
@@ -1005,7 +1018,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                     out.append(found)
         for i in open_ids([b], ("[standing]",)):
             if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(i), handoff):
-                out.append("%s is not in the handoff: put it there, or end its line with [closed] once it is settled" % i)
+                out.append(Closable("%s is not in the handoff: put it there, or end its line with [closed] once it is settled" % i))
     return out
 
 
@@ -1538,8 +1551,9 @@ def inbox_stop(hook):
                        + "; ".join(r.rstrip(".") for r in reasons)
                        + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
-                          " message to that repo's triage session, and put open standing ids in the handoff, or end a settled item's"
-                          " line with [closed]."
+                          " message to that repo's triage session, and put open standing ids in the handoff"
+                          + (", or end a settled item's line with [closed]."
+                             if any(isinstance(r, Closable) for r in found) else ".")
                           if found else "."))
         return out
     except Exception as e:  # advisory: a crash passes, and says so on stderr

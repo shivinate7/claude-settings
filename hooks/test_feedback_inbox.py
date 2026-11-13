@@ -210,6 +210,7 @@ Relay: no case. A relay arrives in the `<cross-session-message` frame, the same 
 
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -4839,6 +4840,98 @@ def case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string():
           "only merge after the check passes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
 
 
+NOT_SAVED_ANSWER = "question answer was not saved"  # the words of the box's line when an answer cannot be saved
+OPTION_B = "Option B"
+
+
+def case_box_answer_as_an_object_is_saved_as_its_text():
+    """A box answer may be an object with an `answer` field, keyed by question. It is saved as its answer text, as a
+    string answer is, and the question is not saved."""
+    cfg, sid = new_cfg(), "qbox-object"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"answer": OPTION_B}}},
+                      questions=box_questions(SHIP_QUESTION))
+    check("question object: the hook exits 0", p.code == 0, p.desc())
+    check("question object: the answer's text is saved", saved_text(cfg, sid) == OPTION_B, saved_text(cfg, sid))
+
+
+def case_box_answer_list_of_objects_is_saved_as_its_texts():
+    """A multi-select answer may come as a list of objects. The answer text of each object is saved."""
+    cfg, sid = new_cfg(), "qbox-object-list"
+    p = question_hook(cfg, sid, {"answers": {MULTI_QUESTION: [{"answer": "Opt A"}, {"answer": "Opt C"}]}},
+                      questions=box_questions(MULTI_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question object list: the hook exits 0", p.code == 0, p.desc())
+    check("question object list: the first object's answer is saved", "Opt A" in text, text)
+    check("question object list: the second object's answer is saved", "Opt C" in text, text)
+
+
+def case_box_answer_that_cannot_be_read_is_never_silent():
+    """An answer the hook cannot save must not vanish: the box saves it or prints the `not saved` line. A readable
+    answer beside an unreadable one is still saved. The empty answers dict is the control: no answer saves nothing and
+    prints nothing."""
+    cfg, sid = new_cfg(), "qbox-unreadable"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"choice": 2}}}, questions=box_questions(SHIP_QUESTION))
+    check("question unreadable: the answer is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p.out or saved_text(cfg, sid) != "", p.desc())
+    cfg2, sid2 = new_cfg(), "qbox-partial"
+    p2 = question_hook(cfg2, sid2, {"answers": {SHIP_QUESTION: "Yes", MULTI_QUESTION: {"choice": 2}}},
+                       questions=box_questions(SHIP_QUESTION, MULTI_QUESTION))
+    check("question partial: the readable answer beside an unreadable one is saved",
+          "Yes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+    check("question partial: the unreadable answer beside a readable one is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p2.out or saved_text(cfg2, sid2) != "Yes", p2.desc())
+    cfg3, sid3 = new_cfg(), "qbox-no-answers"
+    p3 = question_hook(cfg3, sid3, {"answers": {}}, questions=box_questions(SHIP_QUESTION))
+    check("question no answers: an empty answers dict saves nothing and prints nothing",
+          not os.path.exists(inbox_of(cfg3, sid3)) and p3.out.strip() == "", p3.desc())
+
+
+def case_box_note_with_inner_quotes_is_saved_whole():
+    """A trailing `user notes:` is the owner's own words, quote marks included. The cut at the span's last quote, the one
+    after `CI`, keeps `Yes". user notes: only merge if "CI` and drops ` is green.`. The note is saved whole."""
+    cfg, sid = new_cfg(), "qbox-note-quotes"
+    note = 'only merge if "CI" is green.'
+    p = question_hook(cfg, sid, 'The user answered: "%s"="Yes". user notes: %s' % (SHIP_QUESTION, note),
+                      questions=box_questions(SHIP_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question note quotes: the hook exits 0", p.code == 0, p.desc())
+    check("question note quotes: the answer is saved first", text.startswith("Yes"), text)
+    check("question note quotes: the owner's note is saved whole, its inner quotes included", note in text, text)
+
+
+def case_close_proof_counts_only_the_session_repo():
+    """Homes(cwd=B, worked_in=A). The session worked in repo A, and the Stop runs from repo B, which alone holds
+    docs/decisions/x.md on main. The close proof counts the session's own repo, so B's copy proves nothing: the verdict
+    is unknown, and the ruling stays in the compaction note. Controls: a Stop run from A reads the same unknown, and a
+    home that the session's repo holds on main closes from another cwd."""
+    mod = guard_module()
+    rel = "docs/decisions/x.md"
+    session = make_repo("qclose-session", tracked=("README.md",), extras=ROLLED_OUT)
+    stop = make_repo("qclose-stop", tracked=(rel,), extras=ROLLED_OUT)
+    held = make_repo("qclose-held", tracked=(rel,), extras=ROLLED_OUT)
+    scope = tuple(bool(mod.ruling_home.value_refs(rel, where)) for where in (session, stop, held))
+    check("close scope: main holds the home in the Stop's repo and the held repo, not in the session's repo",
+          scope == (False, True, True), scope)
+    text = render_block("the rule is settled", items=("- fb-0958-1 [ruling] -> %s" % rel,))
+
+    def verdict(cwd, worked_in):
+        """(the item's verdict from tend, whether the compaction note still lists it) for a Stop from cwd."""
+        rows, _ = mod.tend_text(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        listed = "fb-0958-1" in mod.needs_work_ids(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        return {ident: got for _, ident, got in rows}.get("fb-0958-1"), listed
+
+    crossed, crossed_listed = verdict(stop, session)
+    check("close proof: a home only the Stop's repo holds does not close a session bound to another repo",
+          crossed == "unknown", "verdict %r" % (crossed,))
+    check("close proof: that ruling stays in the compaction note", crossed_listed, "listed %r" % (crossed_listed,))
+    own, _ = verdict(session, session)
+    check("close proof control: a Stop run from the session's own repo reads the same unknown",
+          own == "unknown", "verdict %r" % (own,))
+    mirror, _ = verdict(session, held)
+    check("close proof control: a home the session's repo holds on main closes from another cwd",
+          mirror == "stale", "verdict %r" % (mirror,))
+
+
 def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
     """A grant block whose text holds six lone CRs, a granted ruling under it, and a plain block's refused ruling to
     the same path below. The Stop reads the inbox with universal newlines, which split at each CR, so the granted line
@@ -4857,6 +4950,89 @@ def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
     check("lone CR: the refused ruling keeps its line, unclosed",
           inbox_line(cfg, sid, "fb-0960-2") == refused, inbox_line(cfg, sid, "fb-0960-2"))
     expect_block("lone CR: the refused ruling still blocks", p, named=("fb-0960-2",), unnamed=("fb-0960-1",))
+
+
+# --------------------------------------------------------------------------- the remedy names [closed] only where a close settles the item
+
+def case_unsent_page_or_repo_refusal_does_not_name_closed():
+    """An unsent page item and an unsent repo item are refused for their sends. The refusal must not offer `[closed]` as
+    a way out: a page or repo item is not settled by the mark, so the owner's answer or message would never be sent."""
+    p = page_run(new_cfg(), "page-remedy", [("98: a", (PAGE_ITEM,))], [owner_rec("98: a"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("page remedy: the unsent page item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("page remedy: the refusal names the page item", "fb-0958-7" in reason, reason)
+    check("page remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+    p = page_run(new_cfg(), "repo-remedy", [("rename", (REPO_ITEM,))], [owner_rec("rename"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("repo remedy: the unsent repo item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("repo remedy: the refusal names the repo item", REPO_ID in reason, reason)
+    check("repo remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+
+
+def case_standing_refusal_still_names_closed():
+    """The control: the refusal for an open standing id still names `[closed]`, the one refusal the mark settles. The
+    ruling refusal is case_ruling_refusal_for_an_unresolved_home_does_not_name_closed."""
+    cfg, sid = new_cfg(), "closed-control-standing"
+    write_file(inbox_of(cfg, sid), render_block("standing id missing from the handoff",
+                                                items=("- fb-0958-4 [standing] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    reason = block_reason(guard(cfg, sid)) or ""
+    check("closed control: the standing refusal blocks", "fb-0958-4" in reason, reason)
+    check("closed control: the standing refusal names [closed]", "[closed]" in reason, reason)
+
+
+# --------------------------------------------------------------------------- the remedy: [closed] for a standing id only; a dict key that is not the question; one home
+
+UNRESOLVED_RULING = "- fb-1 [ruling] -> NO HOME YET"  # a ruling whose home resolves in no repo
+UNRESOLVED_CLOSED = UNRESOLVED_RULING + " [closed]"  # the same line with the mark typed on it
+
+
+def case_ruling_refusal_for_an_unresolved_home_does_not_name_closed():
+    """Typing `[closed]` on a ruling whose home resolves nowhere does not clear its refusal, so the refusal must not offer
+    the mark. The line with the mark still blocks, as case_guard_ruling_homed_to_handoff_blocks pins."""
+    p = homed(new_cfg(), "r-unresolved", (UNRESOLVED_RULING,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling: the refusal blocks", p, named=("fb-1",))
+    reason = block_reason(p) or ""
+    check("unresolved ruling: the refusal does not name [closed]", "[closed]" not in reason, reason)
+    p = homed(new_cfg(), "r-unresolved-closed", (UNRESOLVED_CLOSED,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling typed [closed]: the block still holds", p, named=("fb-1",))
+
+
+def case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped():
+    """A dict answer keyed by a text that is not exactly the question's (a trailing space) is not dropped silently: the
+    answers are saved, or the box prints the `not saved` line."""
+    cfg, sid = new_cfg(), "qbox-key-mismatch"
+    p = question_hook(cfg, sid, {"answers": {"A?": "answer for A", "B? ": "answer for B"}},
+                      questions=box_questions("A?", "B?"))
+    text = saved_text(cfg, sid)
+    lines = text.split("\n") if text else []
+    check("question key mismatch: the hook exits 0", p.code == 0, p.desc())
+    check("question key mismatch: each answer is saved, or the not-saved line prints, never silence",
+          NOT_SAVED_ANSWER in p.out or sorted(lines) == ["answer for A", "answer for B"], p.desc() + " saved=" + text)
+
+
+def case_problems_tests_the_settling_kinds_by_their_one_home():
+    """The ruling and task branch of problems() names the settling kinds through SETTLING_PREFIXES, not a literal copy of
+    the tuple. Read with ast, the language's own parser: a copy is red even while it agrees with the one home."""
+    with open(GUARD_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), GUARD_PATH)
+    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "problems"]
+    check("one home: feedback_guard.py defines problems()", len(defs) == 1, "found %d" % len(defs))
+    if len(defs) != 1:
+        return
+    literal, named = False, False
+    for call in ast.walk(defs[0]):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "startswith" and call.args):
+            continue
+        arg = call.args[0]
+        words = [e.value for e in getattr(arg, "elts", []) if isinstance(e, ast.Constant)]
+        literal = literal or words == ["[ruling]", "[task]"]
+        named = named or any(isinstance(n, ast.Name) and n.id == "SETTLING_PREFIXES" for n in ast.walk(arg))
+    check("one home: problems() repeats the settling prefixes as a literal tuple", not literal,
+          "problems() has its own (\"[ruling]\", \"[task]\") tuple")
+    check("one home: problems() tests the settling kinds with SETTLING_PREFIXES", named,
+          "no startswith in problems() takes SETTLING_PREFIXES")
 
 
 CASES = (
@@ -5074,6 +5250,16 @@ CASES = (
     case_multi_question_box_saves_only_the_answers,
     case_one_question_answer_keeps_its_quote_marks_whole,
     case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string,
+    case_box_answer_as_an_object_is_saved_as_its_text,
+    case_box_answer_list_of_objects_is_saved_as_its_texts,
+    case_box_answer_that_cannot_be_read_is_never_silent,
+    case_box_note_with_inner_quotes_is_saved_whole,
+    case_close_proof_counts_only_the_session_repo,
+    case_unsent_page_or_repo_refusal_does_not_name_closed,
+    case_standing_refusal_still_names_closed,
+    case_ruling_refusal_for_an_unresolved_home_does_not_name_closed,
+    case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped,
+    case_problems_tests_the_settling_kinds_by_their_one_home,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
     case_refs_are_listed_once_per_repo_not_per_item,
 )

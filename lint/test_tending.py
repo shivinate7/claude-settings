@@ -25,6 +25,8 @@ Shapes this file assumes, pinned in one place (the adapter `verdicts_of`, and th
   - command line: python3 lint/tending.py --point P [--store S] [--root R]. Exit 1 for a live store with a stale
     item that its close step cannot fix, or for a malformed contract. Exit 0 otherwise.
 """
+import ast
+import builtins
 import contextlib
 import importlib.util
 import io
@@ -747,6 +749,49 @@ class ResolverAgreementTests(unittest.TestCase):
                 got = verdicts_of(runner, entry("home-held"), "- P1 a path. Home: %s\n" % value, sub)
                 self.assertEqual(got, {"P1": expected}, "Home: %s from a subfolder: the runner says %r, the resolver "
                                  "says %r" % (value, got.get("P1"), expected))
+
+
+def settling_names(path, name):
+    """The names a module-level `name` is built from, read with ast: each Name and Attribute in its value, builtins
+    left out. None when the module assigns no `name` at its top level."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            used = {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+            used |= {n.attr for n in ast.walk(value) if isinstance(n, ast.Attribute)}
+            return used - set(dir(builtins))
+    return None
+
+
+class SettlingKindsOneHomeTests(unittest.TestCase):
+    """Ruling: the kinds that settle on their file home have one home. feedback_guard's SETTLING_PREFIXES (the Stop's
+    `[kind]` prefixes) and the runner's SETTLING_KINDS (the bare kind words) name the same kinds, and one of the two is
+    built from the other, or both are built from one shared name. Two literal lists agree until one of them is edited."""
+
+    def test_the_two_lists_name_the_same_kinds(self):
+        feedback, runner = hook_module("feedback_guard"), load_runner()
+        self.assertTrue(feedback.SETTLING_PREFIXES, "scope: feedback_guard.SETTLING_PREFIXES is empty")
+        prefixes = tuple(p.strip("[]") for p in feedback.SETTLING_PREFIXES)
+        self.assertEqual(prefixes, tuple(runner.SETTLING_KINDS),
+                         "settling kinds: the Stop's prefixes name %r, the runner's kinds name %r"
+                         % (prefixes, tuple(runner.SETTLING_KINDS)))
+
+    def test_one_list_is_built_from_the_other_or_both_from_one_source(self):
+        kinds = settling_names(runner_path(), "SETTLING_KINDS")
+        prefixes = settling_names(hook_module("feedback_guard").__file__, "SETTLING_PREFIXES")
+        self.assertIsNotNone(kinds, "scope: lint/tending.py assigns no module-level SETTLING_KINDS")
+        self.assertIsNotNone(prefixes, "scope: hooks/feedback_guard.py assigns no module-level SETTLING_PREFIXES")
+        one_names_the_other = "SETTLING_PREFIXES" in kinds or "SETTLING_KINDS" in prefixes
+        self.assertTrue(one_names_the_other or bool(kinds & prefixes),
+                        "two literal homes: lint/tending.py SETTLING_KINDS and hooks/feedback_guard.py "
+                        "SETTLING_PREFIXES are not built from each other or from one shared name")
 
 
 class RuleHomeTests(unittest.TestCase):
