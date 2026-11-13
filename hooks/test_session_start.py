@@ -2591,6 +2591,41 @@ class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, Session
         self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
         self.assertEqual(self.read_text(kept), "local other\n", "the ignored directory's own file changed")
 
+    def test_a_directory_holding_an_ignored_file_that_origin_replaces_with_a_file_is_not_moved_over(self):
+        self.publish_checkout({"t/f": "tracked f\n"}, ["*.log"])
+        local = self.write_ignored("t/ign.log", "local log\n")
+        self.assert_ignored_listed("t/ign.log")
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "t")), "scope: t is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"t": "now a file\n"}, remove=["t/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file under t changed")
+        self.assertTrue(os.path.isfile(local), "the ignored file under t was removed")
+        self.assertEqual(self.read_text(local), "local log\n", "the ignored file under t was overwritten")
+
+    def test_a_directory_holding_an_ignored_symlink_that_origin_replaces_with_a_file_is_not_moved_over(self):
+        self.publish_checkout({"t/f": "tracked f\n"}, ["*.log"])
+        scratch = os.path.join(self.root, "scratch")
+        os.makedirs(scratch)
+        marker = os.path.join(scratch, "marker.txt")
+        self.put(marker, "scratch marker\n")
+        link = os.path.join(self.primary, "t", "ign.log")
+        self.link_to(marker, link)
+        self.assert_ignored_listed("t/ign.log")
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "t")), "scope: t is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"t": "now a file\n"}, remove=["t/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored symlink under t changed")
+        self.assertTrue(os.path.islink(link), "the ignored symlink under t was replaced")
+        self.assertEqual(os.path.realpath(link), os.path.realpath(marker), "the ignored symlink now points elsewhere")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
