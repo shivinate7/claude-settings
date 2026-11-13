@@ -12907,6 +12907,7 @@ class PullsHost(merge.Host):
     repo-wide issue comments. `list_calls` keeps (path, fields) of every list read, in order. Any other read is a failed case.
     `count_gh` runs the real Host.pages and Host.api over a scripted `gh` instead, which answers each REST route with the shape `gh api` gives
     and keeps the route of every call in `gh_calls`: the cost of one read, counted at the one seam every call goes through.
+    In count mode a POST is answered as posted, and its body is kept in `posts`, as the lane-lint comment a PASS posts.
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
@@ -12929,6 +12930,7 @@ class PullsHost(merge.Host):
         self.reads = []
         self.list_calls = []
         self.count_gh, self.gh_calls = count_gh, []
+        self.posts = []  # (route, body) of each POST in count mode: the lane-lint comment a PASS posts
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
@@ -12942,6 +12944,10 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
+            if "-X" in args and args[args.index("-X") + 1] == "POST":  # Host.api sends a body through --input: the file the post reads, then removes
+                with open(args[args.index("--input") + 1], encoding="utf-8") as f:
+                    self.posts.append((rel, json.load(f)))
+                return 0, json.dumps({"id": 1})
             if self.files_error and re.fullmatch(r"pulls/\d+/files", rel):
                 return 1, self.files_error
             m = re.fullmatch(r"pulls/(\d+)", rel)
@@ -15107,7 +15113,43 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
 class ReviewEnv(Env):
-    """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here."""
+    """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here.
+    The record's lane lint (R67) is stubbed for every class here, as a PASS that runs nothing: a stub that calls the real lint would need
+    a ci-job stub, a fake host that reads and posts like GitHub, and a feat branch the fixture lacks. The lint's own cases are
+    ReviewRecordLint (merge/test_lane_lint.py), which sets REAL_LINT and keeps the real lint. Other callers of lane_lint get it unchanged."""
+
+    REAL_LINT = False  # True: the record's lint runs for real (ReviewRecordLint)
+
+    def setUp(self):
+        super().setUp()
+        if not self.REAL_LINT:
+            real = merge.lane_lint
+
+            def pass_without_lint(*args, **kwargs):
+                return 0 if kwargs.get("review_record") else real(*args, **kwargs)
+
+            patch = unittest.mock.patch.object(merge, "lane_lint", side_effect=pass_without_lint)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def commit_feat(self, changes):
+        """Commit `changes` ({path: text}, None removes a path) on feat in the second clone and push it, so origin's feat and the lane's head move."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for rel, text in changes.items():
+            path = os.path.join(o, *rel.split("/"))
+            if text is None:
+                os.remove(path)
+            else:
+                put(path, text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "feat: a change the review-record case sets")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def set_feat_workflow(self, text):
+        """Commit on feat: its .github/workflows/checks.yml becomes `text`, or is removed when `text` is None."""
+        self.commit_feat({".github/workflows/checks.yml": text})
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
@@ -15345,7 +15387,8 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(got, url, "batch_blame got %r, not the run URL as given" % got)
 
 class ReviewRecordWrite(ReviewEnv):
-    """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
+    """`merge <pr> --review-record` prints the record for the pull request's live head, after its lint passes (R67). It pushes nothing and takes
+    no lock. The lint is stubbed in this class (ReviewEnv), so the lint comment a PASS posts is checked by ReviewRecordLint, not here."""
 
     def test_the_record_is_printed_and_nothing_is_pushed(self):
         before, locked = self.refs(), self.lock_ref()
@@ -17345,21 +17388,37 @@ class ReviewGuardHostFiles(unittest.TestCase):
             fn(7, 1)
 
 class ReviewGuardCost(ReviewEnv):
-    """`--review-record` without --fix-check makes exactly three gh reads, for a pull request of up to 100 files: the pull request, then its files
-    list (one page up to 100 files), then its comments (issues/comments). They are counted at the one seam every call goes through (PullsHost in
-    count mode), as ReviewedList counts its reads."""
+    """`--review-record` without --fix-check makes three gh reads of its own, for a pull request of up to 100 files: the pull request, then its
+    files list (one page up to 100 files), then its comments (issues/comments). Its lane lint (R67, decision pr-review-record) adds the lint's
+    own read of the pull request, and one comment post on a PASS: the cost of a printed record is one lane lint plus one comment post. The lint
+    is the real lane_lint here, with only ci-job's answer scripted to pass, so those reads and the post are counted too. They are counted at the
+    one seam every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
 
-    def test_the_record_makes_three_gh_reads(self):
-        # a PR of 100 files is one page, so its whole list is still one read: three reads for any PR of up to 100 files
+    REAL_LINT = True
+
+    def setUp(self):
+        super().setUp()
+        self.set_feat_workflow(workflow_text("checks", "checks"))  # the head has a checks job, so the lint runs and posts
+
+    def test_the_record_makes_three_reads_then_the_lint_read_and_one_post(self):
+        # a PR of 100 files is one page, so its whole list is still one read: the same reads for any PR of up to 100 files
         hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
+        head = self.head()
         for guard, files in (("no", None), ("yes", None), ("no", hundred)):
             with self.subTest(guard=guard, files=len(files) if files else 1):
-                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files)
-                rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", guard,
-                                             "--round", "1:reviewer:sonnet:PASS", host=host)
+                rows = {head: [draft_row(merge.Host.DRAFT_TOUCHED)]}  # the lint's draft read: the touched job passed, so the draft is a pass
+                host = PullsHost([batch_pull(7, head, head_ref="feat")], rows, count_gh=True, files=files)
+                with unittest.mock.patch.object(merge, "ci_job_run", return_value=("pass", [], [], False)), \
+                        unittest.mock.patch.object(tempfile, "tempdir", run_folder()):  # the lint tree's temp dir lands in this run's folder
+                    rc, out, err = self.run_args("7", "--review-record", "--head", head, "--kind", "normal", "--guard", guard,
+                                                 "--round", "1:reviewer:sonnet:PASS", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
-                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", "issues/comments"], "the record's gh reads, in order")
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", "issues/comments", "pulls/7", "pulls", f"commits/{head}/check-runs", "issues/7/comments"],
+                                 "the record's gh calls, in order: its three reads, then the lint's reads (its pull request, the open pulls for the cross measure, "
+                                 "its draft run), then the lint comment's post")
+                self.assertEqual([route for route, _ in host.posts], ["issues/7/comments"], "the record posted more than the one lint comment")
+                self.assertEqual(host.posts[0][1]["body"], lint_body(head), "the lint comment is not the one a PASS posts at this head")
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
