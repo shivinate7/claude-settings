@@ -11,7 +11,6 @@ this file imports as `fixture`. BRIEF_FROM_STEP_UNDER_TEST overrides the module 
 The module loads inside each case, after the case asserts that the file exists. A checkout without the module fails
 each case on that assert, never on an import error. The template cases read templates/brief.md and need no module.
 """
-import contextlib
 import importlib.util
 import json
 import os
@@ -45,9 +44,8 @@ FILES_MARKER = "<coordinator names the files>"
 CHECK_MARKER = "<coordinator names the check that proves done>"
 PARAPHRASE = "(paraphrase, no owner quote)"
 FULL = 30  # the full-size store: one step with this many rulings
-# Word count of templates/brief.md at efc87b0c0, before the rewrite:
-#   git show efc87b0c0:skills/project-ops/templates/brief.md | wc -w
-# Pinned, so the builder's rewrite of the template does not move the cap.
+# The word count of the old templates/brief.md, the one the builder rewrote: 821 words by wc -w.
+# Pinned, so that rewrite does not move the cap.
 BASELINE_WORDS = 821
 PASTED_LINES = 40  # a pasted file body in a step note: the brief never carries it
 PATH_IN_NOTE = "skills/project-ops/scripts/brief_from_step.py"  # a path in a note: Files keeps it
@@ -196,10 +194,10 @@ def spawn_brief(block, marker=None):
     return "\n".join(([marker] if marker else []) + kept)
 
 
-def guard_reason(config, prompt, model="sonnet", subagent="reviewer"):
+def guard_reason(config, prompt, model="sonnet", role="reviewer"):
     """The real guard's answer to one Agent spawn, as Claude Code reads it: "" for an allow, else the deny reason."""
     payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "cwd": config,
-               "tool_input": {"subagent_type": subagent, "model": model, "prompt": prompt}}
+               "tool_input": {"subagent_type": role, "model": model, "prompt": prompt}}
     env = dict(fixture.ENV, CLAUDE_CONFIG_DIR=config)
     env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # the env pin lifts the refusal; the cases must not inherit it
     done = _nowindow.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
