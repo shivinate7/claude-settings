@@ -17,7 +17,7 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 
 | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
 |---|---|---|---|---|---|---|---|
-| `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
+| `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age, and blocks a Stop while a CI wait has no check-in. |
 | `lint/report_guard.py` | hook | Stop | - | - | claude-sonnet-5-5 | model default: the call passes no effort | At Stop, after a turn that landed (git commit, push, merge, revert or cherry-pick, gh pr merge or create, or a GitHub MCP write tool), blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error. |
 | `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | At the end of the turn, checks the agent model cap in each watched settings file. Reverts a cap change that no tool call explains, or a raise past its expiry time. |
 | `hooks/ruling_home.py` | hook | Stop | - | - | no model | n/a | At Stop, refuses once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost. |

@@ -533,7 +533,7 @@ CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
-             "Set the next one after each red CI verdict, wider apart.")
+             "Set the next one after each red CI verdict, wider apart (decision ci-wait-reads-run-status).")
 
 
 def unquoted(command):
