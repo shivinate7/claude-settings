@@ -12501,7 +12501,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_plan_record_change_merges(self):
         """A file under docs/plans/ sets lint_plan_refuter and no job, beside the decision record's lint_ruling_kind."""
@@ -12513,7 +12513,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_test_folder_note_merges(self):
         """A .md under a test folder sets lint_red_run and no job: the red-run lint reads it, no suite does."""
@@ -12525,7 +12525,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_job_flag_beside_a_lint_flag_still_turns_the_job_on(self):
         """The control for the lint-only cases: a code path beside the decision record turns its job on, and the lint flag is on too.
