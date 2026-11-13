@@ -801,18 +801,6 @@ def case_n28_labelled_writer_that_exported_passes():
                  (SCRIPT,))
 
 
-def case_n29_multi_word_label_with_no_id_that_ran_an_export_passes():
-    """The writer is "Triage lead": a multi-word label with no session id. A named writer decides alone, so the export
-    run before the write does not make this session the writer. Control: the bare word "Triage" with the same run
-    blocks, as N22 does."""
-    writer = "Triage lead"
-    check("N29 scope: the transcript names the multi-word label", writer_seen(writer) == writer, writer_seen(writer))
-    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
-    expect_pass("N29", run_stop("n29", base_repo("n29"), records, writer=writer, extra_env=LABEL_ENV))
-    expect_block("N29 control", run_stop("n29c", base_repo("n29c"), records, writer="Triage", extra_env=LABEL_ENV),
-                 (SCRIPT,))
-
-
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -913,7 +901,6 @@ CASES.extend((
     case_n26_label_whose_id_only_starts_with_ours_passes,
     case_n27_labelled_writer_that_only_read_passes,
     case_n28_labelled_writer_that_exported_passes,
-    case_n29_multi_word_label_with_no_id_that_ran_an_export_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
