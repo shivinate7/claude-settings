@@ -179,7 +179,7 @@ def state_of(test, root, kind, guard, letters, fix=None, net="not owed"):
 
 class ShippedReviewRows(unittest.TestCase):
     """Case 1: the shipped record holds the review rows the policy states, and review_state gives the policy's verdict for every kind,
-    Guard or check and round combination, round 2 FAIL with round 3 owed included."""
+    Guard or check and round combination, a failed second round with the third round owed included."""
 
     def test_the_shipped_record_holds_the_review_rows_the_policy_states(self):
         rows = policy_rows_of(shipped_text())

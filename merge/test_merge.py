@@ -16074,8 +16074,8 @@ class ReviewNoRestart(ReviewEnv):
     rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
     record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it
     below REVIEW_LAST_ROUND without a --fix-check. A record with no round line and a --fix-check is no restart: its fix check passes, or fails and
-    needs a new lane (owner ruling 2026-11-13 14:01 CST). Round 3 may follow a failed round 2, or a failed fix check with no round 2 written, and
-    its record holds round 3 alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
+    needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
+    check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
     nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
@@ -16205,55 +16205,57 @@ class ReviewNoRestart(ReviewEnv):
         self.assertEqual(out, "", "a refused record printed to stdout")
         self.assertNotIn("Traceback", err)
 
-    def test_round_three_after_round_one_and_a_failed_fix_check_is_accepted(self):
-        # Case (a), owner ruling 2026-11-13 14:01 CST: round 1 FAILs, a fix check FAILs, then round 3 runs with no round 2 written. The chain is the
-        # round 1 record, then the fix check record, which holds no round line. The record posted now holds round 3 alone.
+    def test_round_three_after_round_one_and_a_failed_fix_verifier_is_accepted(self):
+        # A failed first round, then a failed fix verifier with no second round written: the third round runs, and its record holds that round
+        # alone. The fix verifier's record holds no round line.
         round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
-        fix_check = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="FAIL"),))
-        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_check))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="FAIL"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_verifier))
         self.assert_accepted(rc, out, err)
 
-    def test_a_fix_check_only_record_that_passes_after_round_one_is_accepted(self):
-        # Case (c), owner ruling 2026-11-13 14:01 CST: a round 1 FAIL, then a record with no round line whose fix check PASSes at round 1's
-        # reviewed head. It is no restart: it holds no round line, and its fix check is the line that passes.
+    def test_a_fix_verifier_only_record_that_passes_after_round_one_is_accepted(self):
+        # A failed first round, then a record with no round line whose fix verifier PASSes at the first round's reviewed head. It is no restart:
+        # it holds no round line, and its fix verifier is the line that passes.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
         rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(earlier))
         self.assert_accepted(rc, out, err)
 
     def test_round_three_alone_after_a_failed_round_two_is_accepted(self):
-        # The control for the refusals below: round 3 runs after a round 2 FAIL (owner ruling 2026-11-13 14:01 CST), and its record holds round 3 alone.
+        # The control for the refusals below: a third round runs after a failed second round (owner, page item 741, 14:01 CST), and its record holds
+        # that round alone.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier))
         self.assert_accepted(rc, out, err)
 
     def test_round_three_alone_after_a_passed_round_two_is_refused(self):
-        # A round 2 PASS is done, so no round 3 follows it (owner ruling 2026-11-13 14:01 CST).
+        # A passed second round is done, so no third round follows it (owner, page item 741, 14:01 CST).
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier))
         self.assert_refused_with_no_record(rc, out, err)
 
     def test_round_three_repeating_a_passed_round_two_is_refused(self):
-        # The same refusal for a record that repeats the earlier rounds before its round 3, as a full record does. The repeat form after a
-        # failed round 2 is accepted by test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted.
+        # The same refusal for a record that repeats the earlier rounds before its third round, as a full record does. The repeat form after a
+        # failed second round is accepted by test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS", "3:reviewer:sonnet:PASS"),
                                      host=self.chain_host(earlier))
         self.assert_refused_with_no_record(rc, out, err)
 
     def test_round_three_alone_on_haiku_is_refused(self):
-        # Round 3 runs sonnet on the round row (decision agent-model-cap). The sonnet twin is test_round_three_alone_after_a_failed_round_two_is_accepted.
+        # The third round runs sonnet on the round row (decision agent-model-cap). The sonnet twin is test_round_three_alone_after_a_failed_round_two_is_accepted.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:haiku:PASS"), host=self.chain_host(earlier))
         self.assert_refused_with_no_record(rc, out, err)
 
     def test_a_first_record_that_skips_round_one_is_refused(self):
-        # The control is test_the_first_record_on_a_pull_request_is_accepted: round 1 alone is accepted as a first record. Round 3 alone is not.
+        # The control is test_the_first_record_on_a_pull_request_is_accepted: the first round alone is accepted as a first record. The third round
+        # alone is not.
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with())
         self.assert_refused_with_no_record(rc, out, err)
 
     def test_round_three_after_an_unparseable_earlier_comment_is_accepted_with_no_type_error(self):
-        # Control: round 3 after the two FAIL records is accepted. The comment below starts with the record marker, so the repo's comment read
+        # Control: the third round after the two FAIL records is accepted. The comment below starts with the record marker, so the repo's comment read
         # keeps it, and its Kind line does not parse: the parser reads it as None. The new record must be accepted beside it with no TypeError.
         round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
@@ -16269,20 +16271,20 @@ class ReviewNoRestart(ReviewEnv):
             self.fail(f"round 3 after an unparseable earlier comment raised TypeError: {exc}")
         self.assert_accepted(rc, out, err)
 
-    def test_round_three_after_a_passed_fix_check_on_a_failed_round_two_is_refused(self):
-        # Control: round 3 after the failed round 2 alone is accepted, so the refusal below comes from the passed fix check that follows it.
-        # The fix check holds no round line, and its fix diff starts at round 2's head.
+    def test_round_three_after_a_passed_fix_verifier_on_a_failed_second_round_is_refused(self):
+        # Control: the third round after the failed second round alone is accepted, so the refusal below comes from the passed fix verifier that
+        # follows it. The fix verifier holds no round line, and its fix diff starts at the second round's head.
         round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
-        fix_check = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two))
         self.assert_accepted(rc, out, err)
-        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two, fix_check))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two, fix_verifier))
         self.assert_refused_with_no_record(rc, out, err)
 
 class ReviewFixAfterRoundThree(ReviewEnv):
-    """The chain of PR #3242: round 1 FAIL (haiku), round 2 FAIL (sonnet), round 3 PASS (sonnet, net value zero) on a Guard or check change, then a
-    sonnet fix check that PASSes at a later head. A fix check after a passing round 3 is accepted, as a fix after a merge of main is (owner ruling
-    2026-11-13 14:01 CST). Each record is built with record_text() and read back by review_state at its own head."""
+    """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
+    zero), then a sonnet fix check that PASSes at a later head. A fix check after a passing last round is accepted, as a fix after a merge of main
+    is (owner, page item 741, 14:01 CST). Each record is built with record_text() and read back by review_state at its own head."""
 
     R1, R2, R3 = "96" * 20, "64" * 20, "a9" * 20  # the heads of rounds 1 to 3: 40 hex, distinct from every other head here
     FIX = "ba" * 20  # the live head after the fix diff; the fix check's reviewed head is R3
@@ -16292,8 +16294,8 @@ class ReviewFixAfterRoundThree(ReviewEnv):
     ROUND_ARGV = ("--round", "1:reviewer:haiku:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:PASS", "--net-value", "zero")
 
     def round_records(self):
-        """The records of rounds 1 to 3, oldest first. Round 3's record repeats rounds 1 and 2, as a fresh full review at a head that moved
-        after round 2 does (decision pr-review-record)."""
+        """The records of the first three rounds, oldest first. The third round's record repeats the first two, as a fresh full review at a head
+        that moved after the second round did (decision pr-review-record)."""
         return [record_text(head=self.R1, rounds=("Round 1: reviewer, haiku, FAIL",), guard="yes"),
                 record_text(head=self.R2, rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL"), guard="yes"),
                 record_text(head=self.R3, rounds=self.ROUNDS_ONE_TO_THREE, guard="yes", net="zero")]
@@ -16311,7 +16313,7 @@ class ReviewFixAfterRoundThree(ReviewEnv):
         """The argv of a sonnet fix check whose fix diff starts at `reviewed`, written for the head `head`."""
         return self.record_argv(head, "--fix-check", f"{reviewed}:reviewer:{self.FIXED_MODEL}:{verdict}")
 
-    def test_the_242_chain_round_three_then_a_fix_check_pass_is_accepted_and_reads_done(self):
+    def test_round_three_then_a_fix_verifier_pass_is_accepted_and_reads_done(self):
         r1, r2, r3 = self.round_records()
         rc, out, err = self.run_args(*self.record_argv(self.R3, *self.ROUND_ARGV), host=self.chain_pulls(r1, r2, head=self.R3))
         self.assertEqual(rc, 0, "round 3 after a failed round 2 was refused:\n" + out + err)
@@ -16322,14 +16324,14 @@ class ReviewFixAfterRoundThree(ReviewEnv):
         self.assertEqual(parse_text(self, body)["fix"], (self.R3, "reviewer", self.FIXED_MODEL, "PASS"), "the printed fix check line is not the one given")
         self.assertEqual(record_state(self, body, head=self.FIX), "done", "the printed fix check does not read done at the live head")
 
-    def test_a_fix_check_fail_after_a_passing_round_three_is_printed_and_leaves_the_pull_request_open(self):
+    def test_a_fix_verifier_fail_after_a_passing_round_three_is_printed_and_leaves_the_pull_request_open(self):
         rc, out, err = self.run_args(*self.fix_argv(self.R3, verdict="FAIL"), host=self.chain_pulls(*self.round_records()))
         self.assertEqual(rc, 0, "a failed fix check after a passing round 3 was refused:\n" + out + err)
         state, why = record_verdict(self, posted_body(self, out), head=self.FIX)
         self.assertEqual(state, "open", "a failed fix check after a passing round 3 does not leave the pull request open")
         self.assertIn("fix verifier failed", why)
 
-    def test_a_fix_check_whose_reviewed_head_is_not_the_newest_record_head_is_refused(self):
+    def test_a_fix_verifier_whose_reviewed_head_is_not_the_newest_record_head_is_refused(self):
         bodies = self.round_records()
         for reviewed in (self.R2, self.R1, "2e" * 20):
             with self.subTest(reviewed=reviewed):
@@ -16339,7 +16341,7 @@ class ReviewFixAfterRoundThree(ReviewEnv):
                 self.assertIn("--fix-check", err, "the refusal does not name --fix-check")
                 self.assertNotIn("Traceback", err)
 
-    def test_a_second_fix_check_chained_after_a_passing_fix_check_is_accepted(self):
+    def test_a_second_fix_verifier_chained_after_a_passing_fix_verifier_is_accepted(self):
         first_live = "ca" * 20  # the head the first fix check was written for; the second fix check's fix diff starts here
         first = record_text(head=first_live, rounds=(), fix=(fix_verifier_line(head=self.R3),), guard="yes")
         host = self.chain_pulls(*self.round_records(), first, commits={self.FIX: [first_live]})
@@ -16356,7 +16358,7 @@ class ReviewPastHead(ReviewEnv):
         return PullsHost([batch_pull(7, live)], {}, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
 
     def record_argv(self, head):
-        """The argv of a round 1 PASS record for pull request 7 at `head`."""
+        """The argv of a first-round PASS record for pull request 7 at `head`."""
         return ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", head, "--round", "1:reviewer:sonnet:PASS")
 
     def test_a_record_for_an_earlier_head_of_the_pull_request_is_accepted(self):

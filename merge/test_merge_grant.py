@@ -192,7 +192,7 @@ class ReviewGrantRules(unittest.TestCase):
         self.assertEqual(self.granted_state("FAIL", guard="yes", net="negative")[0], "held")
 
     def test_round_four_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        # a FAIL round 4 owes its net value; a PASS round 4 reads done without one (owner, page item 741), see the PASS case below
+        # a failed fourth round owes its net value; a passed fourth round reads done without one (owner, page item 741), see the PASS case below
         for verdict in ("FAIL",):
             with self.subTest(verdict=verdict):
                 state, why = self.granted_state(verdict, guard="yes", net="not owed")
