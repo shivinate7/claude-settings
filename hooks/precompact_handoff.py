@@ -1048,7 +1048,7 @@ def _unflagged_missing(session_id, state):
     return missing
 
 
-# --- Owner waits (item 16 of decision precompact-handoff) -------------------------------------
+# --- Owner waits (item 17 of decision precompact-handoff) -------------------------------------
 # A coordinator's handoff keeps every item waiting on the owner in this session. The Stop nudge
 # blocks when the section is missing or empty, or when a refused act with no later success is not
 # named in it. Cost per Stop with a handoff, when no transcript line holds the coordinator tag text
