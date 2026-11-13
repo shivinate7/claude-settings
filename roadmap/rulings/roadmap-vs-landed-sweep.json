@@ -1,0 +1,10 @@
+{
+ "id": "roadmap-vs-landed-sweep",
+ "at": "2026-11-13T12:51:00-06:00",
+ "title": "After the drains, check the roadmap against what has landed",
+ "ruling": "Owner 2026-11-13 12:51 CST, relayed by the retrospective: after all the drains occur, check the roadmap against what has landed, to confirm nothing says pending that has actually landed. Step roadmap-vs-landed-sweep carries it.",
+ "quote": "after all the drains occur we'll need to check the roadmap against what's landed to confirm there's nothing that says pending but has actually landed",
+ "source": "Retrospective message to triage, 12:51 CST Nov 13, quoting the owner. Filed by triage.",
+ "status": "open",
+ "step": "roadmap-vs-landed-sweep"
+}

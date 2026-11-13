@@ -1,0 +1,14 @@
+{
+ "id": "roadmap-vs-landed-sweep",
+ "title": "When the backlog drain ends, compare every roadmap step not done against main and merged PRs",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:51 CST Nov 13 (relayed by the retrospective): after all the drains occur, check the roadmap against what has landed, so nothing reads pending that has landed.",
+ "source": "owner 12:51 CST Nov 13, relayed by the retrospective",
+ "note": "Todo, starts when the backlog drain ends. A Sonnet read compares every roadmap step not marked done against main and merged PRs, and marks done each one that landed, with the commit. Example seen Nov 13: step mcp-merge-unguarded read ready, but 625a87260 landed it Nov 10. The retrospective carries it in its handoff and reports the count. Closes only from a commit read, never in bulk (ledger step bulk-close-needs-ledger).",
+ "updatedAt": "2026-11-13T12:52:18-06:00"
+}
