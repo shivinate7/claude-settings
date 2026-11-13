@@ -2272,4 +2272,4 @@
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
 - silent-undo-span-regex-quadratic: the backtick branch of `_SPAN_OR_COMMENT` in lint/check_silent_undo.py backtracks quadratically; a 65 KB single paragraph of backtick runs of growing length took 58.8 s in `last_paragraph`, and real bodies are far smaller.
-- silent-undo-span-regex-crlf: the blank-line guard `\n[ \t]*\n` of `_SPAN_OR_COMMENT` never matches a CRLF body (GitHub's web editor writes CRLF). With an odd backtick, the excuse in the last paragraph reads as comment text and the check refuses it. An LF body reads it. Rare.
+- silent-undo-span-regex-crlf: the blank-line guard `\n[ \t]*\n` of `_SPAN_OR_COMMENT` never matches a CRLF body (GitHub's web editor writes CRLF). With an odd backtick, the comment text reads as the last paragraph, so the excuse before it is not last and is refused. An LF body reads it. Rare.
