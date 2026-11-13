@@ -33,7 +33,7 @@
   "rank": 48,
   "ref": "c197 (the silent test files; mutation report finding, decision mutation-report-scores-suites)",
   "stands": true,
-  "status": "closed",
+  "status": "open",
   "title": "The six \"silent\" test files: they are fine, so close the notes about them?",
   "why": "They run, they pass and they fail when broken; the report paired them with the wrong files, and the right test files already cover those."
 }

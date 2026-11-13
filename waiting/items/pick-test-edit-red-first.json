@@ -24,7 +24,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 11:59 CST",
-  "reply": "Closed 12:57 CST: the retrospective audit found this pick repeats a ruling already on record; nothing to decide.",
+  "reply": "Withdrawn: Closed 12:57 CST: the retrospective audit found this pick repeats a ruling already on record; nothing to decide. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Builder test-edit false alarm: fix it red first",
   "stands": true,

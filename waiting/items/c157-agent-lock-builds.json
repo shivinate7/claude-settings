@@ -26,7 +26,7 @@
   "rank": 6,
   "ref": "c157 (cleanup never deletes a live agent's build folders), part 2, PR #748",
   "stands": true,
-  "status": "closed",
+  "status": "open",
   "title": "Does a Claude agent's lock keep its build folders from cleanup?",
   "why": "It is the change that fixes the full-disk failure; the 30-minute clock already covers a short pause."
 }

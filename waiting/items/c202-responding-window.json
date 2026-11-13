@@ -33,7 +33,7 @@
   "rank": 52,
   "ref": "c202 (ask in chat first, then the page; every answer ends on the page), your chat rulings Oct 28 15:06 and 15:10 CDT",
   "reply": "Answered in chat, Oct 28 15:07 CDT: \"5 minutes.\" Then your correction, 15:10 CDT: a session asks in chat first; if you have not answered after 5 minutes, the question goes to triage for the page; when you answer in chat, the session sends your answer to triage anyway. The trigger is no chat answer after 5 minutes. The 5 minutes is your number.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "How long should a session wait for your chat answer before the question goes to the page?",
   "why": "Your own number and your own rule; (b) is the one you picked."

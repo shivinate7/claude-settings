@@ -26,7 +26,7 @@
   "rank": 8,
   "ref": "c108 (the decision watch says once, plainly, when a folder has no git repo)",
   "stands": true,
-  "status": "closed",
+  "status": "open",
   "title": "How the decision watch speaks in a folder with no git repo",
   "why": "It changes no rule, and a notice that repeats every turn teaches you to skip it."
 }

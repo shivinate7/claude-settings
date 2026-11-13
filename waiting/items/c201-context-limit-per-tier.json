@@ -33,7 +33,7 @@
   "rank": 53,
   "ref": "c201 (how the build's sessions are organized): your want, Oct 28 15:08 CDT",
   "reply": "Answered, Oct 28 16:15 CDT: test the cloud route (a). The step that is yours is item 58: make one extra cloud environment with the variable set.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "Can each kind of session get its own context limit? Test it for cloud sessions?",
   "why": "Most lanes run in the cloud, so the cloud answer is the one that matters, and one test settles what the docs leave open."

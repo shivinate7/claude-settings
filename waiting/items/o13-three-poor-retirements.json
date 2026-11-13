@@ -26,7 +26,7 @@
   "rank": 51,
   "ref": "o13 (one name per thing: the glossary), item 49's cross review, lane B PR #780",
   "reply": "Answered, Oct 28 16:15 CDT: bring back claim, try and gap (a). One lane puts the three words back as plain words, restores the \"(this sense)\" qualifier, and fixes the leftover prose. It partly undoes #780.\n\nBuilt, Oct 28 18:07 CDT (draft PR 792, reviewed, joins the next batch). Two things to know; no pick needed. (1) \"(this sense)\" still keeps your item 49 a reach into file paths, rule anchors and record slugs, so a new path such as docs/github-issue-notes.md is still refused; leaving that out reopened a safety hole in review. So \"no false flags\" holds for code names and prose, not for paths. (2) The rule anchors that lane B renamed (such as outcomes-tests-are-statements) stay renamed; claim, try and gap come back in prose only (claim 32 places, try 13, gap 4). If you want the anchors back too, that is a new lane.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "Three retired words look like poor swaps: keep them or bring them back?",
   "why": "Three swaps read worse than the words they replaced, and false flags teach people to ignore the check."

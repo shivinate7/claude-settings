@@ -33,7 +33,7 @@
   "rank": 57,
   "ref": "c78 (one shared browser-test setup), your item 40 run on q_max main d3a047a",
   "reply": "Answered, Oct 28 16:15 CDT: leave it parked (c); you will work in q_max and maybe revisit. Your question: were these failing before? Not measured. q_max's browser tests run only when started, and nothing ran them after the shared setup went in earlier the same day (q_max#978). The session that read the failures did not compare them with older runs, and I did not look for any. D-187, the first failure, is either a regression or an out-of-date way of finding the Undo button; nobody has checked which. c78 stays open, and no lane or run starts.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "q_max's browser tests found 45 failures: fix first, run again first, or leave them?",
   "why": "The first failure spoils 14 others, so fixing it first gives a run worth the runner hours, and it fixes real defects on the way."

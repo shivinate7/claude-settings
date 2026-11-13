@@ -36,7 +36,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:07 CST",
-  "reply": "Closed 12:57 CST: the retrospective audited every coordinator pick (your 12:36 ask) and found this one sound. It stays in force; say so in the thread to overrule it.",
+  "reply": "Withdrawn: Closed 12:57 CST: the retrospective audited every coordinator pick (your 12:36 ask) and found this one sound. It stays in force; say so in the thread to overrule it. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Cap alarm title",
   "stands": true,

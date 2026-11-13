@@ -33,7 +33,7 @@
   "rank": 59,
   "ref": "c201 (how the build's sessions are organized), your note on item 50 (b)",
   "reply": "Answered, Oct 28 17:50 CDT: keep today's helper settings (a). A later lane measures cost and quality before any change.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "What model and effort should the helper agents of an Opus lane run?",
   "why": "Nothing measured shows today's settings are too costly or too weak, and a wrong cut to reviewers costs more than it saves; the L1 lane can measure first."

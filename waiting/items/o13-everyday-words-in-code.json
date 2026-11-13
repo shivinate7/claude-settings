@@ -26,7 +26,7 @@
   "rank": 49,
   "ref": "o13 (one name per thing: the glossary check), lane B PR #780",
   "reply": "Your note, Oct 28 14:48 CDT: you asked how these words came to be retired. They were not retired because a better word fits. Plan o13, \"one word per meaning\", which you ruled on Oct 26 (\"yes to all nine groups\"), kept the word that already had a row in GLOSSARY.md and retired the other, so each meaning has one word. Examples: guard (refuses an act) over gate, check (passes or fails a change) over gate, red run over proof. The eight words (gap, entry, issue, try, block, deny, approval, worker) stay plain English in prose; they are retired only as names for our own workflow things, and block and deny stay where Claude Code itself defines them. Your pick (a) keeps them legal in code names. The plan is plans/o13-one-word-per-meaning.md on the roadmap branch, if you want to re-open any one word.",
-  "stands": true,
+  "stands": false,
   "status": "closed",
   "title": "Should the word check also refuse everyday words like \"entry\" and \"block\" inside code?",
   "why": "A check that fires on normal code gets ignored, which loses more than the few inconsistent code names; (a) keeps the check trusted and still catches the words where they can only mean the old name."
