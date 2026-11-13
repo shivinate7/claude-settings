@@ -1194,9 +1194,31 @@ class Host:
         """-> the parent shas of the commit `sha`, in order (first parent first): one read of commits/<sha> (commit_read). Any failed read raises Stop."""
         return self.commit_read(sha)[0]
 
+    def ruleset_names(self):
+        """-> the check names that the base's ruleset requires: every context of every required_status_checks rule that applies to the base,
+        in order, once each. None when no rule requires a check, which hands the names to the classic protection. Reads rules/branches/<base>, every page
+        (pages: one call when one page holds them), which answers [] when no ruleset applies. Any failed read, of any page, raises Stop (a NetStop stays a NetStop), an HTTP 404 included:
+        the classic list is no stand-in for an unread ruleset, and a check rule on a page not read would be a check not required."""
+        remedy = f"cannot read the rules of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names."
+        try:
+            rules = self.pages(f"rules/branches/{self.base}")
+        except NetStop:
+            raise  # a network error is no unreadable ruleset: the pinned check and the caller stop on it
+        except Stop as e:
+            raise Stop(f"{remedy}\n{e}")
+        try:
+            names = [s["context"] for r in rules if isinstance(r, dict) and r.get("type") == "required_status_checks" for s in r["parameters"]["required_status_checks"]]
+        except (KeyError, TypeError):
+            raise Stop(f"{remedy}\n{rules}")
+        return list(dict.fromkeys(names)) or None
+
     def protection_names(self):
-        """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
-        network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read raises Stop."""
+        """-> the required check names of the base: its ruleset's first (ruleset_names), else its classic branch protection's. None when neither names any
+        (the classic read is an HTTP 404 that is not a network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read
+        raises Stop."""
+        names = self.ruleset_names()
+        if names:
+            return names
         c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
         if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
             return None
@@ -1215,18 +1237,18 @@ class Host:
         else:
             names = self.protection_names()
             if names is None:
-                raise Stop(f"{self.base} has no branch protection, so it names no required checks. "
+                raise Stop(f"{self.base} has no branch protection and no ruleset that requires checks, so it names no required checks. "
                            f"Set merge.requiredChecks to a list of check names. {BATCH_CITE}")
         clash = [k for k in names if k in self.ignore]
         if clash:
             raise Stop("merge.ignoreChecks names a required check: " + ", ".join(clash) + ". A required check is never ignored.")
         if not names:
-            raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks or the branch protection is empty). "
+            raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks, the ruleset and the branch protection all name none). "
                        f"The tool never merges with nothing to wait for. Name the checks. {BATCH_CITE}")
         return names
 
     def refuse_pinned_mismatch(self):
-        """A pinned merge.requiredChecks list must equal a non-empty branch protection list: a copy that drifted waits on checks no run reports (#746).
+        """A pinned merge.requiredChecks list must equal a non-empty ruleset or branch protection list: a copy that drifted waits on checks no run reports (#746).
         An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
         if not isinstance(self.required, list):
             return
@@ -1237,9 +1259,9 @@ class Host:
         except Stop:
             held = None
         if held is None:
-            say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
+            say(f"merge: cannot read the ruleset or the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
         elif held and set(held) != set(self.required):
-            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the ruleset or branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
                        'Set merge.requiredChecks to "protection" so the protection list is the one source.')
 
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
