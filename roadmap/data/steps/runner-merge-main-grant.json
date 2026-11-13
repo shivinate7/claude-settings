@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 13:12 CST Nov 13 answered \"a\" to the coordinator's standing-grant question (relayed by the coordinator).",
  "source": "owner 13:12 CST Nov 13, relayed by the coordinator",
- "note": "Doing. The batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in 2 h. No rebase and no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh record. Home: .claude/CLAUDE.md Standing grants; lane runner-merge-main-grant writes it (coordinator 13:12 CST). Not page item 749, which stays open.",
- "updatedAt": "2026-11-13T13:13:23-06:00"
+ "note": "Doing. The batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in 2 h. No rebase and no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh record. Home: .claude/CLAUDE.md Standing grants; lane runner-merge-main-grant writes it (coordinator 13:12 CST). Not page item 749, which stays open. Home moved 13:13 CST Nov 13 (coordinator 13:14): docs/decisions/standing-merge-grant.md (new bullet), with a pointer bullet in .claude/CLAUDE.md Standing grants; same lane.",
+ "updatedAt": "2026-11-13T13:13:53-06:00"
 }
