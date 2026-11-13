@@ -1910,6 +1910,20 @@ test("inside a tier, rank overrides age, and an item with no rank sorts after th
   assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "old-none", "new-none"]);
 });
 
+// Owner ruling page-newest-first, 2026-11-12 21:37 CST: inside a tier the newest ask comes first.
+test("inside a tier, the newest item comes first, and rank still leads", async (t) => {
+  const items = [
+    mk("calm-old", 1, { added: at(1) }), mk("calm-new", 2, { added: at(9) }), mk("calm-mid", 3, { added: at(5) }),
+    mk("hold-old", 4, { added: at(1), holds: "A lane waits." }), mk("hold-new", 5, { added: at(9), holds: "A lane waits." }),
+    mk("rank-old", 6, { added: at(2), rank: 0, stands: true }), mk("rank-new", 7, { added: at(8), rank: 1, stands: true }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  const by = Object.fromEntries(await order(page));
+  assert.deepEqual(by["tier-calm"], ["calm-new", "calm-mid", "calm-old"]);
+  assert.deepEqual(by["tier-holds"], ["hold-new", "hold-old"]);
+  assert.deepEqual(by["tier-stands"], ["rank-old", "rank-new"], "rank must still lead age");
+});
+
 test("a group stays together at its best member's rank", async (t) => {
   const items = [
     mk("solo-0", 1, { added: at(3), rank: 0 }), mk("grp-a", 2, { added: at(1), rank: 5, group: "g" }),
