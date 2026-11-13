@@ -1,0 +1,14 @@
+{
+ "id": "relay-ruling-matches-question",
+ "title": "A relayed owner ruling cites the question it answered, and the send-time judge checks the relayed rule is no wider than that question",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective 14:03 CST Nov 13, its own mistake at 13:29: it relayed \"round 3 no longer occurs\" as a rule for every change, when the owner was answering item 741 (skip round 3 after a pass). Round 3 was wrongly dropped from lanes for about 30 minutes.",
+ "source": "retrospective 14:03 CST Nov 13",
+ "note": "Todo, candidate. Guard: a relayed ruling names the item or question it answered; the send-time judge (SendMessage wording judge, step past-ruling-on-send) checks the relayed rule is no wider than that question. Red case: the 13:2x relay against item 741. Triage's own relays of the same words (13:31 and later, ruling r9 text) took the wide reading too and were corrected 14:0x CST. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:04:13-06:00"
+}
