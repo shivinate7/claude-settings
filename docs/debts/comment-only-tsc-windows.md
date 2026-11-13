@@ -1,6 +1,6 @@
 # The tsc lookup misses a Windows shim
 
-**What.** `loadTypescript` looks for `tsc` with no file extension on each PATH folder. An npm install on Windows writes `tsc.cmd` and `tsc.ps1` shims, so the lookup may find nothing. A builder's comment-only edit to a JS or TS test file then refuses on Windows, as `comment_only_change` fails closed. Claude could meet this in normal work on Windows. Harm: a comment-only test edit that the owner allowed is refused there.
+**What.** `loadTypescript` finds an extensionless `tsc` on PATH first, then throws `the typescript package is not beside ...` (exit 2) without trying `tsc.cmd`. This is unverified for npm's Windows layout, which writes `tsc.cmd` and `tsc.ps1` shims. A builder's comment-only edit to a JS or TS test file then refuses on Windows, as `comment_only_change` fails closed. Claude could meet this in normal work on Windows. Harm: a comment-only test edit that the owner allowed is refused there.
 
 **Where.** `lint/typescript_on_path.mjs` (`loadTypescript`), used by `hooks/comment_only.mjs` and `lint/comment_scan.mjs`.
 
