@@ -539,10 +539,11 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     if problems:
         raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
 
-def debt_check(wt, base_ref, host, info):
+def debt_check(wt, base_ref, host, info, store_blame=False):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
-    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR.
+    store_blame: a confirm path passes True so a refusal of a batch integration PR stores its closing lane; a preview presses nothing."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
@@ -553,7 +554,8 @@ def debt_check(wt, base_ref, host, info):
         text = "the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}"
         if all(f.kind == "unknown" for f in found):  # each is a check that could not run: no finding is proven
             raise Unread(text)
-        blame_debt_lane(wt, base_ref, host, info, debt, found)
+        if store_blame:
+            blame_debt_lane(wt, base_ref, host, info, debt, found)
         raise Dropped(text)
 
 def blame_debt_lane(wt, base_ref, host, info, debt, found):
@@ -563,10 +565,11 @@ def blame_debt_lane(wt, base_ref, host, info, debt, found):
         return
     block = parse_freeze(info["body"])
     try:
-        lane = debt_blamed_lane(wt, base_ref, [f.slug for f in found], block["lanes"], debt)
+        start, _ = batch_start(wt, block, info["base"])
+        lane = debt_blamed_lane(wt, base_ref, [f.slug for f in found], block["lanes"], debt, start)
         if lane is None:
             return
-        record_in_block(host, info["branch"], blamed=sorted({*block["blamed"], lane}))
+        record_in_block(host, info["branch"], add_blamed=[lane])
     except (Stop, debt.Unknown) as e:
         say(f"merge: no blame was stored for the debt refusal: {e}")
         return
@@ -3848,7 +3851,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt is None:
             tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
-        debt_check(wt, base_ref, host, info)
+        debt_check(wt, base_ref, host, info, store_blame=True)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
@@ -3941,7 +3944,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     unproven("the worktree is gone, so the claim cannot be proved fresh " + BASE_CITE, "")
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
-                    debt_check(wt, base_ref, host, info)
+                    debt_check(wt, base_ref, host, info, store_blame=True)
                 except (Liftable, Unread) as e:  # a history read that could not run; a finding is Dropped, and refuses
                     unproven("a check could not read the history", str(e))
                 except Stop as e:
@@ -5102,18 +5105,33 @@ def blamed_lanes(root, fail, lanes, base):
             blamed[n] = hit
     return blamed
 
-def debt_blamed_lane(wt, base_ref, slugs, lanes, debt):
-    """-> the one frozen lane (PR) whose diff against `base_ref` closes each debt of `slugs`, or None when a slug has no such lane, has two, or the lanes
-    differ. A close is read by check_debt_retire.closes, the home of what closes a debt (delete or rename out of the debts folder). Raises debt.Unknown."""
+def debt_blamed_lane(wt, base_ref, slugs, lanes, debt, start):
+    """-> the one frozen lane (PR) that closes each debt of `slugs`, or None when a slug has no such lane or two, or the lanes differ. A close is read
+    by check_debt_retire.closes, the home of what closes a debt (delete or rename out of the debts folder). It diffs a lane against the base, so it also
+    counts a lane that merely holds another's deletion, or the deletion already in the On batch. So a debt whose file is absent at `start` (the sha the
+    batch is built from) has no closing lane, and a closer whose head holds another closer's head is not the cause. Raises debt.Unknown or Stop."""
     closing = collections.defaultdict(set)
+    path = {}
     for n, head in sorted(lanes.items()):
         got = debt.closes(wt, base_ref, head)
         for old, _new in got[1] if got else ():
-            closing[os.path.basename(old)[:-3]].add(n)
-    hit = [closing[s] for s in slugs]
-    if any(len(x) != 1 for x in hit) or len(set.union(*hit)) != 1:
-        return None
-    return next(iter(hit[0]))
+            slug = os.path.basename(old)[:-3]
+            closing[slug].add(n)
+            path[slug] = old
+    hit = []
+    for slug in slugs:
+        if slug not in closing:
+            return None
+        c, out = git(wt, "ls-tree", "--name-only", start, "--", path[slug])
+        if c:
+            raise Stop(f"cannot read whether {path[slug]} is in {start[:9]}: {out}")
+        if not out.strip():
+            return None  # the batch starts without the debt: no lane closed it
+        causes = {n for n in closing[slug] if not any(m != n and holds(wt, lanes[m], lanes[n]) for m in closing[slug])}
+        if len(causes) != 1:
+            return None
+        hit.append(causes)
+    return next(iter(hit[0])) if len(set.union(*hit)) == 1 else None
 
 def blame_lines(name, blamed, base, stored=True):
     """The lines a FAILing lint of batch-NAME's head adds: each blamed lane with its drop command when its blame is `stored`, else with the --blame route, since a
@@ -5128,8 +5146,9 @@ def blame_lines(name, blamed, base, stored=True):
                                                         f"If a completed, failed run of batch {name}'s current head is caused by it, store the blame by running:",
                                                         f"  merge --batch-build {name} --blame {n} --run <Actions run URL>")]
 
-def record_in_block(h, branch, **fields):
+def record_in_block(h, branch, add_blamed=(), **fields):
     """Write `fields` (blamed, linted) into the block of batch `branch`'s open pull request, read fresh; the rest of the block and of the body is kept.
+    add_blamed joins the fresh read's blames, never a caller's snapshot of them.
     A write that changes nothing is not sent. -> the pull request as the open list shows it after the read: (number, info)."""
     found = h.batch_pr(branch)
     if found is None:
@@ -5139,6 +5158,8 @@ def record_in_block(h, branch, **fields):
     if block is None:
         raise Stop(f"#{pr} is the open pull request of {branch} and holds no frozen block, so nothing was recorded. {FREEZE_CITE}")
     kept = {"blamed": block["blamed"], "linted": block["linted"], **fields}
+    if add_blamed:
+        kept["blamed"] = sorted({*kept["blamed"], *add_blamed})
     text = freeze_rewrite(info["body"], block, freeze_lines(block["name"], block["lanes"], block["dropped"], block["on"], block["base"], **kept))
     if text != info["body"]:
         h.set_body(pr, text)
@@ -5348,7 +5369,7 @@ def batch_blame(root, h, name, number, url):
     if sha != info["head"]:
         raise Stop(f"the run {url} ran on {(sha or 'no head')[:9]}, an older head: batch {name}'s current head is {info['head'][:9]}. "
                    f"Only a run on the current head blames a lane. Nothing was stored. {FREEZE_CITE}")
-    record_in_block(h, branch, blamed=sorted({*block["blamed"], number}))
+    record_in_block(h, branch, add_blamed=[number])
     say(f"merge: batch {name}: #{number} is blamed by the failed run {url} on {sha[:9]}. To take it off the batch, run:",
         f"  merge --batch-drop {name} {number}")
     return 0
