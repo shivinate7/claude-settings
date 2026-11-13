@@ -687,6 +687,21 @@ class ResolverAgreementTests(unittest.TestCase):
         got = verdicts_of(load_runner(), entry("home-held"), "- H2 a note. Home: docs/x.md\n", root)
         self.assertEqual(got, {"H2": "true"}, "a bare path the resolver holds read as %r" % got)
 
+    def test_copied_path_checks_agree_with_the_resolver_from_a_subfolder(self):
+        # The runner repeats value_resolves's path checks. Git reads `../x` from the cwd, so from sub/ it names the
+        # top-level x, a blob: only the checks keep that value from reading as held, as the resolver refuses it.
+        ruling, runner = hook_module("ruling_home"), load_runner()
+        repo = make_git_repo({"x": "top\n", "sub/keep.txt": "k\n", "lint/held.py": "x\n"})
+        sub = os.path.join(repo, "sub")
+        self.assertTrue(ruling.value_resolves("x", repo), "scope: the resolver does not hold the top-level x")
+        self.assertFalse(ruling.value_resolves("../x", sub), "scope: the resolver holds ../x from sub/")
+        for value in ("/abs", ".", "..", "../x"):
+            with self.subTest(value=value):
+                expected = "true" if ruling.value_resolves(value, sub) else "stale"
+                got = verdicts_of(runner, entry("home-held"), "- P1 a path. Home: %s\n" % value, sub)
+                self.assertEqual(got, {"P1": expected}, "Home: %s from a subfolder: the runner says %r, the resolver "
+                                 "says %r" % (value, got.get("P1"), expected))
+
 
 class RuleHomeTests(unittest.TestCase):
     """Triage ruling (rule git-cite-by-id, the rules store): `Home: rule:<id>` is a home when the anchor
