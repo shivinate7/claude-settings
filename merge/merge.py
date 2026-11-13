@@ -267,6 +267,8 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
+# The model record is a guard path too: its round rows set the model each reviewer runs on, so a docs-only edit of them is a guard change
+# (decision agent-model-cap). guard_hits builds its path from the layout's decisions folder and the guard's file name.
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
@@ -4002,8 +4004,24 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
-REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
-REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
+REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the model record's round rows (decision agent-model-cap)
+
+def review_round_model(n):
+    """-> the model word a reviewer's round `n` (a number, or REVIEW_FIX_ROW) runs: the model record's round row, read through the guard's
+    reader (hooks/guard.py role_round_table), else the guard's fallback. A round past REVIEW_LAST_ROUND reads the last round's row.
+    Reads the record once per call; the guard is imported here for the reason guard_hits gives."""
+    import guard as hook_guard
+    rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
+    return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
+
+def __getattr__(name):
+    """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
+    if name == "REVIEW_FIX_GUARD_MODEL":
+        import guard as hook_guard
+        return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):
     """True when `cite` is a whole cite whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
@@ -4106,8 +4124,9 @@ def review_state(rec, head):
     fix = rec.get("fix")
     if fix and fix[3] != "PASS":
         return "open", "the fix verifier failed, so the fix needs a new lane: one fresh full review at the live head, which a clean merge of main does not replace"
-    if fix and fix[2].lower() != REVIEW_FIX_GUARD_MODEL:
-        return "open", f"the fix check must run on {REVIEW_FIX_GUARD_MODEL}, not {fix[2]}"
+    fix_model = review_round_model(REVIEW_FIX_ROW) if fix else None
+    if fix and fix[2].lower() != fix_model:
+        return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
     final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # a Grant line makes the one round past REVIEW_LAST_ROUND the final round
@@ -5242,10 +5261,13 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
-    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    """-> the sorted paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry or the model record, less each test path: a test
+    file alone is no guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
-    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+    import layout  # lint/layout.py: where the decisions folder is
+    folder = layout.path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "decisions")
+    whole = GUARD_FILES + ("/".join((folder, hook_guard.ROLE_TABLE_FILE)),)
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in whole) and not hook_guard.is_test_rel(p))
 
 def is_doc(path):
     """A doc is a .md under docs/, or the root README.md. Case is ignored and the path is not stripped, so a stray space makes it a non-doc.
@@ -5450,11 +5472,15 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;
         # the last round may run Opus by the owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
-        if a.fix_check and a.fix_check[2].lower() != REVIEW_FIX_GUARD_MODEL:
-            p.error(f"--fix-check: every fix check runs on {REVIEW_FIX_GUARD_MODEL}, so give {REVIEW_FIX_GUARD_MODEL} as MODEL, not {a.fix_check[2]}")
+        if a.fix_check:
+            fix_model = review_round_model(REVIEW_FIX_ROW)
+            if a.fix_check[2].lower() != fix_model:
+                p.error(f"--fix-check: every fix check runs on {fix_model}, so give {fix_model} as MODEL, not {a.fix_check[2]}")
         for n, role, model, _verdict in a.round:  # parse_review below refuses any fourth round with no --grant
-            if role == REVIEW_ROLES[0] and n >= 2 and "sonnet" not in model.lower() and not (n >= 3 and "opus" in model.lower()):
-                p.error(f"--round {n}: a reviewer's round {n} runs sonnet, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the reviewer row)")
+            if role == REVIEW_ROLES[0] and n >= 2:
+                want = review_round_model(n)
+                if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
+                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
