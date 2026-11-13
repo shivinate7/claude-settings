@@ -1,0 +1,10 @@
+{
+ "id": "own-766-b-field-now",
+ "at": "2026-11-13T16:09:24-06:00",
+ "title": "Keep the lane-missing check, with a field that tells a lane wait from a PR wait, built in the same lane",
+ "ruling": "Owner 16:08 CST Nov 13, page item 766, \"none of these\": \"B but fix it in the same go\". Option b: keep the receipt-close check's lane-missing line and add a field that tells a lane wait from a PR wait. The new field is built in the same lane and PR (#3264), not queued for later. Option a (drop the line) is not chosen.",
+ "quote": "B but fix it in the same go",
+ "source": "Owner comment on the waiting page, thread 817a973d, 16:08 CST Nov 13; filed by triage.",
+ "status": "open",
+ "step": "close-writes-receipt-answer-gone"
+}
