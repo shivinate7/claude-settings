@@ -31,8 +31,6 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 
 Cost: each run of the page writer makes one list call per page of each collection and starts one python process. It makes one commit when a file changed. No timer and no watcher.
 
-Cost of the Stop check: it reads the transcript once per Stop, inside the Stop hook process. It starts one `git log` only in the page writer's session after a page write, and it writes no file.
-
 Known limits:
 
 - The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. A password word whose whole value is a placeholder, a mask or a plain word also passes. So do `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
