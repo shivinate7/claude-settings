@@ -1,0 +1,14 @@
+{
+ "id": "step-status-derived",
+ "title": "build.py derives a step's status from merged and open PRs and flags a hand status that disagrees (EXPRESS)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro's ask, ledger row d1-roadmap-mechanical-github-projects: a hand-kept status drifts from what has landed (seen Nov 13: mcp-merge-unguarded read ready after it landed).",
+ "source": "coordinator 13:15 CST Nov 13, from the retrospective",
+ "note": "EXPRESS, doing: lane started as express lane step-status-derived (coordinator 13:15). build.py derives each step's status from merged and open PRs and flags a hand status that disagrees. Related: roadmap-vs-landed-sweep (the one-time check after the drain) and glossary-step-statuses (the status names). Triage reads the flags and fixes hand statuses from a commit read, never in bulk.",
+ "updatedAt": "2026-11-13T13:14:46-06:00"
+}
