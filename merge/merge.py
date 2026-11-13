@@ -1311,7 +1311,8 @@ class Host:
     COMMIT_FILES_CAP = 300  # GitHub lists at most 300 files of one commit, so a list this long may be cut short
 
     def commit_files(self, sha):
-        """-> the paths of the files the commit `sha` changes, in order: the `filename` of each entry of the `files` list of one read of commits/<sha>.
+        """-> the paths of the files the commit `sha` changes, in order: the `filename` of each entry of the `files` list of one read of commits/<sha>,
+        and after a renamed entry its `previous_filename` too, as pr_files lists it.
         An empty list is a commit with no files. A failed read, a reply whose `files` is absent or no list, and a list of COMMIT_FILES_CAP or more
         (maybe cut short) raise Stop: unknown, never read as an empty or complete list."""
         c, out = self.api(f"commits/{sha}")
@@ -1323,8 +1324,8 @@ class Host:
                 raise ValueError("the files value is not a list")
             if len(files) >= self.COMMIT_FILES_CAP:
                 raise ValueError(f"{len(files)} files, so the list may be cut short")
-            return [f["filename"] for f in files]
-        except (ValueError, KeyError, TypeError) as e:
+            return [p for f in files for p in ((f["filename"], f["previous_filename"]) if f.get("previous_filename") else (f["filename"],))]
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
             raise Stop(f"cannot read the files of {sha[:9]}, so whether they are all records is unknown {READ_CITE}: {e}")
 
     def commit_parents(self, sha):
@@ -4329,8 +4330,8 @@ def record_only_after(h, head, live):
     """True when every commit after `head`, up to `live`, is a one-parent commit that changes record or notes files only. Record or notes files are
     the paths under a layout kind marked "record" and the debt-notes file. The walk follows first parents from `live`, judges `live` and each commit
     below it, never `head`, and must reach `head` within REVIEW_MERGE_WALK commits. A merge, a root commit, a commit with no files, a commit with
-    any other path, a longer walk and a head that is never reached are all False. A failed read raises Stop: unknown, never False.
-    Cost: one commit read and one files read per commit walked."""
+    any other path (a guard record, guard_hits, and a path that is no doc, is_doc, included), a longer walk and a head that is never reached are all False.
+    A failed read raises Stop: unknown, never False. Cost: one commit read and one files read per commit walked."""
     import layout  # lint/layout.py: where the record folders and the notes file are
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     folders = tuple(layout.path(root, name) + "/" for name, kind in layout.kinds().items() if kind.get("record"))
@@ -4344,6 +4345,8 @@ def record_only_after(h, head, live):
             return False
         paths = h.commit_files(sha)
         if not paths or not all(p == notes or p.startswith(folders) for p in paths):
+            return False
+        if guard_hits(paths) or not all(is_doc(p) for p in paths):  # a guard record or a non-.md file in a record folder is no record-only commit
             return False
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read, as clean_merges_after ends
