@@ -4839,6 +4839,98 @@ def case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string():
           "only merge after the check passes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
 
 
+NOT_SAVED_ANSWER = "question answer was not saved"  # the words of the box's line when an answer cannot be saved
+OPTION_B = "Option B"
+
+
+def case_box_answer_as_an_object_is_saved_as_its_text():
+    """A box answer may be an object with an `answer` field, keyed by question. It is saved as its answer text, as a
+    string answer is, and the question is not saved."""
+    cfg, sid = new_cfg(), "qbox-object"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"answer": OPTION_B}}},
+                      questions=box_questions(SHIP_QUESTION))
+    check("question object: the hook exits 0", p.code == 0, p.desc())
+    check("question object: the answer's text is saved", saved_text(cfg, sid) == OPTION_B, saved_text(cfg, sid))
+
+
+def case_box_answer_list_of_objects_is_saved_as_its_texts():
+    """A multi-select answer may come as a list of objects. The answer text of each object is saved."""
+    cfg, sid = new_cfg(), "qbox-object-list"
+    p = question_hook(cfg, sid, {"answers": {MULTI_QUESTION: [{"answer": "Opt A"}, {"answer": "Opt C"}]}},
+                      questions=box_questions(MULTI_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question object list: the hook exits 0", p.code == 0, p.desc())
+    check("question object list: the first object's answer is saved", "Opt A" in text, text)
+    check("question object list: the second object's answer is saved", "Opt C" in text, text)
+
+
+def case_box_answer_that_cannot_be_read_is_never_silent():
+    """An answer the hook cannot save must not vanish: the box saves it or prints the `not saved` line. A readable
+    answer beside an unreadable one is still saved. The empty answers dict is the control: no answer saves nothing and
+    prints nothing."""
+    cfg, sid = new_cfg(), "qbox-unreadable"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"choice": 2}}}, questions=box_questions(SHIP_QUESTION))
+    check("question unreadable: the answer is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p.out or saved_text(cfg, sid) != "", p.desc())
+    cfg2, sid2 = new_cfg(), "qbox-partial"
+    p2 = question_hook(cfg2, sid2, {"answers": {SHIP_QUESTION: "Yes", MULTI_QUESTION: {"choice": 2}}},
+                       questions=box_questions(SHIP_QUESTION, MULTI_QUESTION))
+    check("question partial: the readable answer beside an unreadable one is saved",
+          "Yes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+    check("question partial: the unreadable answer beside a readable one is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p2.out or saved_text(cfg2, sid2) != "Yes", p2.desc())
+    cfg3, sid3 = new_cfg(), "qbox-no-answers"
+    p3 = question_hook(cfg3, sid3, {"answers": {}}, questions=box_questions(SHIP_QUESTION))
+    check("question no answers: an empty answers dict saves nothing and prints nothing",
+          not os.path.exists(inbox_of(cfg3, sid3)) and p3.out.strip() == "", p3.desc())
+
+
+def case_box_note_with_inner_quotes_is_saved_whole():
+    """A trailing `user notes:` is the owner's own words, quote marks included. The cut at the span's last quote, the one
+    after `CI`, keeps `Yes". user notes: only merge if "CI` and drops ` is green.`. The note is saved whole."""
+    cfg, sid = new_cfg(), "qbox-note-quotes"
+    note = 'only merge if "CI" is green.'
+    p = question_hook(cfg, sid, 'The user answered: "%s"="Yes". user notes: %s' % (SHIP_QUESTION, note),
+                      questions=box_questions(SHIP_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question note quotes: the hook exits 0", p.code == 0, p.desc())
+    check("question note quotes: the answer is saved first", text.startswith("Yes"), text)
+    check("question note quotes: the owner's note is saved whole, its inner quotes included", note in text, text)
+
+
+def case_close_proof_counts_only_the_session_repo():
+    """Homes(cwd=B, worked_in=A). The session worked in repo A, and the Stop runs from repo B, which alone holds
+    docs/decisions/x.md on main. The close proof counts the session's own repo, so B's copy proves nothing: the verdict
+    is unknown, and the ruling stays in the compaction note. Controls: a Stop run from A reads the same unknown, and a
+    home that the session's repo holds on main closes from another cwd."""
+    mod = guard_module()
+    rel = "docs/decisions/x.md"
+    session = make_repo("qclose-session", tracked=("README.md",), extras=ROLLED_OUT)
+    stop = make_repo("qclose-stop", tracked=(rel,), extras=ROLLED_OUT)
+    held = make_repo("qclose-held", tracked=(rel,), extras=ROLLED_OUT)
+    scope = tuple(bool(mod.ruling_home.value_refs(rel, where)) for where in (session, stop, held))
+    check("close scope: main holds the home in the Stop's repo and the held repo, not in the session's repo",
+          scope == (False, True, True), scope)
+    text = render_block("the rule is settled", items=("- fb-0958-1 [ruling] -> %s" % rel,))
+
+    def verdict(cwd, worked_in):
+        """(the item's verdict from tend, whether the compaction note still lists it) for a Stop from cwd."""
+        rows, _ = mod.tend_text(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        listed = "fb-0958-1" in mod.needs_work_ids(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        return {ident: got for _, ident, got in rows}.get("fb-0958-1"), listed
+
+    crossed, crossed_listed = verdict(stop, session)
+    check("close proof: a home only the Stop's repo holds does not close a session bound to another repo",
+          crossed == "unknown", "verdict %r" % (crossed,))
+    check("close proof: that ruling stays in the compaction note", crossed_listed, "listed %r" % (crossed_listed,))
+    own, _ = verdict(session, session)
+    check("close proof control: a Stop run from the session's own repo reads the same unknown",
+          own == "unknown", "verdict %r" % (own,))
+    mirror, _ = verdict(session, held)
+    check("close proof control: a home the session's repo holds on main closes from another cwd",
+          mirror == "stale", "verdict %r" % (mirror,))
+
+
 def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
     """A grant block whose text holds six lone CRs, a granted ruling under it, and a plain block's refused ruling to
     the same path below. The Stop reads the inbox with universal newlines, which split at each CR, so the granted line
@@ -5074,6 +5166,11 @@ CASES = (
     case_multi_question_box_saves_only_the_answers,
     case_one_question_answer_keeps_its_quote_marks_whole,
     case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string,
+    case_box_answer_as_an_object_is_saved_as_its_text,
+    case_box_answer_list_of_objects_is_saved_as_its_texts,
+    case_box_answer_that_cannot_be_read_is_never_silent,
+    case_box_note_with_inner_quotes_is_saved_whole,
+    case_close_proof_counts_only_the_session_repo,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
     case_refs_are_listed_once_per_repo_not_per_item,
 )
