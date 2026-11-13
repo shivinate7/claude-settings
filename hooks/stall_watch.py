@@ -5,7 +5,7 @@ Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
   300 seconds with no new output. The job keeps running.
 - --stop: At Stop, lists each open background job whose output file did not change for
-  the quiet age.
+  the quiet age, and blocks a Stop while a CI wait has no check-in.
 
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
@@ -64,6 +64,15 @@ Stop: stall_watch.py --stop
   and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
   the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
+  ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
+  --undo; or MCP update_pull_request with draft false) opens a wait. A later user or queued message with a
+  `CI green|cancelled|unknown on <sha>` line, or a merge call (bin/merge, merge_pull_request), closes it. A
+  `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
+  CronCreate or ScheduleWakeup call covers it. An open wait with no check-in prints
+  {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
+  line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero process starts, zero
+  files written, zero timers, no network. Any error prints nothing.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
@@ -509,6 +518,114 @@ def stopped_ids(content):
     m = STOPPED.match(msg) if isinstance(msg, str) else None
     return [m.group(1)] if m else []
 
+CI_VERDICT = re.compile(r"^CI (green|red|cancelled|unknown) on \S", re.M)
+CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
+           b"ScheduleWakeup", b"CI ")
+CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+CI_SEGMENT = re.compile(r"[;&|\n]+")
+CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
+             "Set the next one after each red CI verdict, wider apart.")
+
+
+def unquoted(command):
+    """The command with quoted text, `#` comments and heredoc bodies dropped, so only shell words remain.
+    A quote with no closer is a plain character (an apostrophe in a word), so it hides nothing after it."""
+    text = strip_heredoc_bodies(command)
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if (c == '"' and text[j] == "\\") else 1
+            if j < n:
+                out.append(c + c)
+                i = j + 1
+                continue
+        elif c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c == "#" and (not out or out[-1][-1] in " \t\n;&|("):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def shell_calls(command):
+    """The word lists of each simple command in a shell command line, quoted text and comments gone."""
+    return [seg.split() for seg in CI_SEGMENT.split(unquoted(command)) if seg.strip()]
+
+
+def ci_events(rec):
+    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin',), ('merge',),
+    ('verdict', word). A user or queued message holds a verdict line; only an assistant call holds the rest.
+    A tool result is no message, so a verdict it prints is not one."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else None
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(text)] if isinstance(text, str) else []
+    content = rec["message"]["content"]
+    if kind == "user":
+        if "toolUseResult" in rec:
+            return []
+        if isinstance(content, list):
+            content = "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
+                                and isinstance(b.get("text"), str))
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(content)] if isinstance(content, str) else []
+    events = []
+    for b in content if kind == "assistant" and isinstance(content, list) else ():
+        if not (isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("input"), dict)):
+            continue
+        name, inp = str(b.get("name")), b["input"]
+        tool = name.rsplit("__", 1)[-1]
+        if tool in CI_CHECKIN_TOOLS:
+            events.append(("checkin",))
+        elif tool == "merge_pull_request":
+            events.append(("merge",))
+        elif tool == "update_pull_request" and inp.get("draft") is False:
+            events.append(("ready", str(inp.get("pullNumber") or "")))
+        elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
+            for words in shell_calls(inp["command"]):
+                if words[:3] == ["gh", "pr", "ready"] and "--undo" not in words:
+                    refs = [w for w in words[3:] if not w.startswith("-")]
+                    events.append(("ready", refs[0] if refs else ""))
+                elif words[0].replace("\\", "/").endswith("bin/merge"):
+                    events.append(("merge",))
+    return events
+
+
+def open_ci_wait(transcript):
+    """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
+    None. The newest ready call opens a wait. A verdict other than red, or a merge call, closes it. A red
+    verdict keeps it open and voids the check-ins before it. A check-in after the anchor covers it. One
+    streamed read, records in file order."""
+    wait = None  # [pr, has a check-in since the anchor]
+    with open(transcript, "rb") as f:
+        for line in f:
+            if not any(k in line for k in CI_KEYS):
+                continue
+            try:
+                events = ci_events(json.loads(line))
+            except Exception:  # a bad or half-written line is skipped
+                continue
+            for ev in events:
+                if ev[0] == "ready":
+                    wait = [ev[1], False]
+                elif wait is None:
+                    continue
+                elif ev[0] == "checkin":
+                    wait[1] = True
+                elif ev[0] == "merge" or ev[1] != "red":
+                    wait = None
+                else:
+                    wait[1] = False
+    return wait[0] if wait and not wait[1] else None
+
 
 AGENT_ID = re.compile(r"[\w-]+\Z")
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
@@ -564,62 +681,80 @@ def open_call(path, size):
     return bool(pending)
 
 
+def stale_rows(call):
+    """One row for each stale job in the call's transcript."""
+    now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
+    quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
+    base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
+    rows = []
+    open_jobs, prev_stop = scan_jobs(call["transcript_path"])
+    for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
+        until = " | until: " + note if note else ""
+        real = path
+        if path and base:
+            real = os.path.join(base, re.split(r"[\\/]", path)[-1])
+        st = None
+        for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
+            try:
+                st = os.stat(real)
+                break
+            except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
+                continue
+        if st is None:
+            if prev_stop is not None and began is not None and began <= prev_stop:
+                continue  # started before the previous Stop, which listed it
+            what = "transcript" if agent else "output file"
+            rows.append("%s: unknown, %s not found: %s%s%s" % (
+                job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
+            continue
+        idle = now - st.st_mtime
+        if agent:  # a transcript has no named logs; one long tool call is not a stall
+            if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                try:
+                    busy = open_call(real, st.st_size)
+                except OSError:
+                    busy = False
+                if not busy:
+                    rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
+                        job, idle, real, until, AGENT_REMEDY))
+            continue
+        for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
+            if mark:  # a named log the job still writes keeps it off the list
+                idle = min(idle, now - mark[1])
+        if idle >= quiet:
+            if prev_stop is not None and now - idle + quiet <= prev_stop:
+                continue  # its stall crossed before the previous Stop, which listed it
+            rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
+    return rows
+
+
 def stop():
-    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
-        return 0
     try:
         call = json.load(sys.stdin)
         if call.get("stop_hook_active") is True:
             return 0
-        now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
-        quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
-        base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
-        rows = []
-        open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
-            until = " | until: " + note if note else ""
-            real = path
-            if path and base:
-                real = os.path.join(base, re.split(r"[\\/]", path)[-1])
-            st = None
-            for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
-                try:
-                    st = os.stat(real)
-                    break
-                except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
-                    continue
-            if st is None:
-                if prev_stop is not None and began is not None and began <= prev_stop:
-                    continue  # started before the previous Stop, which listed it
-                what = "transcript" if agent else "output file"
-                rows.append("%s: unknown, %s not found: %s%s%s" % (
-                    job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
-                continue
-            idle = now - st.st_mtime
-            if agent:  # a transcript has no named logs; one long tool call is not a stall
-                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
-                    try:
-                        busy = open_call(real, st.st_size)
-                    except OSError:
-                        busy = False
-                    if not busy:
-                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY))
-                continue
-            for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
-                if mark:  # a named log the job still writes keeps it off the list
-                    idle = min(idle, now - mark[1])
-            if idle >= quiet:
-                if prev_stop is not None and now - idle + quiet <= prev_stop:
-                    continue  # its stall crossed before the previous Stop, which listed it
-                rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
-        if rows:
-            head = "Background jobs still running and quiet: stop it or tell the owner."
-            if "| until: " in "".join(rows):
-                head += " Say whether each until condition is met."
-            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
+        return 0
+    rows, out = [], {}
+    if TASK_NOTIFICATION_TAG:  # without the tag every finished job would look open: list none
+        try:
+            rows = stale_rows(call)
+        except Exception:
+            pass
+    try:
+        pr = open_ci_wait(call["transcript_path"])
+        if pr is not None:
+            out["decision"] = "block"
+            out["reason"] = "PR %s is marked ready and no check-in is set. %s" % (pr or "(this branch)", CI_REMEDY)
+    except Exception:
         pass
+    if rows:
+        head = "Background jobs still running and quiet: stop it or tell the owner."
+        if "| until: " in "".join(rows):
+            head += " Say whether each until condition is met."
+        out["systemMessage"] = "\n".join([head] + rows)
+    if out:
+        print(json.dumps(out))
     return 0
 
 
