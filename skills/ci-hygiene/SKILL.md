@@ -22,7 +22,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    CI step may already run in parallel, or be cached.
 3. **Run slow checks only on their inputs.** Run a slow check after a change to the files it reads.
-   Detect the change with `git diff` against the base commit. Add a nightly full run (step 17 skips it on a green main) and a manual
+   Detect the change with `git diff` against the base commit. Add a manual full-run
    trigger. If detection cannot read the diff, run the check. That fails safe. A check that cannot
    read its own input exits non-zero in CI, never 0. CI reads the exit code as the verdict (decision
    `ci-unknown-is-red`, an unknown read is red in CI).
@@ -206,8 +206,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 17. **CI runs once per batch.** The integration PR run is the proof for its tree. Rulings: R61 (macOS
     CI once per batch), R62 (Linux and Windows CI once per batch), R63 (install.sh tests on Linux
     and macOS). The push to main starts no macOS job. It starts no suite on a tree that a green
-    integration PR run tested. If main's head already has a green run, the nightly run skips. The
-    no-merge-onto-red-main check reads the integration PR run on that tree. Unverified: R61 part 3
+    integration PR run tested, and a reused run counts for a suite only if that suite ran on the same
+    tree. The repo has no nightly CI schedule, only a manual run (step drop-nightly-schedule, owner
+    ruling 22:19 CST Nov 12). The no-merge-onto-red-main check reads the integration PR run on that tree. Unverified: R61 part 3
     asks for a first check that the check still reads a run. The macOS jobs `checks-macos` and `checks-macos-b`
     run a mac-tagged slice, not full guard shards. A lane's touched-tests macOS leg runs only for
     files whose subject is macOS. Windows keeps its full guard and merge shards, once, in the
@@ -225,7 +226,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A job-level `if:` holds only the draft guard. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
-    its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
+    its scope flag and `|| github.event_name != 'pull_request'`, so push and dispatch runs
     start it, except where step 17 skips a run. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
