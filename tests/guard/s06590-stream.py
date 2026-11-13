@@ -472,6 +472,10 @@ sh("check-tail: the bin merge --release-check piped to tail in the foreground is
    "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
    "merge --release-check 5 6", "allow", cwd=NOGIT)
+# --release-check keeps the tail and head reach (decision background-check-through-verdict), so a grep after it is
+# allowed. The lane-lint and review-record rows carry the wider reach.
+sh("check-tail: merge --release-check piped to grep is allowed, the reach is tail and head only",
+   "merge --release-check 5 6 | grep x", "allow", cwd=NOGIT)
 add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --release-check 5 6 2>&1 | tail -3")
@@ -635,6 +639,9 @@ sh("check-tail: python3 -Im lint.ste_lint piped to tail, then && git commit, is 
    "python3 -Im lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: python3 -W ignore -m lint.ste_lint piped to tail, then && git commit, is refused",
    "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+# A lone tee is no cut, but a lint's exit is read through every later stage: the commit runs on the last stage's exit.
+sh("check-tail: python3 lint/ste_lint.py piped to tee, then && git commit, is refused",
+   "python3 lint/ste_lint.py x.md | tee lint.log && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #
