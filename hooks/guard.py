@@ -589,7 +589,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
+            git_apply_hit, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -2466,12 +2466,14 @@ def builder_test_path(path: str, cwd: str) -> bool:
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
-    command (this is the one caller that reads script files). `tool` is the
+    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, and the files a
+    `git apply` patch names (`git_apply_hit`), on the raw command (this is the one caller that reads
+    script files and patches). `tool` is the
     call's tool: it sets which shell's rules read the text."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
+            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True)
+            or git_apply_hit(raw, cwd, builder_test_path))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
