@@ -78,7 +78,7 @@ The R28 steps `prose-tending-contract`, `prose-tending-move-stores`, `feedback-l
 
 ## Plan: the steps that make "git is home" true end to end
 
-Coordinator, 2026-11-13 12:14 CST, from the retrospective's blind review. This record names them. It builds none of the code. Triage files each as a step.
+Coordinator, 2026-11-13 12:14 CST, from the retrospective's git-home plan. This record names them. It builds none of the code. Triage files each as a step.
 
 1. A page writer exports the same document to git and pushes in the same turn, before any relay. Step `waiting-export-miss-cloud` makes the Stop check catch a cloud writer.
 2. The `receipts` collection joins the exported ones. `lint/layout.py:275` drops it today.
