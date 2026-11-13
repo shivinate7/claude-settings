@@ -1,0 +1,10 @@
+{
+ "id": "round-1-sonnet-finding-labels",
+ "at": "2026-11-07T14:41:00-06:00",
+ "title": "Round 1 runs Sonnet for guard and check diffs; findings are labelled",
+ "ruling": "Page item 359 (review-rounds-rework-picks), relayed 2026-11-07 14:41 CST: a) round 1 runs Sonnet for guard and check diffs, Haiku stays for docs and records; c) each finding is labelled blocker, should-fix or wording, and only a blocker fails the round. Part b (skip round 3 unless a guard or check changed or round 2 failed) was in the same reply.",
+ "quote": "a, b and c",
+ "source": "page copy item 359, reply routed to the coordinator, step review-rounds-rework; filed by triage at the coordinator 11:47 CST Nov 13 request, for lane rounds-rules-one-record.",
+ "status": "open",
+ "step": "review-rounds-rework"
+}

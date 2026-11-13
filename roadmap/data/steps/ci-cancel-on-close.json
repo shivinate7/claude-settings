@@ -1,0 +1,14 @@
+{
+ "id": "ci-cancel-on-close",
+ "title": "Closing a PR cancels its running CI",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3WnhxtGWz1TAEcDVq",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 merge-path audit (owner 11:34 and 11:36 CST Nov 13): a closed PR keeps spending runner minutes.",
+ "source": "coordinator 11:46 CST Nov 13, from runner 10 audit",
+ "note": "Doing, express. Lane session_013NEJL3WnhxtGWz1TAEcDVq. Owner 11:34/11:36 CST Nov 13.",
+ "updatedAt": "2026-11-13T11:51:15-06:00"
+}

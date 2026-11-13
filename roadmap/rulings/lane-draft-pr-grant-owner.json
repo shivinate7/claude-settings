@@ -1,0 +1,10 @@
+{
+ "id": "lane-draft-pr-grant-owner",
+ "at": "2026-11-12T17:19:00-06:00",
+ "title": "A lane may open its own draft PR and never marks it ready",
+ "ruling": "Owner typed go lane-draft-pr-grant at 2026-11-12 17:18 CST (page item 668, closed) and said \"A for sure\" at 17:19 CST. Any lane a coordinator or lane started may open its own draft PR and never marks it ready, per decision draft-until-reviewed. The Standing grants line in .claude/CLAUDE.md is not on main yet (PR #3048 open).",
+ "quote": "A for sure",
+ "source": "page item 668 (lane-draft-pr-grant-line); retrospective relay 17:19 CST Nov 12; coordinator 11:47 CST Nov 13 asked for this home.",
+ "status": "open",
+ "step": "lane-draft-pr-grant"
+}

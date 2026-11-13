@@ -1,0 +1,10 @@
+{
+ "id": "any-filter-after-lane-lint",
+ "at": "2026-11-08T07:16:00-06:00",
+ "title": "Any filter after merge --lane-lint or --review-record is refused",
+ "ruling": "Coordinator ruling 2026-11-08 07:16 CST: any filter after merge --lane-lint or merge --review-record is refused; the verdict line is the answer.",
+ "quote": "Coordinator ruling, 2026-11-08 07:16 CST",
+ "source": "PR #2015 body (coordinator ruling 07:16, plus 05:15 process-only); relayed by lane bg-tail-loses-verdict 11:51 CST Nov 13. Filed by triage.",
+ "status": "open",
+ "step": "bg-tail-loses-verdict"
+}

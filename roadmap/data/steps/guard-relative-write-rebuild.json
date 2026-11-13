@@ -1,0 +1,14 @@
+{
+ "id": "guard-relative-write-rebuild",
+ "title": "Rebuild of #2234: false-alarm cut for the relative-write guard, with #1906",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane guard-relative-write-escape asks whether #2234 splits. Triage pick, undoable: split.",
+ "source": "lane session_013NEJL2TXiTWybT3h86WJyd, Nov 13",
+ "note": "Triage pick 11:51 CST Nov 13 (undo: merge it back into guard-relative-write-escape). False-alarm reduction needing #1906, about 550 production, 790 test and 90 mutation lines. Own step and lane; its PR will not say \"Replaces #2234\". The lane files debts other-git-option-unread and other-python-dynamic-unread in its own PR.",
+ "updatedAt": "2026-11-13T11:51:15-06:00"
+}

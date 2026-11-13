@@ -1,0 +1,14 @@
+{
+ "id": "merge-reviewed-cursor",
+ "title": "merge --reviewed keeps a cursor so it reads each lane once",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2UD9WQVy46Gd7bGKa",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 merge-path audit (owner 11:34 and 11:36 CST Nov 13).",
+ "source": "coordinator 11:46 CST Nov 13, from runner 10 audit",
+ "note": "Doing, express. Lane session_013NEJL2UD9WQVy46Gd7bGKa. Owner 11:34/11:36 CST Nov 13.",
+ "updatedAt": "2026-11-13T11:51:15-06:00"
+}
