@@ -1,0 +1,14 @@
+{
+ "id": "lanes-no-ci-record-claims",
+ "title": "Decision lanes-run-no-full-ci-job states the join as main does it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Line 13 of the decision holds two claims main 8d7d36bd9 contradicts. (a) 'a FAIL ... is ignored': a FAIL naming the live head refuses the join (lint_state, lint_check); only an older-head FAIL is ignored. (b) 'the join needs it': lint_check skips a batch integration PR whose all-jobs rollup is green on that head, while merge --reviewed (reviewed_read) does not take the claim_only route, so the two readers disagree.",
+ "source": "lane merge-line-cites-to-symbols 09:22 CST Nov 13 (PR #3130)",
+ "note": "Rewrite line 13 in place to what lint_check and reviewed_read do, cited by symbol. Whether the two readers should agree is a code question: if the builder finds reviewed_read should take claim_only, that is a check change and a separate lane. PR #3139 (draft), lane session_013NEJL4Q4RNWVcjpz6PWmqS: line 13 now states today's behaviour by symbol. The reader disagreement is filed as step reviewed-read-matches-lint.",
+ "updatedAt": "2026-11-13T09:41:27-06:00"
+}

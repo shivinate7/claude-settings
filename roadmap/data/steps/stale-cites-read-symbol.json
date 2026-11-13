@@ -1,0 +1,14 @@
+{
+ "id": "stale-cites-read-symbol",
+ "title": "The stale-cite judge sees the symbol a 'read path::name' cite names",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "lint/stale_cites.py cited_excerpt shows merge.py lines 1-40 for a 'read path::name' cite; only the 'test path::name' form resolves a symbol. So the prose judge never sees the named symbol and can pass a stale claim.",
+ "source": "lane merge-line-cites-to-symbols 09:22 CST Nov 13 (PR #3130)",
+ "note": "Fix: cited_excerpt resolves the symbol for the read form too, from the same resolver the test form uses (one home). Red first: a read cite to a symbol below line 40 shows that symbol. Then re-score the judge.",
+ "updatedAt": "2026-11-13T09:23:46-06:00"
+}

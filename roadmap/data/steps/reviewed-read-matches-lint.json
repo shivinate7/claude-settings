@@ -1,0 +1,14 @@
+{
+ "id": "reviewed-read-matches-lint",
+ "title": "merge --reviewed reads lane-lint as the join does",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Main's two lane-lint readers disagree. lint_check (the join) skips a batch integration PR with a green all-jobs rollup, and accepts an older-head PASS when every later commit is a claim (claim_only). reviewed_read (merge --reviewed) takes neither route, so such a PR reads 'no lint' there. Two readers of one verdict, with no stated reason (rule building-one-home-per-capability).",
+ "source": "lane lanes-no-ci-record-claims 09:40 CST Nov 13 (PR #3139)",
+ "note": "Fix: reviewed_read calls the same lint verdict lint_check uses (one home), so both take the rollup skip and claim_only. Red first: a claim-only later commit reads lint PASS in --reviewed. Check change: full review, round 3 net-value test applies. Departs from: main, reviewed_read reads 'no lint' on those two routes.",
+ "updatedAt": "2026-11-13T09:41:27-06:00"
+}

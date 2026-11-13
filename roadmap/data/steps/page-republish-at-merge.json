@@ -1,0 +1,14 @@
+{
+ "id": "page-republish-at-merge",
+ "title": "A merge that changes the page code republishes the page",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The Cockpit ran main's page code from before batch 122 until triage republished it at 09:43 CST Nov 13 (owner asked 09:39 CST). Two done steps were meant to stop this. c130's republish is a prose step for the batch runner, and batch 122 skipped it. page-stale-hook reads a stamp at <git common dir>/waiting-page-built (stale_pages.py read_stamp) and stays silent with no stamp, so in a fresh cloud container it likely never fires (retrospective's code reading, not probed). The Status tab also lags: nothing republishes it after each batch.",
+ "source": "retrospective 09:43 CST Nov 13, answering the owner's 09:39 CST question",
+ "note": "(a) merge --confirm on a batch whose diff touches skills/waiting-page/page.html prints the republish as a post-merge act, and the runner's report carries 'republished: <pages>' or a reason. (b) The stamp moves from the local git dir to the record branch, so a cloud session reads it. (c) Until step page-data-one-store lands, triage republishes the Status tab at each batch review (triage does this from batch 131 on, as a stood pick; undo: drop it from the batch review). Done when a test merge that touches page.html, from a fresh cloud container, gets a 'behind' line or a refusal. Probe first: confirm the no-stamp silence in a cloud container.",
+ "updatedAt": "2026-11-13T09:46:21-06:00"
+}
