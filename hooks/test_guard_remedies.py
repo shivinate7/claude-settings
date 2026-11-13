@@ -11,7 +11,9 @@ alone takes minutes). Five test methods in three groups:
 1. STATIC: each refuse() site in hooks/guard*.py, and each call of call_judge.py's refuse() wrapper,
    resolves to a reason that carries "Remedy:". The resolution follows local names (the nearest assignment
    above the use), module constants, imported constants, dict lookups, helper returns, appended values and
-   the arguments a helper's return names. An unresolvable reason counts as lacking.
+   the arguments a helper's return names. A refuse() that reads a parameter, or a queue element an appender
+   fills (guard.py's ask_command), counts once per call of that function, with the call's own arguments. An
+   unresolvable reason counts as lacking.
 2. PROBES: each rule that has a Remedy is in REMEDY_PROBES, with the allowed act its Remedy names, or in
    REMEDY_PROSE_ONLY, with the reason no runnable act exists. Each probe runs through the guard, which must
    answer, and must not refuse or ask it under that rule. The table entries are checked against the scan.
@@ -440,25 +442,87 @@ def call_arg(call, index, keyword):
     return None
 
 
-def sites_in(mod, shape):
-    rule_i, reason_i = shape  # the decision is not read: a Remedy is owed on a deny and on an ask alike
+def positional(func):
+    return [a.arg for a in func.args.posonlyargs + func.args.args]
+
+
+def param_slot(mod, node):
+    """(function, parameter) that a refuse() argument reads its text from, or None. A bare name is a parameter its
+    function never assigns. A name unpacked from a module list's element (`rule, reason, ... = QUEUE[0]`) reads the
+    element each appender stores: the parameter the appended tuple takes at that position is the slot."""
+    if not isinstance(node, ast.Name):
+        return None
+    for func in scopes(mod, node):
+        if node.id not in params(func) and not local_values(func, node.id):
+            continue
+        values = local_values(func, node.id)
+        if not values:
+            return (func, node.id)
+        if len(values) != 1 or not isinstance(values[0], Pick) or not isinstance(values[0].value, ast.Subscript):
+            return None
+        queue = values[0].value.value
+        if not isinstance(queue, ast.Name):
+            return None
+        slots = set()
+        for appended in mod.appended.get(queue.id, []):
+            if not isinstance(appended, ast.Tuple) or values[0].index >= len(appended.elts):
+                continue
+            elt = appended.elts[values[0].index]
+            if isinstance(elt, ast.Name) and scopes(mod, elt) and elt.id in params(scopes(mod, elt)[0]):
+                slots.add((scopes(mod, elt)[0], elt.id))
+        return slots.pop() if len(slots) == 1 else None
+    return None
+
+
+def site_of(mod, call, rule_node, reason_node):
+    """The Site a refuse() call makes from its rule and reason arguments, each read in the scope it is written in."""
+    rule_trail = Trail()
+    if rule_node is not None:
+        text_of(mod, rule_node, rule_trail, rule=True)
+    rules = sorted({s for s in rule_trail.strings if RULE_RE.fullmatch(s)})
+    if not rules:
+        rules = ["<%s>" % (ast.unparse(rule_node)[:50] if rule_node is not None else "missing")]
+    reason_trail = Trail()
+    if reason_node is not None:
+        text_of(mod, reason_node, reason_trail)
+    return Site(mod.path, call.lineno, rules,
+                ast.unparse(reason_node)[:80] if reason_node is not None else "<no reason argument>",
+                reason_trail.strings)
+
+
+def expansions(mod, node, shape):
+    """One Site per call of the function whose parameter a refuse() reads, each read with that call's own arguments.
+    None when neither argument reads a parameter, or the two read parameters of different functions."""
+    rule_node, reason_node = call_arg(node, shape[0], "rule"), call_arg(node, shape[1], "reason")
+    slots = {}
+    for key, arg in (("rule", rule_node), ("reason", reason_node)):
+        slot = param_slot(mod, arg) if arg is not None else None
+        if slot:
+            slots[key] = slot
+    if not slots or len({id(owner) for owner, _ in slots.values()}) != 1:
+        return None
+    owner = next(iter(slots.values()))[0]
+    names = positional(owner)
     out = []
+    for caller in ast.walk(mod.tree):
+        if not (isinstance(caller, ast.Call) and isinstance(caller.func, ast.Name) and caller.func.id == owner.name):
+            continue
+        args = {"rule": rule_node, "reason": reason_node}
+        for key, (_, name) in slots.items():
+            args[key] = call_arg(caller, names.index(name) if name in names else len(names), name)
+        out.append(site_of(mod, caller, args["rule"], args["reason"]))
+    return out
+
+
+def sites_in(mod, shape):
+    out = []  # the decision is not read: a Remedy is owed on a deny and on an ask alike
     for node in ast.walk(mod.tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "refuse"):
             continue
-        rule_node, reason_node = call_arg(node, rule_i, "rule"), call_arg(node, reason_i, "reason")
-        rule_trail = Trail()
-        if rule_node is not None:
-            text_of(mod, rule_node, rule_trail, rule=True)
-        rules = sorted({s for s in rule_trail.strings if RULE_RE.fullmatch(s)})
-        if not rules:
-            rules = ["<%s>" % (ast.unparse(rule_node)[:50] if rule_node is not None else "missing")]
-        reason_trail = Trail()
-        if reason_node is not None:
-            text_of(mod, reason_node, reason_trail)
-        out.append(Site(mod.path, node.lineno, rules,
-                        ast.unparse(reason_node)[:80] if reason_node is not None else "<no reason argument>",
-                        reason_trail.strings))
+        followed = expansions(mod, node, shape)
+        if followed is None:
+            followed = [site_of(mod, node, call_arg(node, shape[0], "rule"), call_arg(node, shape[1], "reason"))]
+        out += followed
     return out
 
 
@@ -544,10 +608,11 @@ def page_payload(tool_input):
 RUN = None
 CFG = None
 REPO_DIR = None
+LANE_DIR = None  # a worktree of the fixture repo, where a per-file discard runs
 
 
 def setUpModule():
-    global RUN, CFG, REPO_DIR
+    global RUN, CFG, REPO_DIR, LANE_DIR
     RUN = _test_temp.run_folder()
     CFG = os.path.join(RUN, "cfg")
     os.makedirs(CFG)
@@ -563,6 +628,21 @@ def setUpModule():
     os.makedirs(os.path.join(REPO_DIR, ".claude"))
     with open(os.path.join(REPO_DIR, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
         json.dump({"kinds": {}, "waiting-page": PAGE_URL}, f)
+    # A lane worktree of the fixture repo: a worktree needs a commit to start from.
+    subprocess.run(["git", "-C", REPO_DIR, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+                    "commit", "-q", "--allow-empty", "-m", "probe"], check=True, capture_output=True)
+    LANE_DIR = os.path.join(RUN, "lane")
+    subprocess.run(["git", "-C", REPO_DIR, "worktree", "add", "-q", "--detach", LANE_DIR], check=True,
+                   capture_output=True)
+    # An upstream on the fixture's branch: a push with an implied destination off it is what push-stray-branch asks about.
+    current = subprocess.run(["git", "-C", REPO_DIR, "symbolic-ref", "--short", "HEAD"], check=True,
+                             capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "-C", REPO_DIR, "update-ref", "refs/remotes/origin/lane-x", "HEAD"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", REPO_DIR, "config", "branch.%s.remote" % current, "origin"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", REPO_DIR, "config", "branch.%s.merge" % current, "refs/heads/lane-x"], check=True,
+                   capture_output=True)
     # The stamp probe restamps a premise, so the guard needs a dated handoff on disk and a transcript to read.
     os.makedirs(os.path.join(CFG, "handoffs"))
     with open(os.path.join(CFG, "handoffs", "probe-stamp.md"), "w", encoding="utf-8") as f:
@@ -580,12 +660,17 @@ REMEDY_PROBES.update({
     "process-args": [("ps by pid and command name", bash_payload("ps -o pid,comm"))],
     "git-env-set": [("git -C with the repo path", bash_payload("git -C <REPO> status"))],
     "two-worktrees-one-branch": [("git -C on the own checkout", bash_payload("git -C <REPO> status"))],
-    "shared-tree": [("git stash list, a read", bash_payload("git stash list", "<REPO>"))],
+    "shared-tree": [("git stash list, a read", bash_payload("git stash list", "<REPO>")),
+                    ("git worktree list, the read the prune Remedy names", bash_payload("git worktree list", "<REPO>")),
+                    ("a per-file discard in the session's own lane worktree, with no cd", bash_payload(
+                        "git -C <LANE> restore probe.txt", "<LANE>"))],
     "other-checkout": [("git -C log of another clone", bash_payload("git -C <REPO> log -1", "<RUN>"))],
     "verdict-pipe": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"))],
     "check-tail": [("verdict with nothing after it", bash_payload("verdict python3 hooks/test_guard.py"))],
     "force-push": [("push with --force-with-lease", bash_payload(
-        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>"))],
+        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>")),
+        ("the lane's own branch, by name, with a lease", bash_payload(
+            "git push --force-with-lease --force-if-includes origin HEAD:lane-probe", "<REPO>"))],
     "push-agent-branch": [("push the lane's branch by name", bash_payload(
         "git push origin HEAD:lane-probe", "<REPO>"))],
     "push-all-main": [("push the lane's branch by name", bash_payload(
@@ -797,15 +882,23 @@ REMEDY_PROBES.update({
     "wsl-allow-list": [("wsl with -e and a python script", bash_payload("wsl -e python3 hooks/test_guard.py", "<REPO>"))],
 })
 
+# ---- the ask reasons the scan reads through ask_command's queue: each act is the one its Remedy names.
+REMEDY_PROBES.update({
+    # A network remote is the one the guard judges by its URL: a push to main asks there, and the local origin never does.
+    "push-main": [("the lane's own branch, by name", bash_payload("git push origin HEAD:lane-probe", "<REPO>")),
+                  ("the lane's own branch, by name, on a network remote", bash_payload(
+                      "git push https://github.com/probe/probe.git HEAD:lane-probe", "<REPO>"))],
+    "push-stray-branch": [("the destination named, as the Remedy says", bash_payload(
+        "git push origin HEAD:lane-probe", "<REPO>"))],
+    "bare-merge": [("the merge tool with --confirm", bash_payload("merge 123 --confirm"))],
+})
+
 REMEDY_PROSE_ONLY.update({
     "worktree-home": "the Remedy is to stop and report to the orchestrator: no tool call is the act",
     # The Remedy's act is a Read. The guard never judges a Read, and the check clears on the read itself, outside
     # the guard, so no guard call can prove the Remedy. A probe here would pass whatever the Read did.
     "handoff-unread": "the Remedy's act is a Read, which the guard never judges: the read clears the check outside "
                       "the guard, so no guard call can prove it",
-    # A placeholder for a rule the caller passes in: call_judge.unvetted's callers name spawn-judge and question-judge.
-    "<rule>": "a placeholder for a rule passed in as a parameter, not a rule: its callers are spawn-judge and "
-              "question-judge, which are prose-only here",
     "lane-closes-after-records": "the act is get_session on the target and then the archive again, and the archive's check "
                                  "reads the lane's records from its transcript, which this fixture does not stage",
     "load-brake": "the Remedy's act is to end the turn and send the reading to the parent: no tool call the guard judges",
@@ -840,7 +933,8 @@ def tearDownModule():
 def run_guard(body):
     """(decision, reason) the guard prints for one payload, judged the way the guard suite judges it.
     <REPO>, <RUN> and <CFG> in the payload stand for this run's fixture folders."""
-    text = json.dumps(body).replace("<REPO>", REPO_DIR).replace("<RUN>", RUN).replace("<CFG>", CFG)
+    text = (json.dumps(body).replace("<REPO>", REPO_DIR).replace("<RUN>", RUN).replace("<CFG>", CFG)
+            .replace("<LANE>", LANE_DIR))
     body = json.loads(text)
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
@@ -874,13 +968,7 @@ def run_guard(body):
 # Rules whose refusal has no Remedy yet, by the area PR that adds it. Each area PR deletes its own lines, so
 # every PR passes alone; the last one leaves this table empty. A rule listed here that already carries a
 # Remedy fails test_pending_rules_still_lack_a_remedy, so a line cannot outlive its fix.
-REMEDY_PENDING = {
-    # The ask path. settle_ask()'s refuse() takes its reason from the queue that ask_command() fills, which the scan
-    # does not follow, so its site reads as "<rule>". Those asks carry no Remedy yet: shared-tree (WORKTREE_PRUNE_ASK_REASON,
-    # TREE_ASK_REASON), force-push (PUSH_ASK_REASON), push-main (PUSH_MAIN_REASON) and push-stray-branch (PUSH_STRAY_REASON).
-    # The row goes once those carry one and the scan follows the queue.
-    "ask": ["<rule>"],
-}
+REMEDY_PENDING = {}
 PENDING = {rule for rules in REMEDY_PENDING.values() for rule in rules}
 
 
