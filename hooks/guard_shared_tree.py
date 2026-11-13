@@ -739,9 +739,9 @@ def names_only_files(subcommand: str, args, root: str, segment: str = "") -> boo
 TREE_ASK_REASON = (
     "Rule (shared trees): this command throws away work in a working tree. "
     "This checkout is a worktree, so the loss is limited to this lane. "
-    "Commit work you must set aside on your own branch, never a stash. "
-    "A per-file discard in a worktree runs with no ask when the command holds no cd: "
-    "git -C <lane> restore <file>. "
+    "Remedy: set work aside with a commit on your own branch, never a stash. "
+    "To drop one file's edits, run `git -C <lane> restore <file>`, which runs with no ask when "
+    "the command holds no cd. "
     "The click in this prompt is the grant."
 )
 

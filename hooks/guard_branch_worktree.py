@@ -108,6 +108,8 @@ WORKTREE_PRUNE_ASK_REASON = (
     "Rule (shared trees): this drops the administrative record of a worktree whose directory no "
     "longer exists. It deletes no files, but the record it drops could belong to another "
     "session. "
+    "Remedy: read the records with `git worktree list`, where a stale one shows as prunable, and "
+    "leave a record that is not your own lane's for its session. "
     "The click in this prompt is the grant."
 )
 
