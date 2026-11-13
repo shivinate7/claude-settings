@@ -133,8 +133,10 @@
                           A cloud run needs the batch-runner role. Each run that does not stop ends with one line per pull request that
                           --reviewed reads done on the base and that no lane set, open pull request or base holds: `merge: #N left out of
                           batch NAME: none|prose|conflict` (prose: docs-only; conflict: its head conflicts with the base tip). A failed read
-                          prints `merge: left-out list unknown (why)` and keeps the batch result. Added gh cost: one reviewed_read, then per
-                          done candidate one compare against each other open pull request on the base and one against the base, plus one `git merge-tree`.
+                          prints `merge: left-out list unknown (why)` and keeps the batch result. Added gh cost: one reviewed_read, one open-PR
+                          list read (h.batch_pr) for a missing base or lane set, then per done candidate one compare against each other open pull
+                          request on the base and one against the base. Per code candidate: one `git fetch` of the base (once per run), a
+                          `git cat-file` check, a fetch of its refs/pull/N/head if the clone lacks it, and one `git merge-tree`.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
                           head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
@@ -5027,24 +5029,24 @@ def left_out_lines(root, h, name, numbers, base):
     """-> the lines naming each pull request that `merge --reviewed` reads done on `base`, that is not in the batch's lane set `numbers` and whose
     head no other open pull request on `base` holds (a batch's draft included) and `base` does not hold: `merge: #N left out of batch NAME: REASON`,
     ascending. REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
-    with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_tree. Cost over a build: reviewed_read's reads, then one compare per
-    candidate and other open pull request on `base`, one compare against `base` and one `git merge-tree` per candidate. Any Stop or an unknown
-    merge-tree raises Stop."""
+    with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_reason, the one home of "does this head merge cleanly onto the base"
+    (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one compare per
+    candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. Any Stop or an unknown
+    merge_reason raises Stop."""
     _lines, done, pulls = reviewed_read(h)
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
     kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
-    tip = fetch_branch(root, base, FREEZE_CITE) if kinds else None
-    out = []
+    fetched, out = {}, []
     for n in sorted(kinds):
         if any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n) or h.holds_head(heads[n], base):
             continue
         if kinds[n] == "docs-only":
             why = "prose"
         else:
-            state, _tree, why_unknown = merge_tree(root, tip, heads[n])
-            if state == "unknown":
-                raise Stop(f"cannot tell whether #{n} merges onto {base}: {why_unknown[0]}")
-            why = "conflict" if state == "conflict" else "none"
+            reason = merge_reason(root, n, base, heads[n], fetched)
+            if reason and is_unknown_reason(reason):
+                raise Stop(f"cannot tell whether #{n} merges onto {base}: {reason}")
+            why = "conflict" if reason else "none"
         out.append(f"merge: #{n} left out of batch {name}: {why}")
     return out
 
