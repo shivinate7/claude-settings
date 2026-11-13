@@ -102,6 +102,9 @@ ROLE_UNREADABLE_CFG = role_config("unreadable", role_table("unreadable", ROLE_TA
 ROLE_LIVE_POINTER = role_table("live", ROLE_TABLE_TEST_AUTHOR_HAIKU)
 ROLE_LIVE_CFG = role_config("live", ROLE_LIVE_POINTER)
 ROLE_RULES_POINTER = role_table("rules", ROLE_TABLE_RULES)
+# The repository's builder pins sonnet, so a case that needs a builder with no model pin reads this fixture folder.
+ROLE_UNPINNED_POINTER = role_table("unpinned", ROLE_TABLE_RULES, agents=("builder",))
+ROLE_UNPINNED_CFG = role_config("unpinned", ROLE_UNPINNED_POINTER)
 
 
 def role_input(role, model, prompt):
@@ -377,7 +380,8 @@ def workflow_opus_override_check():
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
           "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: claude with no model is denied when the default is unset",
@@ -385,10 +389,11 @@ role_model_refuse("role-model: claude with no model is denied when the default i
 role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
           None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
-          env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", tool="Task", config=ROLE_UNPINNED_CFG,
+          carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: builder with no model is denied when the default is empty",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
@@ -440,7 +445,7 @@ def role_override_lift_check():
 def role_override_no_model_check():
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
     override that follows still lifts a test-author on sonnet."""
-    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
+    config, session = role_config("ov-no-model", ROLE_UNPINNED_POINTER), "role-ov-no-model"
 
     def call(seconds, spawn, env=None):
         return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
