@@ -21,9 +21,10 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
 - The ruling census suite stays on every OS: it tests macOS `/var` symlinks and Windows backslash and `normcase` paths.
 - Suites that touch paths, processes, shells, launchd, schtasks, symlinks or encoding run on every OS. When unsure, a suite stays on all OSes.
 - The macOS job runs only the suites that touch the OS. `install.sh` syntax and checkout detection run once, on `shell-macos`. Windows keeps its own Git Bash run.
-- `concurrency` cancels superseded runs on pull requests only. Push, nightly and manual runs finish.
+- `concurrency` cancels superseded runs on pull requests only. Push and manual runs finish.
 - Step names do not change: `lint/rule_audit.py` reads them.
 - When a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after. This is a step of the `ci-hygiene` skill (owner, 2026-10-17 23:46 CDT).
+- CI has no nightly schedule (owner, 2026-11-12 22:19 CST). 45 nightly runs since Sep 30 found nothing the push runs had not. A manual run stays through `workflow_dispatch`. Jobs that run only on `schedule` are now dead. They stay until a cleanup after the integration-PR lane merges.
 
 Reason: a slow Windows runner failed a PR on tests its change did not touch. Fixed sleeps cost time, and macOS CI minutes went to suites
 that do not touch the OS. A duplicate run costs minutes for no new verdict.
