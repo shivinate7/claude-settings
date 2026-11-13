@@ -1324,7 +1324,7 @@ def tend_text(homes, text):
     blocks = parse(text)
     settle(homes, blocks)
     lines = {n for b in blocks for n in b["item_at"]}
-    rows = tending.tend(entry, text, homes.worked_in or homes.cwd or ".", homes.on_main)
+    rows = tending.tend(entry, text, homes.worked_in or homes.cwd or ".", known=homes.on_main)
     return [r for r in rows if r[0] + 1 in lines], entry
 
 

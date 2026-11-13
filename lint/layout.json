@@ -89,7 +89,7 @@
   "tending": {
     "decisions": {
       "where": "decisions",
-      "item": "^Home: (\\S+)",
+      "item": "(?i)^\\s*[-*]?\\s*home:\\s*(\\S+)",
       "still-true": "home-held",
       "close": "none",
       "runs-from": ["merge-check"],
