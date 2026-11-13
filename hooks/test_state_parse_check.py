@@ -582,10 +582,9 @@ builtins.open = _logged_open
 FilterRun = collections.namedtuple("FilterRun", "starts before after opened")
 
 
-class PreFilterCost(unittest.TestCase):
-    """The cost the decision states (docs/decisions/state-file-parse-check.md, Cost): a call that names neither
-    .json nor the handoff folder starts no Python, a call that names one starts one, and the hook writes no file.
-    A shim for python3 and python, first on PATH, records each start."""
+class HookRunner:
+    """The one runner of the state check's registered command: a recording shim per python, and a log of each open
+    the hook makes. A test class mixes it in with unittest.TestCase."""
 
     @staticmethod
     def state_command():
@@ -624,6 +623,10 @@ class PreFilterCost(unittest.TestCase):
         starts = len(read_text(log).splitlines()) if os.path.exists(log) else 0
         opened = read_text(opens).splitlines() if os.path.exists(opens) else []
         return FilterRun(starts, before, listing(), opened)
+
+class PreFilterCost(HookRunner, unittest.TestCase):
+    """The cost the decision states (docs/decisions/state-file-parse-check.md, Cost): a call that names neither
+    .json nor the handoff folder starts no Python, a call that names one starts one, and the hook writes no file."""
 
     def run_filter(self, home, tool, tool_input, response):
         """(starts, files before the call, files after it) from run_hook."""
@@ -801,6 +804,201 @@ class EmptyAndFullStates(unittest.TestCase):
         line, column = json_error(self, "")
         codes, ctx = home.write_hook(os.path.join(home.work, "empty.json"), "")
         assert_named(self, codes, ctx, "an empty *.json", "empty.json", home, line=line, column=column)
+
+
+class CdAndHeredoc(unittest.TestCase):
+    """A sed -i that runs after a cd, and a heredoc body whose lone apostrophe hides the append from the check."""
+
+    @SHELL_ONLY
+    def test_sed_after_cd_into_the_handoff_folder_that_deletes_the_closer_is_named(self):
+        home = Home()
+        write(home.inbox, HEAD_1 + "\n````\nowner: keep the closing fence\n````\n")
+        command = "cd %s && sed -i '$d' %s" % (shlex.quote(home.handoffs), shlex.quote(os.path.basename(home.inbox)))
+        self.assertEqual(home.sh(command), 0, "scope: the cd and the sed must run")
+        self.assertNotEqual(read_text(home.inbox).splitlines()[-1], "````", "scope: the sed must delete the closer")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_named(self, codes, ctx, "a sed -i after a cd into the handoff folder", home.sid + ".inbox.md", home,
+                     line=2)
+
+    @SHELL_ONLY
+    def test_heredoc_body_with_a_lone_apostrophe_that_opens_a_fence_is_named(self):
+        home = Home()
+        write(home.inbox, HEAD_1 + "\n")
+        command = "cat >> %s <<'EOF'\n````\nit's\nEOF\n" % shlex.quote(home.inbox)
+        self.assertEqual(home.sh(command), 0, "scope: the heredoc append must run")
+        self.assertEqual(read_text(home.inbox), HEAD_1 + "\n````\nit's\n", "scope: the body must land in the inbox")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_named(self, codes, ctx, "a heredoc body with a lone apostrophe that opens a fence",
+                     home.sid + ".inbox.md", home, line=2)
+
+    @SHELL_ONLY
+    def test_the_same_heredoc_without_the_apostrophe_is_named_control(self):
+        home = Home()
+        write(home.inbox, HEAD_1 + "\n")
+        command = "cat >> %s <<'EOF'\n````\nits\nEOF\n" % shlex.quote(home.inbox)
+        self.assertEqual(home.sh(command), 0, "scope: the heredoc append must run")
+        self.assertEqual(read_text(home.inbox), HEAD_1 + "\n````\nits\n", "scope: the body must land in the inbox")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_named(self, codes, ctx, "the same heredoc without the apostrophe", home.sid + ".inbox.md", home,
+                     line=2)
+
+
+class WriteForms(unittest.TestCase):
+    """Each write form that leaves an inbox with its closing fence lost is named at the open fence, line 2. A shell
+    form runs for real. Each PowerShell form is judged on the state the test leaves, as EveryTool does."""
+
+    INTACT = HEAD_1 + "\n````\nowner: keep the closing fence\n````\n"
+    LOST = HEAD_1 + "\n````\nowner: keep the closing fence\n"
+
+    def named_when_lost(self, home, tool, command, why):
+        self.assertEqual(read_text(home.inbox), self.LOST, "scope: the call must leave the closer lost")
+        codes, ctx = home.dispatch(tool, {"command": command})
+        assert_named(self, codes, ctx, why, home.sid + ".inbox.md", home, line=2)
+
+    @SHELL_ONLY
+    def test_head_to_a_temp_file_then_mv_that_drops_the_closer_is_named(self):
+        home = Home()
+        q = shlex.quote
+        write(home.inbox, self.INTACT)
+        tmp = home.inbox + ".tmp"
+        command = "head -n -1 %s > %s && mv %s %s" % (q(home.inbox), q(tmp), q(tmp), q(home.inbox))
+        self.assertEqual(home.sh(command), 0, "scope: the head and mv must run")
+        self.named_when_lost(home, "Bash", command, "head -n -1 into a temp file, then mv over the inbox")
+
+    @SHELL_ONLY
+    def test_mv_of_a_copy_that_drops_the_closer_is_named(self):
+        home = Home()
+        q = shlex.quote
+        write(home.inbox, self.INTACT)
+        source = home.inbox + ".new"
+        write(source, self.LOST)
+        command = "mv %s %s" % (q(source), q(home.inbox))
+        self.assertEqual(home.sh(command), 0, "scope: the mv must run")
+        self.named_when_lost(home, "Bash", command, "mv of a copy that drops the closer, over the inbox")
+
+    @SHELL_ONLY
+    def test_cp_of_a_copy_that_drops_the_closer_is_named(self):
+        home = Home()
+        q = shlex.quote
+        write(home.inbox, self.INTACT)
+        source = os.path.join(home.work, "lost-copy.txt")
+        write(source, self.LOST)
+        command = "cp %s %s" % (q(source), q(home.inbox))
+        self.assertEqual(home.sh(command), 0, "scope: the cp must run")
+        self.named_when_lost(home, "Bash", command, "cp of a copy that drops the closer, over the inbox")
+
+    @SHELL_ONLY
+    def test_perl_in_place_that_drops_the_last_line_is_named(self):
+        home = Home()
+        write(home.inbox, self.INTACT)
+        command = "perl -i -pe '$_ = \"\" if eof' %s" % shlex.quote(home.inbox)
+        self.assertEqual(home.sh(command), 0, "scope: the perl must run")
+        self.named_when_lost(home, "Bash", command, "perl -i -pe that drops the closer")
+
+    @GNU_SED_ONLY
+    def test_truncate_that_drops_the_closer_is_named(self):
+        # truncate -s -N is GNU coreutils; BSD truncate has no -s, so this runs where GNU sed does.
+        home = Home()
+        write(home.inbox, self.INTACT)
+        self.assertEqual(self.INTACT[-5:], "````\n", "scope: the last five bytes are the closer")
+        command = "truncate -s -5 %s" % shlex.quote(home.inbox)
+        self.assertEqual(home.sh(command), 0, "scope: the truncate must run")
+        self.named_when_lost(home, "Bash", command, "truncate -s -5 that drops the closer")
+
+    @SHELL_ONLY
+    def test_powershell_set_content_that_drops_the_closer_is_named(self):
+        home = Home()
+        write(home.inbox, self.LOST)
+        command = 'Set-Content -Path "%s" -Value "owner: keep the closing fence"' % home.inbox
+        self.named_when_lost(home, "PowerShell", command, "PowerShell Set-Content that drops the closer")
+
+    @SHELL_ONLY
+    def test_powershell_out_file_that_drops_the_closer_is_named(self):
+        home = Home()
+        write(home.inbox, self.LOST)
+        command = 'Out-File -FilePath "%s"' % home.inbox
+        self.named_when_lost(home, "PowerShell", command, "PowerShell Out-File that drops the closer")
+
+
+class NoFalseAlarm(unittest.TestCase):
+    """Text that a strict JSON reader rejects, but the file is fine as it stands, is silent. A broken state .json
+    stays named."""
+
+    @SHELL_ONLY
+    def test_tsconfig_json_with_line_comments_is_silent(self):
+        home = Home()
+        text = '{\n  // the compiler options\n  "compilerOptions": {}\n}\n'
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(text)  # scope: a strict reader rejects the text
+        codes, ctx = home.write_hook(os.path.join(home.work, "tsconfig.json"), text)
+        assert_silent(self, ctx, "a tsconfig.json with // comments")
+
+    @SHELL_ONLY
+    def test_json_file_with_a_utf8_bom_is_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "bom.json")
+        codes, ctx = home.write_hook(path, "﻿" + OK_JSON)
+        self.assertEqual(read_bytes(path)[:3], b"\xef\xbb\xbf", "scope: the file starts with a UTF-8 BOM")
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(read_text(path))  # scope: a strict reader rejects the BOM
+        assert_silent(self, ctx, "a valid .json with a UTF-8 byte order mark")
+
+    @SHELL_ONLY
+    def test_background_redirect_that_leaves_an_empty_json_is_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "bg.json")
+        write(path, "")
+        self.assertEqual(read_text(path), "", "scope: the file is still empty when the hook runs")
+        codes, ctx = home.dispatch("Bash", {"command": "slowtool > bg.json &"})
+        assert_silent(self, ctx, "a background redirect whose json is still empty")
+
+    @SHELL_ONLY
+    def test_foreground_redirect_that_leaves_an_empty_json_is_named_control(self):
+        home = Home()
+        write(os.path.join(home.work, "bg.json"), "")
+        line, column = json_error(self, "")
+        codes, ctx = home.dispatch("Bash", {"command": "slowtool > bg.json"})
+        assert_named(self, codes, ctx, "a foreground redirect that leaves the same empty json", "bg.json", home,
+                     line=line, column=column)
+
+    @SHELL_ONLY
+    def test_a_genuinely_broken_state_json_is_still_named_control(self):
+        home = Home()
+        broken = '{\n  "a": 1,,\n  "b": 2\n}\n'
+        line, column = json_error(self, broken)
+        codes, ctx = home.write_hook(os.path.join(home.work, "state.json"), broken)
+        assert_named(self, codes, ctx, "a state .json with a doubled comma", "state.json", home,
+                     line=line, column=column)
+
+
+class PremisesReadCost(HookRunner, unittest.TestCase):
+    """An Edit whose new_string occurs 40 times in a handoff. Each place is one candidate before-state, and each is
+    judged. The premises prompt must still be read at most once in the call, and the handoff once."""
+
+    def repeated_edit(self):
+        home = Home()
+        write(home.handoff, handoff_text("## Next\n\n" + "- step\n" * 39 + "- old\n"))
+        edit_on_disk(self, home.handoff, "- old\n", "- step\n")
+        self.assertEqual(read_text(home.handoff).count("- step\n"), 40, "scope: new_string must repeat 40 times")
+        run = self.run_hook(home, "Edit", {"file_path": home.handoff, "old_string": "- old\n", "new_string": "- step\n"},
+                            {"stdout": "", "stderr": ""})
+        return home, run
+
+    @SHELL_ONLY
+    def test_repeated_new_string_reads_the_premises_prompt_at_most_once(self):
+        home, run = self.repeated_edit()
+        self.assertEqual(run.starts, 1, "scope: the hook must run on the Edit")
+        prompt = sum(os.path.basename(p) == "precompact_handoff_prompt.md" for p in run.opened)
+        self.assertGreaterEqual(prompt, 1, "scope: the premises prompt must be read")
+        self.assertLessEqual(prompt, 1, "the premises prompt was opened %d times in one Edit" % prompt)
+
+    @SHELL_ONLY
+    def test_repeated_new_string_reads_the_handoff_once(self):
+        home, run = self.repeated_edit()
+        self.assertEqual(run.starts, 1, "scope: the hook must run on the Edit")
+        handoff = sum(os.path.basename(p) == os.path.basename(home.handoff) for p in run.opened)
+        self.assertGreaterEqual(handoff, 1, "scope: the handoff must be read")
+        self.assertLessEqual(handoff, 1, "the handoff was opened %d times in one Edit" % handoff)
 
 
 class FenceHelperPins(unittest.TestCase):
