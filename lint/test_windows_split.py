@@ -184,6 +184,7 @@ LINUX_SUITES = {
     "bash actions/all-jobs-passed/test_action.sh": (LINUX_CODE, "bash"),
     "bash actions/ci-alarm/test_action.sh": (LINUX_CODE, "bash"),
     "python3 actions/ci-alarm/test_clear_rule.py": (LINUX_CODE, "bash"),
+    "python3 actions/ci-alarm/test_revert_rule.py": (LINUX_CODE, "bash"),
     "python3 actions/ci-done-comment/test_comment.py": (LINUX_CODE, "bash"),
     "bash actions/ruling-kind/test_action.sh": (LINUX_CODE, "bash"),
     "python3 actions/readme-links/test_readme_links.py": (LINUX_CODE, "bash"),
