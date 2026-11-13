@@ -78,7 +78,7 @@ The progress-claim check (rule `progress-claims-cite-live-read`): on any turn, l
 last reply that holds a progress phrase ("in progress", "nearly done", "waiting on", "stalled" and the like, read outside
 code spans) in a sentence whose subject (a step, lane, batch, `PR #n`, a bare `#n` or a step id in a code span) sits in
 that sentence or an earlier one of the paragraph, unless the claim's block cites a named read: get_session, list_events,
-pull_request_read, list_pull_requests, "REST API" or "REST read", "live read", a PR URL, or "unmeasured", "not read",
+pull_request_read, list_pull_requests, "REST API" or "REST read", a PR URL, or "unmeasured", "not read",
 "unknown". A stamp alone is no read. A state word ("merged", "done") is no phrase. Fences are skipped. One refusal per
 turn lists the lines and joins any other reason. It checks that a block cites a read, not that the read happened.
 Decision: progress-claims-cite-live-read. Cost: regex over the reply, no file, no process.
@@ -755,7 +755,7 @@ PROGRESS_PHRASE_RE = re.compile(
     r"|\b\d{1,3}\s*%\s*(?:done|complete)", re.I)
 PROGRESS_READ_RE = re.compile(
     r"\b(?:get_session|list_events|pull_request_read|list_pull_requests|unmeasured|unknown)\b|\bnot\s+read\b"
-    r"|\blive\s+read\b|(?<![\w-])(?-i:REST)\s+(?:API|reads?)\b|https?://\S*/pull/\d+", re.I)
+    r"|(?<![\w-])(?-i:REST)\s+(?:API|reads?)\b|https?://\S*/pull/\d+", re.I)
 PROGRESS_BLOCK_START = re.compile(r"^(?:\||#{1,6}\s|[-*+]\s|\d+[.)]\s|\*\*)")
 PROGRESS_REASON = owner_line(
     "Progress-claim guard (rule progress-claims-cite-live-read)",
