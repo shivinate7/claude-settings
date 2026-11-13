@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""After a Bash, PowerShell, Write, Edit or MultiEdit call, names a state file the call left unreadable: a *.json that does not parse, an inbox or handoff .md with a code fence left open, an inbox block header lost, or a handoff with no Working premises heading. It never blocks, and it says nothing about a file that was already broken or is gone (decision state-file-parse-check). Standard library only.
+"""After a Bash, PowerShell, Write, Edit or MultiEdit call, names a state file the call left unreadable: a *.json that does not parse, an inbox or handoff .md with a code fence left open, an inbox block header lost, or a handoff with no Working premises heading. It never blocks. After an Edit or MultiEdit it says nothing about a file that was already broken, and it says nothing about a file that is gone (decision state-file-parse-check). Standard library only.
 
 The mistake it stops: a Bash, PowerShell, Write, Edit or MultiEdit call that leaves a state file
 broken: a *.json that json.loads rejects, an inbox (*.inbox.md) or handoff (*.md) in the handoff folder
@@ -11,28 +11,34 @@ names the file, the line and the fault, and exits 0 on every path.
 
 What it reads: only the files the call names.
   - Write, Edit, MultiEdit: the call's file_path, when it is a *.json or a *.md in the handoff folder.
-  - Bash, PowerShell: the command split into words and operators (a quoted `>` is a word). A path counts
-    only in a write position (a `sed -i` operand, a `>` or `>>` target, a `tee` argument), and only when it
-    is a *.json or a *.md in the handoff folder. A read says nothing, even of a state file: it changes nothing, and an alarm on each read would
-    repeat until the file is fixed. So `cat bad.json` says nothing.
+  - Bash, PowerShell: the command is read with the repo's one shell walk (guard_core: heredoc bodies dropped,
+    quotes and comments read, `cd` followed, a lone `&` a cut). A path counts only in a write position: a
+    redirect target, a `tee` argument, a `sed -i` or `perl -i` operand, the last word of `mv` and `cp`, a
+    `truncate` operand, the target of Set-Content, Add-Content, Out-File. It counts only when it is a *.json
+    or a *.md in the handoff folder. A read says nothing, even of a state file: it changes nothing, and an
+    alarm on each read would repeat until the file is fixed. So `cat bad.json` says nothing. A redirect under
+    a background `&` whose file is still empty says nothing: the job has not written yet.
   - The handoff folder is the folder of precompact_handoff.handoff_path, under CLAUDE_CONFIG_DIR.
 
 No false alarm mid-edit: an Edit or MultiEdit rebuilds the before-state from old_string and new_string
 (the after-state with new_string put back to old_string). A new_string that occurs more than once, or is
 empty, gives one candidate before-state per place it could have been. The check stays silent only when
-every candidate was already broken. It caps the work (candidates times file size) before it builds any
+every candidate was already broken. That silence is for an Edit or MultiEdit alone: a Write or a shell
+write is judged as left, so it names a broken file even when the file was broken before. It caps the work (candidates times file size) before it builds any
 candidate, builds them one at a time, and stays silent past the cap or when new_string is not in the file.
 A file that is gone says nothing: a delete is not a break. A Write or a shell write is judged as left.
 
 Fence rules, one home (hooks/fence_rule.py, which feedback_guard.py also reads): an inbox uses
 fence_rule.inbox_scan (parse()'s loop, so this check and the Stop check agree on the inbox); another handoff
 .md uses fence_rule.fence_scan (unfenced()'s loop) with the indent capped at three spaces. A fence inside a
-JSON string is text: the fence scan never runs on JSON.
+JSON string is text: the fence scan never runs on JSON. A *.json whose only fault is a `//` or `/* */` comment,
+or a UTF-8 byte order mark, is fine.
 
 Cost: every call in the matcher starts the settings.json filter's shell, with one cat and one grep. The
 filter greps only tool_input and exits unless it names `.json` or the handoff folder, so a call that names
 neither starts no Python. A call that names one starts one Python, which reads each file it judges, and
-imports fence_rule when a .md is judged. It writes no file and starts no other process.
+imports fence_rule when a .md is judged, and guard_core and guard when a shell call is judged. It reads
+the premises prompt at most once and each file it judges once. It writes no file and starts no other process.
 """
 import json
 import os
@@ -53,14 +59,25 @@ MAX_CANDIDATES = 64      # places one new_string may occur in and still be tried
 SHORT_TEXT = 2000        # a text this short is tried at every character for an Edit that only removed text
 MAX_WORK = 60_000_000    # candidates times file size: a costlier rebuild is skipped, and the check is silent
 MAX_BYTES = 8_000_000    # a state file larger than this is not read
-SEPARATORS = {"|", "||", "&&", ";", "&", ";;", "|&", "(", ")"}
-REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
-SKIP_PROGRAMS = {"sudo", "command", "env", "exec", "nohup", "time"}
 SED_IN_PLACE = re.compile(r"-[A-Za-z]*i|--in-place")
+PERL_IN_PLACE = re.compile(r"-[A-Za-z]*i|--in-place")
+# Each PowerShell writer: the flags that name its target, and the flags whose next word is a value, not a path.
+POWERSHELL_WRITERS = {"set-content", "add-content", "out-file", "clear-content", "new-item"}
+POWERSHELL_PATH_FLAGS = ("-path", "-filepath", "-literalpath", "-pspath")
+POWERSHELL_VALUE_FLAGS = ("-value", "-encoding", "-inputobject", "-width", "-stream", "-itemtype", "-name")
 
 
 def handoff_dir():
     return os.path.dirname(precompact_handoff.handoff_path("x"))
+
+
+PREMISES = []   # the premises heading matcher, read once per process: _premises_head() opens the prompt file
+
+
+def premises_head():
+    if not PREMISES:
+        PREMISES.append(precompact_handoff._premises_head())
+    return PREMISES[0]
 
 
 def norm(path):
@@ -84,96 +101,94 @@ def kind_of(path, hdir):
     return None
 
 
-OPERATOR = re.compile(r"&>>|&>|>>|>\||>&|<&|<<|\|\||&&|\|&|;;|[|;&()<>]")
+def lone_ampersands(segment):
+    """[(text, backgrounded)] for one split_segments segment cut at each lone unquoted `&`, the shell's background
+    operator. The `&` of `&>`, `>&`, `2>&1` and `&&` is no cut. A part before a lone `&` runs in the background."""
+    import guard_core
+    marks = []
+    for at, char, quote in guard_core.walk_quotes(segment):
+        if char == "&" and not quote:
+            before, after = segment[at - 1:at], segment[at + 1:at + 2]
+            if before not in (">", "<", "&", "|") and after not in (">", "&"):
+                marks.append(at)
+    parts, start = [], 0
+    for at in marks:
+        parts.append((segment[start:at], True))
+        start = at + 1
+    parts.append((segment[start:], False))
+    return parts
 
 
-def tokens(command, powershell):
-    """[(text, is_operator)] for the command, in order. A quoted or escaped `>`, `;` or `#` is a word, never an
-    operator or a comment. A newline outside quotes is a `;`. A command with an unclosed quote falls back to a
-    whitespace split with no operators. PowerShell keeps a backslash as a path character."""
-    out, word, quoted, i = [], "", False, 0
+def powershell_target(args):
+    """The path a PowerShell writer cmdlet names: the value of -Path, -FilePath or -LiteralPath, else its first
+    word that is no flag and no flag's value."""
+    skip = False
+    for at, word in enumerate(args):
+        low = word.lower()
+        if low in POWERSHELL_PATH_FLAGS:
+            return args[at + 1] if at + 1 < len(args) else None
+        if skip:
+            skip = False
+        elif low.startswith("-"):
+            skip = low in POWERSHELL_VALUE_FLAGS
+        else:
+            return word
+    return None
 
-    def flush():
-        nonlocal word, quoted
-        if word or quoted:
-            out.append((word, False))
-        word, quoted = "", False
 
-    try:
-        while i < len(command):
-            ch = command[i]
-            if ch in "'\"":
-                end = command.find(ch, i + 1)
-                while ch == '"' and end > 0 and not powershell and command[end - 1] == "\\":
-                    end = command.find(ch, end + 1)
-                if end < 0:
-                    raise ValueError("unclosed quote")
-                word, quoted, i = word + command[i + 1:end], True, end + 1
-            elif ch == "\\" and not powershell and i + 1 < len(command):
-                word, i = word + command[i + 1], i + 2
-            elif ch in " \t\r":
-                flush()
-                i += 1
-            elif ch == "\n":
-                flush()
-                out.append((";", True))
-                i += 1
-            elif ch == "#" and not word and not quoted:
-                end = command.find("\n", i)
-                i = len(command) if end < 0 else end
-            else:
-                found = OPERATOR.match(command, i)
-                if found:
-                    if not (word.isdigit() and found.group().startswith((">", "&>"))):
-                        flush()
-                    else:
-                        word = ""
-                    out.append((found.group(), True))
-                    i = found.end()
-                else:
-                    word, i = word + ch, i + 1
-        flush()
-    except ValueError:
-        return [(w, False) for w in command.split()]
-    return out
+def verb_writes(verb, args):
+    """The words of `args` that name a file the command `verb` writes. A word that is no state file is dropped
+    later by kind_of, so a script word among them does no harm."""
+    if verb == "tee" or (verb == "sed" and any(SED_IN_PLACE.fullmatch(w) for w in args if w.startswith("-"))):
+        return [w for w in args if not w.startswith("-")]
+    if verb == "perl" and any(PERL_IN_PLACE.fullmatch(w.split("=")[0]) for w in args if w.startswith("-")):
+        return [w for w in args if not w.startswith("-")]
+    if verb in ("mv", "cp"):
+        words = [w for w in args if not w.startswith("-")]
+        return words[-1:]
+    if verb == "truncate":
+        out, skip = [], False
+        for word in args:
+            if skip:
+                skip = False
+            elif word in ("-s", "--size", "-r", "--reference"):
+                skip = True
+            elif not word.startswith("-"):
+                out.append(word)
+        return out
+    if verb in POWERSHELL_WRITERS:
+        found = powershell_target(args)
+        return [found] if found else []
+    return []
 
 
 def shell_paths(command, powershell, cwd, hdir):
-    """The files a shell command writes that this check may judge, in order: a redirect target, a `tee`
-    argument, a `sed -i` operand."""
+    """[(path, backgrounded)] for each file a shell command writes that this check may judge, in order: a redirect
+    target, a `tee` argument, a `sed -i` or `perl -i` operand, the last word of `mv` and `cp`, a `truncate`
+    operand, and the target of Set-Content, Add-Content, Out-File and the like. The walk is the repo's: heredoc
+    bodies are dropped, quotes and comments are read by split_segments, a redirect by guard._redirect_targets, and
+    a `cd` is followed by dir_before_segment, so a relative path resolves where the shell was."""
+    import guard
+    import guard_core
+    guard_core.POWERSHELL_CALL[0] = powershell
+    text = guard_core.strip_heredoc_bodies(command)
+    ends = []
+    segments = guard_core.split_segments(text, ends)
     found = {}
-
-    def add(word):
-        path = resolve(word, cwd)
-        if path is not None:
-            found[path] = True
-
-    seg, redirect, segments = [], False, []
-    for word, is_op in tokens(command, powershell) + [(";", True)]:
-        if is_op and word in SEPARATORS:
-            segments.append(seg)
-            seg, redirect = [], False
-        elif is_op and word in REDIRECTS:
-            redirect = True
-        elif is_op:
+    for number, segment in enumerate(segments):
+        if not segment.strip():
             continue
-        elif redirect:
-            add(word)
-            redirect = False
-        else:
-            seg.append(word)
-    for seg in segments:
-        args = [w for w in seg if not re.fullmatch(r"\w+=.*", w)]
-        while args and os.path.basename(args[0]) in SKIP_PROGRAMS:
-            args = args[1:]
-        program = os.path.basename(args[0]) if args else ""
-        in_place = program == "sed" and any(SED_IN_PLACE.fullmatch(w) or w.startswith("-i")
-                                            for w in args[1:] if w.startswith("-") and w != "--")
-        if in_place or program == "tee":
-            for word in args[1:]:
-                if not word.startswith("-"):
-                    add(word)
-    return [p for p in found if kind_of(p, hdir)][:MAX_PATHS]
+        where = guard_core.dir_before_segment(segments, number, cwd, ends) or cwd
+        for part, background in lone_ampersands(segment):
+            words = list(guard._redirect_targets(part))
+            tokens = guard_core.segment_tokens(guard_core.strip_redirections(part)) or []
+            for at in guard_core.command_indexes(tokens):
+                words += verb_writes(os.path.basename(tokens[at]).lower(), tokens[at + 1:])
+            for word in words:
+                path = resolve(word, where)
+                if path is not None and kind_of(path, hdir):
+                    found[path] = found.get(path, True) and background
+    return list(found.items())[:MAX_PATHS]
 
 
 def read_text(path):
@@ -182,18 +197,54 @@ def read_text(path):
         if not os.path.isfile(path) or os.path.getsize(path) > MAX_BYTES:
             return None
         with open(path, "rb") as handle:
-            return handle.read().decode("utf-8")
+            return handle.read().decode("utf-8-sig")  # a UTF-8 byte order mark is no break
     except (OSError, ValueError):
         return None
 
 
+def blank_comments(text):
+    """`text` with each `//` and `/* */` comment outside a string replaced by spaces, newlines kept, so a position in
+    the result is a position in the text."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in text[i:j]))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def json_fault(text):
-    """(line, column, why) when json.loads rejects the text, else None."""
+    """(line, column, why) when json.loads rejects the text, else None. A file whose only fault is a `//` or
+    `/* */` comment (a tsconfig.json) is fine: the reader that wrote it takes comments."""
     try:
         json.loads(text)
+        return None
+    except json.JSONDecodeError:
+        pass
+    except Exception:  # a RecursionError on deep nesting: not a verdict
+        return None
+    try:
+        json.loads(blank_comments(text))
     except json.JSONDecodeError as error:
         return error.lineno, error.colno, error.msg
-    except Exception:  # a RecursionError on deep nesting: not a verdict
+    except Exception:
         return None
     return None
 
@@ -206,7 +257,7 @@ def facts(kind, text, fences):
         blocks, open_line = fences.inbox_scan(text)
         return {"fence": open_line, "stamps": [b["stamp"] for b in blocks]}
     return {"fence": fences.fence_scan(text, 3)[1],
-            "premises": precompact_handoff._premises_head().search(text) is not None}
+            "premises": premises_head().search(text) is not None}
 
 
 class Unknown(Exception):
@@ -336,7 +387,7 @@ def judge(path, kind, after, befores, fences):
 
 
 def targets(payload, hdir):
-    """[(path, kind)] of the files this call writes that the check may judge."""
+    """[(path, kind, backgrounded)] of the files this call writes that the check may judge."""
     tool, tool_input = payload.get("tool_name"), payload.get("tool_input")
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
     if not isinstance(tool_input, dict):
@@ -345,10 +396,13 @@ def targets(payload, hdir):
         raw = tool_input.get("file_path")
         path = resolve(raw, cwd) if isinstance(raw, str) else None
         kind = kind_of(path, hdir) if path else None
-        return [(path, kind)] if kind else []
+        return [(path, kind, False)] if kind else []
     if tool in SHELL_TOOLS and isinstance(tool_input.get("command"), str):
-        return [(p, kind_of(p, hdir)) for p in
-                shell_paths(tool_input["command"], tool == "PowerShell", cwd, hdir)]
+        try:
+            return [(p, kind_of(p, hdir), background) for p, background in
+                    shell_paths(tool_input["command"], tool == "PowerShell", cwd, hdir)]
+        except ImportError:
+            return []
     return []
 
 
@@ -359,12 +413,12 @@ def check(payload):
     if not found:
         return ""
     fences = None
-    if any(kind != "json" for _, kind in found):
+    if any(kind != "json" for _, kind, _ in found):
         import fence_rule as fences  # noqa: E402  the one home of the fence loops
     lines = []
-    for path, kind in found:
+    for path, kind, background in found:
         after = read_text(path)
-        if after is None:
+        if after is None or (background and not after.strip()):  # a background job's redirect may not have written yet
             continue
         befores, _ = before_states(payload.get("tool_name"), payload.get("tool_input"), after)
         lines += judge(path, kind, after, befores, fences)
