@@ -470,9 +470,9 @@ def case_nudge():
         check("nudge: 360k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 455000)
-        check("nudge: 455k after the top is silent (no checkpoint above it)",
-              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
-        check("nudge: 455k keeps bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+        check("nudge: 455k after the top blocks at the late checkpoint",
+              is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
 
         p = nudge(c, 120000)
         check("nudge: 120k after 455k (compaction) is silent",
@@ -556,7 +556,7 @@ def case_nudge_limit_checkpoints():
               is_block(c, p), "out=%r" % p.stdout)
         check("limit: 340k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
         p = nudge(c, 460000)
-        check("limit: 460k after the top is silent", p.returncode == 0 and not p.stdout.strip(),
+        check("limit: 460k after the top blocks at the late checkpoint", is_block(c, p),
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
@@ -579,7 +579,7 @@ def case_nudge_limit_checkpoints():
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
-    # limit 800k: threshold 624k, so checkpoints 200k, 350k, then the top at 574k total
+    # limit 800k: threshold 624k, so checkpoints 200k, 350k, the top at 574k and the late one at 604k total
     c = Case("nlim8")
     try:
         set_limit(c, 800000)
@@ -589,17 +589,17 @@ def case_nudge_limit_checkpoints():
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
         p = nudge(c, 755000)
         check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("limit 800k: 755k stores bucket 2", stored_bucket(c) == 2,
+        check("limit 800k: 755k stores bucket 3", stored_bucket(c) == 3,
               "got %r" % stored_bucket(c))
     finally:
         c.cleanup()
-    # limit 200k: threshold 144k, top 94k total, the only checkpoint
+    # limit 200k: threshold 144k, top 94k total and the late one at 124k total
     c = Case("nlim2")
     try:
         set_limit(c, 200000)
         p = nudge(c, 160000)
         check("limit 200k: 160k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("limit 200k: 160k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+        check("limit 200k: 160k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
     finally:
         c.cleanup()
 
@@ -630,17 +630,17 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(284999)])
         check("messages: total 284,999 (messages 199,999) is silent at 85k overhead",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
-        # item 2 (75k drop): checkpoints(299000) = [249k]; the 200k floor is 49k under it, dropped.
+        # item 2 (75k drop): checkpoints(299000) = [249k, 279k]; the 200k floor is 49k under the top, dropped.
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
         check("messages: total 285,000 (messages 200,000) is silent: the 200k floor is dropped",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
-        check("messages: total 333,999 is silent at bucket -1 (the one checkpoint is total 334k)",
+        check("messages: total 333,999 is silent at bucket -1 (the top checkpoint is total 334k)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
-        check("messages: total 334,000 blocks at the one checkpoint (bucket 0)",
+        check("messages: total 334,000 blocks at the top checkpoint (bucket 0)",
               is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
@@ -766,8 +766,8 @@ def case_nudge_top_checkpoint_at_threshold():
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(445000)])
-        check("top: 445k after 340k is not a new block (top bucket already reached)",
-              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
+        check("top: 445k after 340k blocks at the late bucket (the top bucket was already reached)",
+              is_block(c, p) and stored_bucket(c) == 2,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
     finally:
         c.cleanup()
@@ -793,15 +793,58 @@ def case_checkpoint_ladder():
     """checkpoints(room) on its own. The 200k floor goes when a step sits under 75k below the top
     (item 2 of precompact-handoff), and the top sits margin = min(50k, room/2) under the room."""
     for room, want in (
-            (299000, [249000]),  # item 2 (75k drop): the 200k floor is 49k under the top
-            (384000, [200000, 334000]),  # item 2: the floor is 134k under the top, so it stays
+            (299000, [249000, 279000]),  # item 2 (75k drop): the 200k floor is 49k under the top; late one at 279k
+            (384000, [200000, 334000, 364000]),  # item 2: the floor is 134k under the top, so it stays; late one at 364k
             (44000, [22000]),  # margin = min(50k, room/2): room 44k, top 22k
-            (100000, [50000])):  # margin = min(50k, room/2): room 100k, the 50k cap
+            (100000, [50000, 80000])):  # margin = min(50k, room/2): room 100k, the 50k cap, late one at 80k
         try:
             got = under_test().checkpoints(room)
         except Exception as e:
             got = "%s: %s" % (type(e).__name__, e)
         check("ladder: checkpoints(%d) is %r" % (room, want), got == want, "got %r" % (got,))
+
+
+def case_late_checkpoint():
+    """A late checkpoint sits NUDGE_LATE_MARGIN (20k) under the room, after the top one, whenever it
+    sits 25k or more past the top. A cloud lane with 88,069 tokens of start-up load and a 384,000
+    threshold has room 295,931. The top alone gave one checkpoint, [245931], 50k before the line."""
+    for room, want in (
+            (295931, [245931, 275931]),  # the measured cloud lane: the late one is 20k under the room
+            (384000, [200000, 334000, 364000]),
+            (299000, [249000, 279000]),
+            (100000, [50000, 80000]),  # margin is at its 50k cap here, so the late one is 30k past the top
+            (99000, [49500, 79000]),  # margin 49.5k: 29.5k past the top, still 25k or more
+            (90000, [45000, 70000]),  # margin 45k: the late one is exactly 25k past the top, kept
+            (89999, [45000]),  # margin 44,999: 24,999 past the top, one under the gap: none
+            (80000, [40000]),  # margin 40k: the late one would be 20k past the top, under 25k: none
+            (44000, [22000])):
+        try:
+            got = under_test().checkpoints(room)
+        except Exception as e:
+            got = "%s: %s" % (type(e).__name__, e)
+        check("late: checkpoints(%d) is %r" % (room, want), got == want, "got %r" % (got,))
+    got = under_test().checkpoints(0)
+    check("late: room 0 keeps its one checkpoint below zero", got == [-50000], "got %r" % (got,))
+    c = Case("nlate")
+    try:
+        first = usage_line(30000)
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
+        check("late: 340k (top bucket, 30k overhead) blocks", is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(363999)])
+        check("late: 363,999 is silent, under the late checkpoint",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(364000)])
+        check("late: 364,000 (threshold - 20k) blocks at the late bucket",
+              is_block(c, p) and stored_bucket(c) == 2,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(380000)])
+        check("late: 380,000 after the late bucket is silent (nothing above it)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 2,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
 
 
 def case_nudge_small_room_margin():
@@ -1739,8 +1782,8 @@ def case_nudge_reads_summary_flag():
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(455000)])
-        check("flag nudge: 455k after the top is silent", p.returncode == 0
-              and not p.stdout.strip() and stored_bucket(c) == 1,
+        check("flag nudge: 455k after the top blocks at the late bucket",
+              is_block(c, p) and stored_bucket(c) == 2,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
     finally:
         c.cleanup()
@@ -2332,6 +2375,7 @@ def main() -> int:
     case_nudge_uses_last_assistant_entry_and_sums_cache()
     case_nudge_stop_hook_active()
     case_nudge_failures_are_silent()
+    case_late_checkpoint()
     case_nudge_limit_checkpoints()
     case_nudge_reads_messages_not_total()
     case_nudge_close_checkpoint_dropped_and_bogus_first_entry()

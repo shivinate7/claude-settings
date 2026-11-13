@@ -37,7 +37,7 @@ the desktop app has none.
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
-  the top, then the top = room - margin; limit = window_limit(model of the last such entry): env
+  the top, then the top = room - margin, then a late one at room - 20k when 25k or more past the top; limit = window_limit(model of the last such entry): env
   CLAUDE_CODE_AUTO_COMPACT_WINDOW (a count, or a k/m suffix such as 200k, 1.5m; a positive value
   is clamped to 100,000..1,000,000), then modelSettings.<model>.autoCompactWindow, then
   autoCompactWindow in <config dir>/settings.json (each an int in 100,000..1,000,000), default
@@ -48,7 +48,7 @@ the desktop app has none.
   tengu_amber_rokovoko, then 0.2 (408k on 500k with 0.15).
   CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (its leading number p, 0 < p <= 100) can lower it in every session and window.
   Cloud sessions set it per session, read live at each Stop (92 gives 441,600 on 500k; 80 gives 384,000).
-  The hook cannot read the session's live state, so it reads the same cached flag. The last
+  The hook cannot read the session's live state, so it reads the same cached flag. The top
   checkpoint is at size = threshold - margin, margin = min(50k, room // 2), so it always sits
   below the live threshold. The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
@@ -118,6 +118,9 @@ STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
+# The late checkpoint: 20k under the room, kept when it sits NUDGE_LATE_GAP or more past the top one.
+NUDGE_LATE_MARGIN = 20_000
+NUDGE_LATE_GAP = 25_000
 # Claude Code's effective window is window minus 20,000 (the reserve for the summary's output).
 # Auto-compact fires at the effective window minus a summary buffer of fraction f of it, and never
 # above the effective window minus 13,000. summary_fraction reads f from the flags Claude Code
@@ -852,18 +855,21 @@ def checkpoints(room):
     room - margin, with margin = min(NUDGE_MARGIN, room // 2), so a small room keeps a
     positive top. Below the top: 200k, then +150k while below the top. A step under
     NUDGE_STEP // 2 below the top is dropped, the 200k floor included: two rewrites that
-    close are one too many (room 384k: 200k, 334k; room 299k: 249k). When top <= 200k, only
-    the top. For room <= 0, only room - NUDGE_MARGIN, whatever its sign."""
+    close are one too many (room 384k: 200k, 334k, then late 364k; room 299k: 249k, then late 279k). When
+    top <= 200k, only the top, then the late one when it qualifies. For room <= 0, only room - NUDGE_MARGIN, whatever its sign. After the top comes the late
+    checkpoint, room - NUDGE_LATE_MARGIN, when it sits NUDGE_LATE_GAP or more past the top (room 295,931:
+    245,931 and 275,931). The top alone left one measured cloud session 84k tokens short of the live line."""
     margin = min(NUDGE_MARGIN, room // 2) if room > 0 else NUDGE_MARGIN
     top = room - margin
+    late = [room - NUDGE_LATE_MARGIN] if room > 0 and margin - NUDGE_LATE_MARGIN >= NUDGE_LATE_GAP else []
     if top <= NUDGE_FLOOR:
-        return [top]
+        return [top] + late
     cps = [NUDGE_FLOOR]
     while cps[-1] + NUDGE_STEP < top:
         cps.append(cps[-1] + NUDGE_STEP)
     while cps and top - cps[-1] < NUDGE_STEP // 2:
         cps.pop()
-    return cps + [top]
+    return cps + [top] + late
 
 
 def _model_key(name):
