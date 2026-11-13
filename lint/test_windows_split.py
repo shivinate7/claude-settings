@@ -296,15 +296,11 @@ def windows_jobs(text):
     return {n: j for n, j in all_jobs(text).items() if j["os"] == "windows-latest"}
 
 
-# On pull_request the Windows merge job runs only the marked tests (MERGE_TESTS=windows-slice).
-# The slice step has the same `run:` as the full step, so it is told apart by its env.
+# The Windows slices (MERGE_TESTS / GUARD_TESTS=windows-slice) are gone (R62): the ready-PR shards run every case. A step
+# that still runs one is named by its key, so the pins can say it is gone. The slice step has the same `run:` as the full step.
 SLICE = "python merge/test_merge.py [windows-slice]"
-SLICE_ENV = {"MERGE_TESTS": "windows-slice"}
-# The same pattern for the guard suite (GUARD_TESTS=windows-slice, cut F). Its own Windows job,
-# checks-windows-guard, runs the full suite off pull_request and the slice on it.
 GUARD_CMD = "python hooks/test_guard.py"
 GUARD_SLICE = "python hooks/test_guard.py [windows-slice]"
-GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
 GUARD_JOB = "checks-windows-guard"
 # A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
@@ -381,9 +377,10 @@ def placement_problems(text):
     wj = windows_jobs(text)
     jobs = {n: [key(st) for st in j["steps"]] for n, j in wj.items()}
     problems = []
+    # R62: the ready-PR shards run every case, so the Windows merge slice has no step.
     homes = [n for n, runs in jobs.items() for r in runs if r == SLICE]
-    if len(homes) != 1:
-        problems.append(f"{SLICE!r} runs {len(homes)} times on windows-latest: {homes}")
+    if homes:
+        problems.append(f"{SLICE!r} runs {len(homes)} times on windows-latest: {homes}, want 0")
     for cmd in REQUIRED:
         homes = [(n, st) for n, j in wj.items() for st in j["steps"] if key(st) == cmd]
         if len(homes) > 1:
@@ -407,10 +404,8 @@ IF_PIN = {"python janitor/mutate_sweep.py":
           # The full merge suite runs on every event, a ready pull_request included (R62); the slice only on pull_request.
           "python merge/test_merge.py":
           "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
-          SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}",
-          # The full guard suite runs on every event, a ready pull_request included (R62); the guard slice only on pull_request (cut F).
-          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
-          GUARD_SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}"}
+          # The full guard suite runs on every event, a ready pull_request included (R62). Neither suite has a slice step.
+          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -635,11 +630,10 @@ def hardening_problems(text):
     """A carrying job has `needs: scope`, its scope condition in its steps (job_check_problems) and setup-python; a REQUIRED step
     keeps `!cancelled()`, its pinned shell and its pinned condition (the part after the scope condition)."""
     problems = []
-    n = text.count("MERGE_TESTS")  # one mention only: the slice step's env. Job, workflow or $GITHUB_ENV copies would slice every run.
-    if n != 1:
-        problems.append(f"MERGE_TESTS appears {n} times in checks.yml, want exactly 1 (the slice step's env)")
-    slice_envs = {SLICE: SLICE_ENV, GUARD_SLICE: GUARD_SLICE_ENV}
-    # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would reach the slice on pull_request.
+    n = text.count("MERGE_TESTS")  # no merge slice step (R62), so no mention: a job, workflow or $GITHUB_ENV copy would slice a run.
+    if n != 0:
+        problems.append(f"MERGE_TESTS appears {n} times in checks.yml, want 0 (no merge slice step)")
+    # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would cut that suite's cases in every run.
     for var in SHARD_VAR.values():
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
                     if isinstance(st.get("env"), dict) and var in st["env"]
@@ -656,10 +650,8 @@ def hardening_problems(text):
             problems.append(f"{name}: no setup-python")
         for st in steps:
             cmd = key(st)
-            if cmd not in REQUIRED and cmd not in slice_envs:
+            if cmd not in REQUIRED:
                 continue
-            if cmd in slice_envs and st["env"] != slice_envs[cmd]:
-                problems.append(f"{name}: slice env is {st['env']}, want {slice_envs[cmd]}")
             if "!cancelled()" not in (step_if(st) or ""):
                 problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {step_if(st)}")
             if cmd in IF_PIN and step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[cmd]):
@@ -670,8 +662,8 @@ def hardening_problems(text):
 
 
 def guard_problems(text):
-    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. It runs the full suite off pull_request
-    and the slice on it, both run only on the guard flag. No other Windows job runs the guard suite."""
+    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. It runs the full suite on every event, a ready
+    pull_request included, on the guard flag, and has no slice step (R62). No other Windows job runs the guard suite."""
     jobs = windows_jobs(text)
     if GUARD_JOB not in jobs:
         return [f"no windows-latest job named {GUARD_JOB}"]
@@ -687,17 +679,13 @@ def guard_problems(text):
     steps = {}
     for st in job["steps"]:
         steps.setdefault(key(st), st)
-    for cmd in (GUARD_CMD, GUARD_SLICE):
-        if cmd not in steps:
-            problems.append(f"{GUARD_JOB} has no step {cmd!r}")
+    if GUARD_CMD not in steps:
+        problems.append(f"{GUARD_JOB} has no step {GUARD_CMD!r}")
     if GUARD_CMD in steps and step_rest(steps[GUARD_CMD], read_scope_condition(job)) != unwrap(IF_PIN[GUARD_CMD]):
         problems.append(f"{GUARD_JOB}: full guard condition is not the pinned text: {step_if(steps[GUARD_CMD])}")
+    # R62: the ready-PR shards run every case, so the Windows guard slice has no step.
     if GUARD_SLICE in steps:
-        st = steps[GUARD_SLICE]
-        if st.get("env") != GUARD_SLICE_ENV:
-            problems.append(f"{GUARD_JOB}: slice env is {st.get('env')}, want {GUARD_SLICE_ENV}")
-        if step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[GUARD_SLICE]):
-            problems.append(f"{GUARD_JOB}: slice condition is not the pinned text: {step_if(st)}")
+        problems.append(f"{GUARD_JOB} still runs {GUARD_SLICE!r}: the shards cover every case on pull_request")
     # One mention per slice step's env, and no other: the Windows slice (GUARD_JOB) and the macOS slice (R61, MACOS_SLICE_JOB).
     g = text.count("GUARD_TESTS")
     homes = sorted(n for n, j in all_jobs(text).items() for st in j["steps"] if "GUARD_TESTS" in (st.get("env") or {}))
@@ -1115,7 +1103,8 @@ class WindowsSplit(unittest.TestCase):
                 self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
 
     def test_checker_sees_drop_and_duplicate(self):
-        def doc(*jobs, slice_=True):
+        # R62: no merge slice step, so a doc has none unless slice_ puts one in job 0 (a defect).
+        def doc(*jobs, slice_=False):
             return "jobs:\n" + "".join(
                 f"  j{i}:\n    runs-on: windows-latest\n    steps:\n"
                 + "".join(f"      - run: {c}\n" for c in cmds)
@@ -1123,8 +1112,8 @@ class WindowsSplit(unittest.TestCase):
                    if slice_ and i == 0 else "")
                 for i, cmds in enumerate(jobs)
             )
-        self.assertTrue(placement_problems(doc(REQUIRED[:7], REQUIRED[7:14], REQUIRED[14:], slice_=False)))
         self.assertEqual(placement_problems(doc(REQUIRED[:7], REQUIRED[7:14], REQUIRED[14:])), [])
+        self.assertTrue(placement_problems(doc(REQUIRED[:7], REQUIRED[7:14], REQUIRED[14:], slice_=True)))
         self.assertTrue(placement_problems(doc(REQUIRED[1:7], REQUIRED[7:14], REQUIRED[14:])))
         self.assertTrue(placement_problems(doc(REQUIRED[:8], REQUIRED[7:14], REQUIRED[14:])))
 
@@ -1133,33 +1122,29 @@ class WindowsSplit(unittest.TestCase):
         full_e = "!cancelled() && needs.scope.outputs.code == 'true'"
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
-        def doc(full=full_e, slice_=slice_e, env="windows-slice", with_full=True):
-            full_step = (f"      - name: Full\n        if: ${{{{ ({scope_condition}) && {full} }}}}\n"
-                         "        run: python merge/test_merge.py\n") if with_full else ""
+        def doc(with_slice=False, env="windows-slice", full=full_e):
+            full_step = f"      - name: Full\n        if: ${{{{ ({scope_condition}) && {full} }}}}\n        run: python merge/test_merge.py\n"
+            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition}) && {slice_e} }}}}\n        env:\n"
+                          f"          MERGE_TESTS: {env}\n        run: python merge/test_merge.py\n") if with_slice else ""
             return ("jobs:\n  checks-windows-merge:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n"
-                    f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition} }}}}\n" + full_step
-                    + f"      - name: Slice\n        if: ${{{{ ({scope_condition}) && {slice_} }}}}\n        env:\n"
-                    f"          MERGE_TESTS: {env}\n        run: python merge/test_merge.py\n")
+                    f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition} }}}}\n" + full_step + slice_step)
 
-        self.assertEqual(hardening_problems(doc()), [])
-        self.assertIn("'python merge/test_merge.py' runs 0 times on windows-latest: []",
-                      placement_problems(doc(with_full=False)))  # full run removed
-        self.assertNotIn("'python merge/test_merge.py' runs 0 times on windows-latest: []", placement_problems(doc()))
-        self.assertTrue(hardening_problems(doc(slice_=full_e)))  # slice runs on push
-        self.assertTrue(hardening_problems(doc(full=slice_e)))  # full run on pull_request
-        self.assertTrue(hardening_problems(doc(slice_=slice_e.replace("!cancelled() && ", ""))))
-        self.assertTrue(hardening_problems(doc(env="full")))  # slice env not pinned
         good = doc()
+        self.assertEqual(hardening_problems(good), [])
+        self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
+        self.assertTrue(any("runs 1 times on windows-latest" in p for p in placement_problems(doc(with_slice=True))))
+        self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(doc(with_slice=True))))
+        self.assertTrue(hardening_problems(doc(full=slice_e)))  # full run on pull_request only: the pin is every event
         for bad in (good.replace("    runs-on: windows-latest\n", "    runs-on: windows-latest\n    env:\n      MERGE_TESTS: windows-slice\n"),
                     "env:\n  MERGE_TESTS: windows-slice\n" + good,
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
-            self.assertTrue(any("MERGE_TESTS appears 2 times" in p for p in hardening_problems(bad)), bad)
-        self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
+            self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
         self.assertTrue(hardening_problems(doc(full=full_e.replace(" && needs.scope.outputs.code == 'true'", ""))))
 
     def test_checker_sees_the_shard_defects(self):
         scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
-        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
+        full_e = unwrap(IF_PIN[GUARD_CMD])
+        slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
         def job(name, shard, base=False, slice_=False):
             # The base job is scoped: the scope condition sits in each step. A shard keeps its job-level if and its steps' own ifs.
@@ -1181,7 +1166,7 @@ class WindowsSplit(unittest.TestCase):
         def place(text):
             return [p for p in placement_problems(text) if "test_guard" in p]
 
-        base = job("checks-windows-guard", "1/3", base=True, slice_=True)
+        base = job("checks-windows-guard", "1/3", base=True)
         good = doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3"))
         self.assertEqual(place(good), [])
         self.assertEqual(guard_problems(good), [])
@@ -1191,6 +1176,8 @@ class WindowsSplit(unittest.TestCase):
             "a shard doubled": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "2/3")),
             "a shard unset": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "")),
             "n disagrees": doc(base, job("checks-windows-guard-2", "2/2"), job("checks-windows-guard-3", "3/3")),
+            "a slice step left in the base job": doc(job("checks-windows-guard", "1/3", base=True, slice_=True),
+                                                     job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3")),
             "a lone shard": doc(job("checks-windows-guard", "1/2", base=True, slice_=True)),
             "a stray job name": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-rest", "3/3")),
         }
@@ -1218,19 +1205,21 @@ class WindowsSplit(unittest.TestCase):
 
     def test_checker_sees_the_guard_slice_and_mutate_defects(self):
         scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
-        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
+        full_e = unwrap(IF_PIN[GUARD_CMD])
+        slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
-        def doc(full=full_e, slice_=slice_e, env="windows-slice", scope_condition_=scope_condition, job_if=None, extra="", more=""):
+        def doc(full=full_e, slice_env=None, scope_condition_=scope_condition, job_if=None, extra="", more=""):
+            # R62: no slice step. slice_env, when given, names a slice step left in the job.
+            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition_}) && {slice_e} }}}}\n        env:\n"
+                          f"          GUARD_TESTS: {slice_env}\n        run: python hooks/test_guard.py\n") if slice_env else ""
             return ("jobs:\n  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
                     + (f"    if: {job_if}\n" if job_if else "") + extra + "    steps:\n"
                     f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition_} }}}}\n"
                     f"      - name: Full\n        if: ${{{{ ({scope_condition_}) && {full} }}}}\n        run: python hooks/test_guard.py\n"
-                    f"      - name: Slice\n        if: ${{{{ ({scope_condition_}) && {slice_} }}}}\n        env:\n"
-                    f"          GUARD_TESTS: {env}\n        run: python hooks/test_guard.py\n" + more)
+                    + slice_step + more)
         self.assertEqual(guard_problems(doc()), [])
-        self.assertTrue(guard_problems(doc(slice_=full_e)))  # slice runs on push
-        self.assertTrue(guard_problems(doc(full=slice_e)))  # full suite runs on pull_request
-        self.assertTrue(guard_problems(doc(env="full")))  # slice env not pinned
+        self.assertTrue(guard_problems(doc(slice_env="windows-slice")))  # a slice step is left in the job
+        self.assertTrue(guard_problems(doc(full=slice_e)))  # full suite runs on pull_request only
         self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
         self.assertTrue(guard_problems(doc(job_if=scope_condition)))  # a job-level if on the scoped job
         self.assertTrue(guard_problems(doc(scope_condition_=scope_condition.replace("guard", "checks_windows"))))  # wrong flag
@@ -1836,6 +1825,26 @@ class ReadyPullShards(unittest.TestCase):
                 want = read_scope_condition(jobs[base])
                 self.assertIsNotNone(want, f"{base} steps carry no one scope condition")
                 self.assertEqual(read_scope_condition(jobs[name]), want, f"{name} scope condition is not {base}'s")
+
+    def test_the_windows_guard_job_keeps_its_full_suite_and_has_no_slice_step(self):
+        # Named failure: checks-windows-guard still runs the windows-slice guard step, so a ready PR runs its cases twice.
+        jobs = windows_jobs(self.text)
+        self.assertIn(GUARD_JOB, jobs, f"no {GUARD_JOB} job")
+        keys = [key(st) for st in jobs[GUARD_JOB]["steps"]]
+        self.assertIn(GUARD_CMD, keys, f"{GUARD_JOB} has no full guard step")
+        self.assertNotIn(GUARD_SLICE, keys, f"{GUARD_JOB} still runs {GUARD_SLICE!r}")
+
+    def test_the_windows_merge_job_has_no_slice_step(self):
+        # Named failure: checks-windows-merge still runs the windows-slice merge step, so a ready PR runs its cases twice.
+        jobs = windows_jobs(self.text)
+        self.assertIn("checks-windows-merge", jobs, "no checks-windows-merge job")
+        keys = [key(st) for st in jobs["checks-windows-merge"]["steps"]]
+        self.assertNotIn(SLICE, keys, f"checks-windows-merge still runs {SLICE!r}")
+
+    def test_no_windows_slice_env_is_set_anywhere_in_checks_yml(self):
+        # Named failure: a GUARD_TESTS or MERGE_TESTS windows-slice value is still set in a step, a job or the workflow.
+        self.assertEqual(re.findall(r"(?:GUARD|MERGE)_TESTS:\s*windows-slice", self.text), [],
+                         "a windows-slice env is still set in checks.yml")
 
 
 class TopLevelOr(unittest.TestCase):
