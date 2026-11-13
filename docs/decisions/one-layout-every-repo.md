@@ -25,7 +25,7 @@ The layout:
 - Repos with a `map.config.json` add `docs/map/`, the plain-English map that skill plain-english-map writes.
 - A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
   An extra kind never replaces a core or screen kind. The extras file marks the repo as rolled out only with
-  its own key, `"rolled-out": true`. An extras file with no mark, or `false`, leaves the repo at its legacy folders. A mark that is not JSON `true` or `false` (a string, a number, `null`) is an unreadable file: `layout.py` raises `LayoutError`, so no check reads it as legacy. The waiting page keys, the waiting-data folder (`waiting` in both places) and the mockup home (`docs/design` in both places) still read; a folder that legacy and layout place differently does not, except in the feedback guard's ruling-home check, which reads decisions, debts and todo at either place. Its keys
+  its own key, `"rolled-out": true`. An extras file with no mark, or `false`, leaves the repo at its legacy folders. A mark that is not JSON `true` or `false` (a string, a number, `null`) is an unreadable file. `layout.py` raises `LayoutError`, so no check reads it as legacy. The waiting page keys still read. So do the waiting-data folder (`waiting` in both places) and the mockup home (`docs/design` in both places). A folder that legacy and layout place differently does not read. The one exception is the feedback guard's ruling-home check, which reads decisions, debts and todo at either place. Its keys
   that are not about folder placement (`waiting-page`, `kind`, `caution`, `visibility`, `devices`, `roadmap`)
   read whenever the file exists.
 

@@ -5730,7 +5730,7 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            if a.kind == "docs-only":  # a decision record is a ruling: its change takes a review round (decision docs-only-prs-skip-review)
+            if a.kind == "docs-only":  # a decision record is a ruling, so the docs-only skip does not cover it (decision docs-only-prs-skip-review)
                 try:
                     rulings = decision_paths(root, [(p, st) for p, st, _ in files])
                 except layout.LayoutError as e:
