@@ -12914,10 +12914,11 @@ class PullsHost(merge.Host):
     per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
     OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
     parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
-    commit sha to its tree sha, which the same answer names under commit.tree.sha."""
+    commit sha to its tree sha, which the same answer names under commit.tree.sha. `commit_files(sha)` is the Host read of a commit's paths, scripted
+    by `commit_paths` (sha -> paths); each call is kept in `file_reads`, and a sha in `commit_files_fail` or not in `commit_paths` raises Stop."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None):
+                 commits=None, trees=None, commit_paths=None, commit_files_fail=()):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12935,6 +12936,16 @@ class PullsHost(merge.Host):
         self.commit_reads = []  # the sha of each commits/<sha> read, in order
         self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
+        self.commit_paths = dict(commit_paths or {})  # sha -> the paths commit_files reads for it
+        self.commit_files_fail = set(commit_files_fail)  # the shas whose files read fails
+        self.file_reads = []  # the sha of each commit_files read, in order
+
+    def commit_files(self, sha):
+        """-> the paths of the commit `sha`, as the scripted commit_paths gives them. A failed or unscripted read raises Stop, as the Host read does."""
+        self.file_reads.append(sha)
+        if sha in self.commit_files_fail or sha not in self.commit_paths:
+            raise merge.Stop(f"cannot read the files of {sha[:9]} (scripted failure)")
+        return list(self.commit_paths[sha])
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -15925,6 +15936,125 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(rc, 2, "a fix verifier on a conflicted merge with an edit outside its conflict, after a sonnet PASS fix verifier, was accepted:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
         self.assertNotIn("Traceback", err)
+
+class ReviewFixNotesGap(ReviewEnv):
+    """A fix check whose reviewed head is not the newest earlier record's Head (decision pr-review-record, the --fix-check order). The gap is the
+    commits from that Head to the reviewed head, fix_check[0], walked by first parent. A gap of record or notes commits only keeps the fix check: the
+    review at the Head still covers the code the gap leaves alone. Any other gap commit refuses (exit 2): one with a code file, a docs file that is no
+    record, no files, or a merge. A walk that never reaches the Head refuses too, and so does a read that fails, which says unknown. The fix commit after
+    the reviewed head is never judged: the fix verifier checks it. Each case scripts the chain Head, gap, reviewed head, then the --head commit, a code
+    commit that a walk from --head would refuse. Each verdict comes after its scope check, the read of the gap commit it depends on. Cases 7 and 8 are
+    green controls on the base: a fix line refuses, and no gap is the old behaviour."""
+
+    CODE = "merge/merge.py"  # the --head commit's file: a walk that reached --head would refuse on it
+    GAP = ["91" * 20, "92" * 20, "93" * 20]  # the gap commit shas, in the order the cases use them
+    OTHER = "e0" * 20  # the second parent of a merge in the gap
+    ROOT, UNRELATED = "e1" * 20, "e2" * 20  # a root commit, and a commit on it that never reaches the Head
+    PRE_FIX = "1e" * 20  # the reviewed head of the fix line on the newest record in case 7
+    RECORD_DIRS = [layout.path(os.path.dirname(HERE), name) for name, kind in layout.kinds().items() if kind.get("record")]  # decisions, debts
+    NOTES_FILE = layout.path(os.path.dirname(HERE), "debt-notes")  # the debts notes file, a record path too
+
+    def record_file(self, i):
+        """A file under the i-th record folder the layout names, so the cases reach each record kind."""
+        return f"{self.RECORD_DIRS[i % len(self.RECORD_DIRS)]}/gap-{i}.md"
+
+    def gap_host(self, gap, *, fix_record=(), unreadable=(), fail_files=()):
+        """-> (host, fix). `gap` is one (sha, files) or (sha, files, parents) per commit, oldest first: the first commit's parent is REVIEW_OLD_HEAD,
+        the Head, and each later one's is the commit before it. `unreadable` names the gap shas whose commit read has no answer; `fail_files` names
+        the shas whose files read fails. `fix` is the last gap commit, the reviewed head of the fix check, or the Head for an empty gap. REVIEW_HEAD
+        is the --head commit, on `fix`, and its files are code."""
+        commits, paths, prev = {}, {REVIEW_HEAD: [self.CODE]}, REVIEW_OLD_HEAD
+        for sha, files, *parents in gap:
+            if sha not in unreadable:
+                commits[sha] = list(parents[0]) if parents else [prev]
+            paths[sha] = list(files)
+            prev = sha
+        commits[REVIEW_HEAD] = [prev]
+        comment = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=fix_record))
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[comment], commits=commits, commit_paths=paths, commit_files_fail=fail_files)
+        return host, prev
+
+    def fix_from(self, host, fix):
+        """-> (rc, out, err) of --review-record on REVIEW_HEAD, with a PASS fix check from `fix`."""
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{fix}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+
+    def assert_recorded(self, rc, out, err, why):
+        self.assertEqual(rc, 0, why + ":\n" + out + err)
+        self.assertIn(REVIEW_MARKER, out, "an accepted fix check printed no record")
+
+    def assert_refused(self, rc, out, err, why):
+        self.assertEqual(rc, 2, why + ":\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_one_record_commit_after_the_head_is_recorded(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not judge the gap commit, so the verdict below tests nothing")
+        self.assert_recorded(rc, out, err, "a fix check whose gap is one record commit was refused")
+
+    def test_two_record_or_notes_commits_after_the_head_are_recorded(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)]), (self.GAP[1], [self.NOTES_FILE])])
+        rc, out, err = self.fix_from(host, fix)
+        for sha in self.GAP[:2]:
+            self.assertIn(sha, host.file_reads, "scope: the walk did not judge " + sha[:9] + ", so the verdict below tests nothing")
+        self.assert_recorded(rc, out, err, "a fix check whose gap is two record or notes commits was refused")
+
+    def test_a_record_commit_then_a_code_commit_is_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)]), (self.GAP[1], [self.CODE])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[1], host.file_reads, "scope: the walk did not judge the code commit in the gap, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap holds a code commit was accepted")
+
+    def test_a_notes_commit_that_also_touches_a_docs_plan_is_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0), "docs/plans/gap-plan.md"])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not judge the gap commit, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap commit also touches a docs file that is no record was accepted")
+
+    def test_a_gap_commit_with_no_files_is_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not judge the gap commit, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap commit has no files was accepted: no files is not a record or notes commit")
+
+    def test_a_failed_files_read_of_a_gap_commit_is_unknown_and_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)])], fail_files=(self.GAP[0],))
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not read the gap commit's files, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check over a failed files read was not refused")
+        self.assertIn("unknown", err, "a fix check over a failed files read was refused without saying unknown: a failed read is not clean")
+
+    def test_a_failed_commit_read_of_a_gap_commit_is_unknown_and_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)])], unreadable=(self.GAP[0],))
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.commit_reads, "scope: the walk did not read the gap commit's parents, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check over a failed commit read was not refused")
+        self.assertIn("unknown", err, "a fix check over a failed commit read was refused without saying unknown: a failed read is not clean")
+
+    def test_a_fix_line_on_the_newest_record_refuses_a_notes_only_gap(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)])], fix_record=(fix_verifier_line(head=self.PRE_FIX),))
+        rc, out, err = self.fix_from(host, fix)
+        self.assert_refused(rc, out, err, "a fix check after a fix line was accepted over a notes-only gap: a fix never follows a fix")
+
+    def test_no_gap_keeps_the_old_behaviour(self):
+        host, fix = self.gap_host([])
+        self.assertEqual(fix, REVIEW_OLD_HEAD, "fixture: the reviewed head is not the Head, so there is no empty gap to judge")
+        rc, out, err = self.fix_from(host, fix)
+        self.assert_recorded(rc, out, err, "a fix check with no commits between the Head and its reviewed head was refused")
+
+    def test_a_merge_in_the_gap_is_refused(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.record_file(0)], [REVIEW_OLD_HEAD, self.OTHER])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.commit_reads, "scope: the walk did not read the merge's parents, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap holds a merge was accepted")
+
+    def test_a_gap_that_never_reaches_the_head_is_refused(self):
+        host, fix = self.gap_host([(self.ROOT, [self.record_file(0)], []), (self.UNRELATED, [self.record_file(1)], [self.ROOT])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.UNRELATED, host.commit_reads, "scope: the walk did not read the gap's commits, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap never reaches the Head was accepted")
+
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
