@@ -3,7 +3,7 @@
 The coordinator sent this brief to the real lane. The text is word for word, so it sits in a code block.
 
 ```text
-Lane brief: questions-reach-page. You are a lane session (one lane, Opus). Coordinator: session_013NEJL2pASwRjgJDnsvnpNe. Batch runner 7: session_013NEJKyjt96cx7d1uCdtb8U. Page writer (triage 5): session_013NEJL1qEunLpTi68de3Jrv.
+Lane brief: questions-reach-page. You are a lane session (one lane, Opus). Coordinator: session_013NEJL2pASwRjgJDnsvnpNe. Batch runner 7: session_013NEJKyjt96cx7d1uCdtb8U. Page writer (triage 5): by role: triage, see the roster in CLAUDE.md on the roadmap branch.
 
 Incident (owner, 2026-11-01 23:26 CST): "this problem needs to be solved. along with that, tons of sessions have questions in their own and arent making it to the artifact. not sure how after it working for so long the ball got dropped without anything catching it except me".
 What happened: the coordinator asked 5+ questions in chat from 22:25 on, wrote "send to triage after 5 min" in each report, and sent none until 23:25. Lane sessions put picks under Input Needed in their own chat; nothing forwarded them to the coordinator or the page writer.
@@ -18,3 +18,5 @@ Failure classes: false alarm on a reply that only mentions a past question; a bo
 Done check: test-author writes red cases first (hooks/test_*.py or lint/test_report_guard.py), shows them red on main 49a41651; builder makes them green; P9 lane lint green: `~/.claude/bin/verdict ~/.claude/bin/ci-job checks --lint` and `python3 lint/check_silent_undo.py --upstream origin/main --head HEAD --strict`. Update decision questions-go-to-owner and skill waiting-page in place to name the mechanism.
 Models per agent-model-cap. No EnterWorktree, confirm_repository_trust, request_computer_folder or create_session. Never write the roadmap. Open a draft PR; send its number and head to batch runner 7 and to me. Report cap 20 lines, plus one Lessons line.
 ```
+
+Note (Nov 12, 2026): the triage session id in the block was replaced by its role (restart-plan R22 point 3, which says a brief names a role, never a session id). The other ids in the block are the old respawn's and are not changed here.
