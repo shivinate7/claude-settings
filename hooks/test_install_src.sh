@@ -2157,7 +2157,7 @@ cloud_startup_local1() {
 # silent. The refresh hook is skipped in its old form and its new form. snap_hook_forms reads the new form from install.sh's
 # own HOOK_CMD line, so no case copies the marker.
 snap_fires='def fires: (.matcher // "") as $m | if ($m == "" or $m == "*") then true else ("startup" | test("^(" + $m + ")$")) end;'
-# The old form, as commit 6227ae905^ wrote it. No tree holds that line now, so it is written out here.
+# The old form of the refresh hook (no tree holds that line now), so it is written out here.
 snap_old_line='HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"'
 # snap_eval_hook LINE: the HOOK_CMD that LINE assigns, with the REPO, REF and RAW that install.sh sets (CLAUDE_SETTINGS_REF unset).
 snap_eval_hook() {
