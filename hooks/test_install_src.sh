@@ -3138,7 +3138,7 @@ caseG6() {
   git -C "$g_co" config remote.origin.url "$work/caseG6-no-such-remote"
   ref_before=$(cd "$g_co" && git rev-parse main)
   grun
-  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  want="checkout $g_top: the origin fetch did not run, so origin refs may be stale; freshness unknown"
   n=$(printf '%s\n' "$g_out" | grep -c 'freshness unknown')
   if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
   elif [ "$n" != "1" ] || ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected exactly: $want; got: $g_out"
@@ -3157,7 +3157,7 @@ caseG7() {
   git config -f "$g_co/.git/config" protocol.ext.allow always
   g_out=$(cd "$g_co" && CLAUDE_CONFIG_DIR="$g_cfg" CLAUDE_SETTINGS_FETCH_TIMEOUT=0 sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/dev/null)
   g_rc=$?
-  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  want="checkout $g_top: the origin fetch did not run, so origin refs may be stale; freshness unknown"
   if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
   elif ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected: $want; got: $g_out"
   else ok "$name"; fi

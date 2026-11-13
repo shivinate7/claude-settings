@@ -91,7 +91,7 @@ rm -f "$f"
 exit 0
 ```
 
-Also set these four as environment variables in the same cloud environment menu. They are
+Also set these as environment variables in the same cloud environment menu. They are
 the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
 but a session can start without them. Measured in another session: the SessionStart refresh
 rewrites `settings.json` after Claude Code reads it.
@@ -100,6 +100,7 @@ rewrites `settings.json` after Claude Code reads it.
 * `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
 * `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
 * `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
+* `MAILBOX_REPO=https://github.com/shivinate7/session-mailbox.git` (decision `session-messages`)
 
 The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
 `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
@@ -363,8 +364,9 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
 Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
 It runs on the Duo by default, or on the iPhone 18 Pro with `--device pro`. It reuses the first booted device of that role. With none booted, it boots the role's device, runs the tests, and shuts that simulator down, also on failure, INT and TERM. With the other phone kind booted, it boots nothing and exits 1. `--hold [--for S] [-- CMD]` keeps the device for S seconds (default 300, max 900) under the same lock, with no xcodebuild.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
-It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
+It never shuts down a simulator it did not boot. Before its own boot it deletes that device's PosterBoard store (`PRBPosterExtensionDataStore`), which iOS 27.1 never frees. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
 On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro [--udid]`, `give` and `status`. After the grant it checks the booted list again before it boots. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
+After its own boot it tries to disable the Siri, intelligence, Mail and Spotlight daemons that crash on every iOS 27.1 boot; the list lives in `bin/sim-noise-services`.
 
 ## Session tiers and a roadmap record for a repo
 
