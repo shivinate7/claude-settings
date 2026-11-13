@@ -20,9 +20,10 @@ Limits on every grant: the machine-load brake is not busy (decision machine-load
   or a family module is missing or broken) grants nothing: take exits 1 with one stderr line, "brake could not be loaded",
   and leaves no lease and no queue place; status prints that line and exits 0 (decision guard-hooks-fail-closed).
   The load average is never read.
-  duo: the first free slot of 1 and 2. pro: slot pro, when no one holds it. No device waits on another: no pairing
-  and no count of simulators (sims-load-brake-only, owner 2026-11-12 21:59 CST); the load brake alone limits them.
-The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
+  duo: the first free slot of 1 and 2. pro: slot pro, when no one holds it. Pairing is gone, and no count of
+  simulators limits a grant (sims-load-brake-only, owner 2026-11-12 21:59 CST); the load brake limits them.
+The queue is strict FIFO across devices: only its head is granted, so a later take never passes an earlier one. A free pro
+  waits behind a queued duo head. That is a pick the owner may widen.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
 Brake: hooks/guard.py, loaded by path on the first read of a call. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,

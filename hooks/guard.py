@@ -3975,10 +3975,7 @@ def load_hit(tool: str, tool_input) -> tuple:
         return "", ""
     busy = load_busy(reading)
     if busy:
-        # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
-        waits = [t for t in busy if not t.startswith("disk")]
-        remedy = " and ".join((["wait until the load drops"] if waits else [])
-                              + (["free disk space"] if len(waits) < len(busy) else []))
+        remedy = load_busy_remedy(busy)
         text = (LOAD_BUSY_NO_FOREGROUND + remedy.capitalize() if tool == "Workflow"
                 else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
@@ -4052,6 +4049,14 @@ def load_busy(reading) -> list:
                  and disk < min(disk_total * LOAD_BUSY_DISK_SHARE / 100.0, LOAD_BUSY_DISK_GB))
     return [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
                         disk_busy and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
+
+
+def load_busy_remedy(busy) -> str:
+    """The remedy that matches load_busy's readings, lowercase: load drops by waiting, disk space comes back only when
+    it is freed. The one home of that text: load_hit and sim_boot_refusal both call it."""
+    waits = [t for t in busy if not t.startswith("disk")]
+    return " and ".join((["wait until the load drops"] if waits else [])
+                        + (["free disk space"] if len(waits) < len(busy) else []))
 
 
 def load_full(reading) -> list:
@@ -5266,8 +5271,9 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
         if busy:
             refuse(tool, "deny", "simulator-boot-cap",
                    "The machine is busy: %s. Booting another simulator now would add load. Booted now: %s. "
-                   "Wait until the load falls, or use a booted simulator (decision machine-load-brake)."
-                   % (", ".join(busy), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted) or "none"),
+                   "%s, or use a booted simulator (decision machine-load-brake)."
+                   % (", ".join(busy), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted) or "none",
+                      load_busy_remedy(busy).capitalize()),
                    name)
         boots, table, now = (sweep.sim_read_boots(os.path.join(guard_core.config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())
