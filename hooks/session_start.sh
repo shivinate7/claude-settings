@@ -256,7 +256,7 @@ fi
 # Up to date, or ahead only: no line (the later ahead check covers that). The default is $gm_default, the branch the
 # refresh fetched, so no second fetch runs. A merge that fails says so and leaves git's own state.
 # Cost: one git rev-list per startup start, plus one git rev-parse for the in-progress files and one git diff for the
-# added paths when the checkout is behind, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
+# added paths when the checkout is behind, plus one git ls-files per added path with something on disk in its way, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
 # hook; the merge writes the working tree, index and HEAD of this checkout only.
 ff_done=""
 if [ "$source" = startup ] && [ "${gm_fetch_rc:-1}" -eq 0 ] 2>/dev/null && [ -n "$gm_default" ]; then
@@ -293,10 +293,22 @@ EOF
           elif [ "$ff_ahead" -gt 0 ] 2>/dev/null; then
             ff_reason="diverged"
           else
-            # A file the move adds that already exists is an ignored one (a non-ignored one made the tree dirty above);
-            # git would overwrite it, so the move does not run.
-            ff_hit=$(cd "$toplevel" 2>/dev/null && git diff -z --name-only --diff-filter=A HEAD "origin/$gm_default" 2>/dev/null \
-              | tr '\0' '\n' | while IFS= read -r ff_p; do if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then echo 1; break; fi; done)
+            # Something untracked on disk at a path the move adds, or a file or symlink at one of its parents, is an
+            # ignored one (a non-ignored one made the tree dirty above): git would overwrite it or write through it, so
+            # the move does not run. A tracked one is git's own to replace, and a parent directory holds the new file
+            # without harm. --no-renames lists a rename's target as added, so it is checked too.
+            ff_hit=$(cd "$toplevel" 2>/dev/null && git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" 2>/dev/null \
+              | tr '\0' '\n' | while IFS= read -r ff_p; do
+                  ff_in=""
+                  if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then ff_in="$ff_p"; fi
+                  ff_d="$ff_p"
+                  while [ -z "$ff_in" ]; do
+                    case "$ff_d" in */*) ff_d="${ff_d%/*}" ;; *) break ;; esac
+                    if [ -L "$ff_d" ] || { [ -e "$ff_d" ] && [ ! -d "$ff_d" ]; }; then ff_in="$ff_d"; fi
+                  done
+                  # Literal pathspecs, so a name holding * or ? cannot match some other tracked path.
+                  if [ -n "$ff_in" ] && [ -z "$(git --literal-pathspecs ls-files -- "$ff_in" 2>/dev/null)" ]; then echo 1; break; fi
+                done)
             [ -n "$ff_hit" ] && ff_reason="an ignored file is in the way"
           fi
         fi
