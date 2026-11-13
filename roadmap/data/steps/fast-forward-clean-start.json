@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "Ruling fast-forward-clean-start (owner 21:59 CST Nov 12) had no step that builds it. Its step field pointed at grants-read-from-main, which is about the grant warning and hook timeout (Degen D14 part a).",
  "source": "retrospective Degen ledger audit 06:30 CST Nov 13",
- "note": "Build the ruling's shape: only the session's own worktree; clean means no edits, no commits ahead, no merge or rebase in progress, and on the default branch; fast-forward only; only at session start or an owner prompt; one line printed. Ruling repointed to this step 06:32 CST.",
- "updatedAt": "2026-11-13T06:32:23-06:00"
+ "note": "Build the ruling's shape: only the session's own worktree; clean means no edits, no commits ahead, no merge or rebase in progress, and on the default branch; fast-forward only; only at session start or an owner prompt; one line printed. Ruling repointed to this step 06:32 CST. 09:56 CST Nov 13: lane (PR #3141, session_013NEJL37QY2EjAqXYiuEe3b) asked whether a start may fast-forward a clean main checkout another live session may share (the hook refuses only agent worktrees). Not settled: the never-shared clause is the retrospective's proposal, not the owner's words (ruling fast-forward-clean-start). Posted as Cockpit item 689: a keep as built (recommended, lane's pick), b only a session's own linked worktree. Lane keeps a meanwhile.",
+ "updatedAt": "2026-11-13T09:56:15-06:00",
+ "blocked": "owner item 689"
 }

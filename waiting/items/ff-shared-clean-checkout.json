@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T15:55:00Z",
+  "context": "Goal: each session starts on current main, so it never reads stale rules or code.\nProblem (rule): the start hook cannot tell whether another live session shares a clean main checkout, so it can move files under that session, and your Q6 answer left this nuance for you to decide.\nBased on (ruling): your 21:59 CST Nov 12 answer, \"Q6 B \u2014 but theres probs some nuance here ponder it!\" (ruling fast-forward-clean-start); the never-shared clause is the retrospective's proposal, not your words.\nBased on (read): hooks/session_start.sh in PR #3141 refuses only agent worktrees, so a second session's start in a shared clean main checkout moves files under the first session.\nDeparts from: main, which never fast-forwards at start \u2014 adds a fast-forward of a clean checkout, in every clean checkout (a) or only in a session's own linked worktree (b).",
+  "home": "step fast-forward-clean-start",
+  "id": "ff-shared-clean-checkout",
+  "kind": "decision",
+  "n": 689,
+  "options": [
+    {
+      "gain": "No liveness tracking to build; a plain main clone stays current too.",
+      "how": "PR #3141 stays as it is: any clean checkout on the default branch fast-forwards at start, except agent worktrees.",
+      "id": "ff-any-clean",
+      "key": "a",
+      "label": "Keep as built (recommended)",
+      "lose": "A second session's start can change files under a first session in the same clean main checkout. Nothing is lost, since the tree was clean, but the first session reads newer files mid-task."
+    },
+    {
+      "gain": "A shared checkout never moves under a running session.",
+      "how": "Fast-forward only in a linked worktree under .claude/worktrees/ that is not an agent worktree; a plain main clone never moves.",
+      "id": "ff-own-worktree-only",
+      "key": "b",
+      "label": "Only a session's own linked worktree",
+      "lose": "A plain main clone, such as the pointer checkout, never fast-forwards, so a session started there can read stale main."
+    }
+  ],
+  "owner": "lane fast-forward-clean-start (session_013NEJL37QY2EjAqXYiuEe3b), PR #3141",
+  "ref": "coordinator 09:55 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fast-forward a shared clean checkout",
+  "shown": [
+    {
+      "id": "ff-any-clean",
+      "key": "a",
+      "label": "Keep as built (recommended)"
+    },
+    {
+      "id": "ff-own-worktree-only",
+      "key": "b",
+      "label": "Only a session's own linked worktree"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "May a session's start fast-forward a clean main checkout that another live session may share?",
+  "why": "Your 21:59 CST Nov 12 answer (Q6 B) asked for the nuance to be pondered; this is that nuance, and no ruling of yours settles it."
+}
