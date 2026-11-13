@@ -202,7 +202,7 @@ The preview lists each one in a "dead-rooted servers" section, with a reason.
 
 An unreadable answer means keep. The signal, the grace period, and the report
 are the same as for a listener. This tier is machine-wide and not tied to a
-repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+repository, so `janitor.roots` and the repo's `janitor.json` do not narrow it.
 
 ## Simulators
 
@@ -219,7 +219,7 @@ The preview lists each device with `WOULD STOP` or `KEEP` and a reason code.
 `--confirm` runs one `xcrun simctl shutdown <UDID>` per device, at most 4 per
 run (`janitor/sweep.py: SIM_SHUTDOWN_CAP = 4`). The rest wait for the next run. There is no `all`, and no erase. With no
 `xcrun`, or on Windows, the tier is absent and prints nothing. The tier is
-machine-wide, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+machine-wide, so `janitor.roots` and the repo's `janitor.json` do not narrow it.
 
 The guard reuses the same idle test (`sim_keep_code` in `sweep.py`) to refuse a
 boot when an idle twin exists (same decision).
@@ -246,8 +246,8 @@ preview lists each one as `prune WOULD`. `--confirm` then runs
 `git worktree prune`, which applies git's own staleness test again. Git alone
 decides what is stale. A
 locked worktree is never stale. If git gives no answer, the sweep prunes
-nothing and says so. This tier runs per repository, so `sweep: false` in
-`.claude/janitor.json` opts it out.
+nothing and says so. This tier runs per repository, so `sweep: false` in the
+repo's `janitor.json` opts it out.
 
 ## Leftover folders
 
@@ -256,7 +256,7 @@ A leftover folder (a husk) is a real folder directly under
 
 - Git does not list it as a worktree.
 - It is not empty.
-- It holds only entries named in `huskNames` in `.claude/janitor.json`, for
+- It holds only entries named in `huskNames` in the repo's `janitor.json`, for
   example `["node_modules", ".serve"]`. With no `huskNames`, the sweep finds
   none.
 
@@ -281,7 +281,7 @@ agent worktrees idle 30 minutes or more to a sibling trash name
 folders, since the agent may be resumed there. A detached child then deletes
 the trash. The folders are `native/build`,
 `.build` and `DerivedData`, plus each name in `buildDirs` in
-`.claude/janitor.json`, for example `["Pods/Build"]`. A name with `/` matches
+the repo's `janitor.json`, for example `["Pods/Build"]`. A name with `/` matches
 one path under the worktree root. A bare name matches at any depth. `buildDirs`
 adds names and never removes a default.
 
@@ -292,7 +292,7 @@ the daily sweep delete trash names a child left. The checks are in decision
 
 ## How you opt out
 
-Write `.claude/janitor.json` at the root of your repository:
+Write `janitor.json` in the `.claude` folder at the root of your repository:
 
     {
       "sweep": false,
