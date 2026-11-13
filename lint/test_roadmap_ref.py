@@ -22,8 +22,11 @@ import re
 import shutil
 import subprocess
 import sys
+import json
+import signal
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, ".."))
@@ -217,6 +220,225 @@ class FreshRefTests(unittest.TestCase):
         self.assertEqual(fetch_sites(docstring), [], "a docstring that describes a fetch was flagged")
         self.assertEqual(fetch_sites(message), [], "a message that names a fetch for the owner was flagged")
         self.assertEqual(fetch_sites(comment), [], "a comment was flagged")
+
+
+LINT = HERE
+FAKE_GIT = r'''
+import json, os, subprocess, sys, time
+HERE = os.path.dirname(os.path.abspath(sys.argv[0]))
+with open(os.path.join(HERE, "conf.json"), encoding="utf-8") as handle:
+    conf = json.load(handle)
+argv = sys.argv[1:]
+verb = next((word for word in argv if word in ("fetch", "log")), "")
+try:
+    devnull = os.path.samestat(os.fstat(0), os.stat(os.devnull))
+except OSError:
+    devnull = None
+record = {"verb": verb, "stdin_devnull": devnull,
+          "env": {key: os.environ.get(key) for key in ("GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND")}}
+with open(conf["log"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record) + "\n")
+if verb == "fetch" and conf["hang"]:
+    if conf["grandchild"]:
+        child = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        with open(conf["pid"], "w", encoding="utf-8") as handle:
+            handle.write(str(child.pid))
+    time.sleep(30)
+sys.exit(1)
+'''
+
+
+def make_fake_git(folder, hang=False, grandchild=False):
+    """A `git` for one case, to put first on PATH. Each start appends its verb, its stdin and the git environment to
+    starts.log. A fetch with `hang` sleeps past FETCH_TIMEOUT; with `grandchild` it first starts a child and writes the
+    child's pid to grandchild.pid. Returns (folder, starts.log, grandchild.pid)."""
+    os.makedirs(folder)
+    log, pid = os.path.join(folder, "starts.log"), os.path.join(folder, "grandchild.pid")
+    with open(os.path.join(folder, "conf.json"), "w", encoding="utf-8") as handle:
+        json.dump({"log": log, "pid": pid, "hang": hang, "grandchild": grandchild}, handle)
+    path = os.path.join(folder, "git")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("#!%s\n" % sys.executable + FAKE_GIT)
+    os.chmod(path, 0o755)
+    return folder, log, pid
+
+
+def git_starts(log, verb):
+    """The records of the starts with `verb` that the fake git logged, oldest first."""
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+    return [record for record in records if record["verb"] == verb]
+
+
+def on_path(folder):
+    """The PATH with `folder` first, for mock.patch.dict."""
+    return {"PATH": folder + os.pathsep + os.environ.get("PATH", "")}
+
+
+def alive(pid):
+    """True while `pid` runs. A zombie, exited but not yet reaped, is not running."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = "/proc/%d/stat" % pid
+    if os.path.exists(stat):
+        with open(stat, encoding="utf-8") as handle:
+            state = handle.read().rsplit(")", 1)[1].split()[0]
+        return state != "Z"
+    return True
+
+
+def kill_quietly(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+class FetchRuleTests(unittest.TestCase):
+    """The roadmap ref is fresh only when FETCH_HEAD names the roadmap branch. A fresh FETCH_HEAD of another branch
+    says nothing about the roadmap, so the roadmap is fetched."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_rule_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_fresh_fetch_head_of_another_branch_is_not_a_fresh_roadmap(self):
+        repo = fixture.clone_with_origin(self.root, "master-only", None, OLD_STORE)
+        fixture.write_fetch_head(repo, "master", NOW - 30)
+        fetch, calls = counting_fetch()
+        helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a fresh FETCH_HEAD of master counted as a fresh roadmap: %d roadmap fetch(es),"
+                         " want 1" % len(calls))
+
+    def test_a_fresh_roadmap_line_starts_no_fetch(self):
+        repo = fixture.clone_with_origin(self.root, "roadmap-fresh", None, OLD_STORE)
+        fixture.write_fetch_head(repo, "roadmap", NOW - 30)
+        fetch, calls = counting_fetch()
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(calls, [], "a fresh roadmap line started %d fetch(es), want none" % len(calls))
+        self.assertEqual(note, "", "a fresh roadmap line gave the note %r, want empty" % note)
+
+
+@unittest.skipUnless(os.name == "posix", "the fake git is a POSIX script, and a process group is a POSIX notion")
+class FetchProcessTests(unittest.TestCase):
+    """The fetch child runs in its own process group, which a timeout kills whole. It reads no prompt and no stdin."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_proc_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_timed_out_fetch_is_killed_with_its_process_group(self):
+        folder, _log, pid_file = make_fake_git(os.path.join(self.root, "hang-group"), hang=True, grandchild=True)
+        repo = fixture.clone_with_origin(self.root, "group", None, OLD_STORE)
+        with mock.patch.dict(os.environ, on_path(folder)):
+            helper().fresh_ref(repo, now=NOW)
+        self.assertTrue(os.path.exists(pid_file), "the fake fetch never started its grandchild")
+        with open(pid_file, encoding="utf-8") as handle:
+            grandchild = int(handle.read())
+        self.addCleanup(kill_quietly, grandchild)
+        self.assertFalse(alive(grandchild), "the fetch's grandchild outlived the timeout: its process group was not"
+                         " killed")
+
+    def fetch_env(self, name, preset=None):
+        """The environment one roadmap fetch starts with, after one fresh_ref with no value preset for the git
+        variables, or with `preset` (a dict) added to the environment."""
+        folder, log, _pid = make_fake_git(os.path.join(self.root, name))
+        repo = fixture.clone_with_origin(self.root, name + "-repo", None, OLD_STORE)
+        with mock.patch.dict(os.environ, dict(on_path(folder), **(preset or {}))):
+            if not preset:
+                for key in ("GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND"):
+                    os.environ.pop(key, None)
+            helper().fresh_ref(repo, now=NOW)
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch starts: %r, want one" % fetches)
+        return fetches[0]["env"]
+
+    def test_the_fetch_never_prompts_for_a_password(self):
+        env = self.fetch_env("prompt")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0", "the fetch may prompt: GIT_TERMINAL_PROMPT is %r"
+                         % env["GIT_TERMINAL_PROMPT"])
+
+    def test_the_fetch_askpass_is_a_no_op(self):
+        env = self.fetch_env("askpass")
+        self.assertEqual(env["GIT_ASKPASS"], "true", "GIT_ASKPASS is %r, want the no-op true" % env["GIT_ASKPASS"])
+
+    def test_the_fetch_ssh_is_batch_mode(self):
+        env = self.fetch_env("batch")
+        self.assertIn("BatchMode=yes", env["GIT_SSH_COMMAND"] or "", "GIT_SSH_COMMAND is %r, want BatchMode=yes"
+                      % env["GIT_SSH_COMMAND"])
+
+    def test_a_preset_ssh_command_is_kept(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "ssh"))
+        repo = fixture.clone_with_origin(self.root, "ssh-repo", None, OLD_STORE)
+        with mock.patch.dict(os.environ, dict(on_path(folder), GIT_SSH_COMMAND="ssh -i /fixture/key")):
+            helper().fresh_ref(repo, now=NOW)
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch did not start: %r" % fetches)
+        self.assertEqual(fetches[0]["env"]["GIT_SSH_COMMAND"], "ssh -i /fixture/key",
+                         "a preset GIT_SSH_COMMAND was replaced")
+
+    def test_the_fetch_child_reads_no_stdin_of_its_parent(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "stdin"))
+        repo = fixture.clone_with_origin(self.root, "stdin-repo", None, OLD_STORE)
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import roadmap_ref; "
+                "roadmap_ref.fresh_ref(sys.argv[2], now=float(sys.argv[3]))")
+        env = dict(os.environ, PATH=folder + os.pathsep + os.environ.get("PATH", ""))
+        done = subprocess.run([sys.executable, "-c", code, LINT, repo, repr(NOW)], input=b"", env=env,
+                              capture_output=True, timeout=60)
+        self.assertEqual(done.returncode, 0, "the child that reads the ref failed: %s"
+                         % done.stderr.decode("utf-8", "replace")[-300:])
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch did not start: %r" % fetches)
+        self.assertIs(fetches[0]["stdin_devnull"], True, "the fetch read its parent's stdin, not /dev/null")
+
+    def test_a_timed_out_fetch_is_not_followed_by_a_tip_read(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "tip"), hang=True)
+        repo = fixture.clone_with_origin(self.root, "tip-repo", None, OLD_STORE)
+        fixture.without_fetch_head(repo)
+        with mock.patch.dict(os.environ, on_path(folder)):
+            note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(len(git_starts(log, "fetch")), 1, "control: the roadmap fetch did not start")
+        tips = git_starts(log, "log")
+        self.assertEqual(tips, [], "a timed-out fetch was followed by %d tip read(s): a second wait of up to"
+                         " FETCH_TIMEOUT" % len(tips))
+        self.assertTrue(note.startswith("read as of "), "the note is %r" % note)
+
+
+READERS = ("lint/ruled_store.py", "hooks/feedback_guard.py", "hooks/sendmessage_state.py", "hooks/override.py",
+           "hooks/question_form.py")
+
+
+def calls_fresh_ref(source):
+    """True when `source` calls fresh_ref, as an attribute or a name. A mention in a string or a docstring is no call."""
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name == "fresh_ref":
+                return True
+    return False
+
+
+class ReaderScanTests(unittest.TestCase):
+    def test_the_scan_sees_a_call_and_no_mention(self):
+        self.assertTrue(calls_fresh_ref("import roadmap_ref\nroadmap_ref.fresh_ref(repo)\n"), "a call was not seen")
+        self.assertFalse(calls_fresh_ref('"""fresh_ref is read here."""\nx = 1\n'), "a docstring mention counted")
+
+    def test_each_reader_of_the_roadmap_calls_fresh_ref(self):
+        for rel in READERS:
+            with self.subTest(reader=rel):
+                self.assertTrue(os.path.exists(os.path.join(REPO, rel)), "scope: %s is not in the repo" % rel)
+                with open(os.path.join(REPO, rel), encoding="utf-8", errors="replace") as handle:
+                    source = handle.read()
+                self.assertTrue(calls_fresh_ref(source), "%s reads origin/roadmap without calling"
+                                " roadmap_ref.fresh_ref" % rel)
 
 
 def tearDownModule():
