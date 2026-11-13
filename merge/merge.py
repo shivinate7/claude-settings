@@ -5536,19 +5536,19 @@ def read_merge_role():
     role = data.get("role")
     return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
 
-def write_merge_role(tier):
-    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+def write_merge_role(role):
+    """Record `role` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a role outside MERGE_ROLES; nothing is written then."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         raise Stop("--role records a merge role in a cloud session only. " + ROLE_CITE)
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
-    if tier not in MERGE_ROLES:
+    if role not in MERGE_ROLES:
         raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     kept = read_state()[0].get("reviewed_cursor")  # the reviewed cursor's cache is not the role's to drop
     try:
-        write_state({"session": sid, "role": tier, **({"reviewed_cursor": kept} if kept is not None else {})})
+        write_state({"session": sid, "role": role, **({"reviewed_cursor": kept} if kept is not None else {})})
     except OSError as e:
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
