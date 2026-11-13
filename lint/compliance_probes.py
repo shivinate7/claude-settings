@@ -1153,8 +1153,11 @@ def probe_words(root):
     def no_base(why):  # check_glossary.unknown_exit would end this process
         raise NoBase(why)
 
+    top = git_ok(root, "rev-parse", "--show-toplevel")  # the check reads a change from the repo top, as a path of it
+    top = top.stdout.decode("utf-8", "replace").strip() if top and top.returncode == 0 else ""
     real_root, real_exit = check_glossary.ROOT, check_glossary.unknown_exit
-    check_glossary.ROOT, check_glossary.unknown_exit = root, no_base  # the check's git and reads now run in the child
+    # the check's git and reads now run in the child's repo top: a root below it still reads the whole change
+    check_glossary.ROOT, check_glossary.unknown_exit = top or root, no_base
     check_glossary._RUN.clear()
     check_glossary.tick = tick  # the check calls it inside its name loop, so one giant file cannot outrun the deadline
     current, done = None, 0
@@ -1175,20 +1178,25 @@ def probe_words(root):
                 units = [(rel, True, False, None, None) for rel in check_glossary.added()]
                 units += [(rel, False, True, None, lines) for rel, lines in sorted(scope.items())]
                 units += [(rel, False, False, text, lines) for rel, text, lines in committed
-                          if not (scope.get(rel) == lines and read(root, rel) == text)]
+                          if not (scope.get(rel) == lines and read(top, rel) == text)]
             else:
                 units = [(rel, True, True, None, None) for rel in files]
+            names = list(dict.fromkeys(unit[0] for unit in units))  # each file once, for the deadline count
+            home = top if diff else root  # a path of the diff is relative to the repo top
         except NoBase as err:
             raise CannotRun(str(err))
-        for done, (rel, by_path, read_now, body, lines) in enumerate(units):
-            current = rel
+        for rel, by_path, read_now, body, lines in units:
+            current, done = rel, names.index(rel)
             tick()
             if by_path:
                 for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
                     add(rel, "-", problem, problem[len(rel):].strip())
             if read_now:
-                body = read(root, rel)
+                body = read(home, rel)
                 if body is None:
+                    if diff and rel in check_glossary.untracked() and not check_glossary.binary(rel):
+                        # new work that no read can judge: unknown, as the check says, never clean
+                        raise CannotRun("%s is untracked and cannot be read as text" % rel)
                     unread.append(rel)
                     continue
             if body is None or rel.startswith(check_glossary.SKIP_CODE):
@@ -1203,7 +1211,7 @@ def probe_words(root):
                 line, _, detail = problem[len(rel) + 1:].partition(": ")
                 add(rel, line, problem, detail)
     except DeadlineHit:
-        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(units)))
+        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(names)))
     finally:
         check_glossary.tick = None
         check_glossary.ROOT, check_glossary.unknown_exit = real_root, real_exit
