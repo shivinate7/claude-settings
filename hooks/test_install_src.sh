@@ -6195,6 +6195,32 @@ default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 ONLY=" $* "
 run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
 
+# The fallback to main reaches the refresh hook too: a hook that names stable would 404 on every later start.
+caseK16() {
+  name="caseK16: a cloud install with no stable branch on origin writes a refresh hook that fetches install.sh from main, not stable"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  fx="$work/k16-fx"; h="$work/k16-home"; scratch="$work/k16-scratch"; bin="$work/k16-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  if git -C "$fx/bare.git" rev-parse -q --verify refs/heads/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  default_cloud_install "$h" "$scratch" "$bin"
+  cmds=$(jq -r '[.hooks.SessionStart[]?.hooks[]?.command] | join("\n")' "$h/.claude-cfg/settings.json" 2>/dev/null)
+  if [ -z "$cmds" ]; then
+    bad "$name" "no SessionStart command in $h/.claude-cfg/settings.json (install exit $rc: $(install_problems))"
+  elif printf '%s\n' "$cmds" | grep -q '/stable/install.sh'; then
+    bad "$name" "the refresh hook fetches install.sh from stable, which origin lacks: $(printf '%s\n' "$cmds" | grep '/stable/install.sh' | head -n 1)"
+  elif ! printf '%s\n' "$cmds" | grep -q '/main/install.sh'; then
+    bad "$name" "no refresh hook fetches install.sh from main: $cmds"
+  else
+    ok "$name"
+  fi
+}
+
 run case1
 run case2
 run case3
@@ -6342,6 +6368,7 @@ run caseK12
 run caseK13
 run caseK14
 run caseK15
+run caseK16
 run caseP1
 run caseP2
 run caseP3
