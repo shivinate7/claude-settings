@@ -5,7 +5,7 @@ currently a patchwork of lessons bugs and fixes and stale prose". The item cover
 watches, wakes, sweeps, reaps or logs.
 
 This record holds the model (section 1), the table of mechanisms (section 2), the merges (section 3),
-the deletes (section 4), the lanes (section 5) and the owner questions (section 6). Section 6 has one open question, Q6.
+the deletes (section 4), the lanes (section 5) and the owner questions (section 6). Section 6 has one open question, Q6. The long-lived watch question (rule 1) is open too, outside section 6.
 This change changes no behaviour. It fixes stale prose in Markdown records and in code comments.
 
 ## Method
