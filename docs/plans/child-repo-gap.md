@@ -2,7 +2,7 @@
 
 Goal (owner, 2026-11-11 14:05 CST, R44: "on r44 yea agreed A build all 3"): each child repo follows
 claude-settings main, with cited exceptions only. This record is part 1, the measure, and the list of fix lanes it feeds. The other R44 builds (stable-branch action
-pins, a child-CI check for contradicting lines, the one-time sweep) are separate builds. The seven repo lanes below are that sweep.
+pins, a child-CI check for contradicting lines, the one-time sweep) are separate builds. The repo lanes below, and the two lists for the owner, are that sweep.
 
 Measured on 2026-11-12 from shallow clones, git and file reads only, against claude-settings main at
 36807ad19. Heads read: q_max 32d4373, home 85fbf7e, joyous f510db0, banchi 70c6bc6, degen 959bf79,
@@ -79,7 +79,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 | Area | Main has | banchi has | Gap |
 |---|---|---|---|
 | CLAUDE.md | Cites records | 169 lines, cites existing records, no `rule:` ids, none stale. By reading, not by the probe: probable copies of the decision-is-an-argument rule (~line 88), the main-by-pull-request block, the screen-before-verdict rule, one-home-per-capability and the stash rule. | Copies to cut to cites. |
-| Contradiction with no exemption | Cited exception with grant | A "never --admin" line and D42 (`enforce_admins` true) match the classic protection main runs today. They are no contradiction now, and go into the ruleset sweep. | Rewrite to the ruleset form in the sweep. |
+| Contradiction with no exemption | Cited exception with grant | A "never --admin" line and D42 (`enforce_admins` true) match the classic protection main runs today, per the record. They are no contradiction now, and go into the ruleset sweep. | Rewrite to the ruleset form in the sweep. |
 | project-ops | Roster, record branch, briefs, handoffs | `origin/roadmap` (bb560f6), `records/*` and `seed/banchi-roadmap` exist. Contents unread. No roster or handoff file in the tree. | Contents unmeasured. |
 | CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:362-368. Eight actions at 919106e7 (Nov 5), behind (counts above). Not used: claude-md-cites, ste-lint, silent-undo, ruling-kind. Zizmor is a local job. | Pins and four missing actions. |
 | Once per batch | PR only for the batch (R61-R63, not built) | Draft pull requests skip, mutation-report is batch-only, but push to main and a nightly run still run the full suite. | R64: when runners are free. |
@@ -135,7 +135,7 @@ are the ones that are not pin moves.
 - **Contradiction check in child CI (R44 contradiction check):** the cases it must catch, found by reading: q_max D-705 and
   D-499/D-833 (no parent rule named), degen line 7 (names a different parent rule than the one it departs from),
   mailaudit's mislabeled rule id. The cases that are no contradiction today: ios-adblock CLAUDE.md line 6 and banchi's
-  "never --admin" and `enforce_admins` wording, which match the classic protection main runs now. The check must not flag
+  "never --admin" and `enforce_admins` wording, which match the classic protection main runs now, per the record. The check must not flag
   them until the ruleset is built. Joyous and home show none. A test that no `@<sha>` pin remains belongs to this build.
 
 ## Fix lanes
