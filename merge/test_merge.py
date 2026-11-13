@@ -12885,10 +12885,13 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", head_ref=None):
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", head_ref=None, body=None):
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads.
-    head_ref names the head branch; the default is feat<number>."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": head_ref or "feat%d" % number, "sha": sha}}
+    head_ref names the head branch; the default is feat<number>. body, when given, is its body, as the list and `pulls/<n>` both give it."""
+    d = {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": head_ref or "feat%d" % number, "sha": sha}}
+    if body is not None:
+        d["body"] = body
+    return d
 
 def pr_file(name, previous=None, status="modified", additions=0):
     """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then.
@@ -16265,14 +16268,19 @@ class ReleaseHost(PullsHost):
             if d["number"] == n:
                 return 0, json.dumps({**d, "state": "closed", "merged": False, "mergeable": None, "mergeable_state": "unknown", "body": "",
                                       "changed_files": 1})
-        return super().pull_reply(n)
+        code, text = super().pull_reply(n)
+        listed = next((d for d in self.pulls if d["number"] == n and "body" in d), None)  # a pull request given a body keeps it, as GitHub's pulls/<n> does
+        if code or listed is None:
+            return code, text
+        return 0, json.dumps({**json.loads(text), "body": listed["body"]})
 
 class ReleaseCheck(ReviewEnv):
     """`merge --release-check N [N ...] [--lint N@SHA:VERDICT ...]`: one line per pull request given, in the order given: `#N PASS`, or `#N FAIL: `
     and its reasons joined by `; `. A PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. Six checks, each a reason when it fails:
     the pull request is open; its newest review record is done at the live head (review_state, as `--reviewed` reads it); the newest record is
     unedited; its lint verdict is PASS or UNKNOWN-AT-CAP for the live head (missing, FAIL, or a SHA that is not the live head is a reason); the merge
-    result is clean (git merge-tree); and a base that is not the default branch has its open pull request in the call, and that one passes.
+    result is clean (git merge-tree); and a base that is not the default branch has its open pull request in the call, and that one passes. With an
+    open batch (an open integration pull request whose body holds a freeze block), the merge into its head must be clean too, as a seventh check.
     Exit 0 only when every line is a PASS. A case's pull requests sit at the feature branch's real commit, so the merge-tree check can read them."""
 
     SHA_RULE = r"(?i)\bsha\b|40[- ]hex"  # a usage error for a lint in the wrong form names the sha rule
@@ -16831,6 +16839,98 @@ class ReleaseCheck(ReviewEnv):
         _, lines, err, _ = self.release([7, 8], pulls=self.two_bases(fx), comments=[self.review(7, head=fx.fixed)],
                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
+
+    # The open batch's integration head. The check also merges each pull request into that head, so a pull request that merges cleanly into main
+    # and conflicts with the batch FAILs. The open batch is the open integration pull request: its head is batch-NAME and its body holds a freeze block.
+    BATCH = "nightly"  # the batch these cases name; its head is on merge.integration_branch(BATCH)
+
+    def open_batch(self, n, sha, lane=6):
+        """-> the open integration pull request n of batch BATCH, at head sha: a draft whose body holds the freeze block that names the batch and its one
+        lane (pull request `lane`, at sha). The caller pushes sha as the batch's branch, or leaves it off origin for an unreadable head."""
+        return batch_pull(n, sha, draft=True, head_ref=merge.integration_branch(self.BATCH), body=freeze_body(freeze_inner(self.BATCH, [(lane, sha)])))
+
+    def push_batch(self, sha):
+        """Push sha as batch BATCH's branch on origin, as a real integration branch is."""
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/{merge.integration_branch(self.BATCH)}")
+
+    def merges(self, head, into):
+        """-> (exit code of git's merge of `head` into `into` in the checkout, whether its output names a conflict)."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", into, head], cwd=self.co, capture_output=True, text=True)
+        return r.returncode, "CONFLICT" in r.stdout
+
+    def release_with_batch(self, fx, head, extra=(), **reads):
+        """-> (rc, lines, err) of --release-check 7 for pull request 7 at `head`, with its record and lint at that head, and `extra` (the batch, and any
+        other open pull request) open beside it. `reads` go to PullsHost, such as pulls_error."""
+        rc, lines, err, _ = self.release([7], lint=self.lints([7], heads={7: head}), pulls=[self.live(7, head=head), *extra],
+                                         comments=[self.review(7, head=head)], commits=fx.parents, trees=fx.trees, compares=fx.on_main, **reads)
+        return rc, lines, err
+
+    def test_batch_head_clean_on_main_but_conflicting_with_the_open_batch_fails_naming_the_batch_head(self):
+        # Catches: --release-check merging a pull request into main only, so #7 reads PASS while it conflicts with the open batch's head. That is how a
+        # pull request passed the release check, then conflicted with a lane inside a running batch. The FAIL names the batch head by its sha; the
+        # alternation also takes the batch's branch or PR number, which the check may name instead. No other reason is on the line.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        clash = self.git_commit(fx.main2, {"a.txt": "batch\n"})  # fx.clean adds a.txt too, with other text, so the two conflict
+        self.push_batch(clash)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main, so the case would test main")
+        self.assertEqual(self.merges(fx.clean, clash), (1, True), "fixture: #7 does not conflict with the batch head, so the case has no clash")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, clash)])
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: "), f"release-check passed #7, which conflicts with the open batch's head {clash[:9]}: {line}\n{err}")
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(line, 7, rf"{clash[:9]}|batch-nightly|#9\b")
+
+    def test_batch_head_clean_on_main_and_on_the_batch_head_passes(self):
+        # Control: #7 merges cleanly into main and into the open batch's head, so its line reads PASS with the batch open. The batch check adds no
+        # reason to a pull request that is clean on both.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        calm = self.git_commit(fx.main2, {"z.txt": "z\n"})
+        self.push_batch(calm)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main")
+        self.assertEqual(self.merges(fx.clean, calm), (0, False), "fixture: #7 does not merge cleanly into the batch head")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, calm)])
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_batch_head_no_open_batch_reads_as_today(self):
+        # Control: with no open integration pull request, #7 reads PASS on its clean merge into main, as before the batch check. An open lane pull
+        # request whose head conflicts with #7 is not a batch: its body holds no freeze block, so the check does not read it.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        lane = self.git_commit(fx.main2, {"a.txt": "lane\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{lane}:refs/heads/feat8")
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main")
+        self.assertEqual(self.merges(fx.clean, lane), (1, True), "fixture: the open lane does not conflict with #7, so the case has no clash")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [batch_pull(8, lane)])
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_batch_head_open_list_unreadable_is_unknown_never_pass(self):
+        # Catches: a failed read of the open pull list taken as no open batch, so #7 reads PASS on main alone while the list that names the batch
+        # is unread. The line is unknown, never PASS.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        calm = self.git_commit(fx.main2, {"z.txt": "z\n"})
+        self.push_batch(calm)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, calm)], pulls_error="gh: could not list the pull requests")
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: "), f"release-check passed #7 with the open pull list unread: {line}\n{err}")
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(line, 7, r"^unknown \(")
+
+    def test_batch_head_unreadable_is_unknown_never_pass(self):
+        # Catches: a batch whose head sha no read can reach (not in the clone, not on origin) taken as no batch, so #7 reads PASS. The line is unknown.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        gone = "9" * 40
+        self.assertFalse(self.has_commit(self.co, gone), "fixture: the unreadable head is in the clone, so the case does not test an unreadable head")
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, gone)])
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: "), f"release-check passed #7 with the open batch's head unreadable: {line}\n{err}")
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(line, 7, r"^unknown \(")
 
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
