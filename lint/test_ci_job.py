@@ -2176,7 +2176,9 @@ class PinnedHarness(Job):
     does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too. The zizmor
     run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still exports where
     os.symlink is refused. Under the flag a step's CLAUDE_SETTINGS_DIR is its own pin's tree, else the job's one pin's, and
-    only then the caller's value is replaced: a step with no pin keeps the caller's value."""
+    only then the caller's value is replaced: a step with no pin keeps the caller's value. A step's own env: wins even when
+    that pin's tree cannot be made; a no-sha ste-lint step takes no pin tree; a job with two pins gives its plain steps the
+    caller's value, else this checkout."""
 
     git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
     lane = LintTools.lane
@@ -2488,9 +2490,9 @@ class PinnedHarness(Job):
         git_in(self.source, "commit", "-qm", "env harness reading %s" % rule)
         return git_in(self.source, "rev-parse", "HEAD")
 
-    def rule_read(self, steps, *args, env=None):
-        """One run of `steps` with `args`: the rule the step read into seen.txt, or a note when it wrote none.
-        -> (rc, verdict lines, the rule or the note, the output)."""
+    def seen_run(self, steps, *args, env=None):
+        """One run of `steps` with `args`: what the step wrote into seen.txt, or a note when it wrote none.
+        -> (rc, verdict lines, the value or the note, the output)."""
         seen = os.path.join(self.root, "seen.txt")
         if os.path.exists(seen):
             os.remove(seen)
@@ -2502,7 +2504,7 @@ class PinnedHarness(Job):
 
     def test_a_plain_step_in_a_job_with_one_pin_reads_the_pins_tree_under_the_flag(self):
         steps = self.code_step(self.pin_a) + step("Read rule", self.READ_RULE)
-        rc, verdicts, rule, text = self.rule_read(steps, "--step", "Read rule", "--pinned",
+        rc, verdicts, rule, text = self.seen_run(steps, "--step", "Read rule", "--pinned",
                                                   env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
         self.assertEqual((rc, verdicts), (0, ["PASS"]), text)
         self.assertNotIn("(no seen.txt", rule, text)  # scope: the step ran
@@ -2525,14 +2527,86 @@ class PinnedHarness(Job):
     def test_a_step_env_that_sets_it_wins_over_the_job_pin_under_the_flag(self):  # the control
         steps = self.code_step(self.pin_a) + step("Read rule", self.READ_RULE,
                                                   env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("own", "step-checkout")})
-        rc, verdicts, rule, text = self.rule_read(steps, "--step", "Read rule", "--pinned",
+        rc, verdicts, rule, text = self.seen_run(steps, "--step", "Read rule", "--pinned",
                                                   env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
         self.assertEqual((rc, verdicts, rule), (0, ["PASS"], "own"), text)
 
     def test_under_the_flag_with_no_pin_the_caller_value_still_wins(self):  # the control
-        rc, verdicts, rule, text = self.rule_read(step("Read rule", self.READ_RULE), "--step", "Read rule", "--pinned",
+        rc, verdicts, rule, text = self.seen_run(step("Read rule", self.READ_RULE), "--step", "Read rule", "--pinned",
                                                   env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
         self.assertEqual((rc, verdicts, rule), (0, ["PASS"], "decoy"), text)
+
+    WRITE_DIR = "printf '%s' \"${CLAUDE_SETTINGS_DIR-<unset>}\" > seen.txt"  # the step writes the settings dir it sees
+
+    def stub_ste_changed(self):
+        """The copied install's bin/ste-changed becomes a stub that writes the CLAUDE_SETTINGS_DIR it sees to seen.txt. The
+        ste-lint step runs that file and reads nothing else, so the stub is where its env can be read."""
+        path = os.path.join(self.cfg, "bin", "ste-changed")
+        write_lf(path, "#!/bin/sh\n" + self.WRITE_DIR + "\n")
+        os.chmod(path, 0o755)
+
+    @staticmethod
+    def pinned_step(name, sha):
+        return step(name, uses="shivinate7/claude-settings/actions/code-check@%s" % sha)
+
+    def two_pin_steps(self):
+        """Two code-check steps pinned at two shas (the lenient and the strict commit), then a plain step that writes its dir."""
+        return self.pinned_step("Pin one", self.pin_a) + self.pinned_step("Pin two", git_in(self.source, "rev-parse", "main")) + \
+            step("Write dir", self.WRITE_DIR)
+
+    def test_a_step_env_that_sets_it_wins_when_the_one_pin_tree_cannot_be_made(self):  # pick (a): red on 820f5b8b1
+        own = os.path.join(self.root, "step-checkout")
+        os.makedirs(own)
+        steps = self.code_step(UNFETCHABLE) + step("Write dir", self.WRITE_DIR, env={"CLAUDE_SETTINGS_DIR": own})
+        rc, verdicts, seen, text = self.seen_run(steps, "--step", "Write dir", "--pinned",
+                                                 env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
+        self.assertEqual((rc, verdicts, seen), (0, ["PASS"], own), text)
+
+    def test_a_no_sha_ste_lint_step_takes_no_pin_tree_under_the_flag(self):  # pick (b): red on 820f5b8b1
+        self.stub_ste_changed()
+        caller = self.checkout_naming("decoy", "caller-checkout")
+        steps = self.code_step(self.pin_a) + step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@main")
+        rc, verdicts, seen, text = self.seen_run(steps, "--step", "STE lint", "--base", "origin/main", "--pinned",
+                                                 env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((rc, verdicts), (0, ["PASS"]), text)
+        self.assertNotIn("(no seen.txt", seen, text)  # scope: the step ran
+        self.assertEqual(seen, caller, "under --pinned the no-sha ste-lint step read a pin tree, not the caller's checkout\n" + text)
+
+    def test_a_failed_pin_tree_does_not_make_a_no_sha_ste_lint_step_unknown(self):  # pick (b): red on 820f5b8b1
+        self.stub_ste_changed()
+        caller = self.checkout_naming("decoy", "caller-checkout")
+        steps = self.code_step(UNFETCHABLE) + step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@main")
+        rc, verdicts, seen, text = self.seen_run(steps, "--step", "STE lint", "--base", "origin/main", "--pinned",
+                                                 env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((rc, verdicts), (0, ["PASS"]), "the job's one pin, which cannot be made, made the no-sha ste-lint step unknown\n" + text)
+        self.assertEqual(seen, caller, "the no-sha ste-lint step did not read the caller's checkout\n" + text)
+
+    def test_a_plain_step_whose_one_pin_tree_cannot_be_made_is_unknown_and_names_the_failed_fetch(self):  # pick (c): control
+        steps = self.code_step(UNFETCHABLE) + step("Write dir", self.WRITE_DIR)
+        rc, lines, text = self.run_step(steps, "--step", "Write dir", "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), text)
+        self.assertIn("could not be fetched", lines[0], "the unknown line does not name the failed fetch\n" + text)
+        self.assertIn(UNFETCHABLE[:7], lines[0], "the unknown line does not name the pin it could not make\n" + text)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "seen.txt")), "the step ran with no pin tree\n" + text)
+
+    def test_without_the_flag_an_unmakeable_job_pin_does_not_touch_a_plain_step(self):  # the control
+        caller = self.checkout_naming("decoy", "caller-checkout")
+        steps = self.code_step(UNFETCHABLE) + step("Write dir", self.WRITE_DIR)
+        rc, verdicts, seen, text = self.seen_run(steps, "--step", "Write dir", env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((rc, verdicts, seen), (0, ["PASS"], caller), text)
+
+    def test_two_pins_and_a_plain_step_take_the_caller_value_under_the_flag(self):  # pick (d): control
+        caller = self.checkout_naming("decoy", "caller-checkout")
+        rc, verdicts, seen, text = self.seen_run(self.two_pin_steps(), "--step", "Write dir", "--pinned",
+                                                 env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((rc, verdicts, seen), (0, ["PASS"], caller), text)
+
+    def test_two_pins_and_a_plain_step_take_this_checkout_without_a_caller_value(self):  # pick (d)
+        rc, verdicts, seen, text = self.seen_run(self.two_pin_steps(), "--step", "Write dir", "--pinned")
+        self.assertEqual((rc, verdicts), (0, ["PASS"]), text)
+        self.assertNotIn("(no seen.txt", seen, text)  # scope: the step ran
+        self.assertEqual(os.path.realpath(seen), os.path.realpath(self.cfg),
+                         "with two pins and no caller value the plain step did not see this checkout\n" + text)
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
