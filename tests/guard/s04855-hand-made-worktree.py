@@ -21,9 +21,8 @@ HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # th
 HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
 HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
 HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
-# The rule text a refusal with no agent_id prints, as the guard printed it before this change. The printed reason
-# holds it whole.
-HM_TODAY_REASON = (
+# The rule text a refusal with no agent_id prints. The printed reason holds it whole.
+HM_RULE_REASON = (
     "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
@@ -80,8 +79,8 @@ def hm_allow(name, command, **kw):
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
 hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_refuse("a call with no agent_id keeps today's reason, and names no -red folder", HMADD + "../lane-x",
-        carries=HM_TODAY_REASON, lacks=("-red",))
+hm_refuse("a call with no agent_id keeps the rule text, and names no -red folder", HMADD + "../lane-x",
+        carries=HM_RULE_REASON, lacks=("-red",))
 hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
 hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
@@ -392,7 +391,7 @@ def hand_made_no_agent_reason_case():
         "tool_input": {"command": HMADD + "../lane-x"}})
     if got != "deny":
         return False, "expected deny, got %s: %s" % (got, reason[:90])
-    head = "hand-made-worktree: " + HM_TODAY_REASON + " "
+    head = "hand-made-worktree: " + HM_RULE_REASON + " "
     if not reason.startswith(head):
         return False, "the no-agent reason does not open with the rule text: %s" % reason[:90]
     tail = reason[len(head):]
@@ -402,6 +401,37 @@ def hand_made_no_agent_reason_case():
 
 
 LOG_FAMILY[HM_NO_AGENT_LABEL] = FAMILY   # registered in the misc literal (section 33355), as the named-path check is
+
+
+# THE RULE TEXT FOR A BAD AGENT ID. An agent_id that fails the id pattern names no home, so it gets no red-run
+# path. The refusal is the rule text, one space, then the agent's override line, which an agent's call gets.
+HM_BAD_ID_LABEL = ("hand-made worktree: a call with an agent_id that fails the id pattern and an agent_type gets "
+                   "the rule text, one space, then the agent override line, and no -red path")
+
+
+def hand_made_bad_agent_id_reason_case():
+    """An agent_id that fails the id pattern gets the rule text and the agent's override line, and no -red path."""
+    import override
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": HMMAIN, "session": None, "env_path": None,
+        "temp": os.path.join(ROOT, "tmp"), "agent_id": "a/../b", "agent_type": "test-author",
+        "tool_input": {"command": HMADD + HMAGENT_LANE9}})
+    if got != "deny":
+        return False, "expected deny, got %s: %s" % (got, reason[:90])
+    if not reason.startswith("hand-made-worktree: "):
+        return False, "the refusal is not the hand-made rule's: %s" % reason[:90]
+    if "-red" in reason:
+        return False, "the reason names a -red path for an agent_id that fails the id pattern: %s" % reason[-120:]
+    head = "hand-made-worktree: " + HM_RULE_REASON + " "
+    if not reason.startswith(head):
+        return False, "the reason does not open with the rule text: %s" % reason[:90]
+    tail = reason[len(head):]
+    if tail != override.offer("hand-made-worktree", None, "a/../b"):
+        return False, "the reason holds words between the rule text and the agent override line: %s" % tail[:90]
+    return True, "the reason is the rule text, one space, then the agent override line, and no -red path"
+
+
+LOG_FAMILY[HM_BAD_ID_LABEL] = FAMILY   # registered in the misc literal (section 33355), as the no-agent pin is
 
 
 # =========================================================================== 2. machine-wide kills
