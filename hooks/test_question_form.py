@@ -150,7 +150,7 @@ def page_item(tail="", options=None, lines=None, **over):
     if options is not None:
         item["options"] = options
     item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
-    return item
+    return tcj.with_frozen_fields(item)  # ids and `shown` for the options as they stand now
 
 
 TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
@@ -385,9 +385,9 @@ def case_closed_stood_and_updates():
     lacking = copy.deepcopy(ITEM92["options"])
     lacking[1].pop("lose")
     page("an update that carries options with an option that has no loss is refused", "update",
-         entry_of({"kind": "decision", "options": lacking}), (FORM_RULE, "lose"))
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": lacking})), (FORM_RULE, "lose"))
     page("an update that carries options with a gain and a loss each passes, its context not carried", "update",
-         entry_of({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])}), None)
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])})), None)
 
 
 def case_str_replace():
@@ -1483,7 +1483,7 @@ def case_departs_line_forms_pass():
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
     page("a decision with CRLF line endings and a valid Departs from line passes", "set",
-         entry_of(dict(ITEM92, context=crlf)), None)
+         entry_of(tcj.with_frozen_fields(dict(ITEM92, context=crlf))), None)
 
 
 def case_departs_str_replace_forms():
@@ -2031,7 +2031,7 @@ def ma144(repo=OTHER_REPO, checked=None, **over):
     if checked is not None:
         item["checked_with"] = checked
     item.update(over)
-    return item
+    return tcj.with_frozen_fields(item)  # MA144 is the record as written; its options get the ids and shown a write carries
 
 
 def ma144_write(**over):
