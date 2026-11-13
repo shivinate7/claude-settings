@@ -678,7 +678,7 @@ class BatchHeadRunsEveryFlag(unittest.TestCase):
 
     # Control, green on the old code. Named failure: the batch arm widens to every pull request, so a lone lane's docs
     # edit or lint edit starts the whole matrix.
-    def test_a_head_that_is_not_a_batch_branch_keeps_the_flags_of_its_diff(self):
+    def test_a_head_that_is_not_an_integration_branch_keeps_the_flags_of_its_diff(self):
         docs = run(["README.md", "decisions/some-record.md"], head_ref="feature-x")
         self.assertEqual(self.flags(docs), set(), f"a docs-only lone lane set flags: {docs}")
         lint = run(["lint/test_ci_scope.py"], existing=["lint/test_ci_scope.py"], head_ref="feature-x")
