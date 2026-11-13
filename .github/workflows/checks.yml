@@ -869,6 +869,7 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page_tier_sort.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
