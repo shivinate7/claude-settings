@@ -1452,9 +1452,10 @@ class Host:
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         A push run that succeeded with every job but `scope` skipped ran no suites (job conclusions, `SUITE_GATE_JOB`). It reads green only when a green pull-request run
-        of the same workflow file and tree (`head_commit.tree_id`) is on the newest 100 successful pull-request runs. Otherwise the newest older run of its file and group
-        that ran its suites stands for it, and keeps its own verdict. With none on the page the read is unknown, never green.
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. So does each newest push run that succeeded, and each older one the walk past a skipped run reads. A skipped push run costs one pull-request runs read. A failed read is unknown."""
+        of the same workflow file and tree (`head_commit.tree_id`) that itself ran suites (a job other than `scope` not skipped) is on the newest 100 successful pull-request runs,
+        any such run, past a newer one that skipped its suites. Otherwise the newest older run of its file and group that ran its suites stands for it, and keeps its own verdict.
+        With none on the page the read is unknown, never green. A succeeded push run that lists no jobs shows no evidence: it is unknown, and no older run stands for it.
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. So does each newest push run that succeeded, and each older one the walk past a skipped run reads. A skipped push run costs one pull-request runs read, once per call, and one jobs read per pull-request run of its file and tree on that page, at most 100 (the page size), none for a run with no tree or a run already read. A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1510,23 +1511,28 @@ class Host:
                     if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need) and all(x in theirs for x in names):
                         return True
                 return False
-            def ran_suites(r):  # judged from job conclusions: some job other than the gate ran. A run with no jobs listed is not judged a skip
-                jobs = jobs_of(r)
-                return not jobs or any(j.get("conclusion") != "skipped" and j["name"] != SUITE_GATE_JOB for j in jobs)
+            def ran_suites(r):  # judged from job conclusions: some job other than the gate ran. A run with no jobs listed shows no suite ran, and is not a pass either (see the loop below)
+                return any(j.get("conclusion") != "skipped" and j["name"] != SUITE_GATE_JOB for j in jobs_of(r))
 
-            covered_trees = []  # the trees of the green pull-request runs on the page, read once and only for a skipped push run
+            pr_runs = []  # the green pull-request runs on the page, newest first, read once and only for a skipped push run
 
-            def covered(r):  # a green pull-request run of r's own tree proved what r skipped: the squash commit keeps the pull request's tree
+            def covered(r):  # a green pull-request run of r's tree that ran its suites proved what r skipped. The squash commit keeps the pull request's tree only when main did not move after the pull request head: otherwise the trees differ, no run matches, and the walk below applies
                 tree = (r.get("head_commit") or {}).get("tree_id")
-                if not covered_trees:
+                if not pr_runs:
                     c, got = self.api("actions/runs", fields={"event": "pull_request", "status": "success", "per_page": 100})
                     if c:
                         raise Stop(f"reading the pull-request runs from GitHub failed, so a skipped push run cannot be judged: {got}")
-                    covered_trees.append({((x.get("head_commit") or {}).get("tree_id"), x["path"].split("@")[0]) for x in json.loads(got)["workflow_runs"]
-                                          if x["status"] == "completed" and x["conclusion"] == "success"})
-                return bool(tree) and (tree, r["path"].split("@")[0]) in covered_trees[0]
+                    pr_runs.append([x for x in json.loads(got)["workflow_runs"] if x["status"] == "completed" and x["conclusion"] == "success"])
+                return bool(tree) and any(((x.get("head_commit") or {}).get("tree_id"), x["path"].split("@")[0]) == (tree, r["path"].split("@")[0]) and ran_suites(x)
+                                          for x in pr_runs[0])
             for key, r in list(newest.items()):
-                if r["event"] != "push" or r["status"] != "completed" or r["conclusion"] != "success" or ran_suites(r) or covered(r):
+                if r["event"] != "push" or r["status"] != "completed" or r["conclusion"] != "success" or ran_suites(r):
+                    continue
+                if not jobs_of(r):  # no jobs listed: no evidence either way, so no older run stands for it
+                    del newest[key]
+                    unknown.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')}) lists no jobs, so nothing shows its suites ran and main is unknown")
+                    continue
+                if covered(r):
                     continue
                 # A skipped push run proved no suite, and no pull-request run of its tree did: the run it stands for is the newest one that ran them.
                 for older in judged[age[r["id"]] + 1:]:
@@ -1538,7 +1544,7 @@ class Host:
                     break
                 else:
                     del newest[key]
-                    unknown.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')}) ran no suites, no green pull-request run has its tree, "
+                    unknown.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')}) ran no suites, no green pull-request run of its tree ran its suites, "
                                    "and no earlier run on the page ran its suites, so main is unknown")
             for r in newest.values():
                 if r["status"] != "completed":  # a re-run in flight: its jobs are mid-change, so none are read
