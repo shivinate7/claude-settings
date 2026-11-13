@@ -2273,6 +2273,12 @@ LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one lin
 LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
 LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
+def shipped_keep_branches():
+    """merge.keepBranches as this repo ships it in .github/stamp.json, read from the file itself."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".github", "stamp.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["merge"]["keepBranches"]
+
 def lane_batch(env, *names):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
     -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line."""
@@ -2749,6 +2755,16 @@ class CutLanes(Env):
         self.assertEqual(rc, 0, out)
         self.assert_deleted(out, "lane2")
         self.assert_kept(out, "batch-map", "keep")
+
+    def test_the_stable_branch_is_kept_by_the_keepBranches_this_repo_ships(self):
+        # The keep list is the repo's own .github/stamp.json, not a copy. lane2's delete is the control: cut_lanes ran.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=shipped_keep_branches()))))
+        lane_batch(self, "stable", "lane2")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_deleted(out, "lane2")
+        self.assertNotEqual(self.head("stable"), "", "stable was deleted: the shipped .github/stamp.json does not keep it in merge.keepBranches")
+        self.assertIn(LANE_KEPT.format(b="stable", why=WHY["keep"]), out)
 
     def unreadable(self, how):
         """The open-PR read fails: nothing is deleted, each lane says why, and the merge still lands."""
