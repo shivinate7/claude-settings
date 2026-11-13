@@ -1180,10 +1180,7 @@ class Host:
                   if d["base"]["ref"] == base and not d.get("draft") and d["number"] != n]
         if not others:
             return []  # no protection read when no other pull request could block
-        if unprotected_counts_all and not isinstance(self.required, list):
-            names = self.protection_names()  # None: no branch protection
-        else:
-            names = self.required_names()
+        names = self.batch_names(unprotected_counts_all)
         blockers = []
         for d in others:
             parts = self.busy_parts(d, names, ignore)
@@ -1195,6 +1192,13 @@ class Host:
             if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
+
+    def batch_names(self, unprotected_counts_all=False):
+        """The required names a read of the head's settled state takes: the protection's (None: no branch protection) in the guard's mode with no
+        pinned list, else required_names. A failed read raises Stop, so the caller reads unknown."""
+        if unprotected_counts_all and not isinstance(self.required, list):
+            return self.protection_names()
+        return self.required_names()
 
     def busy_parts(self, d, names, ignore):
         """-> why the head of the open pull request row `d` is busy: one text per pending required check and per workflow run not completed.
@@ -1585,11 +1589,11 @@ class Host:
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        Another ready PR's running CI holds no merge (per-lane merge). A settled head still makes the read of those pull requests (batch_running,
-        which takes `batch_ignore` as its ignore list), because that read takes the branch protection's required names: a read of them that
-        fails is unknown, and the guard denies a merge it could not read.
+        Another ready PR's running CI holds no merge (per-lane merge), so no other pull request is read and `batch_ignore` is not used. A settled
+        head still reads the required names (batch_names, the guard's mode): a read of them that fails is unknown, and the guard denies a merge
+        it could not read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
-        a head whose check runs link more than one run adds one more workflow runs read; a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        a head whose check runs link more than one run adds one more workflow runs read; a settled head with no pinned list adds the protection read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
         not one per call."""
         try:
@@ -1602,7 +1606,7 @@ class Host:
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
                 if not (red or pending or unseen):
-                    self.batch_running(num, info["base"], unprotected_counts_all=True, ignore=batch_ignore, head=info["head"])  # the answer holds no merge; a failed read raises
+                    self.batch_names(unprotected_counts_all=True)  # the answer holds no merge; a failed read raises
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread

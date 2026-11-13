@@ -108,8 +108,7 @@ MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
-# batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
-# 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
+# protection read, none with a pinned list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
 # hung `gh` to this one budget (pinned in test_guard.py), so a merge with a dead `gh` is refused fast instead of waiting out
 # each call. From a Linux cloud session, REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
@@ -1196,7 +1195,7 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
 
 
 def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
-    """Return a short label when a cloud session's `merge --confirm` acts in a checkout whose repo no cs-repo tag of the own newest
+    """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
     --lane-lint merges nothing and is not judged. Outside the cloud nothing is judged. Cost: none for a call that is no merge confirm;
@@ -1207,14 +1206,15 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
+    return "merge --confirm or --ready" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
 
 
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
+PROVED_FLAGS = ("--confirm", "--ready")  # each pushes to the pull request's branch from the checkout it acts in, so each takes the repo proof
 
 
 def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
-    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
+    """True when a `merge --confirm` or `merge --ready` (PROVED_FLAGS) in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
     segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
     ends = []
@@ -1226,7 +1226,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         scripts = inner_commands(tokens) if tokens else []
         if scripts:
             if depth >= MERGE_NEST_DEPTH:
-                if any("--confirm" in script for script in scripts):
+                if any(f in script for script in scripts for f in PROVED_FLAGS):
                     return True
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
@@ -1238,12 +1238,12 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
             rest = _command_words(merge_tool_args(segment))
             bare = merge_tool_args(strip_redirections(segment))
             bare = None if bare is None else _command_words(bare)
-            if "--confirm" not in (rest if bare is None else bare):
+            if not any(f in (rest if bare is None else bare) for f in PROVED_FLAGS):
                 continue
             if bare is None:
                 raise _FlagsUnreadable("the segment does not tokenize without its redirections")
             flags = _merge_flags(bare)
-            if flags.lane_lint or not flags.confirm:
+            if flags.lane_lint or not (flags.confirm or flags.ready):
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
             from override import remote_session_id
