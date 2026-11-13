@@ -1583,7 +1583,7 @@ PUSH_ASK_REASON = (
 # or a posted comment with a `Fix check:` line.
 REVIEW_LOG_REASON = (
     "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "  # glossary-ok: the decision slug, a literal
-    "reviewed, and a push now moves that head. Order: record first, then the push. Render the record with "
+    "reviewed, and a push now moves that head. Order: review log first, then the push. Render the review log with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
     "GitHub MCP comment tool, then push. (decision push-needs-review-log)"
 )
@@ -1884,8 +1884,10 @@ def _transcript_events(path: str):
                 continue
             try:
                 record = json.loads(line)
-                content = record["message"]["content"] if isinstance(record.get("message"), dict) else None
+                content = record["message"].get("content") if isinstance(record.get("message"), dict) else None
             except (ValueError, TypeError):
+                continue
+            if not isinstance(record, dict):
                 continue
             reports = []
             for block in content if isinstance(content, list) else ():
@@ -1947,7 +1949,7 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
     branch names the push writes; it runs only when a posted review log holds a `Fix check:` line. `where` is the
     push's checkout, where a held report's sha is read against the PR's head.
-    1. A PR known to the session and a reviewer report with no later posted record holding a line with that
+    1. A PR known to the session and a reviewer report with no later posted review log holding a line with that
        report's role, verdict and round (a fix verifier: the `Fix check:` line's role and verdict), and, when a report
        read after the PR names its reviewed head, whose Head is that head (a fix verifier: that Head, or the
        `Fix check:` line's sha),
