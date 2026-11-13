@@ -554,8 +554,10 @@ def session_id_of(payload) -> str:
     return value if SESSION_ID_RE.match(value or "") else ""
 
 
-def session_scratchpad_root(where: str, session_id: str) -> str:
-    """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''."""
+def session_scratchpad_root(where: str, session_id: str, any_temp: bool = False) -> str:
+    """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''.
+    The folder must sit under the guard's temp folder, unless `any_temp` is set: the session id in the path
+    is then the whole proof (rule shared-tree, which reads a scratch repo when TMPDIR names another folder)."""
     if not where or not session_id or not SESSION_ID_RE.match(session_id):
         return ""
     try:
@@ -563,7 +565,7 @@ def session_scratchpad_root(where: str, session_id: str) -> str:
         temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
         return ""
-    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
+    if not any_temp and not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
         return ""
     parts = real.split(os.sep)
     for index in range(len(parts) - 1):
@@ -572,9 +574,10 @@ def session_scratchpad_root(where: str, session_id: str) -> str:
     return ""
 
 
-def under_session_scratchpad(where: str, session_id: str) -> bool:
-    """True when `where` resolves to a path inside this session's own scratchpad."""
-    return bool(session_scratchpad_root(where, session_id))
+def under_session_scratchpad(where: str, session_id: str, any_temp: bool = False) -> bool:
+    """True when `where` resolves to a path inside this session's own scratchpad (`any_temp`: see
+    `session_scratchpad_root`)."""
+    return bool(session_scratchpad_root(where, session_id, any_temp))
 
 
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares that session's
@@ -646,6 +649,50 @@ def scratchpad_clear_writer(where: str, session_id: str) -> None:
         pass
 
 
+# A finished agent's file is no work in progress (rule scratchpad-owner). The harness's SubagentStop is the
+# finish signal: the guard writes one empty marker, `<temp>/claude-guard-finished/<session>/<agent>`, and a
+# write over a file whose recorded writer has a marker passes. The agent's next scratchpad write removes its
+# marker (a resumed agent runs again). Cost: one file per agent end, one stat per refused-looking overwrite.
+SCRATCHPAD_FINISHED = "claude-guard-finished"
+
+
+def scratchpad_finished_marker(session_id: str, agent_id: str) -> str:
+    """The marker path for the agent of this session, or '' for an id that is no session or agent id."""
+    if not SESSION_ID_RE.match(session_id or "") or not re.match(r"^[A-Za-z0-9_-]{1,64}$", agent_id or ""):
+        return ""
+    return os.path.join(tempfile.gettempdir(), SCRATCHPAD_FINISHED, session_id, agent_id)
+
+
+def scratchpad_mark_finished(session_id: str, agent_id: str) -> None:
+    """Record that the agent has stopped. A failed write leaves no marker: its files stay refused."""
+    try:
+        marker = scratchpad_finished_marker(session_id, agent_id)
+        if marker:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            open(marker, "w").close()
+    except Exception:
+        pass
+
+
+def scratchpad_agent_finished(session_id: str, agent_id: str) -> bool:
+    """True when the agent has a finished marker."""
+    try:
+        marker = scratchpad_finished_marker(session_id, agent_id)
+        return bool(marker) and os.path.exists(marker)
+    except Exception:
+        return False
+
+
+def scratchpad_clear_finished(session_id: str, agent_id: str) -> None:
+    """Remove the marker: the agent writes again, so it runs again."""
+    try:
+        marker = scratchpad_finished_marker(session_id, agent_id)
+        if marker:
+            os.remove(marker)
+    except Exception:
+        pass
+
+
 def in_any_session_scratchpad(where: str) -> bool:
     """True when `where` resolves into the scratchpad of ANY session under the temp folder."""
     try:
@@ -660,7 +707,7 @@ def in_any_session_scratchpad(where: str) -> bool:
                for i in range(len(parts) - 1))
 
 
-TREE_DENY_REASON = (
+TREE_REFUSE_REASON = (
     "Rule (shared trees): this command throws away work in a checkout that other "
     "sessions and the owner share, and no step puts it back. "
     "Remedy: copy the file to a name ending in .bak and change the copy. "

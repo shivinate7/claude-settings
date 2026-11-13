@@ -1074,18 +1074,20 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, event=None, **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
     guard subprocess happens to run from. `session` is the payload's session_id. `temp` is the
     temp folder the guard run reads as its own (see TEMP_DIR), or None for the system temp.
+    `event` names a hook event that is not a tool call, such as "SubagentStop" (the payload then
+    carries that event and no tool); `tool` is "" for it.
     """
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": None, "agent_id": agent_id, "process_cwd": process_cwd, "temp": temp,
-        "tool_input": tool_input,
+        "tool_input": tool_input, "event": event,
     })
 
 

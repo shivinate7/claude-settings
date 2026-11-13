@@ -553,10 +553,11 @@ while True:
         from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
-            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_REFUSE_REASON,  # glossary-ok: the two older names stay, only the tree one is renamed
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_agent_finished, scratchpad_clear_finished, scratchpad_clear_writer, scratchpad_mark_finished,
+            scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -4264,14 +4265,26 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    parts = []   # (segment, the folder the shell is in when it runs, or None when that cannot be told)
+    for text in texts:
+        ends = []
+        pieces = split_segments(text, ends)
+        parts.extend((piece, dir_before_segment(pieces, number, cwd, ends)) for number, piece in enumerate(pieces))
+    for segment, shell_dir in parts:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
+        unread = False   # a relative `-C` whose folder cannot be told: it never earns the scratchpad pass
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+            # Git reads a relative `-C` from the folder the shell is in, which a `cd` ahead of it moves. Read so
+            # where the cwd is this session's scratchpad, the one place a root decides a pass on its path alone.
+            if (not GIT_WORK_TREE_RE.search(segment) and not os.path.isabs(_absolute(own_c, ""))
+                    and under_session_scratchpad(_absolute(own_c, cwd), session_id, any_temp=True)):
+                root = _absolute(own_c, shell_dir) if shell_dir else root
+                unread = not shell_dir or any(mark in root for mark in "$%`")
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -4282,8 +4295,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
             continue
-        # This session's own scratchpad: private by path, so nothing shared can be lost.
-        if under_session_scratchpad(root, session_id):
+        # This session's own scratchpad: private by path, so nothing shared can be lost. A relative `-C` that
+        # cannot be read (an untold `cd`, an unread variable) fails closed: its folder may be any checkout.
+        if unread:
+            refuse(tool, "deny", "shared-tree", TREE_REFUSE_REASON, matched)
+        if under_session_scratchpad(root, session_id, any_temp=True):   # the session id in the path is the proof, so TMPDIR may name another folder
             continue
         # The subject read. An empty subject is a silent pass. An unreadable subject is allowed
         # and logged under its OWN rule, so a reader can tell "I could not confirm this" from
@@ -4331,7 +4347,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 continue
             ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
             continue
-        refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
+        refuse(tool, "deny", "shared-tree", TREE_REFUSE_REASON, matched)
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
@@ -5858,7 +5874,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file, unless that agent has finished (its SubagentStop). A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -5877,6 +5893,27 @@ SCRATCHPAD_OVERWRITE_REASON = (
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
+
+
+def ln_unlinks(command: str) -> bool:
+    """True when a segment of `command` runs `ln` with `-f` or `--force`, which unlinks the link name
+    before it links, so it destroys that file as `rm` does. Read for the whole call, not per target: an
+    `ln` with no `-f` over a file that exists fails, so a second `ln` beside a forced one loses nothing
+    by the wider reading. A short cluster stops at `-S` or `-t`, which take a value."""
+    for segment in split_segments(command):
+        tokens = segment_tokens(segment)
+        at = resolve_command(tokens) if tokens else None
+        if at is None or basename(tokens[at]) not in ("ln", "ln.exe"):
+            continue
+        for token in tokens[at + 1:]:
+            if token == "--":
+                break
+            if token.startswith("--"):
+                if len(token) > 2 and "--force".startswith(token):
+                    return True
+            elif token.startswith("-") and "f" in re.split("[St]", token[1:])[0]:
+                return True
+    return False
 
 
 def scratchpad_agent(payload) -> str:
@@ -5904,11 +5941,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed
             command, found = strip_heredoc_bodies(command), {}
+            unlinks = ln_unlinks(command)
 
             def in_scratchpad(word, at, verb):
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
-                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS or (verb == "ln" and unlinks))
                     return True
                 return False
 
@@ -5928,8 +5966,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
-    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
-    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm`, `mv` or `ln -f` names is judged but not recorded. A first write, a rewrite of its own file, a file
+    that no longer exists and a file whose writer has finished (`scratchpad_mark_finished`) pass (`scratchpad_writer_of`), except that an `rm`, an `mv` or an `ln -f` (`ln_unlinks`) of a finished writer's file is still refused. Run once the call's other rules passed."""
     agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         for full in files:
@@ -5939,9 +5977,15 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     for full in files:
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent and not taken:
-            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+            detail = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+            if full in removed:   # a finished writer's file may be written over, never removed or moved: that destroys it for the writer
+                taken = detail
+            if not scratchpad_agent_finished(session, writer):
+                taken = detail
 
     def record_writers():
+        if files:
+            scratchpad_clear_finished(session, agent)   # a resumed agent runs again, so its files are work in progress
         for full in files:
             if full not in removed:
                 scratchpad_record_writer(full, session, agent)
@@ -6051,7 +6095,8 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
 
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
-        judge_stop(payload)
+        judge_stop(payload)   # a builder's block exits here: that agent has not finished
+        scratchpad_mark_finished(session_id_of(payload), scratchpad_agent(payload))
         return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}

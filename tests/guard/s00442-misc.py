@@ -63,6 +63,10 @@ NOGIT_PATH = os.path.join(ROOT, "nogitpath")  # an empty folder on PATH: no git 
 FAKE_SESSION = "5b9f6a3d-0000-4000-8000-000000000000"
 OTHER_SESSION = "0000ffff-0000-4000-8000-000000000000"
 PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
+PRIVCLEAN = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "clean")   # a clean throwaway repo under that scratchpad
+# A real folder the guard reads as its temp folder (TMPDIR). It holds no scratchpad, so a case that sets it
+# judges a scratchpad repo whose temp folder is another folder.
+SPLIT_TEMP = os.path.join(ROOT, "split-temp")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
 GHPEND = os.path.join(ROOT, "ghpend")      # green base main, but one check is pending
@@ -1146,7 +1150,8 @@ def build_fixtures():
     repo is a builder below, and it is built on first use."""
     global LINKS_MADE, SYMWT_MADE
     for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
-                   os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
+                   os.path.join(ROOT, "tmp"),   # the temp folder the silent-write cases read
+                   SPLIT_TEMP):                 # the temp folder the scratchpad cases read
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -1548,6 +1553,11 @@ def _build_privrepo():
     write(os.path.join(PRIVREPO, "f.txt"), "uncommitted\n")
     write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
     _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
+
+def _build_privclean():
+    """PRIVCLEAN: a clean repository under the same scratchpad, the empty subject of a throwaway repo."""
+    make_repo(PRIVCLEAN, {"f.txt": "base\n"})
+    _require_clean(PRIVCLEAN)
 
 def _set_origin_main(where, rev):
     """Point refs/remotes/origin/main at `rev` in `where`. The guard reads that ref, and no remote is needed."""
@@ -2473,6 +2483,7 @@ lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTASHDIRTY,
               SUBJSTAGED], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
+lazy_fixture([PRIVCLEAN], _build_privclean)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
