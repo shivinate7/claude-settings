@@ -5031,8 +5031,8 @@ def left_out_lines(root, h, name, numbers, base):
     ascending. REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
     with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_reason, the one home of "does this head merge cleanly onto the base"
     (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one compare per
-    candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. Any Stop or an unknown
-    merge_reason raises Stop."""
+    candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. An unknown
+    merge_reason raises Stop; a failed read raises its RELEASE_READ_ERRORS error."""
     _lines, done, pulls = reviewed_read(h)
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
     kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
@@ -5051,7 +5051,7 @@ def left_out_lines(root, h, name, numbers, base):
     return out
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
-    """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. A Stop that reading them raises
+    """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. A read error (RELEASE_READ_ERRORS) that reading them raises
     prints `merge: left-out list unknown (why)` and never hides the batch's own result or its exit code. Returns what batch_build_run returns."""
     rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config)
     try:
@@ -5065,7 +5065,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             base = found[1]["base"] if found else "main"
         for line in left_out_lines(root, h, name, set(frozen), base):
             say(line)
-    except Stop as e:
+    except RELEASE_READ_ERRORS as e:  # merge_reason's later git calls go through sh, which can raise OSError or TimeoutExpired
         say(f"merge: left-out list unknown ({' '.join(str(e).split())})")
     return rc
 
