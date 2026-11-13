@@ -68,12 +68,15 @@ Everything is a real symlink. A `git pull` in the clone is the whole update.
 A cloud VM never sees your machine's `~/.claude`. Paste this once per environment, in the
 cloud environment menu in the session title bar, then Edit, then Setup script. It installs
 before Claude Code starts, so the first agent spawn reads `agents/*.md` (decision
-`agent-model-cap`). It never fails setup: on any failure it prints one
-`claude-settings setup:` line and the session starts without the install.
+`agent-model-cap`). It installs from the `stable` branch, which moves only to a `main` commit
+whose run is green. When `stable` is missing, it installs `main` and prints one `WARN` line
+naming `stable`. It never fails setup: on any failure it prints one `claude-settings setup:`
+line and the session starts without the install.
 
 ```bash
 f=$(mktemp)
-if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f"; then
+if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/stable/cloud-setup.sh -o "$f" \
+   && ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f"; then
   : > "$f"
   for d in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root}; do
     for c in "$d"/*/cloud-setup.sh; do
@@ -88,7 +91,7 @@ rm -f "$f"
 exit 0
 ```
 
-Also set these four as environment variables in the same cloud environment menu. They are
+Also set these as environment variables in the same cloud environment menu. They are
 the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
 but a session can start without them. Measured in another session: the SessionStart refresh
 rewrites `settings.json` after Claude Code reads it.
@@ -97,6 +100,7 @@ rewrites `settings.json` after Claude Code reads it.
 * `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
 * `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
 * `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
+* `MAILBOX_REPO=https://github.com/shivinate7/session-mailbox.git` (decision `session-messages`)
 
 The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
 `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
@@ -109,8 +113,10 @@ Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
 install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
-re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
-`CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
+re-fetches the files, from `stable` as well. To install `main` instead, the recovery when `stable`
+is stuck, set `CLAUDE_SETTINGS_REF=main` as an environment variable. The setup script, `install.sh`
+and the `SessionStart` hook read it, and it stays silent where a missing `stable` would print a `WARN`.
+Any other branch name works the same way.
 
 A repo's own `.claude/settings.json` hooks, deny rules, and `SessionStart` hooks do not run in a
 project's cloud thread. The docs say repo hooks run "outside a project thread" in
@@ -164,8 +170,9 @@ Run it from inside the repo, or name the repo's checkout with `-C PATH` (`--repo
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
-                        NAME shows in the lock to a waiting run.
+merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, merge, move the local main, clean up.
+                        A confirm that pushes a claim commit stops there: run it again to merge. NAME shows in the lock to a waiting run.
+merge <pr> --ready      mark a lane's draft ready, once: the records step and the repo's ready checks, then the mark. Merges nothing, takes no lock.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
@@ -174,8 +181,7 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
 merge --reviewed --root DIR [--root DIR ...]
-                        the same list for each repo checkout DIR, one block each, then one batch line per repo:
-                        `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+                        the same list for each repo checkout DIR, one block each. A failed root prints unknown.
 merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
                         failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
@@ -358,8 +364,9 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
 Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
 It runs on the Duo by default, or on the iPhone 18 Pro with `--device pro`. It reuses the first booted device of that role. With none booted, it boots the role's device, runs the tests, and shuts that simulator down, also on failure, INT and TERM. With the other phone kind booted, it boots nothing and exits 1. `--hold [--for S] [-- CMD]` keeps the device for S seconds (default 300, max 900) under the same lock, with no xcodebuild.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
-It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
+It never shuts down a simulator it did not boot. Before its own boot it deletes that device's PosterBoard store (`PRBPosterExtensionDataStore`), which iOS 27.1 never frees. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
 On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro [--udid]`, `give` and `status`. After the grant it checks the booted list again before it boots. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
+After its own boot it tries to disable the Siri, intelligence, Mail and Spotlight daemons that crash on every iOS 27.1 boot; the list lives in `bin/sim-noise-services`.
 
 ## Session tiers and a roadmap record for a repo
 
@@ -378,16 +385,19 @@ the roster, a brief and a role handoff note. A repo adopts it only on the owner'
   after the child ends sees the move. The child finds the clone from the `@` pointer in `~/.claude/CLAUDE.md` (the pointer names
   the live pin, a worktree of the clone). One child runs at a time: it holds a lock directory in
   `~/.claude`, and a start that finds the lock exits quietly. A lock a killed child left is cleared
-  once it is stale. The child fetches `origin/main` and moves local `main` to it,
-  fast-forward only. A tree that holds `main` is merged in place when it has no tracked change;
-  otherwise the tree is left alone. The hook never stashes, resets or forces in your trees. When the
-  pin is not at local `main`, the child runs `merge/install_from_main.sh`, which switches only the pin
+  once it is stale. The child fetches `origin` and moves local `main` to `origin/main`,
+  fast-forward only. A tree that holds `main` is merged in place; when a tracked change blocks that
+  merge, the tree is left alone and the log says so. The hook never stashes, resets or forces in your trees. When the
+  pin is not at `origin/stable` (at local `main` when `origin` has no `stable`, with one `WARN`
+  line in the install log; `CLAUDE_SETTINGS_REF=main` pins local `main` with no `WARN`), the child
+  runs `merge/install_from_main.sh`, which switches only the pin
   and never one with tracked changes. A failed fetch,
   move, skip or pin install writes one line to the install log, with its own reason.
-  Cost, per session start or resume: one detached child and at most one network fetch. A local
+  Cost, per session start or resume: one detached child, at most one network fetch and one
+  `git ls-remote` that asks whether `origin` still has `stable`. A local
   `git fetch .` runs only when `main` moves by ref because no tree holds it. The helper and the
-  installer start only when the pin is not at local `main`. Files written: the lock directory, made
-  and removed each time; install-log lines only on a failure, plus the start and end lines of the
+  installer start only when the pin is not at `origin/stable` (local `main` with no `stable`). Files written: the lock directory, made and removed each time.
+  The install-log lines are written only on a failure or a missing `stable`, plus the start and end lines of the
   helper and of the installer when they run. The install log's reader is the owner; no hook reads it. Case 34 of
   `merge/test_install_from_main.sh` proves the no-move cost: no log line, no installer, one fetch.
 * **Why agents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
