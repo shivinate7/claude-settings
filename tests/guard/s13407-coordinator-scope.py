@@ -13,7 +13,7 @@ import guard_core as _guard_core  # noqa: E402  the one home of the refuter role
 
 REFUTER_ROLE = _guard_core.REFUTER_ROLE
 COORD_RULE = "coordinator-scope"
-COORD_TIER = "cs-build:coordinator"
+COORD_ROLE_TAG = "cs-build:coordinator"
 COORD_RECORD = "session_COORDOWN01"          # the id a get_session record names
 COORD_OWN_ENV = "cse_COORDOWN01"             # the environment's form of that id (hooks/override.py)
 COORD_ENV = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": COORD_OWN_ENV}
@@ -49,10 +49,10 @@ def coord_tags_call(tool_id, add=(), remove=()):
 # The transcripts a session's own get_session record and later tag calls make. Each name is one tier shape.
 COORD_TRANSCRIPTS = {
     "record": role_call("g1", COORD_TAGS, session=COORD_RECORD),
-    "added": role_call("g1", LANE_TAGS, session=COORD_RECORD) + coord_tags_call("t1", add=[COORD_TIER]),
-    "removed": role_call("g1", COORD_TAGS, session=COORD_RECORD) + coord_tags_call("t1", remove=[COORD_TIER]),
+    "added": role_call("g1", LANE_TAGS, session=COORD_RECORD) + coord_tags_call("t1", add=[COORD_ROLE_TAG]),
+    "removed": role_call("g1", COORD_TAGS, session=COORD_RECORD) + coord_tags_call("t1", remove=[COORD_ROLE_TAG]),
     "added-then-removed": (role_call("g1", LANE_TAGS, session=COORD_RECORD)
-                           + coord_tags_call("t1", add=[COORD_TIER]) + coord_tags_call("t2", remove=[COORD_TIER])),
+                           + coord_tags_call("t1", add=[COORD_ROLE_TAG]) + coord_tags_call("t2", remove=[COORD_ROLE_TAG])),
     "no-record": [role_said("Check the open pull requests.")],  # no own get_session, no own tag call: the /clear gap
 }
 
