@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Triage told the mailaudit lane (21:51 CST Nov 12) to pin four actions to a main commit, citing decision action-pins-follow-sessions, which R44 supersedes; the coordinator caught it at 21:53 CST. The past-ruling hook checks page items, not send_message answers that settle a question.",
  "source": "triage incident 21:51-21:54 CST Nov 12 (roadmap e09dc91d6)",
- "note": "Guard: a send_message from the page writer that settles a lane question (\"settled\", \"no owner item\") runs the past-ruling check on the rulings it cites, including later rulings and their supersedes lists, and refuses when a cited ruling is superseded. Cost: one rulings-store read per such message.",
- "updatedAt": "2026-11-12T23:18:28-06:00"
+ "note": "Guard: a send_message from the page writer that settles a lane question (\"settled\", \"no owner item\") runs the past-ruling check on the rulings it cites, including later rulings and their supersedes lists, and refuses when a cited ruling is superseded. Cost: one rulings-store read per such message. Second sighting, triage 23:35 CST Nov 12: told the retrospective the R45 part 2 stale-draft pass had never run; triage's own outbox line of 11:05 CST and plans/stale-drafts-2026-11-12.md show it ran (439 closed, 186 held). Corrected 23:36 CST (both sent messages carry stamps 2-3 min ahead of the clock, a third stamp slip on stamp-guard-bracket-form). The reply stated a fact about past acts without reading the record. The per-batch re-run has not run since; triage adds it to its batch-merge review.",
+ "updatedAt": "2026-11-12T23:36:49-06:00"
 }
