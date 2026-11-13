@@ -1131,7 +1131,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
-            if not word or word in (">", ">>"):
+            if not word or word in (">", ">>", '""'):   # '""' stands for data or a `cp` source, never a path
                 continue
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
@@ -1166,7 +1166,10 @@ def _segment_command(words):
     index = resolve_command(tuple(words))
     if index is None:
         index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
-    command = _name(words[index]) if index < len(words) else ""
+    # A subshell or group opener glued to the verb (`(sed -i ...)`, `{ sed -i ...; }`) is not part of its name.
+    while index < len(words) and words[index] in ("(", "{"):
+        index += 1
+    command = _name(words[index].lstrip("({") or words[index]) if index < len(words) else ""
     return command, [word for word in words[index + 1:] if word]
 
 

@@ -18,7 +18,9 @@ machine runs its hooks, lint and agents out of it, so an edit there is live for 
   - A Bash write is judged by the same predicate (a redirect, `tee`, `sed -i`, `cp`, a python or node script that
     opens a pointer file for writing). Reopened 2026-11-12: lane `decision-watch-finds-transcript` (PR 3054)
     edited `hooks/decision_watch.py` with `sed -i` and a `python3` heredoc in the pointer checkout, and the Edit-tool
-    rule never saw it. A write the scanner cannot read (a script that builds the path at run time) still passes.
+    rule never saw it. Gaps that still pass: a script that builds the path at run time; a verb the shell-write
+    reader does not know (`git apply`, `patch`, `perl -pi`, `awk -i inplace`, `rsync`, `dd of=`); a bulk write fed by
+    stdin or `find` (`xargs sed -i`, `find -exec`, `find -delete`). Round-1 review (2026-11-12) named them.
 - **Liftability.** An owner override (the `owner-override` decision, the owner's typed override) lifts a direct
   pointer path while the pointer is a plain checkout. Two cases lift nothing:
   - The pointer is the live pinned checkout or the main mirror. `is_frozen` then covers every file in it, and
@@ -39,7 +41,8 @@ machine runs its hooks, lint and agents out of it, so an edit there is live for 
 Risk kind: incident, per the `building-guard-needs-incident` rule (a guard is built against a mistake Claude
 has made): PR 2411, 2026-11-09 12:10 CST.
 
-Cost, per the `outcomes-mechanize-rules` rule (cost stated in the record): each Write, Edit, MultiEdit and
+Cost, per the `outcomes-mechanize-rules` rule (cost stated in the record): each Bash call that reaches the shell
+rules also reads the rules file once; the shell reader adds no process. Each Write, Edit, MultiEdit and
 NotebookEdit call reads the global rules file once (at most 64 KiB) and resolves its target paths. It starts no
 process and runs no git. A refusal adds one line to `guard.log` (unmeasured).
 

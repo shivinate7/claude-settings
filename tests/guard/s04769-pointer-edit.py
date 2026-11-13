@@ -101,6 +101,13 @@ add("pointer-edit: a cp onto a pointer file is refused", "deny", "pointer-edit",
     cwd=PTRMAIN, config=PTRCFG, command="cp /dev/null " + PE_TARGET, carries="EnterWorktree")
 add("pointer-edit: the shell refusal names the worktree, never the target", "deny", "pointer-edit",
     cwd=PTRMAIN, config=PTRCFG, command="sed -i 's/a/b/' f.txt", lacks=("f.txt",))
+add("pointer-edit: a sed -i in a subshell on a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="(sed -i 's/base/changed/' " + PE_TARGET + ")", carries="EnterWorktree")
+add("pointer-edit: a sed -i in a group after another command is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="echo ok; { sed -i 's/base/changed/' " + PE_TARGET + "; }",
+    carries="EnterWorktree")
+add("pointer-edit: a cp between two temp files, with the pointer as cwd, is allowed", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="cp " + PE_TEMP + " " + PE_TEMP + ".bak")
 add("pointer-edit: a sed -i in a linked worktree is allowed", "allow",
     cwd=PTRNEST, config=PTRCFG, command="sed -i 's/base/changed/' f.txt")
 add("pointer-edit: a redirect into the temp folder, with the pointer as cwd, is allowed", "allow",
