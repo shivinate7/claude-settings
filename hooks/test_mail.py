@@ -22,6 +22,12 @@ that pass on the base commit, and why each stays.
 - hooks/mail.py turn_start_lines(payload, env) -> list[str]. payload carries session_id and cwd;
   env carries MAILBOX_REPO, MAILBOX_CACHE and CLAUDE_CODE_REMOTE_SESSION_ID. Failure lines start
   "mail unknown: " and never say "no mail".
+- bin/mail status <id>  no --addr, so it looks under every folder. mail/<addr>/<id>.md prints `open`. done/<addr>/<id>.md
+  prints `taken <time> by <taker>` from its Taken-by line, or `taken (taker unknown)` when that line is missing or
+  garbled. An id in no folder, or an empty store, prints `unknown` and exits 1. Exit 0 for open and taken. An unsafe id
+  prints `bad address or id` and exits 2. A git fault prints `mail unknown: <reason>` on stderr and exits 1, never open
+  or taken. It reads the remote with one ls-remote, one fetch and one ls-tree -r, plus one show for a taken message. It
+  never writes.
 - A message file has line 1 `Msg <id> from <addr> to <addr> kind <kind> re <id|-> try <n>`, line 2
   `Reply-to: <addr>`, then the body. The fixtures write this format with plumbing.
 
@@ -284,13 +290,15 @@ class Store:
             return git(self.path, ["cat-file", "blob", "%s:%s" % (self.tip(), path)], self.env, binary=True)
         return git(self.path, ["show", "%s:%s" % (self.tip(), path)], self.env)
 
-    def seed(self, addr, mid, kind, sender, body, re_id="-", eol="\n", body_eol=None):
+    def seed(self, addr, mid, kind, sender, body, re_id="-", eol="\n", body_eol=None, folder="mail", tail=""):
         """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case.
         eol ends the header lines and the blank line after them; body_eol ends the body (default: eol). A line ending
-        other than LF is written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF."""
+        other than LF is written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF.
+        folder is the top folder the file lands in: "mail" for an open message, "done" for a taken one. tail is text
+        appended after the body, such as a Taken-by line or a garbled one."""
         body_eol = eol if body_eol is None else body_eol
         text = ("Msg %s from %s to %s kind %s re %s try 1%sReply-to: %s%s%s%s%s"
-                % (mid, sender, addr, kind, re_id, eol, sender, eol, eol, body, body_eol))
+                % (mid, sender, addr, kind, re_id, eol, sender, eol, eol, body, body_eol)) + tail
         index = os.path.join(self.path, "seed.index")
         env = dict(self.env, GIT_INDEX_FILE=index)
         if os.path.exists(index):
@@ -303,7 +311,7 @@ class Store:
         data = text.encode("utf-8") if "\r" in text else text
         blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=data).strip()
         git(self.path, ["update-index", "--add", "--cacheinfo",
-                        "100644,%s,mail/%s/%s.md" % (blob, addr, mid)], env)
+                        "100644,%s,%s/%s/%s.md" % (blob, folder, addr, mid)], env)
         tree = git(self.path, ["write-tree"], env).strip()
         commit_args = ["commit-tree", tree, "-m", "seed %s" % mid]
         if tip is not None:
@@ -1537,6 +1545,241 @@ class MailboxOff(MailCase):
         read = run_cli(receiver, "read", "0123456789ab")
         self.assertEqual(read.returncode, 2,
                          "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
+
+
+STATUS_WRITES = ("push", "commit-tree", "hash-object", "update-index", "update-ref", "read-tree", "write-tree")
+
+
+class StatusCommand(MailCase):
+    """`bin/mail status <id>`: one id, no --addr, looked up under every folder. Each case asserts the status line first,
+    which is the claim, and checks the no-write and read-count facts after it. Each case's control is an existing
+    command (send, take, read) or the store's own state, so the fixture is proven before the claim."""
+
+    def status(self, machine, mid):
+        return run_cli(machine, "status", mid)
+
+    def stub_git(self, machine, actions=None):
+        """Log each git start of this machine to a fresh file, and apply the stand-in actions. Returns the log's path."""
+        log = os.path.join(self.case, "git-%s.log" % machine.name)
+        if os.path.exists(log):
+            os.remove(log)
+        machine.stub_actions(actions or {}, log=log)
+        return log
+
+    def git_calls(self, log):
+        return [json.loads(line)["sub"] for line in read_lines(log)]
+
+    def take_one(self, store, sender, taker, marker):
+        """A real send from sender to cloud/sess-b, then a take by taker. Returns the id and the line a read must print."""
+        sent = self.send(sender, "cloud/sess-b", "request", marker)
+        self.assertEqual(sent.returncode, 0, "control: the send exited %d: %s" % (sent.returncode, combined(sent)))
+        landed = store.files("mail/cloud/sess-b/")
+        self.assertEqual(len(landed), 1, "control: one send should land one message file: %r" % landed)
+        mid = message_id(landed[0])
+        taken = run_cli(taker, "take", mid)
+        self.assertEqual(taken.returncode, 0, "control: the take exited %d: %s" % (taken.returncode, combined(taken)))
+        self.assertEqual(store.files("mail/cloud/sess-b/"), [], "control: the open path is still there after the take")
+        done = store.files("done/cloud/sess-b/")
+        self.assertEqual(len(done), 1, "control: the take left %d done files, expected one: %r" % (len(done), done))
+        stamped = [line.split() for line in store.read(done[0]).splitlines() if line.startswith("Taken-by:")]
+        self.assertEqual(len(stamped), 1, "control: the done file has %d Taken-by lines, expected one" % len(stamped))
+        _, taker_addr, taken_at, _token = stamped[0]
+        return mid, "taken %s by %s" % (taken_at, taker_addr)
+
+    def done_with_taker_line(self, mid, tail):
+        """A done file whose body ends with `tail` (empty: no Taken-by line at all). Returns a sender's status run."""
+        store = self.store()
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: %s\n" % mid, folder="done", tail=tail)
+        done = store.files("done/cloud/sess-b/")
+        self.assertEqual(done, ["done/cloud/sess-b/%s.md" % mid], "control: the seeded done file is not in done/: %r" % done)
+        return self.status(self.machine("a", store, session="sess-a"), mid)
+
+    def test_taken_message_reads_taken_with_its_taker_and_time(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        taker = self.machine("b", store, session="sess-b")
+        mid, line = self.take_one(store, sender, taker, "status-taken")
+        status = self.status(sender, mid)
+        self.assertEqual(status.stdout.strip(), line,
+                         "status of a taken message did not read taken with its taker and time: exit %d: %s"
+                         % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of a taken message exited %d, expected 0: %s"
+                         % (status.returncode, combined(status)))
+
+    def test_untaken_message_reads_open_exit_0(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        sent = self.send(sender, "cloud/sess-b", "request", "status-open")
+        self.assertEqual(sent.returncode, 0, "control: the send exited %d: %s" % (sent.returncode, combined(sent)))
+        landed = store.files("mail/cloud/sess-b/")
+        self.assertEqual(len(landed), 1, "control: one send should land one message file: %r" % landed)
+        self.assertEqual(store.files("done/"), [], "control: a message no one took is already in done/")
+        status = self.status(sender, message_id(landed[0]))
+        self.assertEqual(status.stdout.strip(), "open", "status of an untaken message did not read open: exit %d: %s"
+                         % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of an untaken message exited %d, expected 0: %s"
+                         % (status.returncode, combined(status)))
+
+    def test_message_addressed_to_another_folder_still_reads_open(self):
+        store = self.store()
+        mid = "0a1b2c3d4e31"
+        folder = "pc/box-one/acme-widgets/sess-x"
+        store.seed(folder, mid, "request", "cloud/sess-a", "Body marker: elsewhere\n")
+        self.assertEqual(store.files("mail/%s/" % folder), ["mail/%s/%s.md" % (folder, mid)],
+                         "control: the seeded message is not under its own folder")
+        caller = self.machine("c", store, session="sess-c")
+        read = run_cli(caller, "read", "--addr", folder, mid)
+        self.assertIn("Body marker: elsewhere", read.stdout, "control: read --addr did not show the seeded body: %s"
+                      % combined(read))
+        status = self.status(caller, mid)
+        self.assertEqual(status.stdout.strip(), "open", "status of a message addressed to another folder did not read open: "
+                         "exit %d: %s" % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of a message addressed to another folder exited %d, expected 0: %s"
+                         % (status.returncode, combined(status)))
+
+    def test_unknown_id_reads_unknown_exit_1_and_never_open(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e61", "request", "cloud/sess-a", "Body marker: decoy\n")
+        reader = self.machine("b", store, session="sess-b")
+        control = run_cli(reader, "read", "0a1b2c3d4e61")
+        self.assertIn("Body marker: decoy", control.stdout, "control: read did not show the decoy: %s" % combined(control))
+        for mid in ("0a1b2c3d4e6", "0a1b2c3d4e99"):  # a prefix of the decoy's id, then an id in no folder
+            status = self.status(reader, mid)
+            self.assertEqual(combined(status).strip(), "unknown", "status of %s, in no folder, did not print unknown: "
+                             "exit %d: %s" % (mid, status.returncode, combined(status)))
+            self.assertEqual(status.returncode, 1, "status of %s, in no folder, exited %d, expected 1"
+                             % (mid, status.returncode))
+
+    def test_empty_store_reads_unknown_exit_1(self):
+        store = self.store()
+        self.assertIsNone(store.tip(), "control: the store has a mail ref before any send")
+        reader = self.machine("b", store, session="sess-b")
+        listing = run_cli(reader, "read")
+        self.assertIn("no open messages", listing.stdout, "control: read on an empty store did not say no open messages: %s"
+                      % combined(listing))
+        status = self.status(reader, "0a1b2c3d4e71")
+        self.assertEqual(combined(status).strip(), "unknown", "status on an empty store did not print unknown: exit %d: %s"
+                         % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 1, "status on an empty store exited %d, expected 1" % status.returncode)
+
+    def test_full_store_reads_each_id_to_its_own_state(self):
+        store = self.store()
+        open_ids = ["0a1b2c3d5%02x" % n for n in range(6)]
+        done_ids = ["0a1b2c3d6%02x" % n for n in range(6)]
+        for n, mid in enumerate(open_ids):
+            store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: open-%d\n" % n)
+        for n, mid in enumerate(done_ids):
+            store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: done-%d\n" % n,
+                       folder="done", tail="Taken-by: cloud/sess-c %s 0a0b0c%02x\n" % (PINNED_STAMP, n))
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), 6, "control: the store does not hold six open messages")
+        self.assertEqual(len(store.files("done/cloud/sess-b/")), 6, "control: the store does not hold six done files")
+        reader = self.machine("b", store, session="sess-b")
+        for mid in open_ids:
+            status = self.status(reader, mid)
+            self.assertEqual(status.stdout.strip(), "open", "status of open %s in a full store did not read open: exit %d: %s"
+                             % (mid, status.returncode, combined(status)))
+        for mid in done_ids:
+            status = self.status(reader, mid)
+            self.assertEqual(status.stdout.strip(), "taken %s by cloud/sess-c" % PINNED_STAMP,
+                             "status of taken %s in a full store did not read taken with its taker: exit %d: %s"
+                             % (mid, status.returncode, combined(status)))
+        status = self.status(reader, "0a1b2c3d7ff")
+        self.assertEqual(combined(status).strip(), "unknown", "status of an id in no folder of a full store did not print unknown: "
+                         "exit %d: %s" % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 1, "status of an id in no folder of a full store exited %d, expected 1"
+                         % status.returncode)
+
+    def test_taken_with_no_taken_by_line_reads_taken_taker_unknown(self):
+        status = self.done_with_taker_line("0a1b2c3d4e81", "")
+        self.assertEqual(status.stdout.strip(), "taken (taker unknown)", "status of a done file with no Taken-by line did not read "
+                         "taken (taker unknown): exit %d: %s" % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of a done file with no Taken-by line exited %d, expected 0"
+                         % status.returncode)
+
+    def test_taken_with_garbled_taken_by_line_reads_taken_taker_unknown(self):
+        status = self.done_with_taker_line("0a1b2c3d4e82", "Taken-by:\n")
+        self.assertEqual(status.stdout.strip(), "taken (taker unknown)", "status of a done file with a garbled Taken-by line did not "
+                         "read taken (taker unknown): exit %d: %s" % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of a done file with a garbled Taken-by line exited %d, expected 0"
+                         % status.returncode)
+
+    def test_unsafe_id_is_refused_with_bad_address_or_id_exit_2(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e91", "request", "cloud/sess-a", "Body marker: unsafe\n")
+        status = self.status(self.machine("b", store, session="sess-b"), "a/../b")
+        self.assertIn("bad address or id", combined(status), "status of an unsafe id did not say bad address or id: exit %d: %s"
+                      % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 2, "status of an unsafe id exited %d, expected 2" % status.returncode)
+
+    def test_unreadable_remote_prints_mail_unknown_never_open_or_taken(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4ea2", "request", "cloud/sess-a", "Body marker: fault\n")
+        reader = self.machine("b", store, session="sess-b", stub=True)
+        log = self.stub_git(reader, {"ls-remote": {"kind": "fail", "stderr": "fatal: unable to reach the mail remote"}})
+        self.assertEqual(store.files("mail/cloud/sess-b/"), ["mail/cloud/sess-b/0a1b2c3d4ea2.md"],
+                         "control: the seeded message is not in the store")
+        status = self.status(reader, "0a1b2c3d4ea2")
+        self.assertTrue(status.stderr.startswith(UNKNOWN), "status with the remote unreadable printed no 'mail unknown:' on "
+                        "stderr: exit %d: %r" % (status.returncode, combined(status)))
+        self.assertNotIn("open", status.stdout, "status with the remote unreadable printed open: %r" % status.stdout)
+        self.assertNotIn("taken", status.stdout, "status with the remote unreadable printed taken: %r" % status.stdout)
+        self.assertEqual(status.returncode, 1, "status with the remote unreadable exited %d, expected 1" % status.returncode)
+        self.assertIn("ls-remote", self.git_calls(log), "status never asked the remote for its tip: git calls %r"
+                      % self.git_calls(log))
+
+    def test_show_failure_on_a_taken_message_prints_mail_unknown_never_taken(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        taker = self.machine("b", store, session="sess-b")
+        mid, _line = self.take_one(store, sender, taker, "status-show-fault")
+        log = self.stub_git(sender, {"show": {"kind": "fail", "stderr": "fatal: bad object %s" % mid}})
+        status = self.status(sender, mid)
+        self.assertTrue(status.stderr.startswith(UNKNOWN), "status with git show failing on a taken message printed no "
+                        "'mail unknown:' on stderr: exit %d: %r" % (status.returncode, combined(status)))
+        self.assertNotIn("taken", status.stdout, "status with git show failing read taken: %r" % status.stdout)
+        self.assertNotIn("open", status.stdout, "status with git show failing read open: %r" % status.stdout)
+        self.assertEqual(status.returncode, 1, "status with git show failing exited %d, expected 1" % status.returncode)
+        self.assertIn("show", self.git_calls(log), "status never ran git show on the taken message: git calls %r"
+                      % self.git_calls(log))
+
+    def test_open_status_reads_the_remote_once_and_writes_nothing(self):
+        store = self.store()
+        mid = "0a1b2c3d4eb1"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: count-open\n")
+        before = store.tip()
+        self.assertIsNotNone(before, "control: the store has no mail ref after the seed")
+        reader = self.machine("b", store, session="sess-b", stub=True)
+        log = self.stub_git(reader)
+        status = self.status(reader, mid)
+        self.assertEqual(status.stdout.strip(), "open", "status of an open message did not read open: exit %d: %s"
+                         % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of an open message exited %d, expected 0" % status.returncode)
+        calls = self.git_calls(log)
+        for sub, want in (("ls-remote", 1), ("fetch", 1), ("ls-tree", 1), ("show", 0)):
+            self.assertEqual(calls.count(sub), want, "status of an open message ran %d %s, expected %d: git calls %r"
+                             % (calls.count(sub), sub, want, calls))
+        self.assertEqual([sub for sub in calls if sub in STATUS_WRITES], [],
+                         "status of an open message ran a write git call: %r" % calls)
+        self.assertEqual(store.tip(), before, "status of an open message moved the mail ref")
+
+    def test_taken_status_reads_the_remote_once_and_adds_one_show(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        taker = self.machine("b", store, session="sess-b")
+        mid, line = self.take_one(store, sender, taker, "status-count-taken")
+        before = store.tip()
+        log = self.stub_git(sender)
+        status = self.status(sender, mid)
+        self.assertEqual(status.stdout.strip(), line, "status of a taken message did not read taken with its taker and time: "
+                         "exit %d: %s" % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 0, "status of a taken message exited %d, expected 0" % status.returncode)
+        calls = self.git_calls(log)
+        for sub, want in (("ls-remote", 1), ("fetch", 1), ("ls-tree", 1), ("show", 1)):
+            self.assertEqual(calls.count(sub), want, "status of a taken message ran %d %s, expected %d: git calls %r"
+                             % (calls.count(sub), sub, want, calls))
+        self.assertEqual([sub for sub in calls if sub in STATUS_WRITES], [],
+                         "status of a taken message ran a write git call: %r" % calls)
+        self.assertEqual(store.tip(), before, "status of a taken message moved the mail ref")
 
 
 class SettingsDefault(unittest.TestCase):
