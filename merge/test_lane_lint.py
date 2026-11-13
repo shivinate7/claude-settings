@@ -268,11 +268,12 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
 
-    def merge_into_feat(self, ref):
-        """The lane's head merges `ref` (a ref the second clone sees) in with a merge commit, and is pushed. -> the new head sha."""
+    def merge_into_feat(self, ref, session=None):
+        """The lane's head merges `ref` (a ref the second clone sees) in with a merge commit, and is pushed. `session` adds that session's
+        Claude-Session trailer to the merge commit. -> the new head sha."""
         o = self.other
         tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge %s into feat" % ref, ref)
+        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", with_session("merge %s into feat" % ref, session), ref)
         tm.sh(o, "git", "push", "-q", "origin", "feat")
         return self.head("feat")
 
@@ -868,6 +869,11 @@ def lane_body(session_id, text="Lane work."):
     return "%s\n\n%s\n" % (text, SESSION_URL % session_id)
 
 
+def with_session(message, session):
+    """-> `message` with the Claude-Session trailer of `session`, the line a session's commit carries; `message` as given when session is None."""
+    return message if session is None else "%s\n\nClaude-Session: %s" % (message, SESSION_URL % session)
+
+
 def session_of(body):
     """-> the session id a PR body names by its URL line, or None. The one home of the same-lane key: a rule change moves this and same_lane."""
     found = re.search(r"claude\.ai/code/(session_[A-Za-z0-9]+)", body or "")
@@ -961,21 +967,22 @@ class CrossMeasure(LaneFixture):
         self.assertTrue(any(re.search(r"\b%s\b" % re.escape(base), line) for line in lines),
                         "%s: no conflict line names %s: %s" % (what, base, text))
 
-    def commit_on(self, name, files, start):
-        """Commit `files` ({path: text}) on branch `name`, cut from `start` in the second clone, and push it. -> the commit's sha."""
+    def commit_on(self, name, files, start, session=None):
+        """Commit `files` ({path: text}) on branch `name`, cut from `start` in the second clone, and push it. `session` adds that session's
+        Claude-Session trailer. -> the commit's sha."""
         o, sh = self.other, tm.sh
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", name, start)
         for path, text in files.items():
             tm.put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", "%s: %s" % (name, ", ".join(sorted(files))))
+        sh(o, "git", "commit", "-q", "-m", with_session("%s: %s" % (name, ", ".join(sorted(files))), session))
         sh(o, "git", "push", "-q", "origin", name)
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def own_writes(self, files):
-        """The lane's head gains a commit with `files`. -> its sha."""
-        return self.commit_on("feat", files, "origin/feat")
+    def own_writes(self, files, session=None):
+        """The lane's head gains a commit with `files`, carrying `session`'s trailer when given. -> its sha."""
+        return self.commit_on("feat", files, "origin/feat", session)
 
     def listing(self, n, head, body, state="open", draft=False):
         """PR n on `head` with `body`, as the fake host's open-PR list and its PR read carry it. -> the head."""
@@ -1631,6 +1638,110 @@ class CrossMeasure(LaneFixture):
                 self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
                 self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
                 self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
+
+    # One owner per open pull request (roadmap step one-owner-per-pr: each open PR has one session). Each commit a PR adds (origin/<base>..head) carries a Claude-Session
+    # trailer. Two session ids on those commits mean two sessions worked the PR, and `merge --lane-lint <pr>` refuses it. A batch integration
+    # PR is exempt: its commits come from many lanes by design. The ids are read from git log in the second clone, not from merge.py.
+
+    def session_ids_of(self, head, base="origin/main"):
+        """-> the sorted, distinct Claude-Session ids on the commits of base..head, read in the second clone after a fetch. A trailer is the
+        line `Claude-Session: <session URL>`; a session id named anywhere else in a message does not count."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        out = tm.sh(o, "git", "log", "--format=%B", "%s..%s" % (base, head))
+        return sorted(set(re.findall(r"^Claude-Session: https://claude\.ai/code/(session_[A-Za-z0-9_-]+)$", out, re.M)))
+
+    def two_session_pr(self):
+        """PR 7 with one commit of OWN, then a merge of a moved main by OTHER: the shape of the incident, where triage's merge-main builder pushed
+        onto a lane's PR. -> the head sha."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.main_moves()
+        return self.merge_into_feat("origin/main", session=OTHER)
+
+    def assert_owner_refusal(self, text, rc, lints, sessions):
+        """The refusal of a PR whose commits name `sessions`: rc 1, each id named, a FAIL, no PASS line, and no ci-job run beside it."""
+        self.assertEqual(rc, 1, "a PR whose commits name %d sessions passed the lane lint: %s" % (len(sessions), text))
+        for session in sessions:
+            self.assertIn(session, text, "the refusal does not name session %s: %s" % (session, text))
+        self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
+        self.assertEqual(pass_lines(text), [], "a PR whose commits name two sessions printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on the owner check: " + text)
+
+    def test_a_pr_whose_commits_name_two_sessions_is_refused_and_names_both_ids(self):
+        """Why: triage's merge of main went onto a lane's own PR at 16:54 CST Nov 10, so two sessions worked it. Without the check the lint
+        passes, so no FAIL names the two ids."""
+        head = self.two_session_pr()
+        self.assertEqual(self.session_ids_of(head), sorted([OWN, OTHER]), "precondition: the PR's commits do not name two sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assert_owner_refusal(text, rc, lints, [OWN, OTHER])
+
+    def test_a_pr_with_a_second_sessions_plain_commit_is_refused_and_names_both_ids(self):
+        """Why: the same rule for a plain commit by a second session, not only a merge of main. Without the check the lint passes."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.own_writes({"other-b.txt": "second session\n"}, session=OTHER)
+        self.assertEqual(self.session_ids_of(self.head("feat")), sorted([OWN, OTHER]), "precondition: the PR's commits do not name two sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assert_owner_refusal(text, rc, lints, [OWN, OTHER])
+
+    def test_a_long_pr_worked_by_three_sessions_is_refused_and_names_each_id(self):  # the full-size state
+        """Why: twelve commits from three sessions, four each, the PR's largest realistic shape. Every session is named. Without the check the lint
+        passes."""
+        sessions = [OWN, OTHER, "session_01ThirdLaneSeven"]
+        for i in range(12):
+            self.own_writes({"long-%02d.txt" % i: "commit %d\n" % i}, session=sessions[i % 3])
+        self.assertEqual(self.session_ids_of(self.head("feat")), sorted(sessions), "precondition: the PR's commits do not name three sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assert_owner_refusal(text, rc, lints, sessions)
+
+    def test_a_pr_whose_commits_all_name_one_session_passes_with_one_pass_line(self):  # control
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.own_writes({"own-b.txt": "lane 7 again\n"}, session=OWN)
+        self.assertEqual(self.session_ids_of(self.head("feat")), [OWN], "precondition: the PR's commits do not name one session, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a PR whose commits all name one session refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing lane: " + text)
+
+    def test_a_pr_with_no_commit_past_its_base_passes_with_no_session_named(self):  # control: the empty state
+        tm.sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/empty")  # a new branch cut at main: the PR adds no commit
+        self.host.branch = "empty"
+        head = self.head("empty")
+        self.assertEqual(tm.sh(self.other, "git", "rev-list", "--count", "origin/main..%s" % head), "0",
+                         "precondition: the PR has a commit past its base, so the case probes no empty state")
+        self.assertEqual(self.session_ids_of(head), [], "precondition: the PR names a session, so the case probes no empty state")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a PR with no commit past its base refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_batch_integration_pr_whose_commits_name_two_sessions_passes(self):  # control: the exemption
+        """Why: a batch integration PR merges many lanes by design, so two session ids on its commits are its normal state. Its freeze block
+        names the batch on the batch's integration branch, so it is an integration PR. The control pins the exemption: it passes with or without the check."""
+        branch = merge.integration_branch(INTEGRATION_NAME)
+        self.host.branch, self.host.body = branch, self.integration_body()
+        self.commit_on(branch, {"integration-a.txt": "lane 7\n"}, "origin/main", session=OWN)
+        self.commit_on(branch, {"integration-b.txt": "lane 8\n"}, "origin/" + branch, session=OTHER)
+        self.assertTrue(merge.is_integration_pr({"body": self.host.body, "branch": branch}), "precondition: PR 7 is not a batch integration PR, so the case probes a lane PR")
+        self.assertEqual(self.session_ids_of(self.head(branch)), sorted([OWN, OTHER]), "precondition: the PR's commits do not name two sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a batch integration PR whose commits name two sessions refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_commit_on_main_from_another_session_does_not_count_against_this_pr(self):  # control: the base's history is not the PR's
+        """Why: a PR's own commits are origin/main..head. Main's history holds many sessions' trailers, and none of them is this PR's. The control pins that the check reads the PR's range, not the base's history."""
+        self.commit_on("main", {"main-other.txt": "merged by another session\n"}, "origin/main", session=OTHER)
+        self.assertEqual(self.session_ids_of("origin/main", "origin/main~1"), [OTHER], "precondition: main's new commit does not name the other session, so the case probes nothing")
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.assertEqual(self.session_ids_of(self.head("feat")), [OWN], "precondition: the PR's own commits do not name one session, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a session's commit on main refused a PR that names only its own session: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
