@@ -225,6 +225,12 @@ class IntermediateHeadHost(LagHost):
 
 PARENT_PR = 1785  # the parent a review-range body names on its `Merge after:` line
 PARENT_BRANCH = "parent-base"  # the parent's head branch
+SECOND_PARENT_PR = 1700  # a second parent, for a body that names two
+SECOND_PARENT_BRANCH = "second-parent-base"
+FIRST_PARENT_PR = 1676  # the first of two parents on one Merge after line
+FIRST_PARENT_BRANCH = "first-parent-base"
+LAST_PARENT_PR = 1742  # the second of the two
+LAST_PARENT_BRANCH = "last-parent-base"
 PLACEHOLDER_START = "c05c0e626"  # the start INCIDENT_BODY names: a placeholder that body_at replaces with a real commit
 INCIDENT_BODY = ("Lane review-range-check, stacked on its parent.\n\n"
                  "Merge after: #1785\n\n"
@@ -1149,6 +1155,243 @@ class LaneLint(LaneFixture):
         missing = "1234567890abcdef1234567890abcdef12345678"
         self.assertNotEqual(merge.git(self.co, "cat-file", "-e", missing + "^{commit}")[0], 0, "the fixture's start exists in the repo")
         self.assert_review_range_refused(ancestry_body(missing), missing, "a start that resolves to no commit", one_parent(h["P"]))
+
+    def side_parent(self, branch, message):
+        """A commit on origin's main, pushed as `branch`: a parent that shares no history with the lane's parent. -> its sha."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        sha = self.commit_in_other(self.head("main"), branch + ".txt", message)
+        self.push_ref(branch, sha)
+        return sha
+
+    def integration_history(self):
+        """Parent #1785 at P1 and parent #1700 at P2, both on main. The lane is built on S, their merge. -> {"P1", "P2", "S", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        main = self.head("main")
+        p1 = self.commit_in_other(main, "one.txt", "first parent")
+        p2 = self.commit_in_other(main, "two.txt", "second parent")
+        self.push_ref(PARENT_BRANCH, p1)
+        self.push_ref(SECOND_PARENT_BRANCH, p2)
+        tm.sh(self.other, "git", "checkout", "-q", "--detach", p1)
+        tm.sh(self.other, "git", "merge", "-q", "--no-ff", "-m", "integrate both parents", p2)
+        s = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        lane = self.commit_in_other(s, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"P1": p1, "P2": p2, "S": s, "L": lane}
+
+    def merged_history(self):
+        """Parent #1785's head P, pushed as its branch and then merged: origin's main is P. The branch is deleted on origin, and the lane is built on P. -> {"P", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        p = self.commit_in_other(self.head("main"), "parent.txt", "parent head")
+        self.push_ref(PARENT_BRANCH, p)
+        self.push_ref("main", p)
+        tm.sh(self.other, "git", "push", "-q", "origin", ":refs/heads/%s" % PARENT_BRANCH)
+        lane = self.commit_in_other(p, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"P": p, "L": lane}
+
+    def assert_review_range_passes(self, body, what, parents):
+        """The check passes `body` and the lint runs once: rc 0, one lint run, one PASS line. `what` names the body in each message."""
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 0, "the check refused %s, which it must pass:\n%s" % (what, text))
+        self.assertEqual(len(runs), 1, "the lint ran %d times for %s, want once: %s" % (len(runs), what, text))
+        self.assertEqual(len(pass_lines(text)), 1, "no PASS line for %s: %s" % (what, text))
+
+    def test_review_range_passes_a_start_at_the_parent_head_in_nine_or_seven_characters(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        for short in (h["P"][:9], h["P"][:7]):
+            with self.subTest(start=short):
+                self.use_review_range_host(body_at(short), one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_start_naming_the_parent_branch_bare_or_as_origin(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        for start in (PARENT_BRANCH, "origin/" + PARENT_BRANCH):
+            with self.subTest(start=start):
+                self.use_review_range_host(body_at(start), one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_lowercase_merge_after_without_a_colon_with_the_dotdot_form(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        short = h["P"][:9]
+        body = body_at(short).replace("Merge after: #1785", "merge after #1785").replace(
+            "`git diff %s feat`" % short, "`git diff %s..feat`" % short)
+        self.assertIn("merge after #1785", body, "the fixture did not take the lowercase line")
+        self.use_review_range_host(body, one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_full_sha_start_with_the_triple_dot_form(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["P"]).replace("`git diff %s feat`" % h["P"], "`git diff %s...feat`" % h["P"])
+        self.assertIn("`git diff %s...feat`" % h["P"], body, "the fixture did not take the triple-dot form")
+        self.use_review_range_host(body, one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_skips_the_check_when_no_merge_after_line_names_a_parent(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        cases = (
+            ("the incident body without its Merge after line", body_at(h["O"]).replace("Merge after: #1785\n", "")),
+            ("an empty body", ""),
+            ("a body at the largest size GitHub keeps", "x" * 65536 + "\n`git diff %s feat`\n" % h["O"]),
+        )
+        for name, body in cases:
+            with self.subTest(name):
+                self.assertNotIn("Merge after", body, "the fixture still names a parent")
+                self.use_review_range_host(body, one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_start_at_the_head_of_either_named_parent(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        second = self.side_parent(SECOND_PARENT_BRANCH, "second parent")
+        self.push_ref("feat", self.commit_in_other(second, "lane.txt", "lane commit on the second parent"))
+        body = body_at(second[:9]).replace("Merge after: #1785\n", "Merge after: #1785\nMerge after: #1700\n")
+        self.assertEqual(body.count("Merge after: #"), 2, "the fixture does not name two parents")
+        parents = {PARENT_PR: (h["P"], PARENT_BRANCH), SECOND_PARENT_PR: (second, SECOND_PARENT_BRANCH)}
+        self.use_review_range_host(body, parents)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_parent_named_with_no_range(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.use_review_range_host("Merge after: #1785\n\nThis body holds no range.\n", one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_placeholder_start_beside_a_real_range(self):
+        """`<start>` and `{reviewed-head}` are placeholders in prose: a start holding any of <>{} is skipped, and the real range is judged."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "Review the range `git diff <start> <end>`, or `git diff {reviewed-head}..{head}`, against the parent. "
+                "The range to read is `git diff %s feat`.\n") % h["P"][:9]
+        self.assert_review_range_passes(body, "a body with placeholder ranges in prose beside a real range", one_parent(h["P"]))
+
+    def test_review_range_passes_a_git_diff_inside_a_fenced_block(self):
+        """A range inside a fenced block is an example: the wrong start in the fence is skipped, and the real range outside it is judged."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "```\n`git diff %s feat`\n```\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
+        self.assert_review_range_passes(body, "a body whose only wrong range sits in a fenced block", one_parent(h["P"]))
+
+    def test_review_range_passes_every_number_on_a_merge_after_line(self):
+        """`Merge after: #1676, #1742` names two parents, so a range at the head of #1742 passes. The lane is built on that head."""
+        self.use_ci_job(PASSING, 0)
+        self.fork_history()
+        first = self.side_parent(FIRST_PARENT_BRANCH, "first parent of two")
+        last = self.side_parent(LAST_PARENT_BRANCH, "last parent of two")
+        self.push_ref("feat", self.commit_in_other(last, "lane.txt", "lane commit on the last parent"))
+        body = body_at(last[:9]).replace("Merge after: #1785", "Merge after: #%d, #%d" % (FIRST_PARENT_PR, LAST_PARENT_PR))
+        self.assertIn("Merge after: #1676, #1742", body, "the fixture did not take the two-number line")
+        parents = {FIRST_PARENT_PR: (first, FIRST_PARENT_BRANCH), LAST_PARENT_PR: (last, LAST_PARENT_BRANCH)}
+        self.assert_review_range_passes(body, "a Merge after line that names #1676 and #1742", parents)
+
+    def test_review_range_passes_a_start_at_a_merged_parent_head_whose_branch_is_gone(self):
+        """The parent PR is merged: its head is origin's main, and its branch is deleted. The fake host still names that head and branch,
+        and the lane holds the head, so a range that starts there passes."""
+        self.use_ci_job(PASSING, 0)
+        h = self.merged_history()
+        self.assertEqual(self.head("main"), h["P"], "the fixture's parent head is not origin's main")
+        self.assertEqual(self.head(PARENT_BRANCH), "", "the fixture's parent branch is still on origin")
+        self.assert_review_range_passes(body_at(h["P"][:9]), "a range that starts at a parent head merged to main, whose branch is gone", one_parent(h["P"]))
+
+    def test_review_range_passes_an_end_that_is_the_lane_branch_or_a_prefix_of_its_head(self):
+        """The end may be the lane branch, bare or as origin/<branch>, or a 7-character-or-longer prefix of the lane head, with the .. and ... forms too."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        start = h["P"][:9]
+        for rng in ("git diff %s feat", "git diff %s origin/feat", "git diff %s " + h["L"][:7], "git diff %s..feat", "git diff %s...feat"):
+            with self.subTest(range=rng):
+                body = "Merge after: #%d\n\nReview only `%s`.\n" % (PARENT_PR, rng % start)
+                self.assert_review_range_passes(body, "a range that reads `%s`" % (rng % start), one_parent(h["P"]))
+
+    def test_review_range_passes_a_correct_start_with_a_placeholder_end(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_passes(ancestry_body(h["P"][:9], "<head>"), "a range from the parent head to a placeholder end", one_parent(h["P"]))
+
+    def test_review_range_passes_a_stat_flag_before_the_range_with_the_right_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff --stat %s..feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the --stat range")
+        self.assert_review_range_passes(body, "a --stat range that starts at the parent head", one_parent(h["P"]))
+
+    def test_review_range_passes_a_context_flag_before_the_range_with_the_right_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff -U0 %s feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the -U0 range")
+        self.assert_review_range_passes(body, "a -U0 range that starts at the parent head", one_parent(h["P"]))
+
+    def test_review_range_skips_a_wrong_start_inside_a_tilde_fence(self):
+        """A `~~~` fence is a fence for stale_cites.fenced_lines, so the wrong start inside it is an example and the check passes."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "~~~\n`git diff %s feat`\n~~~\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
+        self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
+        self.assert_review_range_passes(body, "a body whose only wrong range sits in a tilde fence", one_parent(h["P"]))
+
+    def test_review_range_skips_a_wrong_start_after_an_unclosed_fence(self):
+        """A ``` line with an info string, such as ```python, does not close a fence (stale_cites.fenced_lines), so the fence runs on and
+        the wrong start after it is an example."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "Review only `git diff %s feat`.\n\n"
+                "```\n```python\n`git diff %s feat`\n") % (h["P"][:9], h["O"])
+        self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
+        self.assert_review_range_passes(body, "a body whose wrong range follows an unclosed fence", one_parent(h["P"]))
+
+    def test_review_range_passes_a_merge_after_line_inside_a_fence_as_naming_no_parent(self):
+        """A `Merge after: #N` line inside a fence is an example and names no parent: with no parent named, the check is skipped."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("Merge after: #1785", "```\nMerge after: #1785\n```")
+        self.assertIn("```\nMerge after: #1785\n```", body, "the fixture did not take the fence")
+        self.assert_fence_rule(body, "Merge after: #1785", fenced=True)
+        self.assert_review_range_passes(body, "a body whose only Merge after line sits in a fence", one_parent(h["P"]))
+
+    def test_review_range_passes_the_fork_point_under_a_parent_that_gained_commits(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.lagging_history()
+        self.assert_review_range_passes(ancestry_body(h["O"]), "the fork point of a lane whose parent gained commits after it forked",
+                                        one_parent(h["X"]))
+
+    def test_review_range_passes_a_start_that_merges_both_named_parents(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.integration_history()
+        body = "Merge after: #%d\nMerge after: #%d\n\nReview only `git diff %s feat`.\n" % (PARENT_PR, SECOND_PARENT_PR, h["S"])
+        parents = {PARENT_PR: (h["P1"], PARENT_BRANCH), SECOND_PARENT_PR: (h["P2"], SECOND_PARENT_BRANCH)}
+        self.assert_review_range_passes(body, "a start that merges the two named parents", parents)
+
+    def test_review_range_passes_a_parent_branch_name_at_a_head_the_lane_contains(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_passes(ancestry_body(PARENT_BRANCH), "the parent's branch name, at a head the lane contains", one_parent(h["P"]))
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
