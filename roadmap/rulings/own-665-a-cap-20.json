@@ -1,0 +1,10 @@
+{
+ "id": "own-665-a-cap-20",
+ "at": "2026-11-13T10:57:51-06:00",
+ "title": "The repeat checker sends at most 20 messages to the model per stop",
+ "ruling": "Owner 10:57 CST Nov 13, item 665 (repeat-judge-batch-cap), accepted the lane's pick a: at most 20 messages per stop.",
+ "quote": "accepted pick; A: Cap at 20",
+ "source": "Page save, owner accepted the lane's pick (answer on item 665); filed late by triage 13:45 CST Nov 13 from the receipt ledger.",
+ "status": "open",
+ "step": "judge-replay-corpus"
+}

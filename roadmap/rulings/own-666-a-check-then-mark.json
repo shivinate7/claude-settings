@@ -1,0 +1,10 @@
+{
+ "id": "own-666-a-check-then-mark",
+ "at": "2026-11-13T10:57:51-06:00",
+ "title": "The repeat checker finishes checking before it marks any message",
+ "ruling": "Owner 10:57 CST Nov 13, item 666 (repeat-judge-mark-split), accepted the lane's pick a: check first, then mark.",
+ "quote": "accepted pick; A: Check first, then mark",
+ "source": "Page save, owner accepted the lane's pick (answer on item 666); filed late by triage 13:45 CST Nov 13 from the receipt ledger.",
+ "status": "open",
+ "step": "judge-replay-corpus"
+}

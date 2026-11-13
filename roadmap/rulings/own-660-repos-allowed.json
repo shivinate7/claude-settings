@@ -1,0 +1,10 @@
+{
+ "id": "own-660-repos-allowed",
+ "at": "2026-11-13T11:06:38-06:00",
+ "title": "The 11 unswept repos may be attached; home and degen come back in; runner 11 keeps every checkout fresh",
+ "ruling": "Owner 11:06 CST Nov 13, item 660 (outbox-repo-access), typed on the page: \"yes allowed -- you can also now add home repo and degen repo again (which i'd said were doing work for a bit and to leave them out) -- ensure that batch runnner 11 updates its checkout on all those repos so its not stale on any fo them!\" Triage reading: the lane may attach the 11 unswept repos read-only, plus the home and degen repos; batch runner 11 fast-forwards its checkout of each before every batch.",
+ "quote": "yes allowed; add home repo and degen repo again; ensure that batch runnner 11 updates its checkout on all those repos so its not stale",
+ "source": "Page answer 11:06 CST Nov 13 on item 660; filed late by triage 13:45 CST Nov 13.",
+ "status": "open",
+ "step": "outbox-aggregate-plan"
+}

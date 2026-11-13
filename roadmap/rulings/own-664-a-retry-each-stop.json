@@ -1,0 +1,10 @@
+{
+ "id": "own-664-a-retry-each-stop",
+ "at": "2026-11-13T10:57:51-06:00",
+ "title": "The repeat checker tries again at each stop when it got no answer",
+ "ruling": "Owner 10:57 CST Nov 13, item 664 (repeat-judge-retry), accepted the lane's pick a: when the repeat checker gets no answer about a message, it tries again at the next stop.",
+ "quote": "accepted pick; A: Try again at each stop",
+ "source": "Page save, owner accepted the lane's pick (answer on item 664); filed late by triage 13:45 CST Nov 13 from the receipt ledger.",
+ "status": "open",
+ "step": "judge-replay-corpus"
+}
