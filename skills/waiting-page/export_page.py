@@ -609,9 +609,30 @@ def fetched_docs(fetched, collections):
     return docs
 
 
+STOOD_CLOSED = ("a stood pick closed with no owner answer, so it left the Pick stands section unseen; reopen it, or "
+                "write a reply that starts Reversed or Withdrawn")
+
+
+def stood_closed(items, answers):
+    """[(n, sentence)] for each fetched item that stands, is closed, has no answers doc and no lastAnswer, and whose reply
+    does not start Reversed or Withdrawn. Pure: no page, no node."""
+    held = []
+    for doc_id, doc in sorted(items.items()):
+        if not isinstance(doc, dict) or doc.get("stands") is not True or doc.get("status") != "closed":
+            continue
+        reply = doc.get("reply")
+        if doc_id in answers or doc.get("lastAnswer") or (isinstance(reply, str) and reply.lstrip().lower().startswith(("reversed", "withdrawn"))):
+            continue
+        held.append((doc.get("n") if isinstance(doc.get("n"), int) else doc_id, STOOD_CLOSED))
+    return held
+
+
 def picture_checks(page, docs):
-    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`."""
-    held, why = page_check.check_items(page, docs["items"], docs.get("answers", {}))
+    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`.
+    The held lines also carry each stood pick closed with no owner answer (stood_closed)."""
+    answers = docs.get("answers", {})
+    held, why = page_check.check_items(page, docs["items"], answers)
+    held = held + stood_closed(docs["items"], answers)
     return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
 
 

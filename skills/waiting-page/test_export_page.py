@@ -3300,5 +3300,44 @@ class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):
         self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
 
 
+class StoodPickClosed(Copied):
+    """A stood pick (`stands: true`) that closed with no owner answer leaves the Pick stands section unseen. --check and the
+    export hold it, unless its reply starts "Reversed" or "Withdrawn". Not gated: no node runs, no item carries a picture."""
+
+    def stood(self, n, doc_id, **changes):
+        item = {"id": doc_id, "n": n, "kind": "decision", "status": "closed", "stands": True, "title": "Which way?",
+                "short": "Way", "recommended": "a", "closed": "2026-11-12T19:19:00Z"}
+        item.update(changes)
+        return item
+
+    def check(self, item, answers=None):
+        fetched = self.fetch(items={item["id"]: item}, answers=answers or {}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-stood.html"), PAGE)
+        before = snapshot(self.tmp.name)
+        r = self.run_cmd("--check", "--fetched", fetched, "--page", page)
+        self.assertEqual(snapshot(self.tmp.name), before, "--check wrote a file. Output:\n" + shown(r))
+        return r
+
+    def test_a_closed_stood_pick_with_no_answer_is_held(self):
+        r = self.check(self.stood(565, "stood-no-answer"))
+        self.assertEqual([n for n, _ in held_lines(r)], [565], "a stood pick closed with no answer was not held. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+    def test_a_reply_of_reversed_or_withdrawn_passes(self):
+        for word in ("Reversed: the owner ruled otherwise", "withdrawn, superseded by 699"):
+            r = self.check(self.stood(566, "stood-" + word.split()[0].lower().strip(":,"), reply=word))
+            self.assertEqual(held_lines(r), [], "a %r reply was held. Output:\n%s" % (word, shown(r)))
+
+    def test_an_owner_answer_passes(self):
+        by_file = self.check(self.stood(567, "stood-answer"), {"stood-answer": {"choice": "a", "at": "2026-11-12T19:00:00Z"}})
+        self.assertEqual(held_lines(by_file), [], "a stood pick with an answers doc was held. Output:\n" + shown(by_file))
+        by_last = self.check(self.stood(568, "stood-last", lastAnswer={"choice": "a", "at": "2026-11-12T19:00:00Z"}))
+        self.assertEqual(held_lines(by_last), [], "a stood pick with a lastAnswer was held. Output:\n" + shown(by_last))
+
+    def test_control_an_open_stood_pick_and_a_closed_plain_item_pass(self):
+        self.assertEqual(held_lines(self.check(self.stood(569, "stood-open", status="open"))), [])
+        self.assertEqual(held_lines(self.check(self.stood(570, "plain-closed", stands=False))), [])
+
+
 if __name__ == "__main__":
     unittest.main()
