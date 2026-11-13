@@ -357,12 +357,12 @@ def grant_override(raw, at):
     judge calls per prompt (an Opus no, then the override ask, for a prompt with both words). Those calls are why the
     settings.json row has "timeout": 30. A prompt no route granted, and a typed `opus off`, ends a pending one-act
     override (override.end_once; owner, item 601). Every typed prompt, first of all, ends the turn grant of a plain Opus
-    ask with no length (override.end_turn; ruling own-761-d), in its own try. Any failure is one stderr line, no override."""
+    ask with no length (override.end_turn; ruling own-761-d), in its own try, except `opus off`, which _grant_opus ends and reports. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
         try:  # a typed prompt ends the last plain Opus ask's turn before any grant; a failure here never stops the grants
-            if isinstance(hook, dict):
+            if isinstance(hook, dict) and not override.is_opus_off(hook.get("prompt")):  # `opus off` removes the turn file itself (_grant_opus), with its receipt
                 override.end_turn(hook.get("session_id"), hook.get("prompt"), at,
                                   transcript=hook.get("transcript_path"), source=hook.get("source"))
         except Exception as e:

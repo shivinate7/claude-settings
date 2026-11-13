@@ -701,6 +701,13 @@ def end_once(session_id, prompt, at, transcript=None, source=None):
     return True
 
 
+def is_opus_off(prompt):
+    """True when `prompt` is the keyword form `opus off` as the whole prompt: the form _grant_opus answers by removing
+    the timed file and the turn file, so the caller skips end_turn for it and _grant_opus finds the turn file."""
+    match = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
+    return bool(match) and [w.lower() for w in match.group(1).split()] == ["off"]
+
+
 def end_turn(session_id, prompt, at, transcript=None, source=None):
     """Remove the session's turn file for an owner prompt that is a typed turn (_keyword_typed): the end of a plain Opus
     ask with no length (ruling own-761-d). A notice, a wakeup, a peer or a task notification never ends it, so a builder's
