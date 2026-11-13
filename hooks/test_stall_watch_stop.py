@@ -37,17 +37,17 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
   as unknown, once.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
-- The busy check (a job whose process tree burns CPU is not listed) shares one deadline, BUSY_BUDGET:
-  a stalled lsof or ps cannot hold the Stop past the hook timeout, and a busy holder that lsof names
-  in time still spares its job.
+- The busy check (a job whose process tree burns CPU, or holds a waiter that waits on a live child, is not
+  listed) shares one deadline, BUSY_BUDGET: a stalled lsof or ps cannot hold the Stop past the hook timeout,
+  and a busy holder or waiter that lsof names in time still spares its job.
 - Any error prints nothing and exits 0.
 
 Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a folder that
 replaces the folder of each transcript output path and keeps its file name), STALL_WATCH_QUIET
 (the age in seconds). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
 
-No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a and
-S21c to S21e: they start a shell job, or put a stub sh, ps or lsof first on PATH, and skip off posix,
+No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a,
+S21c to S21g: they start a shell job, or put a stub sh, ps or lsof first on PATH, and skip off posix,
 so Windows runs the rest. Every case that expects silence also runs a control that must list a stale
 job, so a mode that is absent or silent everywhere cannot pass it.
 """
@@ -1948,6 +1948,109 @@ def fast_lsof_busy_holder_still_spares_job():
                        f"a job whose holder's child gains CPU time is listed: {msg!r}")
     problems += listed_once(msg, "bfastquiet600")
     return problems
+
+
+# A parent that starts a `sleep 100` child, writes its sync byte, and waits on that child.
+WAITER_CODE = "import os, subprocess\nkid = subprocess.Popen(['sleep', '100'])\nos.write({sync}, b'x')\nkid.wait()"
+
+
+def waiter_job_problems(waiter_cmd, waiter_id, root_must_be=None, listed=False):
+    """Run one quiet waiter job beside a quiet `sleep 60 | tail -1` control, through Stop. Stop runs while the waiter
+    waits on its child. root_must_be, when given, is the command name the job's own pid must carry: the job's shell
+    exec'd the waiter, so the waiter is the job's root. Return the problems: the scope holds, the control is listed,
+    and the waiter is not. listed=True: the job is a quiet holder that is no waiter, so the job is listed too."""
+    if os.name != "posix" or not shutil.which("sh"):
+        raise Skip("needs sh and process groups, which this host lacks")
+    base = new_dir()
+    waiter_path = output_file(base, waiter_id + "600", 600)
+    sleep_path = output_file(base, "bsleep600", 600)
+    sleep_cmd = "sleep 60 | tail -1"
+    waiter, waiter_r = start_job(waiter_cmd, waiter_path)
+    sleeper, sleep_r = start_job(sleep_cmd, sleep_path)
+    try:
+        if os.read(waiter_r, 1) != b"x":  # the scope first: the parent has its live child now
+            return ["the waiter did not start its child"]
+        if root_must_be is not None:  # the scope first: the job's own pid is the waiter
+            name = subprocess.run(["ps", "-o", "comm=", "-p", str(waiter.pid)],
+                                  capture_output=True, text=True).stdout.strip()
+            if name != root_must_be:
+                return ["the job's pid is %r, want %r: its shell did not exec the waiter" % (name, root_must_be)]
+        recs = log_job(waiter_id + "600", waiter_cmd) + log_job("bsleep600", sleep_cmd)
+        rc, out, err = run_stop(transcript(recs), base)
+        problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+        msg = system_message(out, problems)
+        problems += listed_once(msg, "bsleep600")
+        if problems:  # Stop must list the quiet control, or the waiter's absence proves nothing
+            return problems
+        if listed:
+            return problems + expect(waiter_id + "600" in msg,
+                                     f"a quiet job whose holder is a script is not listed: {msg!r}")
+        return problems + expect(waiter_id + "600" not in msg,
+                                 f"a quiet job whose waiter waits on a live child is listed: {msg!r}")
+    finally:
+        end_job(waiter, waiter_r)
+        end_job(sleeper, sleep_r)
+
+
+@case
+def quiet_job_whose_waiter_waits_on_a_live_child_is_not_listed():
+    """S21f. a quiet shell job whose python parent waits on a live `sleep 100` child, both holding the job's output
+    file, quiet 600 s: not listed, since a waiter is life, as the watcher rules. A quiet `sleep 60 | tail -1` job
+    is listed (control)"""
+    waiter_cmd = "%s -c %s" % (shlex.quote(PY), shlex.quote(WAITER_CODE))
+    return waiter_job_problems(waiter_cmd, "bwaiter")
+
+
+@case
+def quiet_job_whose_shell_execs_a_waiter_is_not_listed():
+    """S21g. the S21f waiter as the job's one command, exec'd by the job's shell, so the waiter is the job's own pid:
+    not listed. A check that counts only the processes under the job's pid lists it"""
+    waiter_cmd = "exec %s -c %s" % (shlex.quote(PY), shlex.quote(WAITER_CODE))
+    return waiter_job_problems(waiter_cmd, "bexec", root_must_be=os.path.basename(PY)[:15])
+
+
+# A script that writes its sync byte, then sleeps. The sync byte comes first, so Stop runs while the script waits.
+DEPLOY_SYNC_BODY = 'echo x >&"$SYNC"\nsleep 100\n'
+
+
+def write_deploy_script(folder, shebang):
+    """./deploy.sh in folder, executable: a `#!<shebang>` line, then DEPLOY_SYNC_BODY. Return its path."""
+    path = os.path.join(folder, "deploy.sh")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!%s\n%s" % (shebang, DEPLOY_SYNC_BODY))
+    os.chmod(path, 0o755)
+    return path
+
+
+@case
+def quiet_job_whose_holder_is_a_sh_script_is_listed():
+    """S21h. a quiet `./deploy.sh` job, deploy.sh a `#!/bin/sh` script with body `sleep 100`, holds the job's output
+    file, quiet 600 s: listed, since the script is a shell copy, not a waiter. A quiet `sleep 60 | tail -1` job is
+    listed (control)"""
+    folder = new_dir()
+    write_deploy_script(folder, "/bin/sh")
+    return waiter_job_problems("cd %s && SYNC={sync} ./deploy.sh; echo done" % shlex.quote(folder), "bdeploy", listed=True)
+
+
+@case
+def quiet_job_whose_shell_execs_a_sh_script_is_listed():
+    """S21i. the S21h script as the job's one command, exec'd by the job's shell, so the script is the job's own pid,
+    the root that Stop checks with include_root: listed"""
+    folder = new_dir()
+    write_deploy_script(folder, "/bin/sh")
+    cmd = "export SYNC={sync} && cd %s && exec ./deploy.sh" % shlex.quote(folder)
+    return waiter_job_problems(cmd, "bdexec", root_must_be="deploy.sh", listed=True)
+
+
+@case
+def quiet_job_whose_holder_is_an_env_bash_script_is_listed():
+    """S21j. control, passes on the branch: the S21h script with `#!/usr/bin/env bash`, whose comm is bash, a shell:
+    listed"""
+    if shutil.which("bash") is None:
+        raise Skip("bash is not on PATH")
+    folder = new_dir()
+    write_deploy_script(folder, "/usr/bin/env bash")
+    return waiter_job_problems("cd %s && SYNC={sync} ./deploy.sh; echo done" % shlex.quote(folder), "benv", listed=True)
 
 
 if __name__ == "__main__":

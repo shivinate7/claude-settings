@@ -44,13 +44,17 @@ Hook: stall_watch.py --hook
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
 
 Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [--also F]...
-         [--log-fd N] [--beat-fd N]
+         [--log-fd N] [--beat-fd N] [--lone-pause 1]
   Streams LOG to stdout (from fd N when given: the handle the wrapper opened, else by path). Any new byte, also a bare \\r, resets the timer. It streams each new byte
   of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
-  300) without new bytes, with no change to any --also log and with no CPU time advanced in any process
-  under the job's shell, it prints a STALL report and exits 3. The job keeps running.
-  The CPU time comes from the once-a-second `ps` that also reads the job's state. It adds no process,
-  timer or file. The job shell's own time does not count.
+  300) without new bytes, with no change to any --also log, with no CPU time advanced in any process
+  under the job's shell, and with no waiter under it, it prints a STALL report and exits 3. The job keeps
+  running. A waiter is a process under the job's shell that is not a shell (or `sleep`) and has a live child
+  (merge on its git children): the job is working while the child runs. `( )`, `$( )` and loop bodies are
+  shell copies, no waiters. With --lone-pause 1 (the hook sets it when the original is one `sleep N` and one
+  command) the watcher reports nothing before the job's first output byte.
+  The CPU time and the waiter check come from the once-a-second `ps` that also reads the job's state. It adds
+  no process, timer or file. The job shell's own time does not count.
   On Linux ps gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall.
   So may a serial chain of sub-second children (`for t in ...; do python $t; done | tail -1`).
   --unwatched F (repeatable) names a log whose directory is unknown; the report lists it. The
@@ -190,6 +194,57 @@ def _continues_list(prior, before, punct):
     return prior.endswith(("&&", "||", "|"))
 
 
+def shell_tokens(command):
+    """(tokens, punct): the command as shlex reads it, a heredoc body dropped, each run of `();<>|&` or a
+    newline a token of its own; punct is the set of those characters. (None, set()) when shlex cannot read it."""
+    try:
+        lex = shlex.shlex(_KeepNewline(strip_heredoc_bodies(command, shells_only=True)), posix=True,
+                          punctuation_chars="();<>|&\n")
+        lex.whitespace_split = True
+        lex.whitespace = " \t\r"
+        tokens = []
+        while True:
+            tok = lex.get_token()
+            if tok is None:
+                break
+            tokens.append(tok)
+    except Exception:
+        return None, set()
+    return tokens, set(lex.punctuation_chars)
+
+
+SLEEP_ARG = re.compile(r"\d+(?:\.\d+)?[smhd]?\Z")
+PIPE_OPS = ("|", "|&", ">|")
+
+
+def lone_pause_command(command):
+    """True when command is one `sleep N` and then exactly one command: `sleep 420; gh api ...`, also joined
+    by `&&` or a newline, with the command a single pipeline or simple command (redirects and pipes are
+    fine; a second list item, a background `&`, `||`, a group or a compound command is not). The pause is
+    the wait the quiet-job remedy allows, and the one command's first output is its read, so the watcher
+    does not end the job before that output. A second pause, or any other list item, makes the job an
+    ordinary one, ended after the quiet age."""
+    tokens, punct = shell_tokens(command)
+    if not tokens:
+        return False
+    while tokens and set(tokens[-1]) <= set(";\n"):  # a trailing separator ends the one command
+        tokens.pop()
+    if len(tokens) < 4 or tokens[0] != "sleep" or not SLEEP_ARG.match(tokens[1]):
+        return False
+    sep = tokens[2]
+    if not (set(sep) <= set(";\n") or sep.rstrip("\n") == "&&"):
+        return False
+    rest = tokens[3:]
+    if set(rest[0]) <= punct or rest[0] in COMMAND_STARTERS + BLOCK_OPENERS + BLOCK_CLOSERS:
+        return False
+    if rest[0] == "sleep":  # a second pause is no command to read
+        return False
+    for tok in rest:
+        if set(tok) <= punct and not (tok in PIPE_OPS or (set(tok) <= set("<>&") and "&&" not in tok and tok != "&")):
+            return False
+    return True
+
+
 def read_named_logs(command):
     """Return (paths, unresolved): the files a command names as its own log, and the relative ones
     whose directory the hook cannot read. See named_logs for the forms read.
@@ -207,20 +262,9 @@ def read_named_logs(command):
     is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
     lists of its own. Newlines are tokens. A comment stops before its newline, so that newline is a
     token too."""
-    try:
-        lex = shlex.shlex(_KeepNewline(strip_heredoc_bodies(command, shells_only=True)), posix=True,
-                          punctuation_chars="();<>|&\n")
-        lex.whitespace_split = True
-        lex.whitespace = " \t\r"
-        tokens = []
-        while True:
-            tok = lex.get_token()
-            if tok is None:
-                break
-            tokens.append(tok)
-    except Exception:
+    tokens, punct = shell_tokens(command)
+    if tokens is None:
         return [], []
-    punct = set(lex.punctuation_chars)
     found, cwd, saved, braces, only_cds, i = [], "", [], 0, True, 0
     list_dir, blocks = "", []  # where the current list started; the start of each enclosing list
     while i < len(tokens):
@@ -342,8 +386,10 @@ def _run(args, timeout=TOOL_TIMEOUT):
 
 class JobState(str):
     """The ps state of the job. `cpu` is {pid: CPU seconds} for every process under the job's shell,
-    or None when ps gave no table (a read that could not run)."""
+    or None when ps gave no table (a read that could not run). `waiter` is True when a process under
+    the job's shell is a waiter (see has_waiter)."""
     cpu = None
+    waiter = False
 
 
 CPU_TIME = re.compile(r"(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
@@ -362,14 +408,15 @@ PS_DOWN = "(ps did not answer"
 
 
 def proc_table(timeout=TOOL_TIMEOUT):
-    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
+    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time, comm]} (comm may be
+    missing), kids {ppid: [pid]}.
     note is the text of a ps that gave no answer, else ''."""
-    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="], timeout)
+    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time=,comm="], timeout)
     if out.startswith(PS_DOWN):
         return {}, {}, out.strip()
     rows, kids = {}, {}
     for line in out.splitlines():
-        p = line.split()
+        p = line.split(None, 4)
         if len(p) >= 4:
             rows[p[0]] = p
             kids.setdefault(p[1], []).append(p[0])
@@ -391,6 +438,59 @@ def tree_cpu(table, pid):
     return cpu
 
 
+SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcsh")
+# Bandaid. A command that never waits on a child. One with a live child is a shell copy that ran its
+# last command by exec (dash does for `( sleep 100 & sleep 100 )`), so it is no waiter. The residual:
+# `( git fetch & git fetch )` also shows as a non-shell process with a live child, so it reads as a waiter.
+LEAF_COMMANDS = ("sleep",)
+
+
+def runs_shell(pid, comm):
+    """True when the process runs a shell: its ps comm is a SHELLS name, or, on Linux, its interpreter is.
+    A script started by its shebang (`./deploy.sh`, `#!/bin/sh`) has its file name as comm, but the kernel
+    puts the interpreter path in argv[0], the first field of /proc/<pid>/cmdline. A `#!/usr/bin/python3`
+    script reads python3 there, so it is no shell. argv[0] that cannot be read (no /proc on macOS or
+    Windows, the process gone, a kernel thread) is '', so the comm decides alone. Cost: no read when comm
+    is a shell, else one read of the small cmdline file; no process, no file written."""
+    if comm in SHELLS:
+        return True
+    try:
+        with open("/proc/%s/cmdline" % pid, "rb") as f:
+            argv0 = f.read(4096).split(b"\0", 1)[0]
+    except OSError:
+        return False
+    return os.path.basename(argv0.decode("utf-8", "replace")).lstrip("-") in SHELLS
+
+
+def has_waiter(table, pid, include_root=False):
+    """True when a process under pid is a waiter: not a shell, with a child that is still alive. A tool
+    that waits on its children (merge on its git children, a python script on a subprocess) is working
+    while a child runs, though the job prints nothing. A shell is no waiter (runs_shell): `( )`, `$( )`, a
+    loop body and a shebang script are shells, and one that waits on `sleep 100` is the hung shape the
+    watcher ends. A copy that exec'd its last command shows as that command, so a LEAF_COMMANDS process is
+    no waiter either; a copy that exec'd a non-leaf command (`( git fetch & git fetch )`) still reads as one.
+    pid itself is left out, as in tree_cpu, unless include_root: at Stop the job's shell may have exec'd
+    the waiter, so the root is the waiter and is checked too. Cost: the ps table the caller read, and at
+    most one runs_shell read per process with a non-shell comm and a live child, per call (once a second
+    in the watcher, once at Stop)."""
+    rows, kids, _ = table
+    stack, seen = list(kids.get(str(pid), [])), set()
+    if include_root and str(pid) in rows:
+        stack.append(str(pid))
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        children = kids.get(cur, [])
+        stack.extend(children)
+        comm = os.path.basename(rows[cur][4].strip()).lstrip("-") if len(rows[cur]) > 4 else ""
+        if (comm not in SHELLS + LEAF_COMMANDS and any(not rows[c][2].startswith("Z") for c in children)
+                and not runs_shell(cur, comm)):
+            return True
+    return False
+
+
 def cpu_advanced(seen, cpu):
     """True when a process in cpu has more CPU seconds than in seen (a new one counts from 0)."""
     return any(secs > seen.get(p, 0.0) for p, secs in cpu.items())
@@ -407,6 +507,7 @@ def job_state(pid):
         return JobState("")
     state = JobState(table[0][str(pid)][2])
     state.cpu = tree_cpu(table, pid)
+    state.waiter = has_waiter(table, pid)
     return state
 
 
@@ -415,8 +516,8 @@ BUSY_BUDGET = 6.0  # seconds for the whole busy check at Stop; the Stop hook is 
 
 
 def busy_outputs(paths):
-    """The output files in paths whose job has CPU time advancing in a process under it, the Stop-side
-    form of the watcher's CPU-time-as-life rule. posix with lsof only: else none. A job's processes are
+    """The output files in paths whose job has CPU time advancing in a process under it, or a waiter in
+    its tree (has_waiter, root included), the Stop-side form of the watcher's CPU-time and waiter life rules. posix with lsof only: else none. A job's processes are
     found by the output file they hold as stdout or stderr (the job has no pid at Stop); the files are
     the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file.
     One deadline, BUSY_BUDGET, bounds lsof, both ps reads and the wait: each call's timeout is the time
@@ -454,7 +555,7 @@ def busy_outputs(paths):
     busy = set()
     for name, pids in holders.items():
         for root in (p for p in pids if p in after[0] and after[0][p][1] not in pids):
-            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)):
+            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)) or has_waiter(after, root, include_root=True):
                 busy.add(names[name])
     return busy
 
@@ -538,13 +639,16 @@ def held(fd):
         return None
 
 
-def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatched=()):
+def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatched=(), lone_pause=False):
     """Stream LOG and BEAT; report a stall after quiet seconds with no new byte on either and no
     change to any named log (named_logs). The named logs cost one stat each a second, in this loop.
     BEAT is where a quiet-by-design tool (bin/verdict) appends its heartbeat; it may not exist at
     start, so it is opened at the first check that finds it. The wrapper creates both files and opens
     both before the job starts, and the job removes them when it ends; log_fd and beat_fd are those
-    handles, so a job that ends at once loses no output."""
+    handles, so a job that ends at once loses no output.
+    lone_pause is True for a job that is one `sleep N` and one command (lone_pause_command): it is
+    never reported before its first output, on LOG, BEAT or a named log, which is the one command's read
+    after the pause."""
     last = time.monotonic()
     marks = log_marks(also)
     next_check = 0.0
@@ -571,10 +675,12 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatc
                     if cpu_advanced(seen_cpu, cpu):
                         last = time.monotonic()
                     seen_cpu = cpu
+                if getattr(state, "waiter", False):  # a tool waiting on a live child is life, quiet or not
+                    last = time.monotonic()
                 if also:
                     seen = log_marks(also)
-                    if seen != marks:  # the job still writes to a log it named
-                        marks, last = seen, time.monotonic()
+                    if seen != marks:  # the job still writes to a log it named: its pause is over
+                        marks, last, lone_pause = seen, time.monotonic(), False
                 if beat and bf is None:
                     try:
                         bf = open(beat, "rb")
@@ -587,11 +693,12 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatc
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
                 last = time.monotonic()
+                lone_pause = False
             if ended:
                 if bf is not None:
                     bf.close()
                 return 0
-            if time.monotonic() - last >= quiet:
+            if time.monotonic() - last >= quiet and not lone_pause:
                 if not checked:  # the last sample may be a second old: sample again, then decide
                     recheck = True
                     continue
@@ -650,6 +757,7 @@ def hook():
         + " --log-fd 9 --beat-fd 8"
         + "".join(" --also " + q(p) for p in logs)
         + "".join(" --unwatched " + q(p) for p in unresolved)
+        + (" --lone-pause 1" if lone_pause_command(original) else "")
         + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; " + cleanup + "; exit $rc\n} 9< "
         + q(log) + " 8< " + q(beat)
@@ -919,7 +1027,7 @@ def main(argv):
     if argv[:1] == ["--stop"]:
         return stop()
     opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None,
-            "--log-fd": None, "--beat-fd": None}
+            "--log-fd": None, "--beat-fd": None, "--lone-pause": None}
     also, unwatched = [], []
     for i in range(0, len(argv) - 1, 2):
         if argv[i] == "--also":
@@ -932,7 +1040,7 @@ def main(argv):
         print(__doc__)
         return 2
     return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also, opts["--beat"],
-                 opts["--log-fd"], opts["--beat-fd"], unwatched)
+                 opts["--log-fd"], opts["--beat-fd"], unwatched, opts["--lone-pause"] == "1")
 
 
 if __name__ == "__main__":
