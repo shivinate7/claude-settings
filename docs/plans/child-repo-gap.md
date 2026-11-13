@@ -2,7 +2,7 @@
 
 Goal (owner, 2026-11-11 14:05 CST, R44: "on r44 yea agreed A build all 3"): each child repo follows
 claude-settings main, with cited exceptions only. This record is part 1, the measure, and the list of fix lanes it feeds. The other R44 builds (stable-branch action
-pins, a child-CI check for contradicting lines, the one-time sweep) are separate lanes.
+pins, a child-CI check for contradicting lines, the one-time sweep) are separate builds. The seven repo lanes below are that sweep.
 
 Measured on 2026-11-12 from shallow clones, git and file reads only, against claude-settings main at
 36807ad19. Heads read: q_max 32d4373, home 85fbf7e, joyous f510db0, banchi 70c6bc6, degen 959bf79,
@@ -51,7 +51,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 | Contradiction with no exemption | A child contradicts a parent line only by citing it, with the owner's grant | D-705 (CLAUDE.md:55) lets the batch runner merge over a failing `browser.yml` run on main (owner 2026-11-07 13:13 CST). It does not name the parent rule `git-never-merge-failing-ci`. D-705:19 uses a role, "primary orchestrator", that session-tiers does not define. D-499 and D-833 (CLAUDE.md:17-19) lock the lint to a pinned commit with no R44 exemption. | One exemption line, one role rename, one exemption or retirement for the pinned-lint lock. |
 | project-ops | Roster, record branch, briefs, handoffs | A `roadmap` branch (3804a024b) with empty data folders, briefs, handoffs, an outbox and its own CLAUDE.md. `tiers.yml` is a probes workflow. | Scaffold only: no steps recorded, no roster found. |
 | CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:670 and browser.yml:181. 9 pins at 2ac382cc6 (Nov 8), behind (counts above). | All 9 pins move to a stable branch. |
-| Once per batch | PR only for the batch, no push re-run | PR trigger only for `claude/int-batch-*` (checks.yml:14, :123), but push to main still runs checks (:85-86). Browser checks run on dispatch only. | R64: when runners are free. |
+| Once per batch | PR only for the batch (R61-R63, not built) | PR trigger only for `claude/int-batch-*` (checks.yml:14, :123), but push to main still runs checks (:85-86). Browser checks run on dispatch only. | R64: when runners are free. |
 | Shared hooks, skills, lint | Come from claude-settings | No copies. ste-lint and the map skill come through the pin. Three q_max-only hooks. | None beyond the pin. Moving the pin fixes it. |
 
 ### home
@@ -60,7 +60,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 |---|---|---|---|
 | CLAUDE.md | Cites records | 57 lines, zero `rule:` anchors, no stale ids, no contradiction found. Lines 29 and 31 restate the batch-runner and coordinator split. | Possible copy, unconfirmed. |
 | project-ops | Roster, record branch, briefs, handoffs | Roles named (CLAUDE.md:27-29). `origin/roadmap` exists (61687fe). The roster is on claude.ai, not in the repo. | Roster, briefs and handoffs unmeasured.  |
-| CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:170-176. All refs are commit pins. all-jobs-passed at 7b49661 is 1 behind by folder, mutation-report at a781a86 is 4 behind, ste-lint and claude-md-cites are current. The shared-resources lint comes from a raw URL at 1cc47f0 (checks.yml:68-71), behind (counts above) on `lint/`. testflight.yml:135 fetches `bin/ios-ship` at eaaf66e, age unmeasured. | Pins are not a branch. Raw URL stale (behind (counts above) on `lint/`); ios-ship age unmeasured. |
+| CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:170-176. All refs are commit pins. all-jobs-passed at 7b49661 is 1 behind by folder, mutation-report at a781a86 is 4 behind, ste-lint (8bc2898) and claude-md-cites (2deb827) are closer to main than the other pins; their counts are above. The shared-resources lint comes from a raw URL at 1cc47f0 (checks.yml:68-71), behind (counts above) on `lint/`. testflight.yml:135 fetches `bin/ios-ship` at eaaf66e, age unmeasured. | Pins are not a branch. Raw URL stale (behind (counts above) on `lint/`); ios-ship age unmeasured. |
 | Once per batch | PR only for the batch (R61-R63, not built) | Push to main skips only the ios job (decision ci-push-skips-macos). Push, nightly and PR synchronize still run the rest. | R64: when runners are free. |
 | Hooks and skills | Come from claude-settings | Only its own tailscale and green-ssh hooks. | None found. |
 
@@ -110,7 +110,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 
 | Area | Main has | ios-adblock has | Gap |
 |---|---|---|---|
-| CLAUDE.md | Cites records | 8 lines. AGENTS.md is an identical copy. Cites `standing-merge-grant`. Line 6 says protection enforces `all-jobs-passed` for admins too (owner 2026-10-10). | Line 6 restates a protection fact. It matches the classic protection main runs today (enforce_admins true), so it is no contradiction now. It goes into the ruleset sweep. |
+| CLAUDE.md | Cites records | 8 lines. AGENTS.md is an identical copy. Cites `standing-merge-grant`. Line 6 says protection enforces `all-jobs-passed` for admins too (owner 2026-10-10). | Line 6 restates a protection fact. It matches the classic protection main runs today, per the record (enforce_admins true; no live setting was read), so it is no contradiction now. It goes into the ruleset sweep. |
 | project-ops | Roster, record branch, briefs, handoffs | None. 49 heads, no roadmap branch. | Absent. |
 | CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:204. Pins: da8d8073 (checks.yml:108, :173, :204; doc-links.yml:17) behind (counts above), mutation-report a48189d0 (:195) behind (counts above), ci-alarm 59bff081 (:213) behind (counts above). Sparse pin of `bin/verdict` and `hooks/_nowindow.py` at da8d8073. Not wired: claude-md-cites, ste-lint, silent-undo, ruling-kind, ci-done-comment. | Pins, and five unused shared actions. |
 | Once per batch | PR only for the batch (R61-R63, not built) | checks.yml:4-6 runs on PR and push to main, nightly at :9. | R64: when runners are free. |
