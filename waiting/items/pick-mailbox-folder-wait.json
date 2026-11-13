@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:17:00Z",
+  "context": "Goal: other repos' findings reach claude-settings triage.\nProblem (goal): act 6 adds one fixed mailbox folder for claude-settings triage; Mac senders are not measured yet.\nBased on (measured): act 1 (PR #2974) found 0 of 13 outboxes holding claude-settings findings.\nDeparts from: main, which has no triage folder in the mailbox \u2014 the folder waits for the Mac measurement.",
+  "home": "step outbox-aggregate-plan",
+  "id": "pick-mailbox-folder-wait",
+  "kind": "decision",
+  "n": 706,
+  "options": [
+    {
+      "gain": "One build that covers Mac senders too.",
+      "how": "Act 6 starts after the Mac mailbox sign-in is measured.",
+      "id": "wait-mac",
+      "key": "a",
+      "label": "Wait for the Mac measurement (triage's pick)",
+      "lose": "Child findings still need an outbox read until then; the backlog is empty today."
+    },
+    {
+      "gain": "Findings arrive with no outbox read sooner.",
+      "how": "Act 6 starts now; Mac senders get covered once measured.",
+      "id": "build-now",
+      "key": "b",
+      "label": "Build the folder now",
+      "lose": "Mac senders have no coverage until measured."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "lane outbox-aggregate-plan 11:17 CST lane stamp; triage pick 11:15 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Triage mailbox folder: wait",
+  "shown": [
+    {
+      "id": "wait-mac",
+      "key": "a",
+      "label": "Wait for the Mac measurement (triage's pick)"
+    },
+    {
+      "id": "build-now",
+      "key": "b",
+      "label": "Build the folder now"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Wait for the Mac mailbox measurement before building the triage mailbox folder?",
+  "why": "Triage took this pick; it stands unless you choose b."
+}

@@ -1,0 +1,14 @@
+{
+ "id": "child-repo-merge-grants",
+ "title": "Standing merge-grant lines for the 7 sweep repos runner 11 now merges in",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:13 CST Nov 13, item 704 b: batch runner 11 merges in every child repo too. None of the 7 sweep repos has a merge-grant line, and 4 have no CLAUDE.md (coordinator 11:17 CST).",
+ "source": "owner 11:13 CST Nov 13, item 704 b; coordinator 11:17 CST",
+ "note": "A record-writer lane adds a merge-grant line to each repo's CLAUDE.md (session-mailbox, inbox-engine, advisor, brewer-kyc, mailaudit-data, frag-head-beta, note-scrape), in the joyous form: \"the owner grants standing merge authority; who runs the merge: claude-settings record standing-merge-grant\", citing item 704 b. Open PRs there today: inbox-engine #1 (draft docs), frag-head-beta #4 (Oct 12). The cs-repo session tags for runner 11 wait on the owner's typed yes in its session.",
+ "updatedAt": "2026-11-13T11:17:55-06:00"
+}

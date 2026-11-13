@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:17:00Z",
+  "context": "Goal: no stale note sits in a child repo's outbox.\nProblem (goal): degen's outbox holds a Nov 10 coordinator note meant for degen's own triage, not a claude-settings finding.\nBased on (ruling): item 659, your 00:50 CST answer: \"either works\".\nDeparts from: main \u2014 the note is left for degen's triage to clear.",
+  "home": "step outbox-aggregate-plan",
+  "id": "pick-degen-note-own-triage",
+  "kind": "decision",
+  "n": 707,
+  "options": [
+    {
+      "gain": "Each repo keeps its own notes.",
+      "how": "Degen's triage removes its own note when it next runs.",
+      "id": "degen-triage",
+      "key": "a",
+      "label": "Degen's triage clears it (triage's pick)",
+      "lose": "The note sits until degen triage runs."
+    },
+    {
+      "gain": "Gone now.",
+      "how": "A claude-settings session attaches degen and removes the note.",
+      "id": "cs-clears",
+      "key": "b",
+      "label": "A claude-settings session clears it",
+      "lose": "A session edits another repo's record for a note that is not its own."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "lane outbox-aggregate-plan 11:17 CST lane stamp; triage pick 11:15 CST Nov 13; your item 659 answer",
+  "repo": "shivinate7/claude-settings",
+  "short": "Degen's note: its triage clears it",
+  "shown": [
+    {
+      "id": "degen-triage",
+      "key": "a",
+      "label": "Degen's triage clears it (triage's pick)"
+    },
+    {
+      "id": "cs-clears",
+      "key": "b",
+      "label": "A claude-settings session clears it"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Let degen's triage clear its own claude-settings-coordinator.md note?",
+  "why": "Triage took this pick; it stands unless you choose b."
+}

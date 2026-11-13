@@ -1,0 +1,14 @@
+{
+ "id": "stood-pick-closes-on-answer",
+ "title": "A standing pick leaves the Pick stands section only on the owner's answer or a reversal",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:15 CST Nov 13: \"where are all the overridable pick stuff that triage used to provide me in the artifact\". Cause (triage read of the page, 11:20 CST): 39 stood picks closed with no owner answer. 25 closed in the retrospective's Nov 12 audit (12:57 to 13:19 CST), including 6 it found sound, which should have kept standing. No new stood pick reached the page from 12:34 CST Nov 12 to 10:56 CST Nov 13, because #2870 (step pick-reaches-page) never landed. The section showed 2 picks.",
+ "source": "owner 11:15 CST Nov 13, relayed by the coordinator 11:16 CST",
+ "note": "The export check (export_page.py checks) flags an item with stands true, status closed, no answers/<id> and no lastAnswer whose reply does not start \"Reversed\" or \"Withdrawn\". Red case: the 6 sound picks closed at 13:19 CST Nov 12. Restored 11:20 CST Nov 13: 5 reopened (565, 566, 572, 583, 584; 578 left closed, as 699 b superseded it), and triage's two 11:15 CST picks added as 706 and 707. Express (ruling drain-first-hold part 4: it tracks owner work). Pairs with step pick-reaches-page.",
+ "updatedAt": "2026-11-13T11:17:55-06:00"
+}

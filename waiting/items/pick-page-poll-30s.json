@@ -28,7 +28,7 @@
   "repo": "shivinate7/claude-settings",
   "short": "Page data: poll about every 30 s, plus a guard on answers",
   "stands": true,
-  "status": "closed",
+  "status": "open",
   "title": "Page data: poll about every 30 s, plus a guard on answers",
   "why": "A coordinator pick you could not see before."
 }

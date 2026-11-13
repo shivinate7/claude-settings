@@ -28,7 +28,7 @@
   "repo": "shivinate7/claude-settings",
   "short": "CI wait cap: leave the 5-minute overage cache as a known gap",
   "stands": true,
-  "status": "closed",
+  "status": "open",
   "title": "CI wait cap: leave the 5-minute overage cache as a known gap",
   "why": "A coordinator pick you could not see before."
 }
