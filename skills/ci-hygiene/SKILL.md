@@ -149,10 +149,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
       (the lane lint, run as a background command) and prints the log only on a PASS: post the printed
       text as a PR comment. The tool refuses a chain it cannot prove (record
       `pr-review-record`, the fix verifier order).
-   4. The log's print in step 3 ran the lane lint at the merge head and posted its PASS comment. Then hand in again.
+   4. After a fix-check log (step 3), the print already ran the lane lint at the merge head and posted its PASS comment. For a clean merge of main there is no new log, so the lane runs `merge --lane-lint <pr>` itself on the new head, as a background command. Then hand in again.
    A PASS ends review only where the log allows it. A change with `Guard or check: yes` still owes
    round 3 and its net-value test. A PR that merges clean needs no fix verifier and no new log: the log
-   stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
+   stays valid (record `pr-review-record`, clean merge survival). It still needs the lint of item 4, because the
    lint verdict names an exact head. A refused chain means that the lane gets the full review of its
    new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and, after a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
