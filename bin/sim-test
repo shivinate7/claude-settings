@@ -27,8 +27,10 @@
 # this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
 # reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
 # goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
-# On its own boot it deletes the leased device's PosterBoard store (`data/Library/Application Support/PRBPosterExtensionDataStore`)
-# while the device is shut down, before the boot. It never does so on the reuse path or any refusal path.
+# On its own boot it deletes the PosterBoard store (`data/Library/Application Support/PRBPosterExtensionDataStore`) of the
+# leased device, which this run has not booted, before the boot (ruling 10 of decision sim-test-is-the-one-boot-path). The
+# devices root is $HOME/Library/Developer/CoreSimulator/Devices; SIM_TEST_DEVICES_DIR overrides it. It never does so on
+# the reuse path or any refusal path.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
 # it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
@@ -250,7 +252,9 @@ if [ -z "$udid" ]; then
   else
     udid=$granted
     # PosterBoard keeps a home-screen snapshot per fold or launch and never frees them (41 GB in 10 days on a Duo, iOS 27.1;
-    # Degen report, 2026-11-12). The store is rebuilt on boot, so it goes while the device is shut down. rm -rf on a symlink removes the link, not its target.
+    # Degen report, 2026-11-12). The store is rebuilt on boot, so it goes before this run boots the device.
+    # rm -rf removes a symlink at the LAST path component (the store itself) and does not follow it; a symlinked parent
+    # folder is followed.
     rm -rf "${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$udid/data/Library/Application Support/PRBPosterExtensionDataStore"
     # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
     # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
