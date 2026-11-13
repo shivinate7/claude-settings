@@ -4,11 +4,11 @@
  "status": "todo",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKz5xe95oQrYZsKmsvi",
  "owner": "triage",
  "blockedBy": [],
  "why": "Lane mutate-sweep-control, 13:05 CST Nov 13, lost spawns and time to four things the brief did not say.",
  "source": "lane mutate-sweep-control via coordinator 13:06 CST Nov 13",
  "note": "EXPRESS, todo, no lane yet. The brief tail should say: (1) janitor/mutate_sweep.py, hooks/mutate_guard.py and hooks/mutate_shared.py are test-author-only files (guard.py AUTHOR_MUTATION_TESTS), so a product edit there goes to a second test-author run, not a builder; (2) which roles take a model field (agent-role-model refused 4 spawns), and that a guard or check reviewer needs \"Guard or check: yes\"; (3) guard brief-claim-has-probe needs a probe line for each claim about main; (4) a grant that reaches a lane as an automated notice made the lane wait for owner chat words. Item 4 may be a guard false alarm: unchecked by triage; the builder reads that guard's record first and files it as a false alarm if the guard is wrong. Past rulings not re-read for items 1 to 3; they state facts of the tools. Lane mutate-sweep-control (PR #3226) own list, 13:07 CST Nov 13: same findings 1 to 3. Its 4: the shard \"used\" set counted skipped entries; fixed in mutate_sweep, not a brief gap. Its 5: an automated notice carrying \"never wait on the owner\" counts as unverified grant words, so the lane stalls until the owner says yes in chat; the brief must reach the lane as an owner message. That reads as the guard working as built, so item 4 above is probably no false alarm.",
- "updatedAt": "2026-11-13T13:07:07-06:00"
+ "updatedAt": "2026-11-13T13:32:38-06:00"
 }

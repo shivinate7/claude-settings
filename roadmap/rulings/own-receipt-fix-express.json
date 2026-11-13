@@ -1,0 +1,10 @@
+{
+ "id": "own-receipt-fix-express",
+ "at": "2026-11-13T13:32:49-06:00",
+ "title": "The receipt-and-answer fix takes the express lane",
+ "ruling": "Owner 13:32 CST Nov 13, typed in this session, on triage's list of the fix still to build for step close-writes-receipt-answer-gone: \"that fix needs an express lane\". The step starts as an express lane, ahead of the drain (R67 part 4: fixes that track work take the express lane).",
+ "quote": "that fix needs an express lane",
+ "source": "Owner message to triage, 13:32 CST Nov 13. Filed by triage.",
+ "status": "open",
+ "step": "close-writes-receipt-answer-gone"
+}

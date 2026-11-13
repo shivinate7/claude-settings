@@ -1,0 +1,14 @@
+{
+ "id": "stale-cites-3186-followups",
+ "title": "Two follow-ups from PR #3186 ride the next lane that touches lint/stale_cites.py",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 13:33 CST Nov 13: #3186 is done at 496ef5660 and the tool refuses a second fix after a fix check, so its two follow-ups wait for the next stale_cites lane (it overrode the \"same PR\" pick).",
+ "source": "lane cite-range-symbol-match via coordinator 13:33 CST Nov 13",
+ "note": "Todo, rides the next lane that touches lint/stale_cites.py. (1) Note stale011-use-site-cite-fires: a use-site cite for one symbol (\"`CONST_VALUE` is read at src/mod.py:31\", with the constant set at line 60) fires STALE011 (round-3 probe confirmed); closest notes stale011-every-symbol-judged and stale011-body-cite-fires. A note, or a debt if Claude is likely to hit it. (2) Fix the stale comment at lint/test_stale_cites.py:1180-1181 (\"4, not 3\"; AnchorReader.prepare no longer gates on a backtick and .py:N only after the round-2 fix). Note: round 3 is going away (ruling r9), so this reason for waiting may lapse.",
+ "updatedAt": "2026-11-13T13:32:38-06:00"
+}
