@@ -1,0 +1,16 @@
+{
+ "id": "pr-windows-slice-misses-merge",
+ "title": "A Windows-only merge-tool defect passes the batch PR run and lands red on main",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ci-linux-windows-once"
+ ],
+ "why": "On a PR, checks-windows-merge runs only the 18 @windows_slice tests and skips shards 2-5 (checks.yml 1587-1625, decision ci-job-caps cap-75 stopgap). The full Windows merge suite runs only on push to main. Batch 113 passed its PR run and turned main red (ExpressPath).",
+ "source": "coordinator 21:03 CST Nov 12; lane session_013NEJKzMndrATd5V4pyEZoB, fix #3052",
+ "note": "Settled by R62 part 3 (owner 15:55 CST Nov 12, store entry r62): \"the Windows full guard and merge shards move into the batch PR run\". That is the full fix: each suite runs once per batch, on the batch PR. No owner item. The work is in step ci-linux-windows-once (lane session_013NEJL3q82Z6A8yHbNvQ5Nf), part 3. Until part 3 lands, the coordinator's option a (add the ExpressPath tests and any shell-out path test to @windows_slice) is a bandaid. It changes no verdict that R62 has not already ordered, so it may ride with fix #3052. Closes when part 3 merges. Parent: main-red-windows-ci-scope.",
+ "updatedAt": "2026-11-12T21:03:59-06:00"
+}
