@@ -194,16 +194,17 @@ def _f1b_push_reset(w):
 
 
 def _f2_conflict_open(w):
-    """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
-    line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
-    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
+    """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds MAIN_CASE, a test case
+    of its own, at the same place in that file. The builder merges main, and the test file conflicts. The merge is
+    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed. A resolution that drops
+    MAIN_CASE loses a case of main's, so the merge check refuses it as lost."""
     main = w + "-main"
     _test_author_lane(w)
     _must(w, "reset", "-q", "--hard", "lane")
-    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE)
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main moves")
-    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    merged = run_vcs(w, *IDENT, "-c", "merge.conflictStyle=merge", "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
 
@@ -391,7 +392,7 @@ def _strip_test_conflict_markers(w):
     with open(path, encoding="utf-8") as handle:
         kept = [line for line in handle if not line.startswith(("<<<<<<< ", "=======", ">>>>>>> "))]
     text = "".join(kept)
-    if "<<<<<<<" in text or "def test_lane_1" not in text or "# main's newer case" not in text:
+    if "<<<<<<<" in text or "def test_lane_1" not in text or MAIN_CASE not in text:
         sys.exit("fixture setup failed: the markers did not strip to both sides in %r" % w)
     write(path, text)
 
@@ -771,13 +772,13 @@ sh("builder-refuse: a builder's pushed test edit, then a reset back to that push
 sh("builder-refuse: a builder's pushed test edit, then a reset back to that push, is denied at push",
    PUSH, "deny", rule=BDIFF, cwd=_bd_f1b, agent_id="bld1", agent_type="builder")
 
-# A merge that conflicts in a test file and is resolved to the builder's own side is a test-author's to
-# resolve, so it is denied.
+# A merge that conflicts in a test file and is resolved to the builder's own side drops main's test case, so it is
+# denied as lost. The reason names that loss.
 _bd_f2 = diff_repo("bd-f2-conflict", _f2_conflict_merge)
 sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at commit",
-   COMMIT, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder", carries=("missing",))
 sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at push",
-   PUSH, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+   PUSH, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder", carries=("missing",))
 
 # Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
 # diff_refusal_case (the a-product-edit row: author-diff at commit, push and stop).
@@ -936,9 +937,9 @@ def _mixed_mid_merge(w, rel=TEST_A):
     main = w + "-main"
     _test_author_lane(w, rel, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
     _must(w, "reset", "-q", "--hard", "lane")
-    _put_commit(main, [(rel, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
+    _put_commit(main, [(rel, BASE_FILES[TEST_A] + MAIN_CASE), ("src/app.py", "x = 9\n"),
                        ("src/clean.py", "z = 1\n")], "main moves")
-    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    merged = run_vcs(w, *IDENT, "-c", "merge.conflictStyle=merge", "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
     _require_conflict(w, rel)
@@ -1015,11 +1016,12 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that also
 # also conflicts a product file. A builder keeps the rule, so the test path is refused at commit, push and stop.
 # The same outcome without the product conflict is pinned by `bd-f2-conflict`, which resolves by a write.
 sh("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is denied at commit",
-   COMMIT, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+   COMMIT, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder", carries=("missing",))
 sh("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is denied at push",
-   PUSH, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+   PUSH, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder", carries=("missing",))
 add("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is blocked at the first stop",
-    "deny", rule=BDIFF, event="SubagentStop", cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+    "deny", rule=BDIFF, event="SubagentStop", cwd=MIXED_OURS, agent_id="bld1", agent_type="builder",
+    carries=("missing",))
 # Case 6 (green pin): a merge commit that adds a test function neither parent holds. No other case pins this:
 # `_c1_committed` commits main's test text, and `_merge_main_in` leaves the builder's text uncommitted.
 sh("builder-refuse: a builder's merge commit that adds a new test function is denied at commit",
@@ -1263,16 +1265,18 @@ sh("builder-refuse: a builder's merge in progress, with a product edit staged an
    agent_type="builder")
 _bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
 sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
-   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder",
+   carries=("missing",))
 
 # The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
 # the command runs in: a conflicted test file left as git wrote it is denied, as is one rewritten to the builder's side.
+# The rewritten row names the lost case in its reason: a deny with no class would hold even if the subfolder path broke.
 sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is denied at "
    "commit by builder-diff from a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_left, "src"),
    agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
    "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
-   agent_type="builder")
+   agent_type="builder", carries=("missing",))
 
 # A builder's own edit to a test file that a clean merge of main took in is refused, in an open merge and in a merge
 # commit. Main's own change, merged clean and left alone, is allowed: the control row below pins that.
@@ -1316,12 +1320,13 @@ sh("builder-refuse: a builder's open merge, with a test file still holding git's
 # A builder's resolution of a conflicted test file to main's side, or to a blend of both sides, is refused by
 # builder-diff, as its resolution to its own side is (_open_test_conflict_edited).
 _bd_m_keep_main = diff_repo("bd-m-keep-main", lambda w: _resolve_test_conflict_open(
-    w, BASE_FILES[TEST_A] + "# main's newer case\n"))
+    w, BASE_FILES[TEST_A] + MAIN_CASE))
 sh("builder-refuse: a builder's merge in progress that resolves a conflicted test file to main's side is denied at commit",
    COMMIT, "deny", rule=BDIFF, cwd=_bd_m_keep_main, agent_id="bld1", agent_type="builder")
+# Keeping both sides, with git's markers stripped, loses no test case of either parent, so the merge route allows it.
 _bd_m_blend = diff_repo("bd-m-blend", _strip_test_conflict_markers)
 sh("builder-refuse: a builder's merge in progress that strips git's markers from a conflicted test file and keeps both "
-   "sides is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
+   "sides is allowed at commit", COMMIT, "allow", cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
 
 # A builder's edit to sub/tests/test_b.py is refused when it runs from sub/ with `diff.relative` set, as it is under the
 # default config. With diff.relative, git prints the path relative to sub/ (tests/test_b.py), so the rows check that the
