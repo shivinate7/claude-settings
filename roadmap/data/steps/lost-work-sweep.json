@@ -1,0 +1,14 @@
+{
+ "id": "lost-work-sweep",
+ "title": "Each batch review lists every lane PR that work could be lost on",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 09:50 CST Nov 13: \"do we have somethign checking for all the lost work?\" Today only the retrospective's one-time audit (09:31 CST) checks it; part 3 of step handin-cannot-drop covers only done PRs not batched after 6 h. Tonight runner 10 found 111 done PRs never batched.",
+ "source": "retrospective 09:51 CST Nov 13, owner 09:50 CST",
+ "note": "At each batch review the batch runner lists every open lane PR in one of five states: (a) done and in no batch for more than 6 h; (b) record open and the lane not told; (c) no review record and the lane idle more than 12 h; (d) lane archived, PR still open; (e) PR on a step marked doing with the lane gone. Each row goes to the session that owns its fix. Cost: one merge --reviewed run plus the live file, inside the batch review already running; no new process or log. Test cases: #2816, #2848, #3057 (a); #2917, #2817, #2957 (b); #2963 (c); #2932 (d). Builds on handin-cannot-drop parts 1-3 (same reader); kept separate because (b)-(e) read lanes, not batches. For the owner to rank.",
+ "updatedAt": "2026-11-13T09:52:21-06:00"
+}
