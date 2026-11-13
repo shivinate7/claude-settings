@@ -2062,6 +2062,8 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- read-back-other-pr-newest: `merge --review-record --read-back` skips a record that parses for another PR, so an older good record can win. `--reviewed` reads the newest comment and calls it bad. The merge gate still refuses.
+- read-back-edited-record: `--read-back` PASS does not check that the record was edited after posting, which `--reviewed` refuses; the PASS line says only that it parses.
 - stamp-readme-wait-item: actions/stamp/README.md item 4 says "The wait leaves out a check". confirm has no wait under the lock now, so the word may be stale. Unverified.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR (`_guard_section_sources` returns no file on a parse error, or when `rule_audit._section_dir` finds no folder). Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. The owner rule (`scratchpad_owner_write` in `hooks/guard.py`) keys its records per file. Decision: scratchpad-owner (the pattern).
