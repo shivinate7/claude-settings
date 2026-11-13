@@ -844,6 +844,30 @@ class StaleRefReadTests(RepoCase):
                          "a stale ref with no network counted as a store problem")
 
 
+class StaleRefNoteTests(RepoCase):
+    """When the freshness check cannot run, because it raises or its module cannot be imported, the store read says so:
+    the session block carries "read as of unknown: <why>". A read is never silent about how fresh it is."""
+
+    def store_with_open_entry(self, name):
+        return self.make_repo(name, store=ruling_files({"r-1": entry("r-1")}))
+
+    def test_a_check_that_raises_is_said_in_the_session_block(self):
+        repo = self.store_with_open_entry("raises")
+        helper = mock.Mock()
+        helper.fresh_ref.side_effect = RuntimeError("boom")
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of unknown:" in line for line in lines),
+                        "a raising freshness check left the session block silent: %r" % lines)
+
+    def test_a_check_that_cannot_be_imported_is_said_in_the_session_block(self):
+        repo = self.store_with_open_entry("no-import")
+        with mock.patch.dict(sys.modules, {"roadmap_ref": None}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of unknown:" in line for line in lines),
+                        "an unimportable freshness check left the session block silent: %r" % lines)
+
+
 def tearDownModule():
     for folder in _RUN:
         shutil.rmtree(folder, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
