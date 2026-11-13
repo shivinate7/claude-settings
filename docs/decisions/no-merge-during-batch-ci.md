@@ -16,7 +16,7 @@ The owner's reading, Nov 1 20:54 CST: the rule keeps main from moving under a ru
 - The preview prints a `batch:` line.
 - Required names: the repo's pinned `merge.requiredChecks` list, else the branch protection. The guard's ruling (orchestrator, Oct 28): with no branch protection (HTTP 404), every reported pending check on the other ready PR counts. The tool refuses a base with no protection and no pinned list.
 - A failed read refuses. Unknown is red, as in decision ci-unknown-is-red (an unknown read in CI is red).
-- The refusal names the other PR, and the check with its link or the workflow that runs. It says to wait. The session that watches the other PR wakes when its run ends. A red run also posts the CI-done comment (rule git-ci-done-comment-wakes).
+- The refusal names the other PR, and the check with its link or the workflow that runs. It says to wait. `--express` keeps the brake and adds the prose-only entry rule (ruling R59 part 5, a ruled prose change skips the batch queue and runs only the checks that read its files; decision owner-override). The session that watches the other PR wakes when its run ends. A red run also posts the CI-done comment (rule git-ci-done-comment-wakes).
 - No reason flag lifts this refusal in the tool.
 
 Not counted:
