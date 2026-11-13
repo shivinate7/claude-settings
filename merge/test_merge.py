@@ -14557,16 +14557,17 @@ class ReleaseCheck(ReviewEnv):
         _, err = self.assert_usage_error("--release-check", "7", "--lint", lint)
         self.assertRegex(self.error_line(err), self.SHA_RULE, f"the refusal of --lint {lint} does not name the sha rule: " + err)
 
-    def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, **reads):
+    def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, extra=(), **reads):
         """-> (rc, lines, err, host) of `merge --release-check numbers`. Each pull request is open, reviewed and lint-passed unless the argument
-        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head."""
+        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head.
+        `extra` holds more flags for the run, such as --config."""
         numbers = list(numbers)
         pulls = [self.live(n) for n in numbers] if pulls is None else pulls
         comments = [self.review(n) for n in numbers] if comments is None else comments
         heads = {p["number"]: p["head"]["sha"] for p in [*pulls, *closed]}
         lint = self.lints(numbers, heads=heads) if lint is None else lint
         host = ReleaseHost(pulls, closed=closed, broken=broken, gh_missing=gh_missing, comments=list(comments), **reads)
-        rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, host=host)
+        rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, *extra, host=host)
         self.assertIn(rc, (0, 1), f"merge refused the --release-check line (rc {rc}):\n{err}")  # the flag is accepted before any line is read
         return rc, out.splitlines(), err, host
 
@@ -15082,12 +15083,12 @@ class ReleaseCheck(ReviewEnv):
                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
 
-    def claim_only_release(self, fx, claim, lint_head, record_head, lint=None):
+    def claim_only_release(self, fx, claim, lint_head, record_head, lint=None, extra=()):
         """-> (rc, lines, err) of --release-check on pull request 7 at the claim commit `claim`: its lint PASS on `lint_head`, its one record for
-        `record_head`, and the commits, trees and compares of fx. `lint` replaces the lint flags."""
+        `record_head`, and the commits, trees and compares of fx. `lint` replaces the lint flags; `extra` goes to the run, as release does."""
         flags = self.lints([7], heads={7: lint_head}) if lint is None else lint
         rc, lines, err, _ = self.release([7], lint=flags, pulls=[self.live(7, head=claim)], comments=[self.review(7, head=record_head)],
-                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main, extra=extra)
         return rc, lines, err
 
     def test_g_a_claim_only_head_carries_the_lint_of_the_reviewed_head_it_stacks_on(self):
@@ -15115,6 +15116,37 @@ class ReleaseCheck(ReviewEnv):
         self.base_tip(fx.main2)
         claim = self.claim_over(fx.fixed, {"a.txt": "claimed\n"})
         self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
+
+    ALT_CONFIG = ".github/alt-stamp.json"  # a second stamp config on origin's main, beside the default .github/stamp.json
+
+    def config_folder_claim(self):
+        """-> (fx, claim). origin's main gets ALT_CONFIG, the default config with its one kind moved to docs/alt, and the default config stays as
+        it is, so it names no docs/alt. `claim` is a claim commit over the lint-passed head that writes docs/alt/second.md."""
+        fx = self.real_commits()
+        alt = dict(CONFIG, kinds=[dict(CONFIG["kinds"][0], folder="docs/alt")])
+        base = self.git_commit(fx.main2, {self.ALT_CONFIG: json.dumps(alt)})
+        self.base_tip(base)
+        self.facts(fx, [base])
+        claim = self.claim_over(fx.fixed, {"docs/alt/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        return fx, claim
+
+    def test_j_release_check_config_file_names_the_folder_the_claim_carry_reads(self):
+        # Catches: --release-check reading the claim carry under the default config, since main hands release_check no config (cfgrel is None).
+        # The claim in docs/alt is refused, though --config names docs/alt, and the lint PASS on the head it stacks on carries under that config.
+        fx, claim = self.config_folder_claim()
+        self.assertNotIn("docs/alt", sh(self.co, "git", "show", "origin/main:.github/stamp.json"),
+                         "scope: the default config names docs/alt, so the case below proves nothing about --config")
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim, extra=("--config", self.ALT_CONFIG))
+        self.assertEqual(lines, ["#7 PASS"], "--config names docs/alt, but the claim's lint carry read another config: " + err)
+        self.assertEqual(rc, 0, err)
+
+    def test_k_without_config_the_default_names_no_folder_so_the_claim_is_refused(self):
+        # Control for the case above: the same origin and claim, with no --config. The default config names no docs/alt, so the lint is not carried.
+        fx, claim = self.config_folder_claim()
         rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)
         self.assertEqual(rc, 1, err)
         self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
