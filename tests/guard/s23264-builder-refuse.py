@@ -1729,4 +1729,170 @@ sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top
    COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
 
 
+# =========================================================================== amend of a commit the builder did not write
+# A message-only amend keeps the tree of the commit it replaces. When no writing entry of the builder's reflog
+# landed that commit, its test lines are another author's, so the amend is not read. An amend that edits a test,
+# or that amends a test commit the builder made, still holds the builder's own change.
+
+
+def _reset_to_lane(w):
+    """The reach the first inherited cases use: a hard reset to the lane tip."""
+    _must(w, "reset", "-q", "--hard", "lane")
+
+
+def _amend_inherited_msg(w, reach=_reset_to_lane, amends=("reworded by the builder",)):
+    """Cut at main. The builder reaches the lane tip, which holds the test-author's commit, by `reach`, then
+    rewords that commit's message only, once for each message in `amends`. Each amend keeps the inherited tree."""
+    _test_author_lane(w)
+    reach(w)
+    for message in amends:
+        _must(w, *IDENT, "commit", "-q", "--amend", "-m", message)
+
+
+def _amend_inherited_edit(w):
+    """Cut at main. The builder reaches the lane tip, edits the test file to the trimmed text, and amends. The
+    amend changes the tree of the inherited commit, so it holds the builder's own edit."""
+    _incident(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "reworded with a test edit")
+
+
+def _own_test_commit(w):
+    """The builder's own test edit, committed on its branch."""
+    _put_commit(w, [(TEST_A, BASE_FILES[TEST_A] + "def test_own():\n    assert 8\n")], "own test edit")
+
+
+def _newer_main(w):
+    """Commits a product change on main, so a rebase of the builder's commit onto main replays it."""
+    _put_commit(w + "-main", [("src/app.py", "x = 9\n")], "newer main")
+
+
+def _amend_own_msg(w, move=None):
+    """Cut at main. The builder commits its own test edit, then `move` (when given) changes HEAD, then it
+    rewords that commit's message only. The amend replaces the own commit, and its tree still holds the edit."""
+    _own_test_commit(w)
+    if move:
+        move(w)
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
+
+
+def _amend_replayed_own_msg(w):
+    """Cut at main. The builder commits its own test edit, main moves on, and the builder rebases onto it. The
+    pick writes a new sha, which the reflog records as `rebase (pick)`. The builder then rewords that commit's
+    message only, and the amend still holds the edit."""
+    _own_test_commit(w)
+    _newer_main(w)
+    _must(w, *IDENT, "rebase", "-q", "main")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
+
+
+def _amend_cherry_own_msg(w):
+    """Cut at main. The builder commits its own test edit, then cherry-picks it onto a side branch that holds a
+    product commit. The product commit makes the pick a new commit: without it, a pick in the same second as the
+    original has the same sha, and the original still reaches HEAD. The builder then rewords that commit's message
+    only, and the amend still holds the edit."""
+    _own_test_commit(w)
+    _must(w, "switch", "-q", "-c", "side", "main")
+    _product_commit(w)
+    _must(w, *IDENT, "cherry-pick", "work")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded on side")
+
+
+def _switch_away_and_back(w):
+    """A branch switch off the own commit and back to `work`. Each switch is a checkout entry in HEAD's reflog."""
+    _must(w, "branch", "-q", "tmp")
+    _must(w, "switch", "-q", "tmp")
+    _must(w, "switch", "-q", "work")
+
+
+def _reset_away_and_back(w):
+    """A hard reset of `work` to main, then a hard reset back to the own commit's sha. The second reset hands
+    HEAD the builder's own commit."""
+    own = run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+    _must(w, "reset", "-q", "--hard", "main")
+    _must(w, "reset", "-q", "--hard", own)
+
+
+def _redeliver_own(w):
+    """Keeps the own commit on a branch, resets `work` to main, then fast-forwards `work` onto that branch. The
+    fast-forward re-delivers the builder's own test commit."""
+    _must(w, "branch", "-q", "keep")
+    _must(w, "reset", "-q", "--hard", "main")
+    _must(w, "merge", "-q", "--ff-only", "keep")
+
+
+def _checkout_lane(w):
+    """Checks `work` out onto the lane tip: a checkout reach."""
+    _must(w, "checkout", "-q", "-B", "work", "lane")
+
+
+def _merge_lane_ff(w):
+    """Fast-forwards `work` onto the lane tip: a merge that writes no commit."""
+    _must(w, "merge", "-q", "--ff-only", "lane")
+
+
+def _amend_detached_own_msg(w):
+    """Cut at main. The builder commits its own test edit, detaches HEAD, and rewords that commit's message only
+    while detached. The push names `work`, so `work` is moved to the amended commit."""
+    _own_test_commit(w)
+    _must(w, "checkout", "-q", "--detach")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
+    _must(w, "branch", "-q", "-f", "work", "HEAD")
+
+
+# An inherited commit's message-only amend keeps the tree it had: allowed at commit and at push.
+_bd_amend_msg = diff_repo("bd-amend-inherited-msg", _amend_inherited_msg)
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit is allowed at commit",
+   COMMIT, "allow", cwd=_bd_amend_msg, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit is allowed at push",
+   PUSH, "allow", cwd=_bd_amend_msg, agent_id="bld1", agent_type="builder")
+# An amend of the inherited commit that also edits the test file holds the builder's own change: denied.
+_bd_amend_edit = diff_repo("bd-amend-inherited-edit", _amend_inherited_edit)
+sh("builder-refuse: a builder's amend of an inherited test-author commit that also edits a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_edit, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's amend of an inherited test-author commit that also edits a test file is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_edit, agent_id="bld1", agent_type="builder")
+# A message-only amend of the builder's own test commit still holds its own test edit: denied.
+_bd_amend_own = diff_repo("bd-amend-own-msg", _amend_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of its own test commit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
+# A rebase pick and a cherry-pick each copy the own commit under a new sha. Their message-only amends still hold the edit.
+_bd_amend_replayed = diff_repo("bd-amend-replayed-own-msg", _amend_replayed_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit, rebased onto a newer main, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_replayed, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of its own test commit, rebased onto a newer main, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_replayed, agent_id="bld1", agent_type="builder")
+_bd_amend_cherry = diff_repo("bd-amend-cherry-own-msg", _amend_cherry_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit, cherry-picked onto another branch, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_cherry, agent_id="bld1", agent_type="builder")
+# Reaches that hand HEAD the builder's own commit again: a switch away and back, a reset from another ref, a
+# detached HEAD, and a fast-forward that re-delivers the commit. Each amend still holds the own test edit: denied.
+_bd_amend_switch = diff_repo("bd-amend-own-switch-msg", lambda w: _amend_own_msg(w, move=_switch_away_and_back))
+sh("builder-refuse: a builder's message-only amend of its own test commit, after a switch away and back, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_switch, agent_id="bld1", agent_type="builder")
+_bd_amend_reset = diff_repo("bd-amend-own-reset-msg", lambda w: _amend_own_msg(w, move=_reset_away_and_back))
+sh("builder-refuse: a builder's message-only amend of its own test commit, after a reset to it from another ref, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_reset, agent_id="bld1", agent_type="builder")
+_bd_amend_detached = diff_repo("bd-amend-own-detached-msg", _amend_detached_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit, made on a detached HEAD, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_detached, agent_id="bld1", agent_type="builder")
+_bd_amend_redeliver = diff_repo("bd-amend-own-redeliver-msg", lambda w: _amend_own_msg(w, move=_redeliver_own))
+sh("builder-refuse: a builder's message-only amend of its own test commit, re-delivered by a fast-forward merge, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_redeliver, agent_id="bld1", agent_type="builder")
+# Inherited reaches: a second message-only amend, a checkout and a fast-forward merge each keep the inherited
+# tree, so each amend is allowed. The fast-forward case pins the Fast-forward exception in the writing entries.
+_bd_amend_twice = diff_repo("bd-amend-inherited-twice-msg", lambda w: _amend_inherited_msg(
+    w, amends=("reworded by the builder", "reworded by the builder again")))
+sh("builder-refuse: a builder's second message-only amend of an inherited test-author commit, reached by a reset, is allowed at push",
+   PUSH, "allow", cwd=_bd_amend_twice, agent_id="bld1", agent_type="builder")
+_bd_amend_checkout = diff_repo("bd-amend-inherited-checkout-msg", lambda w: _amend_inherited_msg(w, reach=_checkout_lane))
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit, reached by a checkout of the lane, is allowed at push",
+   PUSH, "allow", cwd=_bd_amend_checkout, agent_id="bld1", agent_type="builder")
+_bd_amend_ff = diff_repo("bd-amend-inherited-ff-msg", lambda w: _amend_inherited_msg(w, reach=_merge_lane_ff))
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit, reached by a fast-forward merge, is allowed at push",
+   PUSH, "allow", cwd=_bd_amend_ff, agent_id="bld1", agent_type="builder")
+
+
 # =========================================================================== failing open
