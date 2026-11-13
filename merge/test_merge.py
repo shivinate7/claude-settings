@@ -7381,6 +7381,44 @@ class DebtRetire(Env):
         self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
         self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
 
+    def stub_retire_check(self):
+        """Stand in for check_debt_retire.check: each call is recorded, and it finds nothing. -> the list of recorded calls."""
+        import check_debt_retire
+        calls = []
+
+        def check(*args, **kwargs):
+            calls.append((args, kwargs))
+            return []
+
+        patch = unittest.mock.patch.object(check_debt_retire, "check", check)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def green_ci_closes_a_debt(self):
+        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+        self.assertIn("D\tdocs/debts/retire-target.md", sh(self.co, "git", "diff", "--name-status", "origin/main", "origin/feat"),
+                      "scope: feat does not close the debt, so there is no close to judge")
+        self.assertEqual(self.host.head_state(7), "green", "scope: the host does not report green CI")
+
+    def test_confirm_with_green_ci_never_calls_the_retire_check(self):
+        """The Retire run moved into CI, so a host that reports green CI is not asked for the check at confirm, before the claim or after its wait."""
+        self.pr_on_debt(1)  # the close's own Retire test is red: merge would refuse it if it still ran the check
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, "scope: confirm did not reach its merge: " + out)
+        self.assertTrue(getattr(self.host, "merged", False), "scope: confirm did not merge")
+        self.assertEqual(calls, [], "confirm called the Retire check with green CI")
+
+    def test_preview_with_green_ci_never_calls_the_retire_check(self):
+        self.pr_on_debt(1)
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(calls, [], "preview called the Retire check with green CI")
+
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
     in every preview. A closed or merged PR is refused, and the check never runs on it."""
