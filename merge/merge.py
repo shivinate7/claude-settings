@@ -20,9 +20,11 @@
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push. The batch brake still holds.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
-                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"] [--post]
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
-                          sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
+                          sha. Posts nothing unless --post: the lane posts it as a PR comment. --post (not in a cloud session) posts the record, reads it back and prints
+                          PASS or FAILED with the reason (exit 1) and the exact body when the post failed. In a cloud session --post posts nothing and prints FAILED: post the body with
+                          the GitHub MCP tool add_issue_comment, then run --read-back. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
@@ -33,6 +35,10 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
+  merge <pr> --review-record --head SHA --kind K --guard yes|no --read-back [--round ...]
+                          post nothing; read the PR's review record comments back and print PASS (exit 0) only when one parses as this PR's record at SHA,
+                          else FAILED and the reason (exit 1): no record comment found, the newest does not parse (its first bad line is named), or it is for another head.
+                          Skips the restart and fix-check rules, which guard a post. --read-back and --post cannot be given together.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
@@ -4138,7 +4144,13 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
 def parse_review(text):
-    """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
+    """-> the record review_parse reads from `text`, or None when `text` is not a well-formed record."""
+    return review_parse(text)[0]
+
+def review_parse(text):
+    """-> (record, bad): record as below, or None with `bad` the first line the parser refused (a short note when no one line is at fault).
+    The one home of the record's form, and of the line to blame when it does not parse.
+    record is {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
     optional `Grant: #<pr>, <REVIEW_GRANT>` line directly after Guard or check, whose PR is the record's own; with it the rounds must reach round REVIEW_LAST_ROUND + 1, and without it
     they stop at REVIEW_LAST_ROUND. `fix` is None, or the one optional
@@ -4150,18 +4162,26 @@ def parse_review(text):
         lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
         lines.pop()
-    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
-        return None
+    if len(lines) < 7:
+        return None, f"the record has {len(lines)} lines, fewer than 7"
+    if lines[0] != REVIEW_MARKER:
+        return None, lines[0]
+    if lines[-1] != REVIEW_CI_LINE:
+        return None, lines[-1]
     pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
     fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
     net = re.fullmatch(r"Net value: (.+)", lines[-2])
     if not all(fields) or not net:
-        return None
+        return None, next((line for m, line in zip(fields, lines[1:5]) if not m), lines[-2])
     n, head, kind, guard = (m.group(1) for m in fields)
-    if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
-        return None
+    if kind not in REVIEW_KINDS:
+        return None, lines[3]
+    if guard not in REVIEW_GUARDS:
+        return None, lines[4]
+    if net.group(1) not in REVIEW_NETS:
+        return None, lines[-2]
     if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
-        return None
+        return None, lines[4]
     g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
     bound = grant_pr(g.group(1)) if g else None
     grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
@@ -4169,24 +4189,73 @@ def parse_review(text):
     rounds, last, fix = [], 0, None
     for line in lines[5 + bool(grant):-2]:
         if fix:  # nothing follows the fix check line
-            return None
+            return None, line
         f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
         if f:
             if f.group(1) == head:  # the fix diff would be empty
-                return None
+                return None, line
             fix = f.group(1, 2, 3, 4)
             continue
         m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
         if not m:
-            return None
+            return None, line
         i = int(m.group(1))
         if i not in (last, last + 1) or i < 1 or i > ceiling:
-            return None
+            return None, line
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
     if grant and last != ceiling:  # a grant that holds no granted round is not a record
-        return None
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
+        return None, lines[5]
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}, None
+
+# A cloud session's proxy refuses the comment POST (see default_lock), so its record goes out through the GitHub MCP tool.
+REVIEW_CLOUD_POST = "post the lines above with the GitHub MCP tool add_issue_comment, then run again with --read-back"
+
+def review_read_back(h, pr, since, head):
+    """-> None when one of pull request `pr`'s review record comments parses as its own record at `head`, else why none does. A record for another
+    pull request is no record here. When several fail, the newest one gives the reason, since it is the one to fix."""
+    seen = []
+    for body in h.review_comments(since).get(pr, []):
+        rec, bad = review_parse(body)
+        if rec and rec["n"] != pr:
+            continue
+        if rec and rec["head"] == head:
+            return None
+        seen.append((rec, bad))
+    if not seen:
+        return f"no record comment found on pull request #{pr}"
+    rec, bad = seen[-1]
+    if rec:
+        return f"the newest record that parses is for head {rec['head'][:9]}, not the head {head[:9]}"
+    return f"the newest record does not parse; its first bad line is: {bad[:200]}"
+
+def review_verdict(h, pr, since, head):
+    """Read the record back for `review_read_back` and print one verdict line, PASS on stdout and FAILED on stderr. -> the exit code."""
+    why = review_read_back(h, pr, since, head)
+    if why:
+        print(f"FAILED: {why}", file=sys.stderr)
+        return 1
+    say(f"PASS: pull request #{pr} has a review record that parses at head {head[:9]}")
+    return 0
+
+def review_post(h, pr, since, head, body):
+    """Post `body` as a comment on pull request `pr`, then read it back. A failure prints the exact body, so the lane can post it by another route.
+    -> the exit code."""
+    cloud = os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+    if cloud:
+        reason = "a cloud session has no comment POST, so --post posted nothing"
+    else:
+        try:
+            h.post_comment(pr, body)
+        except Stop as e:
+            reason = " ".join(str(e).split())
+        else:
+            return review_verdict(h, pr, since, head)
+    say(body.rstrip("\n"))
+    print(f"FAILED: {reason}", file=sys.stderr)
+    if cloud:
+        print(f"merge: {REVIEW_CLOUD_POST}.", file=sys.stderr)
+    return 1
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -5514,6 +5583,8 @@ def build_parser():
     p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
+    p.add_argument("--read-back", action="store_true", help="with --review-record: post nothing; read the pull request's review record comments back and print PASS only when one parses for this pull request at --head, else FAILED and the reason (exit 1)")
+    p.add_argument("--post", action="store_true", help="with --review-record: post the record as a comment (not in a cloud session, which has no comment POST: post it with the GitHub MCP tool add_issue_comment, then run --read-back), then read it back as --read-back does")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
@@ -5524,6 +5595,10 @@ def main(argv, host=None, lock=None, hosts=None):
     p = build_parser()
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
+    if (a.read_back or a.post) and not a.review_record:
+        p.error("--read-back and --post go with --review-record")
+    if a.read_back and a.post:
+        p.error("--read-back and --post cannot be given together: --post reads back after it posts")
     if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.grant or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record (--head also goes with --confirm)" if a.grant
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
@@ -5722,7 +5797,10 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
+            since = info.get("created") or "1970-01-01T00:00:00Z"
+            if a.read_back:  # posts nothing, so the restart and fix checks below, which guard a post, do not apply
+                return review_verdict(h, a.pr, since, a.head)
+            earlier = [e for e in (parse_review(b) for b in h.review_comments(since).get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
             earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
             new_top = max((r[0] for r in a.round), default=0)
             # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
@@ -5759,8 +5837,12 @@ def main(argv, host=None, lock=None, hosts=None):
                 if not ok:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
-            print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
+            body = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)
+            if a.post:
+                return review_post(h, a.pr, since, a.head, body)
+            say(body.rstrip("\n"))
+            hint = REVIEW_CLOUD_POST if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else "run again with --post to post it and read it back, or post the lines above as a comment and run again with --read-back"
+            print(f"merge: nothing was posted; {hint}.", file=sys.stderr)
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
