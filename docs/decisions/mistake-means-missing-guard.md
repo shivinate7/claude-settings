@@ -31,7 +31,7 @@ False-alarm measure, 2026-11-06, on head d96d8821a: 41 real reports with a Devia
 
 ## The promise guard
 
-The report guard (`promise_problem`) refuses a reply line that promises "from now on" and names only a handoff as its home. A PR, a commit, `step:<slug>` or a repo path on the line clears it. It runs on every turn, landed or not. Incident: roadmap step export-after-page-write. Cost: one regex pass over the reply per Stop, inside the Stop hook process. It starts no process and writes no file. Known limits are in the debt notes (promise-guard-limits).
+The report guard (`promise_problem`) refuses a reply line that promises "from now on" and names no home other than a handoff's. A PR, a commit, `step:<slug>` or a repo path on the line clears it. It runs on every turn, landed or not. Harm it stops: a promise whose only home is a handoff has no check behind it, so the promised act can be skipped with nothing to catch it. Incident: roadmap step export-after-page-write, where a page writer promised that every wake which changes the page ends with an export, and named only its handoff as the home. Cost: one regex pass over the reply per Stop, inside the Stop hook process. It starts no process and writes no file. False-alarm measure: unmeasured. Known limits are in the debt notes (debt promise-guard-limits, the guard's known misses).
 
 ## The inbox incident's guard
 

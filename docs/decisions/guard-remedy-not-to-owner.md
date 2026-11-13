@@ -124,6 +124,19 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TA
 - The route row says the act works on this surface, so it is not the owner's. The refusal names the row and the route. Do the act through that route.
 - The route id is in no row of the route rows file (the refusal names the id): cite an id the file holds, or name a tool refused this session in backticks.
 
+### Promise guard (any reply)
+
+Text: `PROMISE_REASON`. Rule `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).
+
+- The refusal lists each reply line that says "from now on" and names only a handoff as its home. A handoff is no mechanism.
+- For each listed line, do one of these:
+  - Build the check or hook now. Cite its PR or commit on the line.
+  - Queue it as `step:<slug>`, a roadmap step that will build it. Put that on the line.
+  - Drop the promise.
+- A line that reports what a handoff said is no promise, when the subject is "the" or "that" handoff, optionally "previous". Any other subject ("my", "this session's", "the session") makes the promise the session's own. A report cuts only its reported "from now on". A later promise on that line is still checked.
+- A promise inside quotes or backticks is not checked. A handoff named inside quotes or backticks still counts as the home. The label "Handoff gave:" names no home.
+- A PR or commit reference (such as `#1234` or a commit hash), `step:<slug>`, or a repo path on the line clears it.
+
 ### Refusal guard (any reply)
 
 Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reaches the owner).
