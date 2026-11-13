@@ -3016,8 +3016,8 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
                 self.assertNotEqual(rc, 0, "a record with a PASS round printed past a lint FAIL: " + out + err)
                 self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed past a lint FAIL: " + out)
 
-    def test_a_fix_check_pass_on_fail_only_rounds_still_lints_once_as_it_does_today(self):  # pins today's tool, not a ruling
-        # A fix check's PASS line still reaches the lint today, so the lint's FAIL refuses. The FAIL-only ruling names no fix check line.
+    def test_a_fix_verifier_pass_on_fail_only_rounds_still_lints_once_as_it_does_today(self):  # pins today's tool, not a ruling
+        # A fix verifier's PASS line still reaches the lint today, so the lint's FAIL refuses. The FAIL-only ruling names no fix verifier line.
         self.use_ci_job(FAILING, 1)
         reviewed = self.head()
         self.commit_feat({"fix-step.txt": "the fix after the FAIL round\n"})
@@ -3026,7 +3026,7 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
         fix = f"{reviewed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
         rc, out, err = self.record("7", "--review-record", *self.round_flags("1:reviewer:sonnet:FAIL", extra=("--fix-check", fix)))
         self.assert_one_lint_run("main", head, out + err)
-        self.assertNotEqual(rc, 0, "a fix check PASS on FAIL-only rounds printed past a lint FAIL: " + out + err)
+        self.assertNotEqual(rc, 0, "a fix verifier PASS on FAIL-only rounds printed past a lint FAIL: " + out + err)
         self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed past a lint FAIL: " + out)
 
     def test_a_fail_only_record_refused_for_its_state_runs_no_lint(self):  # a control: the refusals already come before the lint
@@ -3049,7 +3049,7 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
         self.host.changed = [("notes/todo.txt", "modified", 1)]  # not a doc, so --kind docs-only is false
         self.assert_fail_only_refused_before_lint(self.round_flags("1:reviewer:sonnet:FAIL", kind="docs-only"), "Kind:")
 
-    def test_a_fail_only_record_with_a_fix_check_and_no_earlier_record_runs_no_lint(self):  # a control
+    def test_a_fail_only_record_with_a_fix_verifier_and_no_earlier_record_runs_no_lint(self):  # a control
         self.use_ci_job(PASSING, 0)
         fix = f"{'e' * 40}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
         self.assert_fail_only_refused_before_lint(self.round_flags("1:reviewer:sonnet:FAIL", extra=("--fix-check", fix)), "--fix-check: the reviewed head must be")
