@@ -16136,6 +16136,16 @@ class HostCommitFiles(unittest.TestCase):
                 with self.assertRaises(merge.Stop):
                     host.commit_files(self.SHA)
 
+    def test_a_files_list_of_300_stops_as_possibly_truncated_and_299_is_read(self):
+        # GitHub caps a commit's files list at 300, so a list of 300 may be cut short: it stops. A list of 299 is short of the cap, so it is complete.
+        self.assert_has_method()
+        paths = [f"many/path-{i}.txt" for i in range(300)]
+        host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths[:299]]))
+        self.assertEqual(host.commit_files(self.SHA), paths[:299], "a files list of 299 was not read as its paths")
+        host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths]))
+        with self.assertRaises(merge.Stop):
+            host.commit_files(self.SHA)
+
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
