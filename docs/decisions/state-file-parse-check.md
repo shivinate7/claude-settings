@@ -75,17 +75,19 @@ Step `inbox-fence-check` (the inbox fence check at the edit), proposed in decisi
 
 Out of scope, so not seen in a Bash or PowerShell call: a path built at run time, such as
 `"$d/x.json"`, a Python or Node script that writes JSON, `dd of=`, `cp -t` and `mv` into a
-folder, `install`, `ln`, and a download with `curl -o`.
+folder, `install`, `ln`, a download with `curl -o`, `sponge`, `find -exec sed -i`, and a command
+inside `bash -c '...'` such as `bash -c 'sed -i ...'`. A JSONC file with a trailing comma is still
+named: only comments are forgiven.
 Write and Edit see every path. A background job that has begun to write a file leaves partial
 text, which the check names as broken. `parse()` reads only the first fence in an inbox
 block, so a lost closer of a second fence there is missed, by this check and the Stop check alike.
 
-Review notes, round 2 (2026-11-06; the quoted lone `>` note is fixed):
+Known limits:
 
 - A removal-only Edit on an already-broken file of 2000 chars or fewer can raise a false alarm.
   A made-up candidate place can repair the other fault.
 - Silent by cap: a `new_string` with more than 64 places, and a MultiEdit with two or more
-  removals on a file over about 5 KB. `sed --in-place=SUFFIX` is not matched.
+  removals on a file over about 5 KB.
 - The pre-filter greps the literal `handoffs`. Renaming the folder in
   `precompact_handoff.handoff_path` needs the same change in `settings.json`.
 

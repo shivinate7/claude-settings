@@ -59,8 +59,11 @@ MAX_CANDIDATES = 64      # places one new_string may occur in and still be tried
 SHORT_TEXT = 2000        # a text this short is tried at every character for an Edit that only removed text
 MAX_WORK = 60_000_000    # candidates times file size: a costlier rebuild is skipped, and the check is silent
 MAX_BYTES = 8_000_000    # a state file larger than this is not read
-SED_IN_PLACE = re.compile(r"-[A-Za-z]*i|--in-place")
-PERL_IN_PLACE = re.compile(r"-[A-Za-z]*i|--in-place")
+# An in-place flag: a short cluster that holds `i` (`-i`, `-ni`, `-pi.bak`, `-i.bak`; anything after the `i` is a
+# backup suffix) or `--in-place` with an optional `=SUFFIX`.
+IN_PLACE_FLAG = re.compile(r"-[A-Za-z0-9]*i|--in-place(?:=|$)")
+# A short cluster whose last letter takes the next word as its value (`-e script`, `-ne script`, `-f file`).
+VALUE_CLUSTER = re.compile(r"-[A-Za-z0-9]*[ef]$|--expression$|--file$")
 # Each PowerShell writer: the flags that name its target, and the flags whose next word is a value, not a path.
 POWERSHELL_WRITERS = {"set-content", "add-content", "out-file", "clear-content", "new-item"}
 POWERSHELL_PATH_FLAGS = ("-path", "-filepath", "-literalpath", "-pspath")
@@ -136,12 +139,28 @@ def powershell_target(args):
     return None
 
 
+def in_place(args):
+    """True when the sed or perl arguments hold an in-place flag. Only a flag counts: the value of `-e` or `-f`,
+    and every word after `--`, is an operand, even when it reads `-i`."""
+    skip = False
+    for word in args:
+        if word == "--":
+            return False
+        if skip:
+            skip = False
+        elif not word.startswith("-"):
+            continue
+        elif IN_PLACE_FLAG.match(word):
+            return True
+        elif VALUE_CLUSTER.match(word):
+            skip = True
+    return False
+
+
 def verb_writes(verb, args):
     """The words of `args` that name a file the command `verb` writes. A word that is no state file is dropped
     later by kind_of, so a script word among them does no harm."""
-    if verb == "tee" or (verb == "sed" and any(SED_IN_PLACE.fullmatch(w) for w in args if w.startswith("-"))):
-        return [w for w in args if not w.startswith("-")]
-    if verb == "perl" and any(PERL_IN_PLACE.fullmatch(w.split("=")[0]) for w in args if w.startswith("-")):
+    if verb == "tee" or (verb in ("sed", "perl") and in_place(args)):
         return [w for w in args if not w.startswith("-")]
     if verb in ("mv", "cp"):
         words = [w for w in args if not w.startswith("-")]
