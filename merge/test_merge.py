@@ -7385,11 +7385,16 @@ class DebtRetire(Env):
         self.addCleanup(patch.stop)
         return calls
 
-    def green_ci_closes_a_debt(self):
-        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+    def ci_closes_a_debt(self, state):
+        """Scope: feat deletes the debt file, and the host reports `state` on the head."""
         self.assertIn("D\tdocs/debts/retire-target.md", sh(self.co, "git", "diff", "--name-status", "origin/main", "origin/feat"),
                       "scope: feat does not close the debt, so there is no close to judge")
-        self.assertEqual(self.host.head_state(7), "green", "scope: the host does not report green CI")
+        self.host.state = state
+        self.assertEqual(self.host.head_state(7), state, "scope: the host does not report %s CI" % state)
+
+    def green_ci_closes_a_debt(self):
+        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+        self.ci_closes_a_debt("green")
 
     def test_confirm_with_green_ci_never_calls_the_retire_check(self):
         """The Retire run moved into CI, so a host that reports green CI is not asked for the check at confirm, before the claim or after its wait."""
@@ -7408,6 +7413,24 @@ class DebtRetire(Env):
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
         self.assertEqual(calls, [], "preview called the Retire check with green CI")
+
+    def test_preview_runs_the_retire_check_when_head_ci_is_pending(self):
+        """Pending CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red, so a real run would refuse it."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("pending: checks")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with pending CI")
+
+    def test_preview_runs_the_retire_check_when_head_ci_is_unknown(self):
+        """An unknown read of the head's CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("unknown (a read of the head's checks failed)")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
