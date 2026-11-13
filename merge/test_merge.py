@@ -12898,9 +12898,10 @@ def pr_file(name, previous=None, status="modified", additions=0):
         d["previous_filename"] = previous
     return d
 
-def batch_run(name, status="in_progress", conclusion=None):
-    """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
-    return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
+def batch_run(name, status="in_progress", conclusion=None, started=None, ended=None):
+    """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed. `started` and `ended` are its
+    started_at and completed_at, None unless a case reads a time."""
+    return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": started, "completed_at": ended}
 
 class PullsHost(merge.Host):
     """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, the check runs and statuses of each head, and the
@@ -16831,6 +16832,301 @@ class ReleaseCheck(ReviewEnv):
         _, lines, err, _ = self.release([7, 8], pulls=self.two_bases(fx), comments=[self.review(7, head=fx.fixed)],
                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
+
+# `merge --run-state N`: the state of pull request N's live head, read in one pass: running, red or all green, and the red job that ended first.
+# It stands alone, takes no lock and writes nothing. Its cases read through RunStateHost, which runs the real Host.pages over a scripted gh.
+RUN_HEAD = "3f2a9c1d7e5b4a6980c1d2e3f4a5b6c7d8e9f0a1"  # the live head of pull request 7
+OLD_HEAD = "0e1d2c3b4a59687706f5e4d3c2b1a09876543210"  # an earlier head of the same pull request, whose runs a read must not show
+RUN_START = "2026-11-13T17:00:00Z"  # every check run's started_at; no case reads it, and each end time comes after it
+RUN_T_A, RUN_T_B, RUN_T_C = "2026-11-13T21:05:00Z", "2026-11-13T21:40:00Z", "2026-11-13T21:55:00Z"  # 15:05, 15:40 and 15:55 CST
+
+def run_rows(*rows, start=RUN_START):
+    """The check runs of a head from (name, conclusion, completed_at) rows, in the order given. A conclusion of None is an unfinished run. A completed
+    run whose completed_at is None or not a time is one whose end time cannot be read."""
+    return [batch_run(name, "in_progress" if conclusion is None else "completed", conclusion, started=start, ended=ended) for name, conclusion, ended in rows]
+
+class RunStateHost(ReleaseHost):
+    """A ReleaseHost for `merge --run-state`. Pull request 7 is open at `head`. The check runs of each head are `by_head` (sha -> rows), read
+    through the real Host.pages, 100 to a page, over the scripted gh. `checks_error` fails each check-runs read. `calls` keeps the arguments of every
+    gh call, so a case can see a write: an api call's method follows its -X flag."""
+
+    def __init__(self, head, by_head, checks_error=None, **kw):
+        super().__init__([batch_pull(7, head)], count_gh=True, **kw)
+        self.check_rows = dict(by_head)
+        self.checks_error = checks_error
+        self.calls = []
+
+    def gh(self, args, cwd=None):
+        self.calls.append(list(args))
+        m = re.search(r"/commits/([^/]+)/check-runs$", args[1]) if args[:1] == ["api"] else None
+        if m is None:
+            return super().gh(args, cwd)
+        if self.checks_error:
+            return 1, self.checks_error
+        code, out = super().gh(args, cwd)
+        _method, _path, params, flags, _jq = REST.parse(args[1:])
+        size, page = int(params.get("per_page", 30)), int(params.get("page", 1))
+        last = max(1, -(-len(self.check_rows.get(m.group(1), [])) // size))
+        if "include" in flags and page < last:  # the Link header a read under -i gets while pages follow; Host.pages asks for each page by number
+            out = 'HTTP/1.1 200 OK\nLink: <https://api.github.com/repos/{owner}/{repo}/commits/%s/check-runs?page=%d>; rel="next"\n\n%s' % (m.group(1), page + 1, out)
+        return code, out
+
+class NoLock:
+    """A merge lock that records each use. `--run-state` takes no lock, so `uses` stays empty."""
+
+    def __init__(self):
+        self.uses = []
+
+    def __getattr__(self, name):
+        self.uses.append(name)
+        raise AssertionError(f"merge --run-state used the merge lock: {name}")
+
+class RunState(Env):
+    """`merge --run-state N`: one state line for pull request N's live head (`run: running`, `run: red`, `run: all green` or `run: none yet`), then a
+    `first red:` line for the red job that ended first, when a job is red. A failed read is `merge: run state unknown (why)`, with exit 1.
+    Each case runs through `main`, the way a session runs it."""
+
+    STATE = f"merge: #7 {RUN_HEAD[:7]} run: "
+    FIRST = "merge: first red: "
+
+    def read(self, rows=(), by_head=None, lock=None, **host_kw):
+        """-> (rc, lines, text, host) of `merge --run-state 7`. The head's check runs are `rows`, or `by_head` (sha -> rows) for a case that names
+        more than one head. `lines` joins stdout and stderr, since the spec names no stream for these lines."""
+        host = RunStateHost(RUN_HEAD, by_head or {RUN_HEAD: list(rows)}, **host_kw)
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge("--run-state", "7", host=host, lock=lock, stdout=out, stderr=err)[0]
+        except SystemExit as e:  # an argparse refusal ends in SystemExit, as in run_args
+            rc = e.code
+        text = out.getvalue() + err.getvalue()
+        return rc, text.splitlines(), text, host
+
+    def assert_unknown(self, rc, lines, text):
+        """A read that could not run: exit 1, and that one `merge: run state unknown (why)` line. No state line and no first red line."""
+        self.assertEqual(len(lines), 1, "want the one unknown line and nothing else:\n" + text)
+        self.assertRegex(lines[0], r"^merge: run state unknown \(.+\)", text)
+        self.assertEqual(rc, 1, text)
+
+    # The state line
+
+    def test_running_when_a_run_is_unfinished_and_none_is_red(self):
+        for status in ("in_progress", "queued"):
+            with self.subTest(status=status):
+                pending = {**run_rows(("test", None, None))[0], "status": status}
+                rc, lines, text, _ = self.read([*run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)), pending])
+                self.assertEqual(lines, [self.STATE + "running"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_all_green_when_every_run_is_completed_with_success_neutral_or_skipped(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_red_when_a_completed_run_failed_timed_out_or_was_cancelled(self):
+        for conclusion in ("failure", "timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", conclusion, RUN_T_B)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + f"test ({conclusion}) ended 15:40 CST"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_red_beats_running(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "failure", RUN_T_B), ("test", None, None)))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (failure) ended 15:40 CST"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_no_run_yet_reads_none_yet(self):
+        rc, lines, text, _ = self.read([])
+        self.assertEqual(lines, [self.STATE + "none yet"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_runs_read_are_the_live_heads_not_an_older_ones(self):
+        rc, lines, text, _ = self.read(by_head={OLD_HEAD: run_rows(("lint", "failure", RUN_T_B))})
+        self.assertEqual(lines, [self.STATE + "none yet"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_queued_or_running_rollup_beside_green_jobs_reads_running(self):
+        for status in ("queued", "in_progress"):
+            with self.subTest(status=status):
+                rollup = {**run_rows(("all-jobs-passed", None, None))[0], "status": status}
+                rc, lines, text, _ = self.read([*run_rows(("lint", "success", RUN_T_A), ("docs", "skipped", RUN_T_A)), rollup])
+                self.assertEqual(lines, [self.STATE + "running"], text)  # the rollup is not done, so the run is not green
+                self.assertEqual(rc, 0, text)
+
+    def test_a_queued_or_running_rollup_alone_reads_running_not_none_yet(self):
+        for status in ("queued", "in_progress"):
+            with self.subTest(status=status):
+                rollup = {**run_rows(("all-jobs-passed", None, None))[0], "status": status}
+                rc, lines, text, _ = self.read([rollup])
+                self.assertEqual(lines, [self.STATE + "running"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_a_scope_row_alone_reads_running_since_the_other_jobs_are_not_listed(self):
+        rc, lines, text, _ = self.read(run_rows(("scope", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "running"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_needed_job_skipped_beside_a_green_rollup_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("e2e", "skipped", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_neutral_rollup_beside_green_jobs_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_B), ("all-jobs-passed", "neutral", RUN_T_B)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)  # neutral is clear for the rollup, as for any other job
+        self.assertEqual(rc, 0, text)
+
+    def test_a_draft_run_with_every_job_and_the_rollup_skipped_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("scope", "skipped", RUN_T_A), ("lint", "skipped", RUN_T_A), ("all-jobs-passed", "skipped", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)  # a draft's rollup is skipped, and a skipped rollup is clear
+        self.assertEqual(rc, 0, text)
+
+    def test_a_completed_row_with_no_conclusion_is_unknown_not_clear(self):
+        cases = {"test": [*run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)),
+                          batch_run("test", "completed", None, started=RUN_START, ended=RUN_T_B)],
+                 "all-jobs-passed": [*run_rows(("lint", "success", RUN_T_A)),
+                                     batch_run("all-jobs-passed", "completed", None, started=RUN_START, ended=RUN_T_B)]}
+        for job, rows in cases.items():
+            with self.subTest(job=job):
+                rc, lines, text, _ = self.read(rows)
+                self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: a finished row with no conclusion is not clear
+                self.assertIn(f"job {job} ", lines[0], text)  # it names the job
+
+    # The first red line
+
+    def test_the_first_red_is_the_one_that_ended_first_not_the_first_listed(self):
+        rc, lines, text, _ = self.read(run_rows(("e2e", "failure", RUN_T_C), ("lint", "timed_out", RUN_T_A), ("docs", "cancelled", RUN_T_B)))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (timed_out) ended 15:05 CST"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_fan_in_jobs_are_never_named_as_the_first_red(self):
+        rc, lines, text, _ = self.read(run_rows(("ci-done", "failure", RUN_T_A), ("all-jobs-passed", "failure", RUN_T_B), ("lint", "failure", RUN_T_C)))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (failure) ended 15:55 CST"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_fan_in_red_alone_names_no_first_red_job(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "failure", RUN_T_B)))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_newest_row_of_a_job_decides_its_state_whichever_row_is_listed_first(self):
+        for order in ("older first", "newer first"):
+            with self.subTest(order=order):
+                failed = {**run_rows(("test", "failure", RUN_T_B))[0], "id": 11}  # the first attempt, the older id
+                passed = {**run_rows(("test", "success", RUN_T_C))[0], "id": 12}  # the re-run, the newer id, which counts
+                rollup = run_rows(("all-jobs-passed", "success", RUN_T_A))
+                rc, lines, text, _ = self.read([failed, passed, *rollup] if order == "older first" else [passed, failed, *rollup])
+                self.assertEqual(lines, [self.STATE + "all green"], text)  # no first red line: the newer row is green
+                self.assertEqual(rc, 0, text)
+
+    def test_a_finished_job_with_an_odd_conclusion_is_unknown_not_clear(self):
+        for conclusion in ("action_required", "stale", "startup_failure"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", conclusion, RUN_T_B), ("e2e", None, None)))
+                self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: no state line, though e2e has not finished
+                self.assertIn(f"job test ended {conclusion}", lines[0], text)  # it names the job and its conclusion
+
+    def test_a_red_job_beside_an_odd_conclusion_reads_red_and_names_the_red_job(self):
+        for conclusion in ("action_required", "stale", "startup_failure"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "failure", RUN_T_B), ("test", conclusion, RUN_T_A), ("all-jobs-passed", "success", RUN_T_C)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (failure) ended 15:40 CST"], text)  # the odd row ends first, so a state that read it would name it
+                self.assertEqual(rc, 0, text)
+
+    def test_a_red_fan_in_beside_a_running_job_reads_red_and_names_no_first_red(self):
+        rc, lines, text, _ = self.read(run_rows(("all-jobs-passed", "failure", RUN_T_B), ("x", None, None)))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)  # red beats running
+        self.assertEqual(rc, 0, text)
+
+    def test_a_red_rollup_beside_green_jobs_reads_red_for_every_red_conclusion(self):
+        for conclusion in ("failure", "timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A),
+                                                        ("all-jobs-passed", conclusion, RUN_T_B)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_a_red_ci_done_beside_green_jobs_reads_red_and_names_no_first_red_job(self):
+        for conclusion in ("failure", "timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A),
+                                                        ("all-jobs-passed", "success", RUN_T_A), ("ci-done", conclusion, RUN_T_B)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (ci-done failed)"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_the_first_red_line_gives_the_end_time_in_us_central_by_date(self):
+        for ended, hhmm in (("2026-11-13T21:40:00Z", "15:40 CST"), ("2026-07-01T22:30:00Z", "17:30 CDT")):
+            with self.subTest(ended=ended):
+                rc, lines, text, _ = self.read(run_rows(("lint", "failure", ended)))  # started at RUN_START, so a start time would read 11:00
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + f"lint (failure) ended {hhmm}"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_a_red_run_whose_end_time_cannot_be_read_is_unknown(self):
+        for bad in (None, "not-a-time"):
+            with self.subTest(completed_at=bad):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "failure", bad)))
+                self.assert_unknown(rc, lines, text)
+
+    def test_a_red_fan_in_with_an_unreadable_end_time_reads_red_and_names_no_first_red(self):
+        for bad in (None, "not-a-time"):
+            with self.subTest(completed_at=bad):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_A), ("all-jobs-passed", "failure", bad)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)  # a fan-in's end time is never read; a red job with the same end time is unknown (the case above)
+                self.assertEqual(rc, 0, text)
+
+    # Reads that fail: unknown, exit 1, never a clear state
+
+    def test_a_failed_pull_request_read_is_unknown(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A)), broken=[7])
+        self.assert_unknown(rc, lines, text)
+
+    def test_a_failed_check_runs_read_is_unknown(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A)), checks_error="gh: HTTP 502 Bad Gateway")
+        self.assert_unknown(rc, lines, text)
+
+    def test_a_missing_gh_is_unknown_with_no_traceback(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A)), gh_missing=True)
+        self.assert_unknown(rc, lines, text)
+        self.assertNotIn("Traceback", text)
+
+    # Full size: a head whose runs take more than one page
+
+    def test_a_head_with_more_than_one_page_of_runs_has_its_first_red_read_from_every_page(self):
+        rows = [(f"job-{i}", "success", RUN_T_A) for i in range(250)]
+        rows[150] = ("lint", "failure", RUN_T_B)  # page two: the earliest red
+        rows[240] = ("docs", "failure", RUN_T_C)  # page three: a later red
+        rc, lines, text, _ = self.read(run_rows(*rows))
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (failure) ended 15:40 CST"], text)
+        self.assertEqual(rc, 0, text)
+
+    # Stands alone, needs no merge role, and reads only
+
+    def test_stands_alone_with_any_other_mode_flag_is_an_argument_error(self):
+        for argv in (("--run-state", "7", "--confirm"), ("--run-state", "7", "--reviewed"), ("--run-state", "7", "--lane-lint"),
+                     ("--run-state", "7", "--review-record", "--head", RUN_HEAD), ("--run-state", "7", "--role", "coordinator"),
+                     ("--run-state", "7", "--unlock"), ("--run-state", "7", "--idle-lanes"), ("--run-state", "7", "--touches", "--case", "x"),
+                     ("--run-state", "7", "--batch-build", "n", "7"), ("--run-state", "7", "--release-check", "7"),
+                     ("7", "--run-state", "7"), ("--run-state",), ("--run-state", "seven")):
+            with self.subTest(argv=argv):
+                self.assert_usage_error(*argv)
+
+    def test_any_session_may_read_it_with_no_merge_role(self):
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
+            os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)  # a cloud session with no id, so no merge role can be recorded
+            self.assertIsNone(merge.read_merge_role(), "the set-up is not a session with no merge role")  # scope first
+            rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_reads_the_live_head_and_takes_no_lock_pushes_nothing_and_writes_nothing(self):
+        before, lock = self.refs(), NoLock()
+        rc, lines, text, host = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_B), ("all-jobs-passed", "success", RUN_T_B)), lock=lock)
+        self.assertEqual(lines, [self.STATE + "all green"], text)  # the read ran and printed its state
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(host.gh_calls, ["pulls/7", f"commits/{RUN_HEAD}/check-runs"], "the reads are not the pull request first, then the live head's check runs")
+        self.assertEqual(lock.uses, [], "merge --run-state used the merge lock")
+        self.assertEqual(self.refs(), before, "merge --run-state pushed a ref")
+        methods = [call[call.index("-X") + 1] for call in host.calls if "-X" in call]
+        self.assertEqual([m for m in methods if m != "GET"], [], "merge --run-state sent a call that is not a read")
 
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,

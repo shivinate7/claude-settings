@@ -81,6 +81,17 @@
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
                           distinct base, one merge-tree per PR (tree objects, no ref), and a fetch of a PR head the clone lacks; no new
                           process kept, file or timer.
+  merge --run-state N     the state of pull request N's live head, so a waiting session need not wait for the whole run: `merge: #N SHA7 run:
+                          running | all green | red | none yet`, and when a job is red `merge: first red: JOB (CONCLUSION) ended HH:MM CST`
+                          (CDT in summer) for the red job with the earliest completed_at. Red is failure, timed_out or cancelled; red beats
+                          running. Of rows that share a job name only the newest counts (a re-run). The fan-in jobs all-jobs-passed and
+                          ci-done count toward the state but are never the first red: a red fan-in alone reads `red` with `merge: first
+                          red: none named (JOB failed)`, a fan-in not finished reads running, and all green needs all-jobs-passed present
+                          and finished with success, neutral or skipped (no all-jobs-passed row yet reads running). A failed read, a red job
+                          whose end time cannot be read (a red fan-in's end time is never read), or, with no red job, a finished job whose
+                          conclusion is neither red nor success, neutral or skipped prints `merge: run state unknown (WHY)` (exit 1); every state read exits 0. Stands alone; takes no lock and no merge role, merges and pushes
+                          nothing; any session may run it. Cost per call: one pulls/N read and one paged check-runs read (one call per
+                          100 jobs). No file, process or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -196,6 +207,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+import local_time  # noqa: E402  the one home of the US Central clock (hooks/local_time.py); --run-state prints an end time with it
+from all_jobs_passed_rules import FAN_IN  # noqa: E402  the one home of the ci-done fan-in job's name (lint/all_jobs_passed_rules.py); --run-state never names it the first red
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -1383,18 +1396,23 @@ class Host:
     DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
     DRAFT_OK = ("success", "skipped", "neutral")
 
+    def job_runs(self, sha, keep=lambda name: True):
+        """-> {job name: check run row} of the head `sha`: ONE read of its check runs, every page, no statuses. Of rows that share a name (a re-run), the
+        newest id is kept. `keep` takes a job name and says whether the job is wanted. Named apart from `run_state`, which reads workflow runs."""
+        newest = {}
+        for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
+            name = r.get("name") or ""
+            if keep(name) and (name not in newest or (r.get("id") or 0) > (newest[name].get("id") or 0)):
+                newest[name] = r
+        return newest
+
     def draft_run_state(self, sha):
         """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
         "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
         "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
         or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
         "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
-        newest = {}
-        for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
-            name = r.get("name") or ""
-            if name == self.DRAFT_TOUCHED or self.DRAFT_TEST_JOB.match(name):
-                if name not in newest or (r.get("id") or 0) > (newest[name].get("id") or 0):
-                    newest[name] = r
+        newest = self.job_runs(sha, lambda name: name == self.DRAFT_TOUCHED or bool(self.DRAFT_TEST_JOB.match(name)))
         failed = [f"{n}: {r.get('conclusion')} {r.get('html_url') or r.get('details_url') or '(no link)'}"
                   for n, r in sorted(newest.items()) if r.get("status") == "completed" and r.get("conclusion") not in self.DRAFT_OK]
         if failed:
@@ -4691,6 +4709,61 @@ def release_check(root, h, numbers, lints, root_why=None):
     return [f"#{n} FAIL: {'; '.join(why)}" if why else f"#{n} PASS" + (RELEASE_LINT_UNKNOWN_NOTE if lints[n][1] == "UNKNOWN-AT-CAP" else "")
             for n, why in verdicts], not any(why for _, why in verdicts)
 
+RUN_RED = ("failure", "timed_out", "cancelled")  # the conclusions of a job that failed the run
+RUN_CLEAR = ("success", "neutral", "skipped")  # the conclusions of a job that holds the run back from nothing
+RUN_FAN_IN = (ROLLUP_JOB, FAN_IN)  # jobs that only roll up the others (checks.yml): their red names no cause, so they are never the first red
+
+def run_state(jobs):
+    """-> (state, first_red) of `merge --run-state` for `jobs`, the {name: check run row} of one head (Host.job_runs). Every row counts toward the state,
+    the fan-in rows (RUN_FAN_IN) too, but a fan-in is never the first red: its failure names no cause.
+    State: `red` when a row ended in RUN_RED (it beats running), else `running` when a row has not finished or no ROLLUP_JOB row is listed yet (the
+    other jobs may not be), else `all green` when ROLLUP_JOB and every other row ended in RUN_CLEAR; `none yet` when no row is there. first_red is the
+    line naming the red non-fan-in job with the earliest completed_at and its end time in US Central; when only fan-in rows are red it reads
+    `merge: first red: none named (<fan-in name> failed)`; else None. A ValueError says why the state is unknown: a red job's end time cannot be
+    read, or a finished row has a conclusion in neither RUN_RED nor RUN_CLEAR (checked after red, before running, so an unread conclusion is never
+    read as clear)."""
+    rows = sorted(jobs.items())
+    done = [(n, r) for n, r in rows if r.get("status") == "completed"]
+    red = [(n, r) for n, r in done if r.get("conclusion") in RUN_RED]
+    if red:
+        ended = []
+        for n, r in red:
+            if n in RUN_FAN_IN:
+                continue
+            raw = r.get("completed_at")
+            try:
+                at = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                shown = local_time.central_hhmm(at) if at.tzinfo else ""
+            except (AttributeError, ValueError):
+                shown = ""
+            if not shown:
+                raise ValueError(f"the end time of job {n} is not readable: {raw!r}")
+            ended.append((at, n, r["conclusion"], shown))
+        if ended:
+            _, name, conclusion, shown = min(ended)
+            return "red", f"merge: first red: {name} ({conclusion}) ended {shown}"
+        fan_in = next(n for n in RUN_FAN_IN if any(m == n for m, _ in red))
+        return "red", f"merge: first red: none named ({fan_in} failed)"
+    for n, r in done:
+        if r.get("conclusion") not in RUN_CLEAR:
+            raise ValueError(f"job {n} ended {r.get('conclusion') or 'with no conclusion'}, which is neither red nor clear")
+    if not rows:
+        return "none yet", None
+    if len(done) < len(rows) or ROLLUP_JOB not in jobs:
+        return "running", None
+    return "all green", None
+
+def run_state_lines(h, n):
+    """-> (lines, ok) of `merge --run-state N`: `merge: #N <sha7> run: <state>`, then the first red line when a job is red (run_state), or one
+    `merge: run state unknown (why)` line and not ok when a read fails or a state cannot be judged. Cost: one `pulls/N` read and one paged check-runs
+    read of the live head."""
+    try:
+        head = h.pr(n)["head"]
+        state, first_red = run_state(h.job_runs(head))
+    except RELEASE_READ_ERRORS as e:
+        return [f"merge: run state unknown ({' '.join(str(e).split())})"], False
+    return [f"merge: #{n} {head[:7]} run: {state}", *([first_red] if first_red else [])], True
+
 def pr_arg(text):
     """argparse type of a pull request number (--release-check, --blame): digits only."""
     if not text.isdigit():
@@ -5505,6 +5578,7 @@ def build_parser():
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
+    p.add_argument("--run-state", type=pr_arg, default=None, metavar="N", help="the state of pull request N's live head: `run: running`, `red`, `all green` or `none yet`, and the red job that ended first with its end time; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
@@ -5556,6 +5630,8 @@ def main(argv, host=None, lock=None, hosts=None):
         for n, _, _ in a.lint:
             if [m for m, _, _ in a.lint].count(n) > 1:
                 p.error(f"--lint gives pull request #{n} more than one verdict")
+    if a.run_state is not None and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("run_state", "repo_dir")):
+        p.error("--run-state stands alone")  # any other option set, a mode flag or not; -C only names the checkout
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
@@ -5586,7 +5662,7 @@ def main(argv, host=None, lock=None, hosts=None):
                                  "config", "session", "undo_check_unknown_ok", "base_red_ok"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.idle_lanes or a.touches or a.release_check or a.run_state is not None:
         pass  # stands alone: checked above
     elif batch:
         name, *numbers = a.batch_build or a.batch_drop
@@ -5676,6 +5752,13 @@ def main(argv, host=None, lock=None, hosts=None):
                 root, root_why = None, e
             lines, ok = release_check(root, host or Host(cwd=a.repo_dir if root_why else root), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why)  # before the role check and any lock: it reads, merges and pushes nothing
             say(*lines)
+            return 0 if ok else 1
+        if a.run_state is not None:
+            lines, ok = run_state_lines(host or Host(cwd=a.repo_dir), a.run_state)  # before the role check and any lock: it reads, merges and pushes nothing
+            if ok:
+                say(*lines)
+            else:
+                print(*lines, file=sys.stderr)
             return 0 if ok else 1
         if a.role is not None:
             write_merge_role(a.role)
