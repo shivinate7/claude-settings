@@ -5072,6 +5072,11 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
       own", "already on main", "pre-existing on main", "matches main", "regression from main" or "regressions from
       main", "worse than main". "The" may stand before main ("worse than the main"), and "branch" may follow it ("the
       main branch"). A hyphen joins no words, so "not-worse-than-main" and "bug-same as main" are no form.
+    - Only a branch-like use of `main` counts: `main` is a claim word only when a branch-like word follows it, the
+      line end or a punctuation mark. A branch-like word is `branch`, or a function word that continues the comparison
+      (in, on, at, for, with, and, or, but, so, because, since, is, was, did, does, had, as, by, from, to, here, too,
+      now, today, yet). A noun after `main` ("window", "menu", "points", "page", "screen", "thread", "loop") makes it
+      no claim, with or without "the" before `main`.
     - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
       main()" are no claim.
     - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
@@ -5140,6 +5145,19 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The glob matches main.py.", "The glob matches main."),
         ("The workflow matches main.yml.", "The workflow matches main."),
         ("The entry point is the same as main() in cli.py.", "The entry point is the same as main."),
+    )
+    NOUN_PAIRS = (  # (no claim, its refused twin): a noun after main is no claim, with or without "the" before main
+        ("The layout is the same as the main window.", "The layout is the same as the main."),
+        ("The toolbar is worse than the main menu.", "The toolbar is worse than the main."),
+        ("The notes are same as main page.", "The notes are same as main."),
+        ("This is a regression from the main loop.", "This is a regression from the main."),
+        ("The header matches the main points.", "The header matches the main."),
+    )
+    FUNCTION_PAIRS = (  # (still refused, its passing twin): a function word after main that continues the comparison
+        ("The filter is worse than the main branch.", "The filter is worse than the main window."),
+        ("The filter is the same as main in the layout.", "The filter is the same as main window in the layout."),
+        ("The filter matches main, so no change.", "The filter matches main window, so no change."),
+        ("Same as main and the rest.", "Same as main window and the rest."),
     )
     OWN_TWINS = (  # refused; "main's own CI is green." passes
         "The layout is main's own.", "The layout: main's own.",
@@ -5433,6 +5451,23 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         self.assert_blocked("same as main at 20261112", "same as main at 20261112")
         self.assert_blocked("same as main at deadbeef", "same as main at deadbeef")
         self.assert_allowed("same as main at 3f9a1c2")
+
+    def test_mc_red_a_noun_after_main_is_no_claim(self):
+        # Catches: a noun after main ("the main window", "the main menu") is read as the branch, a false alarm. Each
+        # refused twin is the same line with main alone, so the noun is the only difference.
+        for line, twin in self.NOUN_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(twin, twin)
+                self.assert_allowed(line)
+
+    def test_mc_red_a_branch_or_function_word_after_main_still_counts(self):
+        # Catches: a function word that continues a comparison ("main in the layout", "main, so") or a branch-like word
+        # ("the main branch") is read as no claim. The refusal is asserted first; the twin swaps the word after main for
+        # a noun, so the word is the only difference.
+        for line, twin in self.FUNCTION_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
 
     # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
 
