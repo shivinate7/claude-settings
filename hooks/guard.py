@@ -191,8 +191,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
-                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
-                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       then `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case, after optional
+                       markdown lead characters. A bracketed or parenthesised label needs no mark before the time. A
+                       bare label needs `,` or `:` or a dash spaced on both sides, then an optional date; or a
+                       `Mon D` date after the zone, then a `:`. Any other bare label, time and zone is prose and
+                       passes. The
                        refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
                        minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
                        when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An

@@ -1832,10 +1832,17 @@ def brief_hit(tool: str, tool_input, transcript: str):
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
 STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
 STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
-# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
-# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
+# A header is a label of 1 to 4 words, then `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case.
+# Anything may follow. A label joins the time in one of three ways. A bracketed or parenthesised label needs no
+# mark. A bare label needs `,` or `:` or a dash spaced on both sides before the time, and then an optional
+# `YYYY-MM-DD` date. Or it needs a `Mon D` date after the zone, then a `:`. Any other bare form is prose and
+# passes: `Deadline 15:00 CST for the merge`, `Done at 12:53 CST - see PR`, `Coordinator 13:40 CST: pick 1 taken`.
+_STAMP_LABEL = r"[^\s,:]+(?:\s+[^\s,:]+){0,3}"
+_STAMP_TIME = r"\d{1,2}:\d{2}(?::\d{2})?\s+(?:CST|CDT)\b"
 _STAMP_HEADER = re.compile(
-    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    _MARKDOWN_LEAD + r"(?:[\[(]\s*" + _STAMP_LABEL + r"(?:[,:]|\s[-\u2014\u2013]|(?=\s))"
+    r"|" + _STAMP_LABEL + r"(?:[,:]|\s[-\u2014\u2013])"
+    r"|" + _STAMP_LABEL + r"\s(?=" + _STAMP_TIME + r"\s+[A-Za-z]{3}\s+\d{1,2}\s*:))\s*"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
