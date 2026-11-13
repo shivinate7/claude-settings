@@ -217,8 +217,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
     start it. See `snippets.md`, section 19.
-    Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
-    unreadable diff or an unmapped path runs everything.
+    Two jobs may share a flag. A docs-only PR skips only the steps behind a flag. A `*.md` path
+    turns no flag on (`ci-scope.sh`, the `*.md) ;;` arm). In the `checks` job, 149 of 167 steps carry
+    no scope `if:` (`checks.yml`, lines 75-667), so a docs-only PR runs them all. Run 43466545532
+    (batch 133, docs only) ran 149 of 167. Count again before you repeat this: add a flag-free step
+    and the number moves. An unreadable diff or an unmapped path runs everything.
 
 ## Public repos
 
