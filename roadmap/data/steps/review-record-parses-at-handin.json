@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Two lanes tonight (#3052, #3050) reported review records posted, but runner 10's `merge --reviewed` parsed none at any head. Lanes hand in without checking that the record parses, and the batch runner finds out at merge.",
  "source": "coordinator 21:04 CST Nov 12 (2 of the last ~8 hand-ins)",
- "note": "Fix: lane-lint runs the same parser as `merge --reviewed` at the head and fails, naming the record, when it parses none. One home: call the merge tool's parser, never a copy. Red first on a record shaped like the #3052 or #3050 one. Started by coordinator 21:07 CST Nov 12.",
- "updatedAt": "2026-11-12T21:07:27-06:00"
+ "note": "Fix: lane-lint runs the same parser as `merge --reviewed` at the head and fails, naming the record, when it parses none. One home: call the merge tool's parser, never a copy. Red first on a record shaped like the #3052 or #3050 one. Started by coordinator 21:07 CST Nov 12. Sighting, coordinator 21:20 CST Nov 12 (#2682, now done with positive net value, re-handed express): `merge --review-record` for a round 3 on a guard or check change writes \"Net value: not owed\" when --net-value is not passed, and `merge --reviewed` then fails the record. Fix candidate: the writer refuses a round-3 record on a guard or check change without --net-value (one parser, so writer and reader agree).",
+ "updatedAt": "2026-11-12T21:20:05-06:00"
 }
