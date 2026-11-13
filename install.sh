@@ -1016,7 +1016,7 @@ if [ "$CLOUD" = 1 ]; then
     ALLOW_FILE="$SRC/merge/cloud_allow.json"
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
     if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
-      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume|compact","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
        | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
       n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)

@@ -1826,8 +1826,8 @@ cloud_settings1() {
     bad "$name" "the SessionStart entries that do not fire on startup differ from the repo settings.json"
   elif [ "$starts" != 1 ]; then
     bad "$name" "expected one SessionStart entry that fires on startup, found ${starts:-none}"
-  elif [ "$last" != "startup|resume" ]; then
-    bad "$name" "the startup entry is not the refresh hook: its matcher is ${last:-none}"
+  elif [ "$last" != "startup|resume|compact" ]; then
+    bad "$name" "the refresh hook is not the last SessionStart entry, or its matcher is not startup|resume|compact: its matcher is ${last:-none}"
   else
     case "$tail_cmd" in
       'i=$(cat); curl -fsSL '*'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud') ok "$name" ;;
@@ -1842,6 +1842,13 @@ cloud_settings1() {
 contains() { case "$1" in *"$2"*) return 0 ;; esac; return 1; }
 # True when $1 holds the text $2, and then the text $3 after it.
 in_order() { case "$1" in *"$2"*"$3"*) return 0 ;; esac; return 1; }
+# fires_for MATCHER SOURCE: "true" when MATCHER, read as an anchored regex, fires for SOURCE, else "false". This is the
+# rule install.sh applies to its own entries (FIRES_JQ), and the rule Claude Code applies to a matcher.
+fires_for() { jq -rn --arg m "$1" --arg s "$2" '$s | test("^(" + $m + ")$")' 2>/dev/null; }
+# REFRESH_JQ: the install.sh --cloud refresh is the one SessionStart entry whose command holds "bash -s -- --cloud".
+REFRESH_JQ='def refresh: select(any(.hooks[]?; (.command? // "") | contains("bash -s -- --cloud")));'
+# refresh_json FILTER FILE: FILTER applied to the refresh entries of the settings.json FILE, raw output.
+refresh_json() { jq -r "$REFRESH_JQ $1" "$2" 2>/dev/null; }
 # hk_envrun CHECKOUT [NAME=VALUE...]: one piped cloud install of CHECKOUT under `env -i` with exactly the given
 # assignments, as the setup script runs it. Sets rc, out (stdout only) and err (stderr only).
 hk_envrun() {
@@ -2146,6 +2153,128 @@ cloud_startup_local1() {
     bad "$name" "a local install ran a startup entry"
   else
     ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- cloud refresh on compact: the refresh entry names compact, so a compacting cloud session refreshes its hooks ----
+# compact_checkout CO: a checkout whose settings.json holds an entry that fires on startup, resume and compact (mark_a,
+# FRESH_A), one that fires on startup only (mark_b, FRESH_B), one that fires on compact only (COMPACT_KEPT), and one
+# that fires on clear|fork (CLEAR_KEPT). install runs only the entries that fire on startup, so no kept entry prints.
+compact_checkout() {
+  cat > "$work/compact-settings.json" <<'JSON'
+{"hooks": {"SessionStart": [
+  {"matcher": "startup|resume|compact", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/mark_a.sh\""}]},
+  {"matcher": "startup", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/mark_b.sh\""}]},
+  {"matcher": "compact", "hooks": [{"type": "command", "command": "echo COMPACT_KEPT"}]},
+  {"matcher": "clear|fork", "hooks": [{"type": "command", "command": "echo CLEAR_KEPT"}]}
+]}}
+JSON
+  hookfix_checkout "$1" "$work/compact-settings.json"
+}
+# compact_install CO HOME: the cloud install of checkout CO into HOME, then the refresh entry it wrote. Sets rc, err and
+# out from the install, and cp_n (refresh entries), cp_m (their matcher) and cp_cmd (the refresh command).
+compact_install() {
+  hookfix_install "$2" "$1"
+  cp_n=$(refresh_json '[.hooks.SessionStart[] | refresh] | length' "$2/.claude-cfg/settings.json")
+  cp_m=$(refresh_json '[.hooks.SessionStart[] | refresh | (.matcher // "")] | join(",")' "$2/.claude-cfg/settings.json")
+  cp_cmd=$(refresh_json '[.hooks.SessionStart[] | refresh | .hooks[]? | .command? // empty] | .[0] // ""' "$2/.claude-cfg/settings.json")
+}
+# refresh_run TAG HOME CO COMMAND INPUT: the refresh COMMAND run as Claude Code runs it, with INPUT on stdin, through a
+# curl stub that serves the install.sh of checkout CO. Sets rf_rc and rf_out (stdout and stderr together).
+refresh_run() {
+  rf_bin="$work/$1-bin"; mkdir -p "$rf_bin"
+  printf '#!/bin/sh\ncat "%s"\n' "$3/install.sh" > "$rf_bin/curl"; chmod +x "$rf_bin/curl"
+  rf_so=$(mktemp "$work/rf-out.XXXXXX")
+  ( cd "$3" && printf '%s' "$5" | env -i PATH="$rf_bin:$PATH" HOME="$2" \
+      CLAUDE_CONFIG_DIR="$2/.claude-cfg" CLAUDE_CODE_REMOTE=true sh -c "$4" > "$rf_so" 2>&1 ); rf_rc=$?
+  rf_out=$(cat "$rf_so")
+}
+
+# The entry a cloud install writes carries matcher startup|resume|compact, from an empty settings.json. The
+# full-size settings.json case is cloud_settings1.
+cloud_compact1() {
+  name="cloud_compact1: the cloud install writes one install.sh --cloud refresh entry with matcher exactly startup|resume|compact, from an empty settings.json"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(new_home); co="$work/cloud_compact1-checkout"
+  make_checkout "$co" "# cloud_compact1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  ( cd "$co" && git add -A && git commit -q -m install )
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" CLAUDE_CODE_REMOTE=true \
+        bash ./install.sh --cloud 2>&1); rc=$?
+  n=$(refresh_json '[.hooks.SessionStart[] | refresh] | length' "$h/.claude-cfg/settings.json")
+  m=$(refresh_json '[.hooks.SessionStart[] | refresh | (.matcher // "")] | join(",")' "$h/.claude-cfg/settings.json")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$n" != 1 ]; then
+    bad "$name" "want one install.sh --cloud refresh entry, found ${n:-none}"
+  elif [ "$m" != "startup|resume|compact" ]; then
+    bad "$name" "the refresh entry's matcher is [$m], want startup|resume|compact"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# CS_HOOK_INPUT with source compact: the refresh entry fires for compact, and its run installs the entry that fires on
+# compact but not the startup-only one. A refresh matcher that does not fire for compact fails at the fires_for check,
+# before any run.
+cloud_compact2() {
+  name="cloud_compact2: CS_HOOK_INPUT with source compact: the refresh entry fires for compact, runs the entry that fires on compact, and not the startup-only entry"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(new_home); co="$work/cloud_compact2-checkout"
+  compact_checkout "$co"
+  compact_install "$co" "$h"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif [ "$cp_n" != 1 ]; then
+    bad "$name" "want one install.sh --cloud refresh entry, found ${cp_n:-none}"
+  elif [ "$(fires_for "$cp_m" compact)" != true ]; then
+    bad "$name" "the refresh entry does not fire for source compact: its matcher is [$cp_m]"
+  else
+    refresh_run cloud_compact2 "$h" "$co" "$cp_cmd" '{"source":"compact"}'
+    if [ "$rf_rc" -ne 0 ]; then
+      bad "$name" "the refresh run exited $rf_rc: $rf_out"
+    elif ! contains "$rf_out" FRESH_A; then
+      bad "$name" "the entry that fires on compact did not run through the refresh"
+    elif contains "$rf_out" FRESH_B; then
+      bad "$name" "the startup-only entry ran for source compact"
+    elif contains "$rf_out" COMPACT_KEPT; then
+      bad "$name" "install ran the compact-only entry, which Claude Code runs itself"
+    else
+      ok "$name"
+    fi
+  fi
+  rm -rf "$h"
+}
+
+# CS_HOOK_INPUT with source clear: the refresh entry does not fire for clear, and no startup entry runs. A control: a
+# matcher broadened to take clear fails here. The clear|fork control shows the written settings has an entry that does
+# fire for clear, so the "does not fire" check is not empty.
+cloud_compact3() {
+  name="cloud_compact3 (green control): CS_HOOK_INPUT with source clear: the refresh entry does not fire for clear, and no startup entry runs"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(new_home); co="$work/cloud_compact3-checkout"
+  compact_checkout "$co"
+  compact_install "$co" "$h"
+  kept=$(jq -r --arg s clear '[.hooks.SessionStart[] | select((.matcher // "") != "") | select(.matcher as $m | $s | test("^(" + $m + ")$"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null)
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif [ "$cp_n" != 1 ]; then
+    bad "$name" "want one install.sh --cloud refresh entry, found ${cp_n:-none}"
+  elif [ "${kept:-0}" -lt 1 ]; then
+    bad "$name" "control: no entry in the written settings fires for source clear, so the check below would prove nothing"
+  elif [ "$(fires_for "$cp_m" clear)" != false ]; then
+    bad "$name" "the refresh entry does not come out false for source clear: its matcher is [$cp_m]"
+  else
+    refresh_run cloud_compact3 "$h" "$co" "$cp_cmd" '{"source":"clear"}'
+    if [ "$rf_rc" -ne 0 ]; then
+      bad "$name" "the refresh run exited $rf_rc: $rf_out"
+    elif contains "$rf_out" FRESH_A || contains "$rf_out" FRESH_B; then
+      bad "$name" "a startup entry ran for source clear"
+    else
+      ok "$name"
+    fi
   fi
   rm -rf "$h"
 }
@@ -5683,6 +5812,9 @@ run cloud_startup7
 run cloud_startup8
 run cloud_startup9
 run cloud_startup10
+run cloud_compact1
+run cloud_compact2
+run cloud_compact3
 run skills_bak1
 run skills_bak2
 run skills_bak3
