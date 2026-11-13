@@ -17,7 +17,8 @@ not load on a push turn.
 Each case runs the real Stop hook as a subprocess. The gh stand-in leads its PATH (setUpModule of
 lint/test_report_guard.py, which takes the stand-in's program from hooks/test_ci_wake.py) and answers
 the fixture the case writes. No real gh runs, no network is reached and no clock is read. The budget
-cases run in process with a fake clock.
+cases run in process with a fake clock. The path-filter reader cases call ci_wake's filter functions in process, on real
+temp repos (or on a string, for the scanner cases).
 
 Cost, proved by the stand-in's call log: a turn with no push, and a Stop with stop_hook_active, make no
 gh call. A push reads at most 3 gh calls for its head: the PR read, the run list, and the workflow list when the run
@@ -73,6 +74,35 @@ REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it nam
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
 FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
+def checks_workflow(push_block):
+    """A `checks` workflow whose `push:` event holds `push_block`, the lines under `push:` as written (indented 4)."""
+    return ("name: checks\non:\n  push:\n" + push_block + "jobs:\n  unit:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+
+
+# A workflow that runs for a push that touches docs/ only. A push that touches other files starts no run of it.
+DOCS_ONLY_WORKFLOW = checks_workflow("    paths:\n      - 'docs/**'\n")
+SRC_ONLY_WORKFLOW = checks_workflow("    paths:\n      - 'src/**'\n")
+FLOW_PATHS = ("api/**", "docs/**", "hooks/**", "lint/**", "migrations/**", "scripts/**", "src/**", "web/**")
+SOURCE = "value = 1\n" * 20  # long enough that a moved copy is still the same file to rename detection
+
+
+def flow_paths_workflow(spread):
+    """A `checks` workflow whose push `paths` is FLOW_PATHS, as one flow line or as a flow list spread over lines."""
+    if not spread:
+        return checks_workflow("    paths: [%s]\n" % ", ".join('"%s"' % p for p in FLOW_PATHS))
+    lines = "".join('      "%s",\n' % p for p in FLOW_PATHS[:-1]) + '      "%s"\n' % FLOW_PATHS[-1]
+    return checks_workflow("    paths: [\n" + lines + "    ]\n")
+
+
+def sequence_workflow(events):
+    """A `checks` workflow whose `on:` is a block sequence of `events`: `on:`, then one `  - event` line each."""
+    return ("name: checks\non:\n" + "".join("  - %s\n" % e for e in events) + "jobs:\n  unit:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+
+
+# GitHub reads `?` as zero or one of the character before it, so this filter matches fil.txt and file.txt only.
+QUESTION_MARK_WORKFLOW = checks_workflow("    paths:\n      - 'file?.txt'\n")
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -158,12 +188,13 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.inv
                 "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
 
 
-def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None):
-    """Make `folder` a git repo with one empty commit. -> the full hash. Local git only.
+def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None, files=None, remove=None):
+    """Make `folder` a git repo, and commit on it. -> the full hash. Local git only.
     on_branch: the local branch the commit lands on, made from the current HEAD when it is new (None keeps the
     default branch). remote_branch: the branch whose remote-tracking ref is set to the commit (None sets none).
     detach: HEAD is left detached at the commit, so no branch is checked out. tag: a local tag of that name at the
-    commit (None makes none)."""
+    commit (None makes none). files: {relative path: text}, written and committed (None commits no file). remove:
+    relative paths deleted in the commit (a rename is one removal and one new file, with the same text)."""
     env = dict(os.environ, **GIT_IDENTITY)
 
     def run_git(*args):
@@ -173,6 +204,14 @@ def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=N
     run_git("init", "-q")
     if on_branch:
         run_git("checkout", "-q", "-B", on_branch)
+    for rel, text in (files or {}).items():
+        os.makedirs(os.path.dirname(os.path.join(folder, rel)), exist_ok=True)
+        with open(os.path.join(folder, rel), "w", encoding="utf-8") as f:
+            f.write(text)
+    for rel in remove or ():
+        run_git("rm", "-q", "--", rel)
+    if files:
+        run_git("add", "--", *files)
     run_git("commit", "-q", "--allow-empty", "-m", "x")
     head = run_git("rev-parse", "HEAD")
     if tag:
@@ -295,6 +334,245 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a report-less push to main was not blocked (scope check)")
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
         self.assertIsNone(decision, "a push to main in a repo with no workflows was blocked for CI: " + reason)
+
+    def test_pr_read_that_lags_the_push_still_owes_a_ci_line(self):
+        # The PR's REST read can lag the push: it still names the head the push moved from, which is not the pushed
+        # commit. That read clears nothing, so the report must name the pushed head's CI state.
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry(sha=OLD)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push whose PR still named the head before it passed with no CI line: "
+                         "the lagging read was taken as no CI")
+        self.assertIn(HEAD7, reason, "the lagging PR read left the pushed head unnamed: %s" % reason)
+
+    def test_push_that_no_workflow_path_filter_matches_owes_no_ci_line(self):
+        # The one workflow runs only for a push that touches docs/. This push touches lint/ alone, so no run is due
+        # and the report needs no CI line.
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": DOCS_ONLY_WORKFLOW})
+        head = git_commit(folder, remote_branch=None, files={"lint/x.py": "x = 1\n"})
+        steps = push(push_out(head[:7], old=base[:7]))
+        fixture_ = answers(prs=[pr_entry(sha=head)], runs=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a push that no workflow's path filter matches was held for a run that never "
+                          "starts: " + reason)
+
+    def test_push_that_a_workflow_path_filter_matches_still_owes_a_running_ci_line(self):
+        # The same workflow, and a push that touches docs/: the run is due, so with no run listed yet the report must
+        # name the head as running.
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": DOCS_ONLY_WORKFLOW})
+        head = git_commit(folder, remote_branch=None, files={"docs/guide.md": "guide\n"})
+        steps = push(push_out(head[:7], old=base[:7]))
+        fixture_ = answers(prs=[pr_entry(sha=head)], runs=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a push that a workflow path filter matches, with no run listed, "
+                         "passed with no CI line")
+        self.assertIn("CI running on " + head[:7], reason, "the due run is not named running: %s" % reason)
+
+    def due_read(self, folder, new, old, cwd=None):
+        """push_may_start_run for the push old..new, read from `cwd` (the repo when None). The budget's clock never
+        moves, so no read runs out and the verdict is the filter's own."""
+        budget = ci_wake.Budget(total=20, per_read=8, clock=StepClock([0.0]))
+        return ci_wake.push_may_start_run(new, old, cwd or folder, budget)
+
+    def git_names(self, folder, *args):
+        """The names one git read lists, run in the repo: the scope a case checks before it asserts the reader."""
+        return subprocess.run(["git", *args], cwd=folder, capture_output=True, text=True, check=True,
+                              timeout=30).stdout.split()
+
+    def subfolder_push(self):
+        """A repo with a src/** workflow, a lint/ folder and a docs-only push. -> (folder, base, head)."""
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "lint/x.py": "x = 1\n", "docs/guide.md": "guide\n"})
+        head = git_commit(folder, remote_branch=None, files={"docs/guide.md": "guide v2\n"})
+        return folder, base, head
+
+    # The path-filter reader (ci_wake.workflow_runs_for, push_may_start_run). Each finding has red cases that name the
+    # defect, and green controls beside them. Each red case checks its scope first.
+
+    def test_multi_line_flow_paths_list_keeps_a_run_due_for_a_matching_file(self):
+        # Eight patterns as one flow line, then spread over lines. src/a.py matches the last one. A list the reader
+        # cannot read must keep the run due, not read as no pattern at all.
+        self.assertTrue(ci_wake.workflow_runs_for(flow_paths_workflow(spread=False), ["src/a.py"]),
+                        "scope: the one-line form does not keep a run due for src/a.py")
+        self.assertTrue(ci_wake.workflow_runs_for(flow_paths_workflow(spread=True), ["src/a.py"]),
+                        "a flow paths list spread over lines was read as no pattern, so no run is due for src/a.py")
+
+    def test_one_line_flow_paths_list_owes_no_run_for_an_unmatched_file(self):
+        self.assertFalse(ci_wake.workflow_runs_for(flow_paths_workflow(spread=False), ["other/x.py"]),
+                         "a one-line flow paths list kept a run due for a file none of its patterns matches")
+
+    def test_empty_workflow_file_keeps_a_run_due(self):
+        # The empty state of the reader: no `on:` block reads as a form it does not parse, so a run stays due.
+        self.assertTrue(ci_wake.workflow_runs_for("", ["docs/x.md"]), "an empty workflow file was read as owing no run")
+
+    def test_rename_out_of_a_watched_path_keeps_a_run_due(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "src/a.py": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"docs/a.py": SOURCE}, remove=["src/a.py"])
+        # Scope: the push takes src/a.py out of src/. Rename detection hides that old path from a plain name list.
+        self.assertEqual(self.git_names(folder, "diff", "--name-only", "--no-renames", base, head),
+                         ["docs/a.py", "src/a.py"], "scope: the push does not remove src/a.py")
+        self.assertTrue(self.due_read(folder, head, base),
+                        "a rename out of src/ dropped the old path from the push's names, so no run is due for src/**")
+
+    def test_plain_edit_of_a_watched_file_keeps_a_run_due(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "src/a.py": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"src/a.py": SOURCE + "x = 2\n"})
+        self.assertTrue(self.due_read(folder, head, base), "an edit of src/a.py owes no run of the src/** workflow")
+
+    def test_move_between_unwatched_paths_owes_no_run(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "docs/x.md": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"docs/y.md": SOURCE}, remove=["docs/x.md"])
+        self.assertFalse(self.due_read(folder, head, base), "a move between docs/ paths kept a run due for src/**")
+
+    def test_push_read_from_a_subfolder_finds_the_workflows_at_the_root(self):
+        folder, base, head = self.subfolder_push()
+        # Scope: the head holds the workflow at the root, where a read from lint/ must find it.
+        self.assertEqual(self.git_names(folder, "ls-tree", "-r", "--name-only", head, ".github/workflows"),
+                         [".github/workflows/checks.yml"], "scope: the head holds no workflow at the root")
+        self.assertFalse(self.due_read(folder, head, base, cwd=os.path.join(folder, "lint")),
+                         "a push read from lint/ found no workflow and kept a run due for a docs-only push")
+
+    def test_docs_only_push_from_the_repo_root_owes_no_run(self):
+        folder, base, head = self.subfolder_push()
+        self.assertFalse(self.due_read(folder, head, base), "a docs-only push kept a run due for src/** from the root")
+
+    def test_src_push_read_from_a_subfolder_keeps_a_run_due(self):
+        folder, base, head = self.subfolder_push()
+        src = git_commit(folder, remote_branch=None, files={"src/a.py": "x = 2\n"})
+        self.assertTrue(self.due_read(folder, src, head, cwd=os.path.join(folder, "lint")),
+                        "a src/ push read from lint/ owes no run of the src/** workflow")
+
+    def test_quoted_path_holding_space_hash_matches_its_file(self):
+        text = checks_workflow('    paths:\n      - "docs/a #b.md"\n')
+        self.assertTrue(ci_wake._path_passes("docs/a #b.md", ["docs/a #b.md"]),
+                        "scope: the matcher does not take the path itself")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a #b.md"]),
+                        "a quoted path holding ' #' was cut as a comment, so its own file kept no run due")
+
+    def test_trailing_comment_after_a_quoted_path_is_still_read(self):
+        text = checks_workflow('    paths:\n      - "docs/a.md"  # the docs\n')
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                        "a real trailing comment after a quoted path hid the path")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/b.md"]), "a path after the comment matched the filter")
+
+    def test_quoted_path_holding_space_hash_does_not_match_another_file(self):
+        text = checks_workflow('    paths:\n      - "docs/a #b.md"\n')
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                         "a quoted path holding ' #' matched a different file")
+
+    def test_lone_quote_in_a_name_and_a_comment_does_not_hide_the_filter(self):
+        # A lone apostrophe is text, not the start of a string: the path and the comment after it still read.
+        text = ("name: Don't build\non:\n  push:\n    paths:\n      - docs/don't.md  # don't widen this\n"
+                "jobs:\n  unit:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/don't.md"]),
+                        "a lone apostrophe hid the path docs/don't.md")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "a lone apostrophe widened the filter to src/a.py")
+
+    def test_block_scalar_text_does_not_change_the_push_filter(self):
+        # A run script after the on: block holds filter-looking text and a `#` line. Only the on: block is the filter.
+        text = ("on:\n  push:\n    paths: [src/**]\njobs:\n  unit:\n    steps:\n      - run: |\n"
+                "          # a shell comment, not a workflow one\n          paths: [docs/**]\n          on: push\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]), "the on: block's own filter was lost")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/guide.md"]),
+                         "text in a run script widened the push filter to docs/")
+
+    # An on: block written as a block sequence (`- push`). The reader skips `- ` lines, so it reads no event at all.
+
+    def test_block_sequence_on_with_push_and_pull_request_keeps_a_run_due_for_a_push(self):
+        text = sequence_workflow(["push", "pull_request"])
+        self.assertIn((2, "- push"), ci_wake._workflow_lines(text), "scope: the on: block holds no `- push` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence holding push owes no run for a push")
+
+    def test_block_sequence_on_with_push_alone_keeps_a_run_due_for_a_push(self):
+        text = sequence_workflow(["push"])
+        self.assertIn((2, "- push"), ci_wake._workflow_lines(text), "scope: the on: block holds no `- push` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence of push alone owes no run for a push")
+
+    def test_block_sequence_on_with_pull_request_alone_keeps_a_run_due_for_a_push(self):
+        # A push to a PR's branch starts a pull_request run. The mapping form (`pull_request:`) and the inline form
+        # (`on: pull_request`) both keep a run due, so the block form must too.
+        text = sequence_workflow(["pull_request"])
+        self.assertIn((2, "- pull_request"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `- pull_request` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence of pull_request alone owes no run for a push to its PR's branch")
+
+    def test_block_sequence_on_with_workflow_dispatch_alone_owes_no_run_for_a_push(self):
+        # Control: a non-push event owes no run on push, read from the block sequence as from the other forms.
+        text = sequence_workflow(["workflow_dispatch"])
+        self.assertIn((2, "- workflow_dispatch"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `- workflow_dispatch` line")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "an on: block sequence of workflow_dispatch alone kept a run due for a push")
+
+    # The `?` of a path filter: GitHub reads it as zero or one of the character before it. Each red case first checks
+    # that the filter is read, by a file it does not match (file.md), which keeps no run due only when the list parses.
+
+    def test_question_mark_filter_owes_no_run_for_files_it_does_not_match(self):
+        # Control: neither file matches file?.txt, so no run is due.
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md", "other.txt"]),
+                         "a path filter of file?.txt kept a run due for a file it does not match")
+
+    def test_question_mark_keeps_a_run_due_for_the_zero_character_match(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertTrue(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["fil.txt"]),
+                        "file?.txt read its ? as one required character, so fil.txt (the e taken as zero) owes no run")
+
+    def test_question_mark_keeps_a_run_due_for_the_one_character_match(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertTrue(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.txt"]),
+                        "file?.txt read its ? as one required character after file, so file.txt (one e) owes no run")
+
+    def test_question_mark_owes_no_run_for_a_file_with_an_extra_character(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["fileA.txt"]),
+                         "file?.txt read its ? as any one character, so fileA.txt, which it does not match, "
+                         "kept a run due")
+
+    def test_rewrite_that_still_lacks_the_ci_line_is_blocked(self):
+        # The first reply holds a report but no CI line, so the Stop blocks for the CI line alone. Its rewrite, the
+        # stop_hook_active Stop of the same turn, must still hold the line, so a rewrite without it is blocked.
+        session = uuid.uuid4().hex
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(REPORT, steps), fixture_, session_id=session)
+        self.assertEqual(decision, "block", "a report with no CI line was not blocked for the pending push")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, stop_active=True, session_id=session)
+        self.assertEqual(decision, "block",
+                         "the rewrite of a CI-only block still lacks the CI line and passed unchecked")
+        self.assertIn("CI running on " + HEAD7, reason,
+                      "the rewrite's block does not name the pending head: %s" % reason)
+
+    def test_rewrite_that_names_the_ci_line_passes(self):
+        # The rewrite of a CI-only block that adds the running line passes.
+        session = uuid.uuid4().hex
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(REPORT, steps), fixture_, session_id=session)
+        self.assertEqual(decision, "block", "a report with no CI line was not blocked for the pending push")
+        decision, reason, _ = self.stop(turn(RUNNING, steps), fixture_, stop_active=True, session_id=session)
+        self.assertIsNone(decision, "a rewrite that names the running CI line was blocked: " + reason)
 
     def test_pending_run_on_ready_pr_blocks_until_next_names_running(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -567,8 +845,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "a colon-form push of tag %s was blocked for CI, though the name is a tag: %s"
                           % (TAG, reason))
 
-    # The branch read of a push with no ref line (report_guard._heads_of_git_push). The cases kill two mutants of that
-    # read: one that gives [] on a failed read, and one that names one constant branch whatever is checked out.
+    # A push with no ref line names the head of the checked-out branch (report_guard._heads_of_git_push). These cases
+    # check that the named head is that branch's own, and that a failed branch read names HEAD as unknown.
 
     def test_bare_push_names_the_checked_out_branch_head(self):
         for command in ("git push", "git push origin HEAD"):
@@ -662,25 +940,42 @@ class PushCheckTests(unittest.TestCase):
                          "the name was read as a tag")
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's head is not named running")
 
-    def test_bare_name_with_a_tag_and_a_local_branch_reads_the_branch_unknown(self):
-        # The tag sits on an older commit. The branch has no remote-tracking ref, so its head is unnamed and the name
-        # reads unknown: the branch is checked, never dropped for the tag. This case kills the mutant that reads a bare
-        # name as a tag whenever a tag has it, since that mutant drops the push.
+    def test_first_push_of_a_branch_on_a_single_branch_clone_reads_the_local_head(self):
+        # A single-branch clone has no remote-tracking ref for a branch it has not pushed before. The head is read from
+        # the local branch the push sends, so the report must name that commit, not an unknown read.
+        folder = self.case_folder()
+        head = git_commit(folder, remote_branch=None, on_branch=FEAT)
+        steps = push(REMOTE_LINE + " * [new branch]      %s -> %s\n" % (FEAT, FEAT),
+                     command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less first push on a single-branch clone was not blocked (scope "
+                         "check)")
+        running = "> **Done** BUILT abc123\n> **Next** CI running on %s" % head[:7]
+        decision, reason, _ = self.stop(turn(running, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "the first push of %s on a single-branch clone read its head unknown, not from the "
+                          "local commit %s: %s" % (FEAT, head[:7], reason))
+
+    def test_bare_name_with_a_tag_and_a_local_branch_reads_the_local_branch_head(self):
+        # The tag and the local branch share a name, and the branch has no remote-tracking ref. The push sends the
+        # branch, so its local head is read: not the tag's commit, and not unknown.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
-        git_commit(folder, remote_branch=None, on_branch=FEAT)
+        head = git_commit(folder, remote_branch=None, on_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
-        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
         decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
         self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
         self.assertEqual(decision, "block", "a bare-name push of a tag and a local branch of one name passed with no "
-                         "CI line: the branch was dropped for the tag")
-        self.assertIn("CI unknown on " + FEAT, reason,
-                      "the bare-name push is not named unknown on %s: %s" % (FEAT, reason))
-        decision, _, _ = self.stop(turn("> **Done** BUILT abc123\n> **Next** CI unknown on %s" % FEAT, steps),
+                         "CI line: the branch's local head was not read")
+        self.assertIn("CI running on " + head[:7], reason,
+                      "the bare-name push's local branch head is not named running on %s: %s" % (head[:7], reason))
+        decision, _, _ = self.stop(turn("> **Done** BUILT abc123\n> **Next** CI running on %s" % head[:7], steps),
                                    fixture_, folder=folder)
-        self.assertIsNone(decision, "a report that holds the unknown line on %s was blocked" % FEAT)
+        self.assertIsNone(decision, "a report that holds the running line on %s was blocked" % head[:7])
 
     def test_bare_name_with_a_tag_and_a_branch_with_its_remote_ref_names_the_branch_head(self):
         # The tag sits on an older commit than the branch's head, so the head named must be the branch's own. The
@@ -699,9 +994,7 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
 
     def test_bare_name_with_only_a_local_tag_reads_as_a_tag(self):
-        # With no branch of the name, a local tag makes the name a tag, so it names no head and no CI line is due. This
-        # case kills the mutant that never reads a name as a tag. The mutant `bare or has_tag` gives the same answer
-        # here, since the bare name is a tag either way, so this case does not kill it.
+        # With no branch of the name, a local tag makes the bare name a tag: it names no head, so no CI line is due.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         steps = push(REMOTE_LINE, command="git push origin %s" % FEAT)
@@ -711,6 +1004,37 @@ class PushCheckTests(unittest.TestCase):
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
         self.assertIsNone(decision, "a bare-name push of a local tag was blocked for CI, though the name is a tag: "
                           + reason)
+
+    def test_ref_line_to_a_refs_tags_name_reads_no_branch_head(self):
+        # git writes the full ref, refs/tags/<name>, as the destination when a branch of that name exists too. That line
+        # names a tag, so the check reads no PR or run for it and asks for no CI line.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
+        steps = push(push_out(HEAD7, dst="refs/tags/%s" % FEAT), command="git push origin HEAD:refs/tags/%s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less tag push was not blocked (scope check)")
+        decision, reason, calls = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a push whose ref line names the tag refs/tags/%s was blocked for CI: %s"
+                          % (FEAT, reason))
+        self.assertFalse([arg for call in calls for arg in call if "refs/tags" in arg],
+                         "the tag %s was read as a branch head: gh was asked %s" % (FEAT, calls))
+
+    def test_tags_push_with_no_ref_line_names_no_head_and_reports_no_unknown_check(self):
+        # A `git push origin --tags` that prints no ref line names no head. The check reads nothing: it asks for no CI
+        # line and does not report that the check failed to run.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, on_branch=FEAT, tag=TAG)
+        steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG), command="git push origin --tags")
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less --tags push was not blocked (scope check)")
+        done, _ = self.run_stop(turn(REPORT, steps), fixture_, folder=folder)
+        decision, reason = block_of(done)
+        self.assertIsNone(decision, "a --tags push with no ref line was blocked for CI, though it names no head: "
+                          + reason)
+        self.assertNotIn(PUSH_UNKNOWN_NOTE, done.stdout, "a --tags push with no ref line reported that the push check "
+                         "did not run")
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -847,7 +1171,7 @@ class PushCheckTests(unittest.TestCase):
             ("the remote-tracking ref names the head", 1, lambda folder: git_commit(folder, remote_branch=FEAT),
              lambda head: [head[:7]]),
             ("a local branch with no remote-tracking ref", 3,
-             lambda folder: git_commit(folder, remote_branch=None, on_branch=FEAT), lambda head: [FEAT]),
+             lambda folder: git_commit(folder, remote_branch=None, on_branch=FEAT), lambda head: [head[:7]]),
             ("no ref of the name", 3, lambda folder: git_commit(folder, remote_branch=None), lambda head: []),
         )
         for label, bound, setup, names_of in cases:

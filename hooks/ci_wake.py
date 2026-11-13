@@ -348,25 +348,34 @@ class Budget:
         return min(self.per_read, left)
 
 
-def commit_read(ref, cwd, timeout=HEAD_READ):
-    """The full commit hash `ref` names in the folder, "" when the read ran and no ref names a commit, and a raised
-    Unknown when the read itself failed (the tool is missing, timed out or could not start)."""
+def git_out(args, cwd, timeout, what):
+    """-> (returncode, stdout) of one local git read in the folder, the one home of the Stop-side git reads. Not
+    git_reads._git: that one has a fixed 10 s timeout and returns None on failure, and these reads need the Budget's
+    timeout and a raised Unknown. A raised Unknown when the read itself failed (the tool is missing, timed out or could not start); `what` names the
+    read in that message."""
     try:
         import _nowindow
     except ImportError:
         _nowindow = subprocess
     exe = shutil.which("git")
     if exe is None:
-        raise Unknown("git read of %s failed: git is not on PATH" % ref)
+        raise Unknown("git read of %s failed: git is not on PATH" % what)
     try:
-        p = _nowindow.run([exe, "rev-parse", "--verify", "-q", ref + "^{commit}"], cwd=cwd,
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        p = _nowindow.run([exe, *args], cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise Unknown("git read of %s timed out" % ref)
+        raise Unknown("git read of %s timed out" % what)
     except OSError as e:
-        raise Unknown("git read of %s failed: %s" % (ref, type(e).__name__))
-    out = p.stdout.strip()
-    return out if p.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
+        raise Unknown("git read of %s failed: %s" % (what, type(e).__name__))
+    return p.returncode, p.stdout
+
+
+def commit_read(ref, cwd, timeout=HEAD_READ):
+    """The full commit hash `ref` names in the folder, "" when the read ran and no ref names a commit, and a raised
+    Unknown when the read itself failed (the tool is missing, timed out or could not start)."""
+    code, out = git_out(["rev-parse", "--verify", "-q", ref + "^{commit}"], cwd, timeout, ref)
+    out = out.strip()
+    return out if code == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
 
 
 def commit_of(ref, cwd, timeout=HEAD_READ):
@@ -377,10 +386,221 @@ def commit_of(ref, cwd, timeout=HEAD_READ):
         return ""
 
 
-def head_state(sha, branch, cwd, budget=None):
-    """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait.
-    state: "none" (no CI to wait for: no open PR, a draft PR, a head the PR has moved past, or a repo with no
-    workflows, read once when the run list is empty), "green",
+WORKFLOW_DIR = ".github/workflows"
+NO_PUSH_EVENTS = ("workflow_dispatch", "schedule")   # events that start no run for a push
+
+
+def _glob_regex(pattern):
+    """A workflow path-filter pattern as a regex, per GitHub's filter pattern cheat sheet: `*` is zero or more
+    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder), `?` and `+` are zero or
+    one and one or more of the character before them, `[...]` is one listed letter, digit or range, and `\\` escapes
+    the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
+    open or odd bracket, a trailing `\\`), so the run stays due rather than a guessed reading dropping it."""
+    parts, quantifiable, i = [], False, 0
+    while i < len(pattern):
+        c = pattern[i]
+        if pattern.startswith("**/", i):
+            parts.append("(?:.*/)?")
+            quantifiable, i = False, i + 3
+        elif pattern.startswith("**", i):
+            parts.append(".*")
+            quantifiable, i = False, i + 2
+        elif c == "*":
+            parts.append("[^/]*")
+            quantifiable, i = False, i + 1
+        elif c in "?+":
+            if not quantifiable:
+                raise _Unparsed(pattern)
+            parts[-1] = "(?:%s)%s" % (parts[-1], c)
+            quantifiable, i = False, i + 1
+        elif c == "[":
+            j = pattern.find("]", i)
+            if j < 0 or not re.fullmatch(r"(?:[a-z]-[a-z]|[A-Z]-[A-Z]|[0-9]-[0-9]|[A-Za-z0-9])+", pattern[i + 1:j]):
+                raise _Unparsed(pattern)
+            parts.append(pattern[i:j + 1])
+            quantifiable, i = False, j + 1
+        elif c == "\\":
+            if i + 1 == len(pattern):
+                raise _Unparsed(pattern)
+            parts.append(re.escape(pattern[i + 1]))
+            quantifiable, i = True, i + 2
+        else:
+            parts.append(re.escape(c))
+            quantifiable, i = True, i + 1
+    try:
+        return re.compile("".join(parts) + r"\Z")
+    except re.error:
+        raise _Unparsed(pattern) from None
+
+
+def _path_passes(path, patterns):
+    """True when a filter's pattern list lets `path` through: the last pattern that matches decides, and `!` negates."""
+    passed = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        if _glob_regex(pattern[1:] if negated else pattern).match(path):
+            passed = not negated
+    return passed
+
+
+def _unquote(word):
+    word = word.strip()
+    return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"" else word
+
+
+def _strip_comment(raw):
+    """A workflow line without its comment: a `#` at a line start or after a space ends the line, unless a quoted
+    string holds it. A quote opens only where a value starts (after a space, `[`, `{`, `,` or the line start), so a lone
+    apostrophe inside a word is text. Not actions/ci-alarm/clear_rule.py's `strip_comment`: that one reads a lone
+    apostrophe as a quote, and hooks/ stays stdlib-only and loads in the Stop hook."""
+    quote = None
+    for i, ch in enumerate(raw):
+        before = raw[i - 1] if i else " "
+        if quote:
+            if ch == quote and not (quote == '"' and before == "\\"):
+                quote = None
+        elif ch in "'\"" and before in " \t[{,":
+            quote = ch
+        elif ch == "#" and before in " \t":
+            return raw[:i].rstrip()
+    return raw.rstrip()
+
+
+def _workflow_lines(text):
+    """-> [(indent, content)] of a workflow's non-blank lines, comments dropped (see `_strip_comment`)."""
+    lines = []
+    for raw in text.splitlines():
+        content = _strip_comment(raw)
+        if content.strip():
+            lines.append((len(content) - len(content.lstrip()), content.strip()))
+    return lines
+
+
+class _Unparsed(Exception):
+    """A filter form this reader does not parse: the run stays due."""
+
+
+def _filter_list(block, key):
+    """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
+    flow list (`[a, b]`, on one line or spread over lines), a lone scalar and a block list (`- a`). Raises _Unparsed
+    for a flow list that never closes."""
+    for n, (indent, content) in enumerate(block):
+        head, colon, rest = content.partition(":")
+        if head.strip() != key or not colon:
+            continue
+        rest = rest.strip()
+        if rest.startswith("["):
+            text, later = rest, iter(block[n + 1:])
+            while not text.endswith("]"):
+                nxt = next(later, None)
+                if nxt is None:
+                    raise _Unparsed(key)
+                text += " " + nxt[1]
+            return [_unquote(w) for w in text[1:-1].split(",") if w.strip()]
+        if rest:
+            return [_unquote(rest)]
+        items = []
+        for deeper, line in block[n + 1:]:
+            if deeper < indent or (deeper == indent and not line.startswith("- ")):
+                break
+            if line.startswith("- "):
+                items.append(_unquote(line[2:]))
+        return items
+    return None
+
+
+def workflow_runs_for(text, files):
+    """False only when a workflow's `on:` block reads cleanly and no push of `files` starts a run of it: it has no
+    event but workflow_dispatch and schedule, or its push event carries a `paths` or `paths-ignore` filter that every
+    file fails. A form this reader does not parse (a flow map, a key it does not know, an unsure filter pattern) reads
+    True, so a run stays due.
+    Stdlib only: CI and the Stop hook have no YAML parser."""
+    lines = _workflow_lines(text)
+    start = next((n for n, (i, c) in enumerate(lines) if i == 0 and re.match(r"""["']?on["']?\s*:""", c)), None)
+    if start is None:
+        return True
+    inline = lines[start][1].partition(":")[2].strip()
+    if inline:
+        words = set(re.findall(r"[\w-]+", inline))
+        return inline.startswith("{") or bool(words - set(NO_PUSH_EVENTS))
+    body = []
+    for indent, content in lines[start + 1:]:
+        if indent == 0:
+            break
+        body.append((indent, content))
+    if not body:
+        return True
+    base = body[0][0]
+    if body[0][1].startswith("- "):
+        return _sequence_runs(body, base)
+    events, push_block, in_push = [], [], False
+    for indent, content in body:
+        if indent == base and not content.startswith("- "):
+            name, _, rest = content.partition(":")
+            events.append(_unquote(name))
+            in_push = _unquote(name) == "push"
+            if in_push and rest.strip():
+                return True
+        elif in_push:
+            push_block.append((indent, content))
+    if any(e not in NO_PUSH_EVENTS and e != "push" for e in events):
+        return True
+    if "push" not in events:
+        return False
+    try:
+        paths, ignore = _filter_list(push_block, "paths"), _filter_list(push_block, "paths-ignore")
+        if (paths is None) == (ignore is None):
+            return True
+        if paths is not None:
+            return any(_path_passes(f, paths) for f in files)
+        return any(not _path_passes(f, ignore) for f in files)
+    except _Unparsed:
+        return True
+
+
+def _sequence_runs(body, base):
+    """An `on:` block written as a block sequence (`- push`): False only when every item is a plain event name and
+    none starts a run for a push. An item it cannot read, a line that is no item, or a deeper line reads True."""
+    events = []
+    for indent, content in body:
+        name = _unquote(content[2:]) if indent == base and content.startswith("- ") else ""
+        if not re.fullmatch(r"[\w-]+", name):
+            return True
+        events.append(name)
+    return any(e not in NO_PUSH_EVENTS for e in events)
+
+
+def push_may_start_run(full, old, cwd, budget):
+    """False only when the workflow files at the pushed head all read cleanly and none can start a run for the files
+    the push changed (`old..full`): a push no path filter matches starts no run, so none is due. Any read that fails,
+    no workflow file, or a push with no `old` head (a new branch) reads True, so a run stays due. Cost: 2 git
+    processes plus 1 per workflow file."""
+    if not old:
+        return True
+    try:
+        code, out = git_out(["diff", "--name-only", "--no-renames", "-z", old, full], cwd, budget.next_timeout(), "the push's files")
+        files = [f for f in out.split("\0") if f]
+        if code != 0:
+            return True
+        code, out = git_out(["ls-tree", "--name-only", "--full-tree", "-z", full, WORKFLOW_DIR + "/"], cwd, budget.next_timeout(),
+                            "the workflow files")
+        names = [n for n in out.split("\0") if n.endswith((".yml", ".yaml"))]
+        if code != 0 or not names:
+            return True
+        for name in names:
+            code, text = git_out(["show", "%s:%s" % (full, name)], cwd, budget.next_timeout(), name)
+            if code != 0 or workflow_runs_for(text, files):
+                return True
+        return False
+    except Unknown:
+        return True
+
+
+def head_state(sha, branch, cwd, budget=None, old=None):
+    """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait. old is the head the
+    remote held before the push (the push's ref line), or None.
+    state: "none" (no CI to wait for: no open PR, a draft PR, a head the PR has moved past, a repo with no
+    workflows, read once when the run list is empty, or a push no workflow path filter matches), "green",
     "pending" (a run has not ended, or a ready PR has no run yet), "red" (a run ended not green), or "unknown"
     (a read failed or ran out of budget). A push to main reads the head's runs direct. A ready PR's runs drop
     skipped ones as `wait_for` does, then judge_runs judges the rest (the cancelled-twin rule is its own)."""
@@ -396,15 +616,21 @@ def head_state(sha, branch, cwd, budget=None):
                 return "none", "no open PR"
             if pr.get("isDraft"):
                 return "none", "draft PR"
-            if not pr["headRefOid"].startswith(sha):
+            if pr["headRefOid"].startswith(sha):
+                full = pr["headRefOid"]
+            elif old and pr["headRefOid"].startswith(old):
+                # The PR read lags the push: it still names the head before it, so the pushed head is read direct.
+                full = commit_of(sha, cwd, budget.next_timeout()) or sha
+            else:
                 return "none", "the PR head has moved past %s" % sha[:7]
-            full = pr["headRefOid"]
         args = ["run", "list", "--commit", full, "--limit", "100", "--json", RUN_FIELDS]
         runs = [r for r in gh_json(args, cwd, timeout=budget.next_timeout()) if r["conclusion"] != "skipped"]
         if not runs:
             # No run is listed: either the repo has no CI (nothing to wait for) or the run has not started.
             if no_workflows(cwd, "", budget.next_timeout()):
                 return "none", "the repo has no workflows"
+            if not push_may_start_run(full, old, cwd, budget):
+                return "none", "no workflow path filter matches the push"
             return ("unknown", "no run is listed for a push to %s" % branch) if main else ("pending", "no run yet")
         from guard_merge import merge_module
         merge = merge_module()

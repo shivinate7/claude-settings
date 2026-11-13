@@ -16,7 +16,8 @@ exception: a block that asked for the missing report leaves a marker file (local
 holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
 the rewrite once for model names and the `Unstarted:` line only. A failure blocks with a correction.
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
-stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
+stop_hook_active; no process, timer or log. A block for the CI line alone leaves one too, flagged ci-only, and its
+rewrite is checked for that line only. The rewrite's own block leaves no marker, so no loop follows.
 
 On a turn that pushed a branch head (git push, not a dry run, a delete or a tag push; or the GitHub MCP push_files,
 create_or_update_file or delete_file), it reads that head's CI state once through hooks/ci_wake.py head_state and
@@ -25,7 +26,8 @@ holds the report until it names it (decision push-report-names-ci, a report afte
 A read that failed or ran out of budget: `CI unknown on <sha7>`. Green, a draft PR and a branch with no PR need no
 line. Only the newest head of each branch counts. Cost: only on a Stop after a push that is not a stop_hook_active
 Stop, at most 2 gh processes per head (the branch's open PR, then the head's runs), a 3rd when the run list is empty
-(the workflow list, so a repo with no workflows reads none), plus up to 3 git processes per name for a head the push
+(the workflow list, so a repo with no workflows reads none; then 2 git processes and 1 per workflow file, so a push
+no workflow path filter matches reads none), plus up to 3 git processes per name for a head the push
 output does not give, 1 more to read the branch of a bare or HEAD push, and 1 for a short head on main (the decision
 push-report-names-ci holds the exact count). Every
 read is inside one 20 s budget, 8 s at most each, under the Stop timeout in settings.json (the seam is
@@ -394,10 +396,24 @@ def _reads_as_tag(name, bare, has_tag, has_branch):
     return not has_branch and (has_tag or bare)
 
 
+def _source_ref(branch, refspecs):
+    """The local branch ref a push sends to `branch`: the source of the refspec whose destination is the branch when
+    it names a local branch (`feat2:feat`), else the local branch of the destination's name (a bare push, a refspec
+    with no `:`, and `HEAD:feat`, which names no branch of its own)."""
+    for spec in refspecs:
+        src, colon, dst = spec.lstrip("+").partition(":")
+        dst = dst if colon else src
+        if (dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst) == branch:
+            src = src[len("refs/heads/"):] if src.startswith("refs/heads/") else src
+            return "refs/heads/" + src if src and src != "HEAD" and not src.startswith("refs/") else "refs/heads/" + branch
+    return "refs/heads/" + branch
+
+
 def _heads_of_git_push(args, output, folder, ci_wake, budget):
-    """-> [(sha, branch, why)] a push call updated; sha is None when the head could not be named, and why then says
-    which read failed (the Unknown message of a spent budget or a failed branch read, or UNNAMED_HEAD); why is None
-    when sha is named. Read from the ref lines of its output (`old..new src -> dst`), so an accepted ref of a multi-ref
+    """-> [(sha, branch, why, old)] a push call updated; sha is None when the head could not be named, and why then
+    says which read failed (the Unknown message of a spent budget or a failed branch read, or UNNAMED_HEAD); why is
+    None when sha is named. old is the head the remote held before the push (the ref line's `old..new`), None for a
+    new branch or a push with no ref line. Read from the ref lines of its output (`old..new src -> dst`), so an accepted ref of a multi-ref
     push counts past a rejected one; a new branch line, and a call whose output holds none (a verdict wrapper
     prints no ref line), read the remote-tracking ref. With no accepted ref line, a rejected push or an
     up-to-date one updated nothing."""
@@ -406,7 +422,7 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         return []
     remote, refspecs, flags = call
     remote = remote or "origin"
-    seen = [(m.group(2), m.group(3)) for m in map(PUSH_REF_LINE.match, output.splitlines()) if m]
+    seen = [(m.group(2), m.group(3), m.group(1)) for m in map(PUSH_REF_LINE.match, output.splitlines()) if m]
     from_ref_lines = bool(seen)
     if not seen and (PUSH_REJECTED_LINE.search(output) or set(flags) & {"--tags", "--all", "--mirror", "--prune"}):
         return []
@@ -416,36 +432,40 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
             names = ([_branch_of(r, folder, budget, ci_wake) for r in refspecs] if refspecs
                      else [ci_wake.current_branch(folder, budget.next_timeout())])
         except ci_wake.Unknown as unknown:
-            return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD", str(unknown))]
-        seen = [(None, n) for n in names if n]
+            return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD", str(unknown),
+                     None)]
+        seen = [(None, n, None) for n in names if n]
     # A [new tag] line drops a name only when no ref line named it: a ref line (`[new branch]` too) is a branch head.
     new_tags = set() if from_ref_lines else set(PUSH_NEW_TAG_LINE.findall(output))
     bare = {r.lstrip("+") for r in refspecs if ":" not in r and r.lstrip("+") != "HEAD"}
     heads = []
-    for sha, branch in seen:
+    for sha, branch, old in seen:
         if "\n" in branch or branch.startswith("refs/tags/") or branch in new_tags:
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         why = None
         if sha is None:
             # The remote-tracking ref is read first: when it names a commit, the name is a branch whatever else holds
-            # it, so the tag and local-branch reads are skipped (1 git process, else at most 3).
+            # it. Else the local ref the push sends names the head (a single-branch clone has no remote-tracking ref
+            # for a first push), and the tag read runs only when no local ref does (1 git process, else at most 3).
+            has_tag = False
             try:
                 if ":" not in remote:
                     sha = ci_wake.commit_read("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
                 if not sha:
+                    sha = ci_wake.commit_read(_source_ref(branch, refspecs), folder, budget.next_timeout())
+                if not sha:
                     has_tag = bool(ci_wake.commit_read("refs/tags/" + branch, folder, budget.next_timeout()))
-                    has_branch = bool(ci_wake.commit_read("refs/heads/" + branch, folder, budget.next_timeout()))
             except ci_wake.Unknown as unknown:
-                heads.append((None, branch, str(unknown)))
+                heads.append((None, branch, str(unknown), old))
                 continue
-            if not sha and _reads_as_tag(branch, branch in bare, has_tag, has_branch):
+            if not sha and _reads_as_tag(branch, branch in bare, has_tag, False):
                 continue
         if not sha:
-            # commit_read gives "" when no remote-tracking ref names a commit; a head left out here would pass the
+            # commit_read gives "" when no ref names a commit; a head left out here would pass the
             # report with no CI line, so it reads as unknown on the branch.
             sha, why = None, UNNAMED_HEAD
-        heads.append((sha, branch, why))
+        heads.append((sha, branch, why, old))
     return heads
 
 
@@ -469,17 +489,18 @@ def _mcp_head(name, tool_input, text):
 
 
 def pushed_heads(after, cwd, budget, ci_wake):
-    """-> [(sha, branch, folder, why)]: the newest head of each branch this turn pushed, in the order of each branch's
-    last push. sha is None for a head no read could name (read as unknown, never dropped); why is the reason."""
+    """-> [(sha, branch, folder, why, old)]: the newest head of each branch this turn pushed, in the order of each
+    branch's last push. sha is None for a head no read could name (read as unknown, never dropped); why is the
+    reason. old is the head the remote held before that push, or None when the push gave none."""
     results = {}
     for rec in after:
         for block in tool_results(rec):
             results[block.get("tool_use_id")] = result_text(block)
     found = {}
 
-    def record(sha, branch, folder, why=None):
+    def record(sha, branch, folder, why=None, old=None):
         found.pop((folder, branch), None)
-        found[(folder, branch)] = (sha, why)
+        found[(folder, branch)] = (sha, why, old)
 
     for rec in after:
         for use in tool_uses(rec):
@@ -496,13 +517,13 @@ def pushed_heads(after, cwd, budget, ci_wake):
                         if subcommand != "push":
                             continue
                         folder = _push_folder(segments, number, ends, cwd)
-                        for sha, branch, why in _heads_of_git_push(args, output, folder, ci_wake, budget):
-                            record(sha, branch, folder, why)
+                        for sha, branch, why, old in _heads_of_git_push(args, output, folder, ci_wake, budget):
+                            record(sha, branch, folder, why, old)
             elif name in PUSH_TOOLS:
                 head = _mcp_head(name, tool_input, output)
                 if head:
                     record(head[0], head[1], cwd)
-    return [(sha, branch, folder, why) for (folder, branch), (sha, why) in found.items()]
+    return [(sha, branch, folder, why, old) for (folder, branch), (sha, why, old) in found.items()]
 
 
 def may_push(records):
@@ -533,11 +554,11 @@ def push_ci_states(after, hook, budget=None):
     budget = budget or ci_wake.Budget()
     cwd = hook.get("cwd") if isinstance(hook.get("cwd"), str) else None
     states = []
-    for sha, branch, folder, why in pushed_heads(after, cwd, budget, ci_wake):
+    for sha, branch, folder, why, old in pushed_heads(after, cwd, budget, ci_wake):
         if sha is None:   # the report line then names the branch: no head was read
             states.append((branch, "unknown", "the head was not named: %s" % why))
             continue
-        state, detail = ci_wake.head_state(sha, branch, folder, budget)
+        state, detail = ci_wake.head_state(sha, branch, folder, budget, old)
         states.append((sha[:7], state, detail))
     return states
 
@@ -1777,6 +1798,9 @@ def _marker_path(hook):
     return local_time.report_marker_path(hook.get("session_id"))
 
 
+MARKER_CI_ONLY = "ci-only"   # the word after the index on a marker's first line
+
+
 def rewrite_problems(hook):
     """Reasons for the rewrite that follows a missing-report block, or []. The marker is
     consumed before any check, so a second rewrite finds none and stays quiet. It holds the
@@ -1788,8 +1812,11 @@ def rewrite_problems(hook):
             return []
         with open(marker, encoding="utf-8") as f:
             lines = f.read().split("\n")
-        idx = int(lines[0].strip())
+        first = lines[0].split()
+        idx = int(first[0])
         os.remove(marker)
+        if MARKER_CI_ONLY in first[1:]:   # the block asked for the CI line alone: so does the rewrite check
+            return [r for r in [push_ci_problem(last_reply(hook), marker_states(lines[1:]))] if r]
         path = hook.get("transcript_path")
         if not path or not os.path.exists(path):
             return []
@@ -1836,13 +1863,15 @@ def marker_states(lines):
     return states
 
 
-def write_marker(hook, idx, states=()):
-    """The marker holds the turn's human index, then each pushed head's CI state, so the rewrite makes no second gh read."""
+def write_marker(hook, idx, states=(), ci_only=False):
+    """The marker holds the turn's human index, then each pushed head's CI state, so the rewrite makes no second gh
+    read. ci_only marks a block that asked for the CI line alone: the rewrite is then a short correction, checked for
+    that line only."""
     try:
         marker = _marker_path(hook)
         if marker is not None:
             os.makedirs(os.path.dirname(marker), exist_ok=True)
-            lines = [str(idx)] + ["%s %s %s" % (sha7, state, " ".join(detail.split())) for sha7, state, detail in states
+            lines = [" ".join([str(idx)] + ([MARKER_CI_ONLY] if ci_only else []))] + ["%s %s %s" % (sha7, state, " ".join(detail.split())) for sha7, state, detail in states
                                   if state in CI_WORDS]
             with open(marker, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
@@ -2295,6 +2324,7 @@ def main():
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
     states = []
+    ci = ""
     try:
         states = push_ci_states(after, hook)
         ci = push_ci_problem(text, states)
@@ -2345,6 +2375,8 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
             write_marker(hook, last_human_idx, states)
+        elif ci and reasons == [ci]:
+            write_marker(hook, last_human_idx, states, ci_only=True)
         finish({"decision": "block", "reason": reason})
     else:
         finish({"systemMessage": note} if note else None)
