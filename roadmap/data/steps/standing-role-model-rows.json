@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Rulings R33 and R52 name models for the standing roles; step model-table-one-home did not build these rows.",
  "source": "coordinator 17:57 CST Nov 12, from lane model-table-one-home",
- "note": "Add the coordinator, triage and batch-runner rows to the agent-model-cap table, from R33 and R52, with their sources. Coordinator 17:59 CST Nov 12: started; builds on #3010's table.",
- "updatedAt": "2026-11-12T17:59:33-06:00"
+ "note": "Add the coordinator, triage and batch-runner rows to the agent-model-cap table, from R33 and R52, with their sources. Coordinator 17:59 CST Nov 12: started; builds on #3010's table. Lane 18:11 CST Nov 12 (#3023 draft): round 1 FAIL (fixed 93e27ee04), fix check FAIL (bare role names in guard role_model_table; fixed 4149362d9). Triage 18:13 CST: per roles-review-cap-three a fix-check FAIL starts a new lane at round 1; no second fix check; coordinator picks same session or new.",
+ "updatedAt": "2026-11-12T18:12:34-06:00"
 }
