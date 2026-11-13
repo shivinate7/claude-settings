@@ -196,7 +196,7 @@ def register_simulator_boot_cases():
        "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg,
        carries=(SIM_UA, SIM_UB))
     # The refusal's remedy matches the reading that tripped it: memory busy waits, disk busy frees disk space, both do both.
-    # Memory-only is the control (its remedy already holds); the other two are red until the remedy matches the reading.
+    # The memory-only case is the control: its remedy is the wait alone.
     sh("boot a third simulator with a busy memory and a disk under the bar: the remedy waits, names no disk space",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
        "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg,
