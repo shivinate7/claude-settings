@@ -1,0 +1,14 @@
+{
+ "id": "handoff-audit-after-compact",
+ "title": "After each compaction, a Sonnet audit agent checks the transcript against the handoff",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 21:11 CST Nov 12 (via the retrospective): \"Some reason the handoff pre compact hooks rnt running well in the cloud, maybe keep a standing thing in ur handoff to send a sonnet agent to cross check your transcript against ur handoff every compaction ? (same for coordinator)\". A stale handoff loses rulings and in-flight work across a compaction.",
+ "source": "owner chat 21:11 CST Nov 12, relayed by the retrospective 21:12 and the coordinator 21:12 CST",
+ "note": "Home: hooks/precompact_handoff_prompt.md (the post-compaction prompt), so every standing session gets the step without its own handoff line. The prompt names one Explore Sonnet agent with the audit marker `Audit:`; it reads the transcript tail and the handoff and reports lines the handoff lacks or gets wrong. Until it lands: the coordinator, the retrospective and triage each keep a standing handoff line (owner's ask named the retrospective and the coordinator; triage adopts it too). Cost: one agent per compaction, read on demand (rule outcomes-mechanize-rules).",
+ "updatedAt": "2026-11-12T21:14:59-06:00"
+}
