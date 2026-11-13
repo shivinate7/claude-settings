@@ -313,7 +313,10 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, own=None, cloud=False):
+_KEEP = object()  # run_hook's default for own and cloud: the caller named neither, so the env it set stays
+
+
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, own=_KEEP, cloud=_KEEP):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -326,12 +329,14 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, own=None, c
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
     env.update({"CLAUDE_CONFIG_DIR": cfg, "PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base,
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
-    # The own id (the env form, cse_<x>) and the cloud flag are set or cleared here, so no run depends on the runner's env.
-    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    env.pop("CLAUDE_CODE_REMOTE", None)
-    if own:
+    # A caller that names own or cloud (None and False count as named) sets both env variables from those args alone.
+    # A caller that names neither keeps its env, so a case that patches os.environ reaches the hook with that env.
+    if own is not _KEEP or cloud is not _KEEP:
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_REMOTE", None)
+    if own is not _KEEP and own:
         env["CLAUDE_CODE_REMOTE_SESSION_ID"] = own
-    if cloud:
+    if cloud is not _KEEP and cloud:
         env["CLAUDE_CODE_REMOTE"] = "true"
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
@@ -1803,7 +1808,7 @@ def case_lane_box_refused_in_a_full_size_transcript():
 
 
 def case_box_stays_open_outside_a_lane():
-    # Green controls, passing on main. Each is judged by the model once and not denied.
+    # Controls: a box outside a lane is judged by the model once and not denied. The lane check must leave these alone.
     # (label, transcript, own env id, the parent scope the reader must read for it)
     cases = (
         ("a session with no parent", own_transcript("plain", None, ["cs-repo:o/r"]), OWN_ENV, None),
@@ -1821,7 +1826,7 @@ def case_box_stays_open_outside_a_lane():
 
 def case_lane_box_fails_open_on_an_unread_record():
     # An unread record or an error counts as no lane (lane_session_hit's rule): the box goes to the model as usual, and
-    # the hook does not crash. Green on main.
+    # the hook does not crash. A read error must never refuse the box, so the lane check leaves these open.
     folder = os.path.join(ROOT, "transcript-folder")
     os.makedirs(folder, exist_ok=True)
     garbage, empty = os.path.join(ROOT, "garbage.jsonl"), os.path.join(ROOT, "empty.jsonl")
