@@ -22,7 +22,7 @@ Why: in banchi, 8 non-code files lost 19 decision hints, because the map listed 
 
 ## Cost
 
-No new process: the skill reads the records and `lint/layout.json` in the check run's own process. The file-read count is unmeasured.
+No new process: the skill reads the records and `lint/layout.json` in the check run's own process (unmeasured). The file-read count is unmeasured.
 
 ## Safety holes, named
 
