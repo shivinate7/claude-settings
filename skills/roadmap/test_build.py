@@ -2,9 +2,11 @@
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
+import ast
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -2127,6 +2129,162 @@ class UntouchedInLivePhase(UpkeepFixture):
                                  "the unreadable step is listed, and the fresh active step is not")
 
 
+class LiveStatusPhase(UpkeepFixture):
+    """A phase is live when it holds an open step whose status is in build.LIVE_STATUS (doing, and the legacy active).
+    The two rows, `untouched 5 days in a live phase` (updatedAt STALE_DAYS old or more) and `no note in a live phase`
+    (an empty note), read the open steps of a live phase whose status is todo, ready, queued or live. A step with no
+    phase never makes a phase live and is never listed. A phase holding only blocked, queued or ready steps is not live."""
+
+    STALE = "untouched 5 days in a live phase"
+    EMPTY = "no note in a live phase"
+
+    def ten_days_ago(self):
+        return iso_ago(10 * 24 * 60)
+
+    def stale_and_empty(self):
+        """((count, sorted entries) of the stale row, the same of the empty row), from one build of main with no --live file."""
+        _, out = self.build_from_main()
+        stale_count, stale = self.row(out, self.STALE)
+        empty_count, empty = self.row(out, self.EMPTY)
+        return (stale_count, self.entries(stale)), (empty_count, self.entries(empty))
+
+    def test_a_phase_holding_a_doing_step_is_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        self.commit_step("later-todo", status="todo", phase="later", note="", updatedAt=self.ten_days_ago(), order=4)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]),
+                         "build holds a doing step, so it is live and its ready step, untouched 10 days, is listed")
+        self.assertEqual(empty, (1, ["build-todo"]),
+                         "build is live, so its empty todo step is listed; later is not live, so later-todo is in neither row")
+
+    def test_a_phase_holding_only_blocked_or_queued_steps_is_not_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("stuck-blocked", status="blocked", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=3)
+        self.commit_step("waiting-queued", status="queued", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
+        (_, stale), (_, empty) = self.stale_and_empty()
+        self.assertIn("build-ready", stale, "scope first: build holds a doing step, so its ready step is listed")
+        self.assertNotIn("stuck-blocked", stale + empty, "stuck holds only a blocked step, so it is not live")
+        self.assertNotIn("waiting-queued", stale + empty, "waiting holds only a queued step, so it is not live")
+
+    def test_a_legacy_active_step_still_makes_its_phase_live(self):
+        # A legacy active step still makes its phase live, which the upkeep rows in this file depend on.
+        self.commit_step("legacy-active", status="active", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]), "an active step makes build live, so its ready step is listed")
+        self.assertEqual(empty, (1, ["build-todo"]), "an active step makes build live, so its empty todo step is listed")
+
+    def test_live_status_is_exactly_doing_and_active(self):
+        self.assertTrue(hasattr(build, "LIVE_STATUS"),
+                        "build has no LIVE_STATUS, so upkeep spells its live statuses out")
+        self.assertEqual(tuple(build.LIVE_STATUS), ("doing", "active"),
+                         "LIVE_STATUS holds doing and the legacy active; done, ready and todo are not live")
+        unknown = [s for s in build.LIVE_STATUS if s not in build.KNOWN_STATUS]
+        self.assertEqual(unknown, [], "each LIVE_STATUS entry is in KNOWN_STATUS")
+
+    def test_upkeep_spells_no_status_literal_of_its_own(self):
+        # Any status word in upkeep's code is a second spelling, so the check reads each string constant against
+        # build.KNOWN_STATUS, the one home of the status words.
+        tree = ast.parse(inspect.getsource(build.upkeep))
+        literal = sorted(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value in build.KNOWN_STATUS)
+        self.assertEqual(literal, [], "upkeep spells a status word itself, at these lines of its source; "
+                                      "it must read the status constants in build")
+
+    def test_thirty_stale_steps_in_a_live_phase_are_all_listed(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        ids = sorted("ready-%02d" % i for i in range(30))
+        for n, sid in enumerate(ids, start=2):
+            self.commit_step(sid, status="ready", phase="build", note="Parked for a lane.",
+                             updatedAt=self.ten_days_ago(), order=n)
+        (count, stale), _ = self.stale_and_empty()
+        self.assertEqual(count, 30, "all 30 stale ready steps in build are counted")
+        self.assertEqual(stale, ids, "the row lists all 30, with no cut-off for a long list")
+
+    def test_folded_and_blocked_steps_are_read_by_neither_row_and_queued_is_read_like_todo(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-folded", status="folded", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-blocked", status="blocked", phase="build", note="", updatedAt=self.ten_days_ago(), order=3)
+        self.commit_step("build-queued", status="queued", phase="build", note="", updatedAt=self.ten_days_ago(), order=4)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=5)
+        (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
+        self.assertIn("build-todo", stale, "scope first: build is live, so its todo step, untouched 10 days, is listed")
+        self.assertEqual((stale_count, stale), (2, ["build-queued", "build-todo"]),
+                         "the stale row reads todo, ready, queued and live steps, so folded and blocked are not listed")
+        self.assertEqual((empty_count, empty), (2, ["build-queued", "build-todo"]),
+                         "the empty row reads todo, ready, queued and live steps, so folded and blocked are not listed")
+
+    def test_a_step_with_no_phase_makes_no_phase_live_and_is_never_listed(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        for name, phase in (("absent", _ABSENT), ("null", None)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("nophase-doing", status="doing", phase=phase, note="Working.", updatedAt=iso_ago(5), order=3)
+                self.commit_step("nophase-todo", status="todo", phase=phase, note="", updatedAt=self.ten_days_ago(), order=4)
+                (_, stale), (_, empty) = self.stale_and_empty()
+                self.assertIn("build-ready", stale, "scope first: build is live, so its ready step, untouched 10 days, is listed")
+                self.assertNotIn("nophase-todo", stale, "a step with no phase is never listed in the stale row")
+                self.assertNotIn("nophase-todo", empty, "a step with no phase is never listed in the empty row")
+
+    def test_a_doing_step_and_an_active_step_are_listed_in_both_rows(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="", updatedAt=self.ten_days_ago(), order=1)
+        self.commit_step("legacy-active", status="active", phase="legacy", note="", updatedAt=self.ten_days_ago(), order=2)
+        (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
+        self.assertEqual((stale_count, stale), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the stale row")
+        self.assertEqual((empty_count, empty), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the empty row")
+
+    def test_a_phase_holding_only_a_ready_step_is_not_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("ready-only", status="ready", phase="ready-only", note="", updatedAt=self.ten_days_ago(), order=3)
+        (_, stale), (_, empty) = self.stale_and_empty()
+        self.assertIn("build-todo", empty, "scope first: build is live, so its empty todo step is listed")
+        self.assertEqual(stale, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
+        self.assertEqual(empty, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
+
+    def test_blocked_queued_and_folded_are_known_statuses(self):
+        missing = [s for s in ("blocked", "queued", "folded") if s not in build.KNOWN_STATUS]
+        self.assertEqual(missing, [], "KNOWN_STATUS lacks these statuses, so upkeep reports a step in one as unknown")
+
+    def test_blocked_queued_and_folded_steps_are_not_unknown_status_entries(self):
+        self.commit_step("c-waiting", status="waiting", order=1)  # an unknown status is still listed
+        for order, status in enumerate(("blocked", "queued", "folded"), start=2):
+            self.commit_step("c-" + status, status=status, order=order)
+        self.publish(sessions=[])
+        _, detail = self.row(self.out_with_live(), StaleInProgress.ROW)
+        self.assertIn('c-waiting (unknown status "waiting")', self.entries(detail),
+                      "scope first: the row lists a step with an unknown status")
+        self.assertEqual(self.entries(detail), ['c-waiting (unknown status "waiting")'],
+                         "blocked, queued and folded are known statuses, so the row does not list them as unknown")
+
+    def test_build_spells_the_live_statuses_only_in_live_status(self):
+        path = HERE / "build.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        home = set()  # the nodes of the LIVE_STATUS assignment, the one place the two words are listed together
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LIVE_STATUS" for t in node.targets):
+                home.update(id(n) for n in ast.walk(node.value))
+        words = ("doing", "active")
+        lists = sorted(n.lineno for n in ast.walk(tree)
+                       if isinstance(n, (ast.Tuple, ast.List, ast.Set)) and id(n) not in home
+                       and all(w in {e.value for e in n.elts if isinstance(e, ast.Constant)} for w in words))
+        compares = sorted(n.lineno for n in ast.walk(tree)
+                          if isinstance(n, ast.Compare) and any(isinstance(op, ast.Eq) for op in n.ops)
+                          and any(isinstance(x, ast.Constant) and x.value in words for x in [n.left, *n.comparators]))
+        self.assertEqual(lists, [], "a tuple or list holds both doing and active at these lines of build.py, outside LIVE_STATUS")
+        self.assertEqual(compares, [], "an == comparison with doing or active is at these lines of build.py")
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
@@ -2842,8 +3000,11 @@ class WaitOnClosedPull(UpkeepFixture):
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
     with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
-    12 h before the live read, when no live session names its step. An entry reads `#<number> (<branch or title>)`,
-    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone."""
+    12 h before the live read, when no live session names its step, and the runner's list does not name it (`held`
+    true) and no review log is posted (`reviewLog` true). An entry reads `#<number> (<branch or title>)`,
+    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone. A held
+    draft reads no entry at all, so its missing createdAt is not an unknown entry. A `held` or `reviewLog` that is
+    not a JSON bool makes the pull row skipped, which reads the row unknown."""
 
     READY = "ready todo steps"
     DRAFT = "draft PRs over 12 h with no live lane"
@@ -2946,6 +3107,59 @@ class ReadyAndDraftRows(UpkeepFixture):
                 count, detail = self.row(self.out_with_live(), self.DRAFT)
                 self.assertEqual((count, self.entries(detail)),
                                  (2, ["#1000 (lone-draft)", "unknown (#998 has no createdAt)"]))
+
+    def test_draft_with_a_posted_review_log_is_not_listed(self):
+        # The #2818 shape: lane lane-ruleset-read, not the step id, and no live session names merge-reads-ruleset.
+        # reviewLog true is the only mark. lone-draft is the control.
+        self.commit_step("merge-reads-ruleset", status="doing")
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), reviewLog=True),
+            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
+                         "a draft whose review log is posted is not listed")
+
+    def test_draft_the_runner_holds_is_not_listed_without_a_review_log(self):
+        # The same shape as the #2818 case, with held true and no review log. lone-draft is the control.
+        self.commit_step("merge-reads-ruleset", status="doing")
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), held=True),
+            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
+                         "a draft the runner's list names (held true) is not listed")
+
+    def test_orphan_draft_and_false_flags_are_still_listed(self):
+        # The false alarm control: no key, no lane, over 12 h, so listed. held false and reviewLog false name nothing.
+        self.publish(sessions=[], pulls=[
+            self.draft(1001, "orphan-draft", self.created_before(780)),
+            dict(self.draft(1002, "held-false", self.created_before(780)), held=False),
+            dict(self.draft(1003, "review-false", self.created_before(780)), reviewLog=False)])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)),
+                         (3, ["#1001 (orphan-draft)", "#1002 (held-false)", "#1003 (review-false)"]),
+                         "a draft with no mark, or with held or reviewLog false, is listed")
+
+    def test_non_bool_held_or_review_log_skips_the_pull_row(self):
+        # A JSON string or number is a wrong shape. The pull row is skipped, so the row reads unknown and lists nothing.
+        for key in ("held", "reviewLog"):
+            for value in ("yes", 1):
+                with self.subTest(key=key, value=value):
+                    self.publish(sessions=[], pulls=[
+                        dict(self.draft(1001, "lone-draft", self.created_before(780)), **{key: value}),
+                        self.draft(1002, "other-draft", self.created_before(780))])
+                    count, detail = self.row(self.out_with_live(), self.DRAFT)
+                    self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
+                                     "a %s that is not a JSON bool skips its pull row" % key)
+
+    def test_held_draft_with_no_created_at_is_not_an_unknown_entry(self):
+        # held skips the pull before the createdAt check, so only the control lone-draft is listed.
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(998, "held-no-date", None), held=True),
+            self.draft(1000, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1000 (lone-draft)"]),
+                         "a held draft with no createdAt reads no unknown entry")
 
     def test_no_live_file_reads_the_draft_row_unknown(self):
         _, out = self.build_from_main()
