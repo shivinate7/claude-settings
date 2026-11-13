@@ -43,9 +43,10 @@ Short and plain are one goal. Never trade one for the other.
   what a shared tool accepts, such as a second form, an allow-list entry or a per-repo exception,
   carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. On the
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
-  true` on a widening one. When every option's `Lose:` is large (a ruling gone, a known gap left open), add one option that softens that loss. It keeps most of the gain.
-  `hooks/question_form.py` checks the box and the page, but not this softening
-  option: it is a writing rule only (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
+  true` on a widening one. When the options trade off heavily, so that every `Lose:` is large (a ruling gone, a known gap left
+  open), add one better-solution option that keeps most of the gain. That option is a writing rule only:
+  no check reads it. `hooks/question_form.py` checks the box and the page
+  (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
   `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
