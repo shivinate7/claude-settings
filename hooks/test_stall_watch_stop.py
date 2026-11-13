@@ -973,11 +973,14 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     output_file(base, "bnoimp600", 600)
     recs = flagged("bnoimp600", desc="Serve q_max files on 3202. until: round 1 bids are served")
     path = transcript(recs)
-    lone = new_dir()
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
     shutil.copy(os.path.join(HERE, "shared_names.py"), lone)
     # stall_watch imports own_session with no guard, so the copy needs it; guard_stream is the one left out
     shutil.copy(os.path.join(HERE, "own_session.py"), lone)
+    lint_beside(root)
     rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
@@ -992,16 +995,27 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     return problems
 
 
+def lint_beside(root):
+    """Lay lint/_transcript.py at `root`/lint, where a copy in `root`/hooks reads it (`../lint`). Without it the
+    Stop check has no finish reader, so it prints nothing for any job."""
+    os.makedirs(os.path.join(root, "lint"), exist_ok=True)
+    shutil.copy(os.path.join(os.path.dirname(HERE), "lint", "_transcript.py"), os.path.join(root, "lint"))
+
+
 def hooks_copy(shared):
-    """A scratch copy of hooks/*.py. shared None leaves out shared_names.py; "stale" writes one with no
-    TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the copy's stall_watch.py."""
-    lone = new_dir()
+    """A scratch copy of hooks/*.py in `root`/hooks, with lint/_transcript.py beside it. shared None leaves out
+    shared_names.py; "stale" writes one with no TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the
+    copy's stall_watch.py."""
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     for name in os.listdir(HERE):
         if name.endswith(".py") and not (name == "shared_names.py" and shared != "real"):
             shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
     if shared == "stale":
         with open(os.path.join(lone, "shared_names.py"), "w", encoding="utf-8") as f:
             f.write("PROJECT_FROZEN_FILES = ()\n")
+    lint_beside(root)
     return os.path.join(lone, os.path.basename(MODULE))
 
 
@@ -1034,6 +1048,33 @@ def finished_job_is_silent_with_shared_names_missing():
 def finished_job_is_silent_with_shared_names_stale():
     """N4b. shared_names.py without TASK_NOTIFICATION_TAG: a finished job idle 2 h prints nothing, exit 0"""
     return finished_job_is_silent_without_the_notice_tag("stale", "shared_names stale")
+
+
+@case
+def missing_reader_is_named_on_stderr_not_silent():
+    """N5. lint/_transcript.py absent beside the copy: a finished job prints nothing on stdout, exit 0, and the
+    Stop check prints one stderr line that names the missing reader, not silence. A control with lint beside the
+    copy prints nothing on stderr."""
+    base = new_dir()
+    output_file(base, "bnolint7200", 7200)
+    done = transcript(flagged("bnolint7200") + [notice("bnolint7200")])
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
+    for name in ("stall_watch.py", "shared_names.py", "own_session.py"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
+    rc, out, err = run_stop(done, base, module=os.path.join(lone, "stall_watch.py"))
+    problems = expect(rc == 0, f"lint missing: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"lint missing: a finished job prints on stdout: {out[:200]!r}")
+    lines = [line for line in err.splitlines() if line.strip()]
+    problems += expect(len(lines) == 1, f"lint missing: stderr holds {len(lines)} line(s), want one: {err[:300]!r}")
+    if len(lines) == 1:
+        problems += expect("_transcript.py" in lines[0],
+                           f"lint missing: the stderr line does not name _transcript.py: {lines[0][:300]!r}")
+    rc, out, err = run_stop(done, base, module=hooks_copy("real"))
+    problems += expect(rc == 0 and err.strip() == "",
+                       f"control: lint beside the copy, stderr is not empty: rc {rc}, {err[:200]!r}")
+    return problems
 
 
 # Row tables. Each row is one case body from above, and keeps its S-label.
