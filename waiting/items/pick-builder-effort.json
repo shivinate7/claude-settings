@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T19:59:09Z",
+  "closed": "2026-11-13T20:02:43Z",
+  "context": "Goal: each agent runs the least effort that keeps it accurate.\nProblem (rule): you asked \"Builder shd be sonnet medium no?\" Main runs the builder on Sonnet high. Your 13:51 layout covered session rows only, so the builder row is untouched. Changing it edits a ruled table.\nBased on (read): the retrospective's take: effort follows the lane's kind, because a failed review round costs more than the effort saved. Unmeasured.\nDeparts from: main, where the builder runs Sonnet high in every lane \u2014 options a and b change it.\nMeanwhile: builders keep Sonnet high.",
+  "home": "decision agent-model-cap; step model-layout-to-table",
+  "id": "pick-builder-effort",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T20:01:00.000Z",
+    "choice": "a",
+    "note": "approved on ur builder suggestoins (typed to the retrospective 14:01 CST, relayed)"
+  },
+  "n": 755,
+  "options": [
+    {
+      "gain": "Lowest builder cost.",
+      "key": "a",
+      "label": "Sonnet medium for every builder (your guess)",
+      "lose": "Guard and check lanes may fail more review rounds (unmeasured)."
+    },
+    {
+      "gain": "Effort where a miss costs most, savings elsewhere.",
+      "key": "b",
+      "label": "By lane kind: high in guard or check lanes, medium in product, design and docs lanes (recommended)",
+      "lose": "Two builder rows to keep; a wrong lane kind gets the wrong effort."
+    },
+    {
+      "gain": "No change; fewest surprises.",
+      "key": "c",
+      "label": "Keep Sonnet high everywhere",
+      "lose": "Pays high effort on lanes that may not need it (unmeasured)."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "owner 13:58 CST Nov 13, via retrospective",
+  "reply": "Filed 14:0x CST: your \"approved on ur builder suggestoins\" is option a, ruling own-755-a-builder-by-kind. Builder effort follows the lane kind: high in guard or check lanes, medium in product, design and docs lanes. Step model-layout-to-table lands it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Builder effort: high, medium, or by lane kind?",
+  "status": "closed",
+  "title": "What effort should the builder agent run at: high everywhere, medium everywhere, or by lane kind?",
+  "why": "It changes the ruled agent row for builders and the cost of every lane."
+}

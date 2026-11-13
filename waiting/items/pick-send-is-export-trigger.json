@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-13T19:59:09Z",
+  "context": "Goal: the git copy of the waiting page is never older than your last save.\nProblem (goal): you asked \"shd me hitting send on an artifact be another update trigger\". Today Send already wakes the page's writer (triage); the git copy is exported only when triage chooses to, so it can read old (item 747 did for about 15 minutes).\nBased on (ruling): your item 593 a ruled the copy timely, not real time; PR #3212 stamps the copy with its age. This option goes beyond that ruling.\nBased on (read): the retrospective's take: yes. The writer exports on that wake. No timer, no new process.\nDeparts from: main \u2014 the copy is exported when triage runs an export, with a stated age; option a exports at each Send.\nMeanwhile: the stated age shows how old the copy is. Cost per Send (a few reads and one commit on the roadmap branch) is unmeasured.",
+  "home": "step page-one-store-fixes; item 593 a (ruling ow-13-q-max-past-rates-a)",
+  "id": "pick-send-is-export-trigger",
+  "kind": "decision",
+  "n": 757,
+  "options": [
+    {
+      "gain": "The copy is never older than your last save.",
+      "key": "a",
+      "label": "Yes: each Send wakes the writer, which exports the git copy then (recommended)",
+      "lose": "A few reads and one commit per Send (unmeasured); many small commits on the roadmap branch."
+    },
+    {
+      "gain": "Fewer commits; no change to what you ruled.",
+      "key": "b",
+      "label": "No: keep the timely export and the stated age, as you ruled (item 593 a)",
+      "lose": "The copy can read old for a while after a save."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "owner 13:58 CST Nov 13, via retrospective",
+  "repo": "shivinate7/claude-settings",
+  "short": "Pressing Send on the page also exports the git copy?",
+  "status": "open",
+  "title": "Should your pressing Send on the waiting page also refresh the git copy of the page?",
+  "why": "It changes when the git copy is written; you ruled it timely, not real time (item 593 a)."
+}

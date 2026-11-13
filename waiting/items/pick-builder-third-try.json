@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-13T19:59:09Z",
+  "context": "Goal: a change that keeps failing review ends cleanly, and the stronger model is used only where it earns its cost.\nProblem (rule): you saw an Opus \"final round\". That was the builder's third try (Opus, by standing grant) after a round 2 FAIL, together with the old reviewer round 3. Your 14:01 CST words: round 3 stays for a change that failed round 2; only the round 3 forced after a pass is gone. So the third try still happens. The question is only the model for it.\nBased on (ruling): r9, newest text 14:01 CST Nov 13 (corrected from the 13:29 CST reading); rule roles-third-round-steps-up, which runs a builder's third try on Opus.\nDeparts from: main CLAUDE.md, where roles-third-round-steps-up runs the builder's third try on Opus \u2014 option b would run it on the builder's own row (Sonnet).\nMeanwhile: the third try keeps running on Opus; lane rounds-rules-one-record waits on your pick for the CLAUDE.md wording.",
+  "home": "ruling r9; step rounds-rules-one-record",
+  "id": "pick-builder-third-try",
+  "kind": "decision",
+  "n": 758,
+  "options": [
+    {
+      "gain": "A stronger model gets one more go on a change that failed twice.",
+      "key": "a",
+      "label": "Keep Opus for the third try (recommended)",
+      "lose": "Opus cost on those tries (unmeasured)."
+    },
+    {
+      "gain": "Lower cost; one builder model throughout.",
+      "key": "b",
+      "label": "Run the third try on the builder's own row (Sonnet)",
+      "lose": "A stubborn change gets no step-up, so it may fail round 3 more often (unmeasured)."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "owner 13:58 CST Nov 13, via retrospective",
+  "reply": "Triage 14:0x CST: your 14:05 CST words (\"i shuld never be prompted we shd change this -- no opus round 3 here just sonnnet high\") are filed as ruling own-r3-reviewer-sonnet-high: the reviewer's round 3 runs Sonnet high and Opus is not an option for it. I read that as the reviewer only. Does it also cover the builder's third try? If yes, pick b here; if the builder's third try may still use Opus, pick a.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Builder third try: Opus or the builder's own model?",
+  "status": "open",
+  "title": "The builder's third try, after a round 2 FAIL: should it still run on Opus, or on the builder's own model?",
+  "why": "It sets the model for the third try in rule roles-third-round-steps-up; the try itself stays."
+}

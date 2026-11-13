@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T19:59:09Z",
+  "closed": "2026-11-13T20:02:43Z",
+  "context": "Goal: design work gets enough thought without paying for it twice.\nProblem (rule): you asked \"should both design reviewer and designer be opus high? or should one be pegged down a notch?\" Main runs both on Opus high.\nBased on (read): the retrospective's take: the designer keeps Opus high (a wide design space); the design reviewer drops to Opus medium (it judges against a mockup and the repo's design rules). Unmeasured.\nDeparts from: main, where both run Opus high \u2014 option a lowers the design reviewer.\nMeanwhile: both keep Opus high.",
+  "home": "decision agent-model-cap; step model-layout-to-table",
+  "id": "pick-designer-reviewer-effort",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T20:01:00.000Z",
+    "choice": "none",
+    "note": "for design reviewer move it to sonnet high (typed to the retrospective 14:01 CST, relayed)"
+  },
+  "n": 756,
+  "options": [
+    {
+      "gain": "Saves on the judging role, keeps depth where the design is drawn.",
+      "key": "a",
+      "label": "Designer Opus high, design reviewer Opus medium (recommended)",
+      "lose": "A shallower review may miss a flaw in a screen (unmeasured)."
+    },
+    {
+      "gain": "No change; both roles get full depth.",
+      "key": "b",
+      "label": "Both Opus high",
+      "lose": "Pays high on both."
+    },
+    {
+      "gain": "Lowest design cost.",
+      "key": "c",
+      "label": "Both Opus medium",
+      "lose": "Thinner mockups and reviews (unmeasured)."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "owner 13:58 CST Nov 13, via retrospective",
+  "reply": "Filed 14:0x CST: your words are ruling own-756-design-reviewer-sonnet. The design reviewer moves to Sonnet high; the designer stays Opus high. Step model-layout-to-table lands it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Designer and design reviewer: both Opus high, or one lower?",
+  "status": "closed",
+  "title": "Should the designer and the design reviewer both run Opus high, or should one go down a notch?",
+  "why": "It changes two ruled agent rows."
+}
