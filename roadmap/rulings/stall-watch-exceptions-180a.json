@@ -1,0 +1,10 @@
+{
+ "id": "stall-watch-exceptions-180a",
+ "at": "2026-11-06T12:19:00-06:00",
+ "title": "Watchers run only inside a hook already started; the stall watcher, ci_wake and the daily job stay as named exceptions",
+ "ruling": "Owner, page item 180 (stall-watch-timer-rule), pick a, saved 18:19 UTC Nov 6 (12:19 CST), routed to the coordinator 12:36 CST: run only inside a hook already started. The stall watcher, ci_wake and the daily job stay as named exceptions, each with a stated cost and a cost test. Triage found this on 13:2x CST Nov 13 when lane watcher-builtin-hook-survey asked the same question as new; it was answered Nov 6. Root CLAUDE.md outcomes-mechanize-rules still says a timer \"starts no new long-lived process\" without naming the exceptions.",
+ "quote": "pick a",
+ "source": "page item stall-watch-timer-rule (n 180), its lastAnswer in the page database. Filed by triage.",
+ "status": "open",
+ "step": "watchers-plan-lanes"
+}

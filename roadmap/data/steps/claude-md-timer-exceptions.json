@@ -1,0 +1,14 @@
+{
+ "id": "claude-md-timer-exceptions",
+ "title": "Root CLAUDE.md names the three watcher exceptions the owner ruled (item 180 a)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane watcher-builtin-hook-survey read root CLAUDE.md as barring the stall watcher and ci_wake, but the owner ruled on Nov 6 that they stay as named exceptions.",
+ "source": "triage read of item 180, 13:2x CST Nov 13",
+ "note": "Todo. Rule outcomes-mechanize-rules says a timer \"starts no new long-lived process\". Ruling stall-watch-exceptions-180a (item 180 a) names three exceptions: the stall watcher, ci_wake and the daily job, each with a stated cost and a cost test. The rule should say so, in the fewest words. A record-writer edit to the owner's CLAUDE.md, so the owner confirms the wording: a CLAUDE.md rule edit needs his word on the exact text.",
+ "updatedAt": "2026-11-13T13:23:55-06:00"
+}
