@@ -1,6 +1,6 @@
-# The -w flag and --no-workspaces are not read for a linked node_modules
+# A nested dependency conflict writes through a member's own link
 
-- **What.** `-w` and `--workspace` change the folder npm works in, and the rule reads them for `npm version` only. `npm ci -w sub` writes the workspace root's `node_modules` and passes when that root's link is not the folder judged (bypass). `--no-workspaces` stops npm from moving the prefix up to a workspace root, and the rule still moves it (false alarm).
-- **Where.** The `npm_walk` walk and the `install` judge in the `linked-node-modules` rule, `hooks/guard_push_delete.py`.
+- **What.** The `linked-node-modules` rule judges one folder: the npm prefix. `-w` and `--workspace` do not change it (`npm prefix -w a` prints what `npm prefix` prints, npm 10.9.9), so `npm ci -w a` from a linked root, and `npm ci --workspace=a` from a member, are refused. `--no-workspaces` stops the walk at the member (`npm_walk`, read by `npm_prefix_flag`). The gap: when a nested dependency conflict makes npm write `packages/a/node_modules/x`, it writes through the member's own link. The rule allows that from the member folder and from the root folder, because it never reads the member's link. Accepted known limit: reading every member's link would refuse each install under a linked member.
+- **Where.** The `install` judge in the `linked-node-modules` rule, `hooks/guard_push_delete.py`.
 - **Decision.** `guard-linked-node-modules` (refuse an install or recursive delete through a linked node_modules).
-- **Retire.** Read `-w` and `--workspace` when it picks the folder, and read `--no-workspaces` when it stops the workspace walk. Tests for the cases above pass.
+- **Retire.** Judge each workspace member's `node_modules` link when the install can write it, only if a real incident shows the limit hit. No test covers `-w` on install; the `--no-workspaces` case is in `tests/guard/s10425-linked-node-modules.py`.

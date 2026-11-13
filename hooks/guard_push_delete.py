@@ -1523,18 +1523,21 @@ def _workspace_member(root: str, folder: str) -> bool:
     return member
 
 
-def npm_walk(where: str):
+def npm_walk(where: str, workspaces: bool = True):
     """(the folder npm installs into, whether it is a workspace root reached from a workspace), as
     `npm prefix` finds them. The folder is the first from `where` upward that holds a package.json or
     a node_modules. When that folder has a package.json, npm keeps walking, and the first folder above
     it whose package.json lists it in `workspaces` becomes the prefix. With none up to the drive root,
-    npm uses `where`."""
+    npm uses `where`. With `workspaces` False (the `--no-workspaces` option), npm stops at that first
+    folder, the member itself (npm 10.9.9: `npm prefix --no-workspaces` run in a member prints the member)."""
     first = None
     folder = where
     while True:
         if first is None:
             if any(os.path.lexists(os.path.join(folder, name)) for name in ("package.json", "node_modules")):
                 first = folder
+        elif not workspaces:
+            return first, False
         elif _workspace_member(folder, first):
             return folder, True
         parent = os.path.dirname(folder)
@@ -1545,7 +1548,8 @@ def npm_walk(where: str):
 
 def npm_prefix_flag(words, where: str) -> str:
     """The folder `--prefix <dir>` or `--prefix=<dir>` names, from `where` when relative, else ''. npm uses
-    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm."""
+    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm. With no
+    `--prefix` and `--no-workspaces`, the folder is the member npm runs in (`npm_walk` with the walk off)."""
     value = ""
     for at, word in enumerate(words):
         if word == "--prefix" and at + 1 < len(words):
@@ -1555,12 +1559,27 @@ def npm_prefix_flag(words, where: str) -> str:
     value = value.strip("\"'")
     if "$" in value or "`" in value or value.startswith("~"):
         return ""  # the shell fills these in, so the guard cannot name the folder: the walk from `where` decides
+    if not value and _workspaces_off(words):
+        return npm_walk(where, False)[0]  # no `--prefix`, but `--no-workspaces`: the member itself, with no walk up
     return os.path.join(where, value) if value else ""
 
 
 def npm_prefix(where: str) -> str:
     """The folder npm installs into: the first element of `npm_walk`."""
     return npm_walk(where)[0]
+
+
+def _workspaces_off(words) -> bool:
+    """True when the last `workspaces` option on the command turns it off: `--no-workspaces`,
+    `--workspaces=false` or `--workspaces false`. With it off, npm's prefix is the member it runs in,
+    with no walk up to the workspace root. `-ws` and `--workspaces` turn it on again."""
+    off = False
+    for at, flag in enumerate(words):
+        if flag == "--no-workspaces" or flag == "--workspaces=false":
+            off = True
+        elif flag in ("--workspaces", "--workspaces=true", "-ws"):
+            off = flag == "--workspaces" and words[at + 1:at + 2] == ["false"]
+    return off
 
 
 def _workspace_reify(words) -> bool:
@@ -1604,6 +1623,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
     def install(args):
         # A `)` glued to the last word closes the subshell or substitution the command sits in.
         words = [arg.rstrip(")") for arg in args]
+        workspaces = not _workspaces_off(words)
         subcommand, at = "", 0
         while at < len(words):
             if words[at] in NPM_VALUE_FLAGS:
@@ -1619,7 +1639,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 version_in_workspace = command == "version" and _workspace_reify(words) and (
                     any(flag in NPM_WORKSPACE_FLAGS or (
                         flag.startswith("--workspace") and not flag.startswith("--workspaces-update"))
-                        for flag in words) or (npm_walk(where)[1] and _has_positional(words[at + 1:])))
+                        for flag in words) or (npm_walk(where, workspaces)[1] and _has_positional(words[at + 1:])))
                 # `audit` rewrites the install when `fix` follows it, after any flag.
                 if command not in NPM_READ_ONLY or (command == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
