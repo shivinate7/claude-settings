@@ -1,18 +1,18 @@
-"""Pins the scope gate on the `checks` job's steps (lane ci-skip-untouched-steps, slice 2).
+"""Pins the scope condition on the `checks` job's steps (lane ci-skip-untouched-steps, slice 2).
 
-ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the gate
+ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the scope condition
 `needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays ungated. The step lists are the audit of main's checks.yml when this was written, by step name.
+step that reads a .md file stays unscoped. The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
-  1. each NO-MD and NAMES-ONLY step carries the gate, exactly.
-  2. each MUST-STAY-UNGATED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
+  1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
+  2. each MUST-STAY-UNSCOPED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
   3. the checks job's step names equal MAIN_STEPS: no rename, add or drop.
-  4. a docs-only pull request leaves `code` false, skips each gated step, and leaves STE lint running.
+  4. a docs-only pull request leaves `code` false, skips each scoped step, and leaves STE lint running.
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
      Scope.test_unreadable_diff_runs_everything, and Scope.test_merge_change_turns_the_merge_job_on (a .py change sets code).
-  5. the entry file of each gated step names no tracked .md file, unless ALLOWED lists that name with a reason.
-  6. no file a gated step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
+  5. the entry file of each scoped step names no tracked .md file, unless ALLOWED lists that name with a reason.
+  6. no file a scoped step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
      (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
@@ -33,17 +33,17 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import NO_MD_GATE, eval_if  # noqa: E402  the one home of the `if:` evaluator and of the gate
+from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if  # noqa: E402  the one home of the `if:` evaluator and of the scope condition
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
-GATE = "${{ %s }}" % NO_MD_GATE
+SCOPE_CONDITION = "${{ %s }}" % NO_MD_SCOPE_CONDITION
 PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
 STE_LINT = "STE lint"
 DOC = "docs/decisions/x.md"
 
-# The audit's NO-MD steps: each reads no .md file at run time, so each takes the gate.
+# The audit's NO-MD steps: each reads no .md file at run time, so each takes the scope condition.
 NO_MD = [
     'Config watch fixture suite',
     'Config watch fast-exit suite',
@@ -141,8 +141,8 @@ NAMES_ONLY = [
     'Hook stub check',
 ]
 
-# The audit's MUST-STAY-UNGATED steps: each reads a .md file at run time, so each stays ungated.
-MUST_STAY_UNGATED = [
+# The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, so each stays unscoped.
+MUST_STAY_UNSCOPED = [
     'STE lint',
     'Rule mechanization audit',
     'Glossary fixture suite',
@@ -192,13 +192,13 @@ MUST_STAY_UNGATED = [
     'Debt retire fixture suite',
     'Comment narration fixture suite',
     'Ruling kind fixture suite',
-    'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it were gated
+    'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it carried the scope condition
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
 ]
 
-# The steps that run only on a pull request, each with its own `if:`. The scope gate does not touch them.
+# The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
 PR_ONLY = [
     'Red-run trailer',
     'Plan refuter line',
@@ -380,7 +380,7 @@ MAIN_STEPS = [
 ]
 
 # Each entry file that names a tracked .md file, with the names and one reason. A name here is written into a temp
-# folder or repo, named in a comment, or a hook's payload: it is not read from the repo. A new name in a gated entry
+# folder or repo, named in a comment, or a hook's payload: it is not read from the repo. A new name in a scoped entry
 # turns the guard red; so does a listed name the file no longer names.
 ALLOWED = {
     "actions/stamp/test_stamp.mjs": (["CLAUDE.md", "README.md"], "written into each case's temp root"),
@@ -423,7 +423,7 @@ MD_TOKEN = re.compile(r"[\w.\-/]*\.md\b")
 CODE_TOKEN = re.compile(r"[\w.\-/]*\.(?:py|sh|mjs)\b")
 # A read a step's run makes: a call that runs a process, opens a file or joins a path. A name in its arguments is a read.
 READ_CALLS = {"run", "call", "check_call", "check_output", "Popen", "system", "join", "open", "read_text", "read_bytes"}
-TRANSITIVE_DEPTH = 3  # hops from a gated entry; the entry is hop 0
+TRANSITIVE_DEPTH = 3  # hops from a scoped entry; the entry is hop 0
 TRANSITIVE_CAP = 200  # files one walk may reach; past it the reach is unknown, which fails
 # A reader: a name for a read of a tracked .md file, or of test_guard.py. test_guard.py loads tests/guard/*.py, and one
 # of those reads skills/impeccable/SKILL.md, so a step that reaches the runner reads a .md file at run time.
@@ -611,13 +611,13 @@ def describe_hits(hits):
     return "; ".join("%s in %s, reached as %s" % (m, rel, " > ".join(chain)) for m, rel, chain in hits)
 
 
-def gated_steps(steps):
+def scoped_steps(steps):
     """(identity, step) for each step the entry guard covers: the audit's NO-MD and NAMES-ONLY steps, and any other step
-    that carries the gate. A named step missing from the job is left out here; the gate test reports it."""
+    that carries the scope condition. A named step missing from the job is left out here; the scope condition test reports it."""
     by_id = {identity(st): st for st in steps}
     names = NO_MD + NAMES_ONLY
     found = [(n, by_id[n]) for n in names if n in by_id]
-    found += [(identity(st), st) for st in steps if if_of(st) == GATE and identity(st) not in names]
+    found += [(identity(st), st) for st in steps if if_of(st) == SCOPE_CONDITION and identity(st) not in names]
     return found
 
 
@@ -634,22 +634,22 @@ class ChecksStepBase(unittest.TestCase):
         self.fail("step %r is not in the %s job" % (name, JOB))
 
 
-class GateOnNoMdSteps(ChecksStepBase):
-    def test_each_no_md_and_names_only_step_carries_the_gate(self):
+class ScopeConditionOnNoMdSteps(ChecksStepBase):
+    def test_each_no_md_and_names_only_step_carries_the_scope_condition(self):
         steps = self.steps()
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, GATE, "step %r: if is %r, want the scope gate" % (name, got))
+                self.assertEqual(got, SCOPE_CONDITION, "step %r: if is %r, want the scope condition" % (name, got))
 
 
-class UngatedAndPrOnlySteps(ChecksStepBase):
-    def test_each_must_stay_ungated_step_reads_no_scope_output(self):
+class UnscopedAndPrOnlySteps(ChecksStepBase):
+    def test_each_must_stay_unscoped_step_reads_no_scope_output(self):
         steps = self.steps()
-        for name in MUST_STAY_UNGATED:
+        for name in MUST_STAY_UNSCOPED:
             with self.subTest(step=name):
                 expr = if_of(self.named(steps, name)) or ""
-                self.assertNotIn("needs.scope.outputs", expr, "step %r is gated on a scope output: %r" % (name, expr))
+                self.assertNotIn("needs.scope.outputs", expr, "step %r reads a scope output in its if: %r" % (name, expr))
 
     def test_each_pr_only_step_keeps_its_pull_request_if(self):
         steps = self.steps()
@@ -665,12 +665,12 @@ class StepNames(ChecksStepBase):
         self.assertEqual(got, sorted(MAIN_STEPS), "the checks job's step names differ from main's")
 
     def test_each_hard_coded_list_names_a_main_step(self):
-        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNGATED + PR_ONLY:
+        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY:
             with self.subTest(step=name):
                 self.assertIn(name, MAIN_STEPS, "a pinned list names a step main does not have")
 
     def test_no_step_is_on_two_lists(self):
-        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNGATED + PR_ONLY
+        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY
         twice = sorted({n for n in listed if listed.count(n) > 1})
         self.assertEqual(twice, [], "a step is on two pinned lists")
 
@@ -680,7 +680,7 @@ class DocsOnlyPullRequest(ChecksStepBase):
         got = scope_run([DOC])
         self.assertEqual(got["code"], "false", "a docs-only change set code: %r" % got)
 
-    def test_every_gated_step_skips_on_that_pull_request(self):
+    def test_every_scoped_step_skips_on_that_pull_request(self):
         got = scope_run([DOC])
         self.assertEqual(got["code"], "false", "a docs-only change set code: %r" % got)
         steps = self.steps()
@@ -689,11 +689,11 @@ class DocsOnlyPullRequest(ChecksStepBase):
                 self.assertFalse(runs_on_pull_request_with(self.named(steps, name), got["code"]),
                                  "step %r still runs on a docs-only pull request" % name)
 
-    def test_ste_lint_stays_ungated_so_it_runs_on_that_pull_request(self):
+    def test_ste_lint_stays_unscoped_so_it_runs_on_that_pull_request(self):
         got = scope_run([DOC])
         self.assertEqual(got["code"], "false", "a docs-only change set code: %r" % got)
         st = self.named(self.steps(), STE_LINT)
-        self.assertTrue(runs_on_pull_request_with(st, got["code"]), "STE lint is gated: if %r" % if_of(st))
+        self.assertTrue(runs_on_pull_request_with(st, got["code"]), "STE lint carries the scope condition: if %r" % if_of(st))
 
 
 class MdNamesInText(unittest.TestCase):
@@ -733,11 +733,11 @@ class MdNamesInText(unittest.TestCase):
         self.assertEqual(md_names_reached(text, tracked), set(tracked))
 
 
-class GatedEntriesNameNoUnlistedMd(ChecksStepBase):
-    def test_each_gated_entry_names_no_tracked_md_file_it_does_not_list(self):
+class ScopedEntriesNameNoUnlistedMd(ChecksStepBase):
+    def test_each_scoped_entry_names_no_tracked_md_file_it_does_not_list(self):
         steps = self.steps()
         tracked = tracked_md()
-        for name, st in gated_steps(steps):
+        for name, st in scoped_steps(steps):
             with self.subTest(step=name):
                 files = entries(st)
                 self.assertTrue(files, "step %r runs no python3, bash or node file the guard can read" % name)
@@ -748,13 +748,13 @@ class GatedEntriesNameNoUnlistedMd(ChecksStepBase):
                         extra = sorted(md_names_reached(read_repo(entry), tracked) - listed)
                         self.assertEqual(extra, [], "%s names a tracked .md file that ALLOWED does not list" % entry)
 
-    def test_each_allowance_is_gated_and_still_names_its_file(self):
+    def test_each_allowance_is_scoped_and_still_names_its_file(self):
         steps = self.steps()
         tracked = tracked_md()
-        gated = {entry for _, st in gated_steps(steps) for entry in entries(st)}
+        scoped = {entry for _, st in scoped_steps(steps) for entry in entries(st)}
         for entry, (names, reason) in ALLOWED.items():
             with self.subTest(entry=entry):
-                self.assertIn(entry, gated, "%s is allowed, but no gated step runs it" % entry)
+                self.assertIn(entry, scoped, "%s is allowed, but no scoped step runs it" % entry)
                 # A listed name no longer tracked was renamed or removed by the change; only names still in the repo are checked.
                 listed = [n for n in names if n in tracked]
                 stale = sorted(set(listed) - md_names_reached(read_repo(entry), tracked))
@@ -762,13 +762,13 @@ class GatedEntriesNameNoUnlistedMd(ChecksStepBase):
 
 
 class AllowanceNamesAfterAMove(unittest.TestCase):
-    ENTRY = "lint/test_check_claude_md_size.py"  # a gated entry that ALLOWED lists with its names
+    ENTRY = "lint/test_check_claude_md_size.py"  # a scoped entry that ALLOWED lists with its names
     GONE = "docs/renamed-away-for-test.md"  # not tracked, as after a rename
 
     def failures_with(self, names):
         with mock.patch.dict(ALLOWED, {self.ENTRY: (names, "fixture")}):
             result = unittest.TestResult()
-            GatedEntriesNameNoUnlistedMd("test_each_allowance_is_gated_and_still_names_its_file").run(result)
+            ScopedEntriesNameNoUnlistedMd("test_each_allowance_is_scoped_and_still_names_its_file").run(result)
         return result.failures + result.errors
 
     def test_a_listed_name_no_longer_tracked_is_not_red(self):
@@ -783,10 +783,10 @@ class AllowanceNamesAfterAMove(unittest.TestCase):
 
 
 class TransitiveReaders(ChecksStepBase):
-    def test_no_gated_step_reaches_a_reader_of_a_md_file(self):
+    def test_no_scoped_step_reaches_a_reader_of_a_md_file(self):
         steps = self.steps()
         index, memo = name_index(tracked_code()), {}
-        for name, st in gated_steps(steps):
+        for name, st in scoped_steps(steps):
             for entry in entries(st):
                 with self.subTest(step=name, entry=entry):
                     hits, cut = walk_readers(entry, repo_text, index, memo)
