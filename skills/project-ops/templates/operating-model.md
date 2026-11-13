@@ -95,31 +95,34 @@ parent, or miss a message while busy.
   or breaks. A session breaks when it slips: a re-asked question, a reply that contradicts the
   roadmap, or a missed ruling (claude-settings decision `session-tiers`, owner, 2026-11-01 17:56 CST).
 - On a rotation, in this order. The coordinator tells the session to rotate.
-  1. The old session stops watching each page its role owns (the repo's one page, the project's
-     waiting page): `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
-     the time from `~/.claude/bin/now-central --full`, then answers each comment still open at that time on those pages. From step 1 to
-     step 5, `writer` in `meta/page` still names the old writer, and no writer watches the page.
-     Asks sent then reach the new writer through its step-5 catch-up read and its first-turn read
+  1. Only the page writer watches a page, so the old session stops watching each page its role owns
+     (the repo's one page, the project's waiting page) only when it is the page writer:
+     `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
+     the time from `~/.claude/bin/now-central --full`, then answers each comment still open at that time on the pages its role owns. From step 1 to
+     step 5, `writer` in `meta/page` still names the old page writer, and no page writer watches the page.
+     Asks sent then reach the new page writer through its step-5 catch-up read and its first-turn read
      of `asks/`.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. The file names each wait it handed over, the home of
-     the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
+     `role-handoff.md`, with that time. A page writer's file names each wait it handed over, the home of
+     the open waiting-page items (the items collection, by URL, never each item), and each page to watch.
+     Any other role's file names the waits and the items home, with `Watch: none`. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
      the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
      the roster.
-  5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
+  5. A successor page writer watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
      before any other act. It reads each page's comments since the time in the hand-off file.
+     A successor in any other role never watches a page.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
      that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
-     the writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
+     the page writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
      gives it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
      (`ArtifactData`). In a repo whose extras file holds the `page-writer` key, it also updates that
      key to its own session id. The key sits in a committed file, so the update goes in a PR. For each
-     ask with no `reply` whose `owner` is the old writer, it reads the
-     ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming writer writes
+     ask with no `reply` whose `owner` is the old page writer, it reads the
+     ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming page writer writes
      `writer`, since the outgoing one is archived at step 4.
 
 ## Autopilot

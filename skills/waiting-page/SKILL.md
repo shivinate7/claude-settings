@@ -345,22 +345,24 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 ## Read the answers
 
-A save on the page sends a comment to Claude when the page allows it. The comment wakes the
-sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
-the answers at each wake, and at the start of each turn while it has an item open (the writer also
-while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
+A save on the page sends a comment to Claude when the page allows it. The comment wakes the writer, the one
+session that watches the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
+the answers at each wake (the writer's only), and at the start of each turn while it has an item open (the writer also
+while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no message comes. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
-- A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
-  adds an item, takes the writer role, or inherits open items. A writer gets the URL from
-  `meta/page`, or from the `Watch:` line of the project-ops role handoff
-  (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
-  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
-  It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
-  has no open item and is not the writer, and at step 1 of a project-ops rotation.
+- Only the writer watches the page (`ArtifactComments` action `watch` with the page URL). Every other
+  session never watches it. This holds when a session adds an item or inherits open items. A session
+  other than the writer learns of an answer from the writer's message to it, which carries the page URL,
+  the item id and the act. It reads the answer from the page, as the fallback above says. The writer
+  watches the page first when it takes the writer role. It gets the URL from `meta/page`, or from the
+  `Watch:` line of the project-ops role handoff (`templates/role-handoff.md`), which names the page URL for a
+  successor writer. A session that inherits items rewrites each item's `owner` to itself: `owner` is the
+  session that reads the answer. The writer stops watching (`ArtifactComments` action `watch` with
+  `on: false` and the page URL) at step 1 of a project-ops rotation.
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.

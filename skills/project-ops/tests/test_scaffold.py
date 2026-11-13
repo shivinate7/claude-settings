@@ -9,6 +9,7 @@ skill writes or ships names this project's threads, sessions or people. The Hand
 judge scripts/check_handoff.py, and the Scaffold cases name the template lines that feed it.
 Temp files: the run folder of lint/_test_temp.py (decision test-temp-standard).
 """
+import ast
 import contextlib
 import io
 import os
@@ -26,6 +27,8 @@ sys.path.insert(1, os.path.join(SKILL, "..", "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import protect  # noqa: E402
 import scaffold  # noqa: E402
+sys.path.insert(1, os.path.join(SKILL, "..", "waiting-page"))
+from test_skill_watch_writer import foreign_watch, prose_sentences  # noqa: E402  the one home of the watch rule
 
 try:
     import check_handoff  # noqa: E402
@@ -179,14 +182,13 @@ class Scaffold(TempDest):
         text = tree(SKILL)["templates/role-handoff.md"]
         section = pages_section(text)
         self.assertIsNotNone(section, "no Pages section")
-        self.assertRegex(section, r"(?m)^Watches stopped at <time>$")
+        # Only the writer watches the page (owner R18, Nov 10), so the header names whose watch stopped.
+        self.assertRegex(section, r"(?mi)^(?:the (?:page )?writer's )?watch(?:es)? stopped at <time>$")
         flat = " ".join(section.split())
         self.assertIn("The URL of each page this role owns", flat)
         self.assertInOrder(flat, (
-            "old session stopped watching each one at that time",
             "answered each comment still open at that time",
             "wrote this file",
-            "successor watches each one at once",
             "reads its comments since that time"))
 
     def test_handoff_rule_moves_page_watches(self):
@@ -202,7 +204,6 @@ class Scaffold(TempDest):
             "each wait it handed over",
             "coordinator archives the old session",
             "coordinator starts the successor from the hand-off file",
-            "successor watches each page at once",
             "reads each page's comments since the time in the hand-off file"))
         self.assertIn("The coordinator sends no broadcast. Sessions read the roster.", flat)
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
@@ -212,6 +213,52 @@ class Scaffold(TempDest):
         self.assertNotIn("<triage limit>", flat, "the rotation section still names the triage limit")
         self.assertNotIn("<batch runner limit>", flat, "the rotation section still names the batch runner limit")
         self.assertIn("The coordinator never hands its own sessions to a successor", flat)
+
+    def test_handoff_pages_give_the_watch_to_the_writer_only(self):
+        section = pages_section(tree(SKILL)["templates/role-handoff.md"])
+        self.assertIsNotNone(section, "no Pages section")
+        found = foreign_watch(section)
+        self.assertFalse(found, f"the Pages section gives a watch to a session other than the writer: {found[0] if found else ''}")
+
+    def test_handoff_watch_none_is_said_for_a_role_that_is_not_the_writer(self):
+        section = pages_section(tree(SKILL)["templates/role-handoff.md"])
+        self.assertIsNotNone(section, "no Pages section")
+        hits = [s for s in prose_sentences(section) if re.search(r"Watch: none", s)]
+        self.assertTrue(hits, "the Pages section has no `Watch: none` sentence")
+        bad = [s for s in hits if not re.search(r"\bwriter\b", s, re.I)]
+        self.assertFalse(bad, f"a `Watch: none` sentence does not name the writer: {bad[0] if bad else ''}")
+
+    def test_rotation_gives_the_watch_to_the_writer_only(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        self.assertIn("## Rotation of standing sessions", text, "the operating model has no rotation section")
+        found = foreign_watch(rotation_rule(text))
+        self.assertFalse(found, f"the rotation section gives a watch to a session other than the writer: {found[0] if found else ''}")
+
+    def test_check_handoff_docstring_gives_the_watch_to_the_writer_only(self):
+        self.assertTrue(os.path.isfile(CLI), "skills/project-ops/scripts/check_handoff.py does not exist")
+        with open(CLI, encoding="utf-8") as f:
+            doc = ast.get_docstring(ast.parse(f.read())) or ""
+        self.assertTrue(doc, "check_handoff.py has no module docstring")
+        found = foreign_watch(doc)
+        self.assertFalse(found, f"the check's docstring gives a watch to a session other than the writer: {found[0] if found else ''}")
+
+    def test_handoff_template_and_model_say_page_writer_not_bare_writer(self):
+        files = tree(SKILL)
+        for path in ("templates/role-handoff.md", "templates/operating-model.md"):
+            with self.subTest(path=path):
+                self.assertIn(path, files, f"{path} is missing")
+                hits = bare_writer_hits(files[path])
+                self.assertFalse(hits, f"{path} says a bare 'writer' where the term is 'page writer': {hits[0] if hits else ''}")
+
+    def test_the_writer_scan_reads_code_spans_wraps_and_lone_backticks(self):
+        # The scan is the one home of the term pin, so its own reads are pinned: a code span is no prose, a lone
+        # backtick never hides the words after it, and a `page` at a line end still joins its `writer`.
+        self.assertEqual(bare_writer_hits("The `writer` key holds it."), [])
+        self.assertEqual(bare_writer_hits("The page writer watches."), [])
+        self.assertEqual(bare_writer_hits("The page\nwriter watches."), [])
+        self.assertTrue(bare_writer_hits("The writer watches."))
+        self.assertTrue(bare_writer_hits("Writer's watch."))
+        self.assertTrue(bare_writer_hits("A lone ` here.\nThe writer `watch` acts."))
 
     def rotation_flat(self):
         """The rotation section, flattened. The scope comes first: a missing section fails here, once."""
@@ -416,18 +463,40 @@ NO_WATCH_LINE = re.compile(r"(?i)\bno\s+`?watch\b")
 OFFERS_IDS = re.compile(r"(?i)\bitem numbers?\b")
 
 
-def handoff_text(open_items="none", watches=()):
+# The glossary term is `page writer`. A bare `writer` in prose is the old word. A code span on one line is no prose
+# (a field name such as `writer` in meta/page), and a lone backtick never pairs across lines. One home of the term pin.
+BARE_WRITER = re.compile(r"(?<!page )\bwriter\b", re.I)
+
+
+def bare_writer_hits(text):
+    """Each place in the prose of `text` that says a bare `writer`. The lines are joined first, so a `page` at a
+    line end still joins its `writer`."""
+    prose = " ".join(re.sub(r"`[^`\n]*`", " ", line) for line in text.splitlines())
+    return [" ".join(prose[max(0, m.start() - 30):m.end() + 10].split()) for m in BARE_WRITER.finditer(prose)]
+
+
+def handoff_text(open_items="none", watches=(), role="Triage", body=(), title=None):
     """A full role hand-off. open_items=None leaves the `Open items:` line out. Each watch is the
-    text after `Watch: `, one line each. The one fixture of the HandoffCheck cases: a case adds an option, never a copy."""
+    text after `Watch: `, one line each. role names the title, `# <role> handoff`; None leaves the title out, so the
+    file has no heading. title, when set, is the whole first heading line, `#` included, and replaces role. body lines
+    go in the State section. Triage is the page writer. The one fixture of the HandoffCheck cases: a case adds an
+    option, never a copy."""
     pages = ["Watches stopped at 10:00", ""]
     if open_items is not None:
         pages.append(f"Open items: {open_items}")
     pages.extend(f"Watch: {w}" for w in watches)
+    if title is not None:
+        heading = [title, ""]
+    else:
+        heading = [] if role is None else [f"# {role} handoff, 2026-01-02", ""]
+    state = ["## State", "", "Item 12 is in flight.", ""]
+    if body:
+        state += [*body, ""]
     return "\n".join([
-        "# Triage handoff, 2026-01-02", "",
+        *heading,
         'From "old triage" at the limit. Checked: main abc1234, record branch def5678.', "",
         "## Standing instructions", "", "Don't skip the check.", "",
-        "## State", "", "Item 12 is in flight.", "",
+        *state,
         "## Pages", "", *pages, "",
         "## Sessions", "", "The batch runner.", ""])
 
@@ -440,13 +509,26 @@ def problems(text):
 
 
 class HandoffCheck(TempDest):
-    """A save of the waiting page wakes only a session that watches it. A successor that inherits open items
-    and gets no Watch line hears nothing (the owner's two test saves). The check judges the hand-off file."""
+    """A save of the waiting page wakes only the writer, the one session that watches it. A writer that inherits
+    open items and gets no Watch line hears nothing (the owner's two test saves). A hand-off from another role has
+    no page to watch. The check judges the hand-off file."""
 
     def test_open_items_without_a_watch_line_is_one_problem(self):
         found = problems(handoff_text(ITEMS))
         self.assertEqual(len(found), 1, found)
         self.assertRegex(found[0], r"(?i)watch")
+
+    def test_the_missing_watch_problem_names_the_writer(self):
+        found = problems(handoff_text(ITEMS))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)\bwriter\b", "the missing-watch problem must name the writer as the one who watches")
+        self.assertRegex(found[0], r"(?i)\bpage writer\b", "the missing-watch problem must name the page writer, the glossary term")
+
+    def test_a_role_that_is_not_the_writer_may_say_watch_none_with_open_items(self):
+        # Only the writer watches the page, so a hand-off from another role has no watch to hand on.
+        for role in ("Coordinator", "Batch runner", "COORDINATOR", "batch runner"):
+            with self.subTest(role=role):
+                self.assertEqual(problems(handoff_text(ITEMS, ["none"], role=role)), [])
 
     def test_a_watch_line_without_a_url_is_no_watch(self):
         for watch in ("", "<page URL>", "none"):
@@ -504,7 +586,7 @@ class HandoffCheck(TempDest):
                 self.assertNotRegex(found[0], OFFERS_IDS)
 
     def test_no_open_items_still_needs_a_watch_url_or_watch_none(self):
-        # Every role that rotates owns a page, so each hand-off names a real Watch URL.
+        # Only the page writer watches the page, so its hand-off names a real Watch URL.
         # The one exception is `Watch: none` together with `Open items: none`.
         self.assertEqual(problems(handoff_text("none", [PAGE])), [])
         self.assertEqual(problems(handoff_text("none", ["none"])), [])
@@ -561,6 +643,73 @@ class HandoffCheck(TempDest):
                 self.assertTrue(any("Open items" in p for p in found), found)
                 self.assertFalse(any(OFFERS_IDS.search(p) for p in found), found)
                 self.assertTrue(any(re.search(r"(?i)\burl\b", p) for p in found), "the message must offer the URL home")
+
+    def test_a_title_that_names_no_coordinator_or_batch_runner_is_the_page_writers(self):
+        # Fails closed: only a first heading that names the coordinator or the batch runner is no page writer's hand-off.
+        for role in ("Writer", "Page writer", "Triage", "Triage lane", "Non-triage", "Repo"):
+            with self.subTest(role=role):
+                found = problems(handoff_text(ITEMS, ["none"], role=role))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_hand_off_with_no_heading_is_the_page_writers(self):
+        found = problems(handoff_text(ITEMS, ["none"], role=None))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_coordinator_or_batch_runner_line_in_the_body_does_not_change_a_page_writers_title(self):
+        # A fenced line or a later line in the body is no title: the first heading line decides.
+        body = ("```", "# Coordinator handoff", "```", "", "# Batch runner notes")
+        for role in ("Triage", "Writer"):
+            with self.subTest(role=role):
+                found = problems(handoff_text(ITEMS, ["none"], role=role, body=body))
+                self.assertEqual(len(found), 1, found)
+
+    def test_a_triage_line_in_the_body_does_not_make_a_coordinator_or_batch_runner_a_page_writer(self):
+        for role in ("Coordinator", "Batch runner"):
+            with self.subTest(role=role):
+                self.assertEqual(problems(handoff_text(ITEMS, ["none"], role=role, body=("# Triage notes",))), [])
+
+    def test_a_coordinator_or_batch_runner_hand_off_with_a_real_watch_is_a_problem(self):
+        # Only the page writer watches a page, so a hand-off from another role hands on no watch.
+        for role in ("Coordinator", "Batch runner"):
+            with self.subTest(role=role):
+                found = problems(handoff_text(ITEMS, [PAGE], role=role))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_title_naming_triage_or_the_page_writer_is_the_writers_even_beside_a_coordinator_or_batch_runner(self):
+        # The page-writer words win: a first heading that names triage or the page writer is the writer's, whatever
+        # else it names. The two plain role titles at the end are controls: their verdict must not move.
+        writer_titles = ("# Batch runner and triage handoff", "# Triage and batch runner handoff, 2026-11-12",
+                         "# Lane handoff (triage and batch runner hats)", "# Triage handoff, for the coordinator",
+                         "# Coordinator-triage handoff", "# Coordinator and page writer handoff")
+        for title in writer_titles:
+            with self.subTest(title=title, watch="none"):
+                text = handoff_text(ITEMS, ["none"], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                found = problems(text)
+                self.assertEqual(len(found), 1, f"{title}: Watch: none with open items must be the page writer's problem")
+                self.assertRegex(found[0], r"(?i)watch")
+            with self.subTest(title=title, watch="url"):
+                text = handoff_text(ITEMS, [PAGE], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                self.assertEqual(problems(text), [], f"{title}: a page URL on the Watch line must pass for the page writer")
+        for title in ("# Coordinator handoff", "# Batch runner handoff"):
+            with self.subTest(title=title, control=True):
+                text = handoff_text(ITEMS, ["none"], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                self.assertEqual(problems(text), [], f"{title}: Watch: none with open items must pass for a non-writer")
+
+    def test_no_check_message_says_a_bare_writer(self):
+        # Each message names the page writer, the glossary term. A `writer` in backticks is a field name, so it passes.
+        hands = (handoff_text(None), handoff_text(ITEMS), handoff_text(ITEMS, [], role="Coordinator"),
+                 handoff_text(ITEMS, ["none"]), handoff_text(ITEMS, [""]), handoff_text(ITEMS, ["<page URL>"]),
+                 handoff_text("12", [PAGE]), handoff_text("", [PAGE]))
+        messages = [p for text in hands for p in problems(text)]
+        self.assertTrue(messages, "no problem message to judge")
+        bare = [m for m in messages if bare_writer_hits(m)]
+        self.assertFalse(bare, f"a check message says a bare 'writer': {bare[0] if bare else ''}")
 
     def cli(self, *args):
         self.assertTrue(os.path.isfile(CLI), "skills/project-ops/scripts/check_handoff.py does not exist")

@@ -24,13 +24,14 @@ query. Add only a deferred step that has no home, and why. Do not ask. Never cop
 
 ## Pages
 
-Watches stopped at <time>
+The page writer's watch stopped at <time>
 
 <Read the time from `~/.claude/bin/now-central --full`, never from memory.>
 
-<The URL of each page this role owns. The old session stopped watching each one at that time,
-answered each comment still open at that time, then wrote this file. The successor watches
-each one at once, and reads its comments since that time.>
+<The URL of each page this role owns. Only the page writer watches a page. The page writer's old session
+stopped watching each one at that time, answered each comment still open at that time, then wrote
+this file. The successor reads its comments since that time. For any other role, the time is
+when the file was written.>
 
 Open items: <items collection URL> or none
 
@@ -40,9 +41,10 @@ that collection to itself.>
 
 Watch: <page URL>
 
-<One `Watch:` line for each page this role owns. The successor runs `ArtifactComments` action `watch`
-on each URL first, before any other act. `Watch: none` is allowed only with `Open items: none`.
-`scripts/check_handoff.py` checks both lines.>
+<One `Watch:` line for each page this role owns. A page writer's successor runs `ArtifactComments` action
+`watch` on each URL first, before any other act. A role other than the page writer writes `Watch: none`,
+since only the page writer watches the page, and the page writer messages it of an answer. The page writer's `Watch: none`
+is allowed only with `Open items: none`. `scripts/check_handoff.py` checks both lines.>
 
 ## Sessions
 
