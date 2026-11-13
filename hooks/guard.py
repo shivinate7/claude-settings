@@ -368,6 +368,19 @@ Other tools, in `judge` order:
                        `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
                        stripped, counts as missing. A call with no lane tag passes. The deny reason names both
                        fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
+  lane-start-open-pr   deny. A `create_session` call (lane or not) that carries a `cs-step:<slug>` tag while an
+                       open pull request of the calling checkout's repo (`git_reads.github_repo`, read once and
+                       shared with lane-repo-tag) already holds the step: the slug is a whole token in its title or
+                       head branch, or opens a body line that starts `Step`, `Lane` or `cs-step` (case-free; heading,
+                       list or quote mark, `*`/`_` emphasis, colon, backticks allowed) or follows a sentence's full
+                       stop. A pull request the prompt cites (`#<n>` or `/pull/<n>`) is not refused. The deny
+                       reason names each uncited number and says to cite it or take it over. The read is one REST
+                       page of 100 (`gh api repos/<repo>/pulls`). Any failed read (no gh, a non-zero exit, a timeout,
+                       bad JSON, no repo), or a full page with no holder in it, passes with one stderr line naming
+                       the rule and one `lane-start-open-pr-unread` line in guard.log. Cost per tagged start: at
+                       most one `git` process for the repo (none when the extras name it), at most one `gh` process
+                       (10 s cap), no file but that guard.log line on a pass without a verdict, no timer. Runs after
+                       lane-start-settings. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -2917,7 +2930,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
+from shared_names import LANE_TAG, STEP_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -2937,6 +2950,12 @@ LANE_START_SETTINGS_REASON = (
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
+# An open pull request already holds the step the new session would start. %s is the uncited numbers, as #n.
+LANE_START_OPEN_PR_REASON = (
+    "An open pull request already holds this step: %s. A second session on it repeats the work or collides with it. "
+    "To build on it, cite the pull request in the brief (`#<number>` or its URL); otherwise take that pull "
+    "request over and start nothing new (decision agent-model-cap)."
+)
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -3085,15 +3104,20 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "prompt: " + (first[:80] or "(none)")
 
 
-def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
-    """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo, or
-    ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
-    key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
-    `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
+def checkout_repo(cwd):
+    """The GitHub `owner/name` of the checkout at `cwd` (git_reads.github_repo, the one reading the roadmap build
+    shares: the extras' "github" key first, then the origin's path), or None. The judge calls it once per
+    create_session call and hands the answer to each rule that needs the repo."""
+    return git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
+
+
+def lane_repo_tag_hit(tool: str, tool_input, repo):
+    """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo
+    `repo` (checkout_repo), or ("", None). A lane tag is judged as in lane_effort_hit. With no readable repo, any
+    full `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
     if not is_lane_create_session(tool, tool_input):
         return "", None
     tags = lane_tags(tool_input)
-    repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
     # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
         if repo and repo_tag_names(tag, repo):
@@ -3112,6 +3136,92 @@ def lane_start_settings_hit(tool: str, tool_input) -> str:
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
     return ", ".join(missing)
+
+
+# A step marker in a pull request body: `Step`, `Lane` or `cs-step`, at a line start (after a heading mark, list or
+# quote marks) or after a sentence's full stop, with `*` or `_` emphasis, a colon and backticks allowed around it, then
+# the slug (appended per call), then _STEP_MARKER_TAIL.
+_STEP_MARKER_HEAD = (r"(?:^|(?<=\.)[ \t]+)[ \t]*(?:#{1,6}[ \t]+)?(?:(?:[-*+>]|\d+[.)])[ \t]+)*[*_]{0,3}`?"
+                     r"(?:cs-step|step|lane)(?![A-Za-z0-9-])[*_]{0,3}`?[ \t]*:?[ \t]*[*_]{0,3}[ \t]*`?")
+# The slug's end: closing `_` emphasis may follow (`_Step: <slug>_`), but a hyphen, letter or digit after it, even past
+# underscores, means a longer slug (`<slug>-2`, `<slug>_2`).
+_STEP_MARKER_TAIL = r"(?=_*(?![\w-]))"
+
+
+def step_slug_in(text, slug: str) -> bool:
+    """True when `slug` is a whole token of `text`: a hyphen, letter, digit or underscore on either side is no match,
+    so a longer slug never holds a shorter one."""
+    return isinstance(text, str) and bool(re.search(r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])", text, re.I))
+
+
+def step_marker_holds(body, slug: str) -> bool:
+    """True when a line of a pull request body is a step marker for `slug` (see _STEP_MARKER_HEAD)."""
+    if not isinstance(body, str):
+        return False
+    return bool(re.search(_STEP_MARKER_HEAD + re.escape(slug) + _STEP_MARKER_TAIL, body, re.I | re.M))
+
+
+def cited_pr_numbers(prompt) -> set:
+    """The pull request numbers a prompt cites: `#<n>` or `/pull/<n>`, with no digit on either side."""
+    if not isinstance(prompt, str):
+        return set()
+    return {int(hash_n or pull_n)
+            for hash_n, pull_n in re.findall(r"(?<![0-9])#([0-9]+)(?![0-9])|/pull/([0-9]+)(?![0-9])", prompt)}
+
+
+def open_pr_uncited(prs, slug: str, prompt) -> list:
+    """The pure judge of rule lane-start-open-pr: the numbers, in list order, of the pull requests in `prs` (as the
+    REST list prints them: number, title, body, head.ref) that hold step `slug` and that `prompt` does not cite. A
+    pull request holds the step when the slug is a whole token of its title or head branch, or a body line is a step
+    marker for it."""
+    cited = cited_pr_numbers(prompt)
+    held = []
+    for pr in prs if isinstance(prs, list) else []:
+        if not isinstance(pr, dict) or not isinstance(pr.get("number"), int) or pr["number"] in cited:
+            continue
+        head = pr.get("head")
+        if (step_slug_in(pr.get("title"), slug) or step_slug_in(head.get("ref") if isinstance(head, dict) else None, slug)
+                or step_marker_holds(pr.get("body"), slug)):
+            held.append(pr["number"])
+    return held
+
+
+def step_slugs(tool: str, tool_input) -> list:
+    """The step slugs of a create_session call: each `tags` entry that, stripped and casefolded, starts with STEP_TAG,
+    with a slug after it. No lane tag needed."""
+    if tool != CREATE_SESSION_TOOL:
+        return []
+    found = [t.strip()[len(STEP_TAG):].strip() for t in lane_tags(tool_input)
+             if isinstance(t, str) and t.strip().casefold().startswith(STEP_TAG)]
+    return [slug for slug in found if slug]
+
+
+def open_pr_unread(tool: str, why: str) -> str:
+    """The pass of rule lane-start-open-pr when its read cannot prove a verdict: one stderr line naming the rule, and
+    one line in the guard's own log. Returns "" (no hit)."""
+    sys.stderr.write("lane-start-open-pr: open pull requests not read (%s); the start passes\n" % why)
+    record(tool, "noted", "lane-start-open-pr-unread", why)
+    return ""
+
+
+def lane_start_open_pr_hit(tool: str, tool_input, repo) -> str:
+    """The uncited open pull requests that hold the step of a create_session call, as "#2767, #2801", or "". Judged
+    only when `tags` carry `cs-step:<slug>` (step_slugs). `repo` is checkout_repo, read once by the judge. The gh read
+    is one bounded call (git_reads.open_pull_requests). A read that cannot run, or a full page with no holder in it
+    (the page may be cut short), passes through open_pr_unread."""
+    slugs = step_slugs(tool, tool_input)
+    if not slugs:
+        return ""
+    prs, why = git_reads.open_pull_requests(repo) if repo else (None, "no GitHub repo for the checkout")
+    if prs is None:
+        return open_pr_unread(tool, why)
+    held = []
+    for slug in slugs:
+        held += [n for n in open_pr_uncited(prs, slug, tool_input.get("prompt")) if n not in held]
+    if not held and len(prs) >= git_reads.OPEN_PR_PAGE:
+        return open_pr_unread(tool, "a full page of %d open pull requests holds no step marker, and more may follow"
+                              % len(prs))
+    return ", ".join("#%d" % n for n in held)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -6849,7 +6959,10 @@ def judge(payload) -> None:
 
     # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
     # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    # One read of the checkout's repo serves this rule and the open pull request check (9b2d), and only a lane or a
+    # step start pays for it.
+    start_repo = checkout_repo(cwd) if is_lane_create_session(tool, tool_input) or step_slugs(tool, tool_input) else None
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, start_repo)
     if repo_tag_hit_tags:
         refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
 
@@ -6858,6 +6971,13 @@ def judge(payload) -> None:
     lane_missing = lane_start_settings_hit(tool, tool_input)
     if lane_missing:
         refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
+
+    # 9b2d. The open pull request check: a start for a step an open pull request already holds is refused unless the
+    # brief cites that pull request. One gh read, only for a create_session tagged cs-step. After the settings. An
+    # override lifts it.
+    open_pr_held = lane_start_open_pr_hit(tool, tool_input, start_repo)
+    if open_pr_held:
+        refuse(tool, "deny", "lane-start-open-pr", LANE_START_OPEN_PR_REASON % open_pr_held, open_pr_held)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).

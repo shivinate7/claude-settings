@@ -1,7 +1,8 @@
 """The git and session reads the guard and the janitor share: one `git` call, the primary
 checkout, a tree's status, the default branch, a branch's proof of survival, a worktree's lock
 and whether a live session stands in it. The roadmap build also imports it for `github_repo`, the one
-reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
+reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares. `gh_run` is the one `gh` runner
+(hooks/ci_wake.py calls it too); `open_pull_requests` is the read of the guard's rule lane-start-open-pr.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
@@ -11,6 +12,7 @@ library only, plus `_nowindow` and `shared_names`, and it imports no guard modul
 import calendar
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -312,6 +314,55 @@ def github_repo(root, extras=_READ_EXTRAS):
     if done is None or done.returncode != 0:
         return None
     return origin_slug(done.stdout)
+
+
+class GhUnread(Exception):
+    """A gh read that could not run. The message is the reason."""
+
+
+def gh_run(args, cwd=None, timeout=10):
+    """-> (returncode, stdout, stderr) of one `gh` call. The one gh runner: the CI wake hook (hooks/ci_wake.py) and the
+    guard's open pull request read both call it. gh is found with shutil.which, since a list-form call of a bare "gh"
+    misses a .cmd launcher on Windows. Raises GhUnread when gh is missing, will not start or times out.
+    A timeout kills gh and never waits on its pipes: subprocess.run waits after its kill, and on Windows a .cmd shim's
+    grandchild can hold the pipes open past the cap."""
+    exe = shutil.which("gh")
+    if exe is None:
+        raise GhUnread("gh is not on PATH")
+    try:
+        p = _nowindow.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=cwd)
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        raise GhUnread("gh %s timed out" % " ".join(args[:2]))
+    except OSError as exc:
+        raise GhUnread("gh %s failed: %s" % (" ".join(args[:2]), type(exc).__name__))
+    return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
+# One page of open pull requests, by REST (the cloud proxy refuses the GraphQL `gh pr list`). A page of this size
+# may be cut short, so it proves no absence.
+OPEN_PR_PAGE = 100
+
+
+def open_pull_requests(repo):
+    """(list, "") of the open pull requests of GitHub repo `owner/name` as REST prints them (number, title, body,
+    head.ref), at most OPEN_PR_PAGE, or (None, why) when the read failed: no gh, a timeout, a non-zero exit, output
+    that is not a JSON list. One gh process, 10 s, no file, no retry; the caller decides what a failed read means.
+    Fields, not a query string: a `&` in an argument is a command separator to cmd.exe behind a .cmd launcher."""
+    args = ["api", "-X", "GET", "repos/%s/pulls" % repo, "-f", "state=open", "-f", "per_page=%d" % OPEN_PR_PAGE]
+    try:
+        code, out, _ = gh_run(args, timeout=10)
+    except GhUnread as exc:
+        return None, str(exc)
+    if code != 0:
+        return None, "gh exited %d" % code
+    try:
+        prs = json.loads(out)
+    except ValueError:
+        return None, "gh printed no JSON"
+    return (prs, "") if isinstance(prs, list) else (None, "gh printed no JSON list")
 
 
 def is_shallow(where: str):

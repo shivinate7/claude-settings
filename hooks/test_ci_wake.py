@@ -1920,6 +1920,63 @@ def case_mcp_update_that_does_not_mark_ready_starts_nothing():
         expect_no_gh("MCP update_pull_request, %s" % label, res)
 
 
+def case_gh_run_timeout_kills_without_a_wait():
+    """gh_run on a read that times out kills the child and returns at once: no communicate and no wait after the
+    kill. On Windows a wait on a .cmd shim's pipes can hang past the 10 s cap (the old ci_wake.gh used Popen,
+    communicate(timeout), then kill, with no wait). The seam is subprocess.Popen, which _nowindow.Popen and
+    subprocess.run both look up at call time. HeldPopen's pipes never close: communicate raises TimeoutExpired, and
+    its __exit__ waits as the real Popen's does, so a builder that waits after the kill, in any form, is caught.
+    shutil.which is faked to find gh, and nothing starts."""
+    import git_reads  # the one gh runner
+    events = []
+
+    class HeldPopen:
+        returncode = None
+
+        def __init__(self, argv, *args, **kwargs):
+            events.append(("start", os.path.basename(str(argv[0]))))
+
+        def communicate(self, input=None, timeout=None):
+            events.append(("communicate", timeout))
+            raise subprocess.TimeoutExpired(cmd="gh", timeout=timeout)
+
+        def kill(self):
+            events.append(("kill",))
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            events.append(("wait",))
+            self.returncode = -9
+            return -9
+
+        def poll(self):
+            return self.returncode
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            events.append(("exit",))
+            self.wait()  # the real Popen waits here as well
+            return False
+
+    raised, message = None, ""
+    with mock.patch.object(subprocess, "Popen", HeldPopen), mock.patch.object(shutil, "which", return_value="/fake/gh"):
+        try:
+            git_reads.gh_run(["api", "-X", "GET", "repos/o/r/pulls"], timeout=10)
+        except git_reads.GhUnread as e:
+            raised, message = "GhUnread", str(e)
+        except Exception as e:
+            raised = type(e).__name__
+    check("gh_run timeout: the read raises GhUnread", raised == "GhUnread", "raised %s, events %s" % (raised, events))
+    check("gh_run timeout: the GhUnread message says timed out", "timed out" in message, "message %r" % message)
+    kills = [i for i, e in enumerate(events) if e[0] == "kill"]
+    check("gh_run timeout: the child is killed", bool(kills), "events %s" % events)
+    after = [e[0] for e in events[kills[0] + 1:] if e[0] in ("communicate", "wait")] if kills else ["(no kill)"]
+    check("gh_run timeout: no communicate or wait after the kill", not after,
+          "after kill: %s, events %s" % (after, events))
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -2147,6 +2204,9 @@ def main():
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
     case_hash_number_selector_reads_the_number_route()
+
+    # The one gh runner: a timed-out read kills the child and does not wait for it.
+    case_gh_run_timeout_kills_without_a_wait()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
