@@ -111,6 +111,27 @@ export const blankShell = (src, { keepStrings = false } = {}) => {
 };
 
 /**
+ * The text of each quoted string in shell source, one line each, in source order. A string in a comment or a heredoc body is none, and a string
+ * that spans lines is left out. A bare word is no string: `python3 src/x.py` holds none. Found in the blanked text, where the only quotes left
+ * are the delimiters of strings and the quotes of a `<<'WORD'` operator, and the text is read from the source at the same offsets.
+ */
+export const shellStrings = (src) => {
+  const bare = blankShell(src);
+  const out = [];
+  for (let i = 0; i < bare.length; i++) {
+    const c = bare[i];
+    if (c === "\\") { i++; continue; }
+    if (c !== "'" && c !== '"') continue;
+    const end = bare.indexOf(c, i + 1);
+    if (end === -1) break;
+    const text = src.slice(i + 1, end);
+    if (!text.includes("\n")) out.push(text);
+    i = end;
+  }
+  return out;
+};
+
+/**
  * Python source with every `#` comment blanked to spaces, and the text of every string blanked too, at the same offsets as the file.
  * Quotes and newlines stay. A string is single-, double- or triple-quoted, and a `\` takes the next character (a raw string too, as in Python).
  * A single- or double-quoted string ends at its line end if it is unterminated. A `#` inside a string, a triple-quoted one included, opens no comment.
