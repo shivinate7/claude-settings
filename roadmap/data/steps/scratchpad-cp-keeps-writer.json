@@ -1,14 +1,16 @@
 {
  "id": "scratchpad-cp-keeps-writer",
  "title": "A cp of another agent's scratchpad file keeps that agent as writer",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2sGyAvwpHNCHioxLc",
  "owner": "triage",
  "blockedBy": [],
  "why": "Decision scratchpad-owner: an agent runs only its own copy 'made from a read of it'; its remedy says read, then write an own copy. #2830 (case cp-mv 3 in tests/guard/s34371-scratchpad-owner.py) lets agent B cp agent A's script and run the copy, and its remedy text steers B to cp. That skips the read the decision exists for. Expected harm: B runs a script it never read, which is the guard's incident class, and the remedy itself teaches the bypass.",
  "source": "triage 03:08 CST Nov 13, reconciling the coordinator's 16:45 CST Nov 12 step-note settlement with decision scratchpad-owner (coordinator 03:07 CST)",
- "note": "Fix: B's cp of A's file records A as writer, as the debt scratchpad-owner-cp-mv-dest already says for mv; case cp-mv 3 flips to refused (red first); the remedy names read-then-write, never cp. Why the decision wins over the 16:45 settlement: that settlement cited building-port-keeps-behaviour, which keeps a port's behaviour, while main's cp pass is a listed ceiling of the guard (decision line 26), not chosen behaviour. #2830 and #3013 merge as they are (coordinator, process-only): no hole opens against main. Guard change: a lane, red first. Undo: say so and the lane drops the step.",
- "updatedAt": "2026-11-13T03:08:31-06:00"
+ "note": "Fix: B's cp of A's file records A as writer, as the debt scratchpad-owner-cp-mv-dest already says for mv; case cp-mv 3 flips to refused (red first); the remedy names read-then-write, never cp. Why the decision wins over the 16:45 settlement: that settlement cited building-port-keeps-behaviour, which keeps a port's behaviour, while main's cp pass is a listed ceiling of the guard (decision line 26), not chosen behaviour. #2830 and #3013 merge as they are (coordinator, process-only): no hole opens against main. Guard change: a lane, red first. Undo: say so and the lane drops the step. 07:33 CST Nov 13: lane session_013NEJL2sGyAvwpHNCHioxLc, PR #3126 (head cb15b3758). Its question: recording A as writer of B's cp also refuses B's own retry, edit or rm of the copy, which main allows. Triage pick (b) in a smaller form: the same sidecar adds a copier key. A run reads the writer; overwrite and rm/mv treat the copier as the owner. Option (a) would ship a known false alarm (decision scratchpad-owner, false-alarm sentences). Undo: coordinator or owner says (a) and the lane takes (a).",
+ "updatedAt": "2026-11-13T07:32:08-06:00",
+ "blocked": null,
+ "pr": 3126
 }
