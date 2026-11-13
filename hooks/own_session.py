@@ -87,10 +87,21 @@ def own_session_ccr(transcript, own_id):
         return None
 
 
-def _scan(transcript, own_id, created):
-    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+def created_sessions(transcript):
+    """{session id: tags} of the sessions the create_session calls of a transcript started, minus each one an
+    archive_session call names after its create (an unarchive_session call after that restores it). A create whose
+    result names no session started none. Cost: one read of the transcript; no file written, no process."""
+    made = {}
+    _scan(transcript, None, True, made)
+    return made
+
+
+def _scan(transcript, own_id, created, made=None):
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers. With a `made` dict,
+    it also fills it with the sessions the create results name (created_sessions)."""
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
+    archived = {}  # session id -> tags of a created session an archive_session call named, for an unarchive
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -109,6 +120,14 @@ def _scan(transcript, own_id, created):
                     if isinstance(given, list):
                         named = block["input"].get("parent_session_id")
                         creates[block.get("id")] = ([str(t) for t in given], named if isinstance(named, str) and named else None)
+                elif made is not None and block.get("type") == "tool_use" and str(block.get("name", "")).endswith(
+                        ("archive_session", "unarchive_session")):
+                    given = block.get("input", {}).get("session_id") if isinstance(block.get("input"), dict) else None
+                    if str(block["name"]).endswith("unarchive_session"):
+                        if given in archived:
+                            made[given] = archived.pop(given)
+                    elif given in made:
+                        archived[given] = made.pop(given)
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
                     # Only a call that names the own session changes the own tags. A call with no readable
                     # list of ids counts too: the safe reading is that it may have named this session.
@@ -120,7 +139,10 @@ def _scan(transcript, own_id, created):
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
-                        if _created_session_id(body) == own_id:
+                        made_id = _created_session_id(body)
+                        if made is not None and made_id:
+                            made[made_id] = creates[block.get("tool_use_id")][0]
+                        if made_id == own_id:
                             (newest, parent), tagged_after, newest_ccr = creates[block.get("tool_use_id")], False, None
                         continue
                     if not isinstance(body, str):

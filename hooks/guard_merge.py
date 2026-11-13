@@ -1905,10 +1905,11 @@ def step_dup_hit(tool: str, tool_input, transcript: str):
     brief's target, carries that step and shares a cs-repo tag with the subject (_step_subject); the reason names that
     session. A brief to a target that carries the step itself starts no new lane, so it passes before any list read.
     Steps and tags match without case. A session is live unless its newest row in the transcript's list_sessions reads
-    is archived (own_session.list_sessions_read). A carrier on any page, whole read or not, is refused. With no
+    is archived (own_session.list_sessions_read). A session an earlier create_session of this transcript started and no
+    archive_session names is live too, when no list row shows it (own_session.created_sessions). A carrier on any page, whole read or not, is refused. With no
     carrier found, no whole list read, a brief whose target has no current record, or a subject with no cs-repo tag is
     refused too: unknown is never an allow, and the guard-wide crash path fails open, so any error here is a refusal.
-    Known limit: only this transcript is read, so a session started after its newest list read is not seen.
+    Known limit: only this transcript is read, so a session another transcript started after its newest list read is not seen.
     Cost: one transcript read per brief or create with a step, plus one for the target's record; no file written, no
     process, no extra tool call."""
     call = _step_call(tool, tool_input)
@@ -1924,8 +1925,12 @@ def step_dup_hit(tool: str, tool_input, transcript: str):
         if not repos:
             raise ValueError("no cs-repo tag")
         rows, whole = own_session.list_sessions_read(transcript)
-        for sid, (tags, archived) in rows.items():
-            if sid == target or archived:
+        live = [(sid, tags) for sid, (tags, archived) in rows.items() if not archived]
+        # A session a create_session of this transcript started is no row unless a later read showed it; a row,
+        # archived or not, is newer than the create and decides.
+        live += [(sid, tags) for sid, tags in own_session.created_sessions(transcript).items() if sid not in rows]
+        for sid, tags in live:
+            if sid == target:
                 continue
             for step in steps:
                 if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & set(_tag_values(tags, ARCHIVE_REPO_PREFIX)):
