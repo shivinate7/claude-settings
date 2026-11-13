@@ -7,12 +7,16 @@
   "n": 684,
   "options": [
     {
-      "gain": "Main can turn green on the next push run, and the queued batches (the #2992 fix-chain PR first) and every lane waiting on main move again.",
-      "how": "Runner 10 merges #3080 at commit 888481daa with the merge tool's red-main reason flag, reason \"batch carries the main-red fix (#3052 scope_run resolve_program)\", under every other merge check.",
+      "gain": "Main can turn green on the next push run (the Windows merge shards run only on a push, so only the merge can prove the fix), and the queued batches (the #2992 fix-chain PR first) and every lane waiting on main move again.",
+      "how": "Type this line in runner 10's session, where the harness asks you: \"Yes: merge #3080 at head 888481daacbec0d89d5d0b4957650a256c3783e0 with --base-red-ok, because it carries #3052, the fix for main's red push run 43348145389.\" Runner 10 then merges with the merge tool, under every other merge check.",
       "id": "merge-fix-batch",
       "key": "a",
       "label": "Yes, merge batch 119 now (recommended)",
       "links": [
+        {
+          "label": "Runner 10's session",
+          "url": "https://claude.ai/code/session_013NEJL2f1YCYsvLdpFqtWP3"
+        },
         {
           "label": "Batch PR #3080",
           "url": "https://github.com/shivinate7/claude-settings/pull/3080"
