@@ -547,6 +547,28 @@ class WrongRefusalNote(Case):
         self.assertIn("wrong refusal", text, "the prose refusal does not name the words `wrong refusal`")
         self.assertIn(self.DECISION, text, "the prose refusal does not name decision %s" % self.DECISION)
 
+    def test_n12_a_notes_line_added_to_another_file_does_not_close_a_prose_debt(self):
+        other = "docs/decisions/elsewhere.md"  # a decision file: the line is in the change, but not in the notes file
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write={other: self.NOTE}, rm=["docs/debts/d-prose.md"])
+        self.assertIn(self.NOTE.strip(), sh(self.dir, "git", "show", "%s:%s" % (self.head, other)), "scope: the line is not in the head's other file")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line added to a file other than the notes file closed a prose debt")
+
+    def test_n13_a_notes_line_removed_by_the_change_does_not_close_a_prose_debt(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write=self.notes(self.NOTE))
+        self.base = self.head  # the notes line is in the base; the change removes it
+        self.assertIn(self.NOTE.strip(), self.notes_at(self.base), "scope: the notes line is not in the base")
+        self.change(write={"docs/debts/notes.md": BASE["docs/debts/notes.md"]}, rm=["docs/debts/d-prose.md"])
+        self.assertNotIn(self.NOTE.strip(), self.notes_at(self.head), "scope: the notes line is still in the head")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line removed by the change closed a prose debt")
+
+    def test_n14_a_notes_line_naming_a_longer_decision_does_not_name_the_decision(self):
+        line = "- d-prose: a wrong refusal by a guard. Decision: %s-x.\n" % self.DECISION
+        self.close_with_note(line)
+        self.assertIn(line.strip(), self.notes_at(self.head), "scope: the notes line is not in the head")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line naming a longer decision cleared the prose close")
+
 
 class TemplateExcuses(unittest.TestCase):
     """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
