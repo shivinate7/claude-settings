@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -1602,7 +1603,7 @@ class ScopedRepo:
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+                put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
@@ -1617,7 +1618,7 @@ class ScopedRepo:
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{start or branch}")
         for path, text in files.items():
-            put(os.path.join(o, path), text)
+            (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
 class SmallBaseMove(ScopedRepo, Env):
@@ -12977,18 +12978,31 @@ class ExpressPath(ScopedRepo, Env):
         script = os.path.join(o, ".github/scripts/ci-scope.sh")
         if base:
             script = os.path.join(self.t, "base-ci-scope.sh")
-            put(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
         out_file = os.path.join(self.t, "scope.out")
         if os.path.exists(out_file):
             os.remove(out_file)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
         env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
-        r = subprocess.run(["bash", script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
         flags = {}
         if os.path.exists(out_file):
             with open(out_file, encoding="utf-8") as f:
                 flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
         return r.returncode, flags
+
+    def test_scope_run_finds_bash_through_resolve_program(self):
+        """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
+        bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
+        argvs = []
+        def fake_run(argv, *a, **k):
+            argvs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with unittest.mock.patch.object(merge, "resolve_program", lambda name, env=None: "/resolved/" + name), \
+             unittest.mock.patch.object(subprocess, "run", fake_run):
+            self.scope_run()
+        self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
+        self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
 
     @staticmethod
     def turned_on(flags):
@@ -15674,6 +15688,34 @@ class ReviewRoundModel(ReviewEnv):
         parse_text(self, haiku)
         self.assertEqual(record_state(self, haiku), record_state(self, sonnet), "a posted round 2 on haiku reads a different state from its sonnet twin")
 
+    def test_a_round_one_on_sonnet_is_accepted_with_guard_yes_as_with_guard_no(self):
+        # Control: the --round check floors sonnet at the second round, never at the first, so a first-round reviewer on sonnet is
+        # accepted with the guard flag yes as with it no (decision agent-model-cap, the reviewer row).
+        for guard in ("yes", "no"):
+            with self.subTest(guard=guard):
+                flags = ("--kind", "normal", "--guard", guard, "--head", self.head(), "--round", "1:reviewer:sonnet:PASS")
+                rc, out, err = self.run_args("7", "--review-record", *flags)
+                self.assertEqual(rc, 0, f"round 1 on sonnet with --guard {guard} was refused:\n" + out + err)
+                parse_text(self, posted_body(self, out))
+
+    def test_round_two_on_opus_is_accepted_when_the_record_round_row_names_opus(self):
+        # One home (decision agent-model-cap): the --round check reads the round rows of the record the guard reads, so a changed row
+        # changes this verdict with no code edit. Without a second-round row, the --round check refuses an opus reviewer, so this case
+        # passes only because the record's row lifts that refusal.
+        root = tempfile.mkdtemp(dir=run_folder())
+        pointer = os.path.join(root, "pointer")
+        os.makedirs(os.path.join(pointer, "docs", "decisions"))
+        with open(os.path.join(pointer, "docs", "decisions", "agent-model-cap.md"), "w", encoding="utf-8") as handle:
+            handle.write("| Role | Round | Model | Effort |\n|---|---|---|---|\n| reviewer | 2 | opus | high |\n")
+        config = os.path.join(root, "config")
+        os.makedirs(config)
+        with open(os.path.join(config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % pointer.replace(os.sep, "/"))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"))
+        self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -16392,6 +16434,9 @@ GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/"
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
 # The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
 PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
+# The model record. Its round rows set the model each reviewer runs on, so a docs-only edit of them moves review models, and the guard holds it
+# (decision agent-model-cap). Built from the layout and the guard's file name, so a moved record changes this path, never a copy of it.
+MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_guard.ROLE_TABLE_FILE))
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -16452,6 +16497,21 @@ class ReviewGuardHits(unittest.TestCase):
         guard_hits = review_fn(self, "guard_hits")
         self.assertEqual(guard_hits(["README.md", "docs/hooks/notes.md", "merges.md", "lint.md"]), [])
         self.assertEqual(guard_hits([]), [])
+
+    def test_a_diff_of_prose_decision_records_and_docs_is_no_guard_change(self):
+        # docs/ is no guard path, so a prose-only diff of docs and decision records holds no hit (decision docs-only-prs-skip-review).
+        self.assertEqual(review_fn(self, "guard_hits")(["docs/decisions/docs-only-prs-skip-review.md", "docs/map/hooks.md", "docs/todo.md"]), [])
+
+    def test_the_model_record_is_a_guard_hit(self):
+        # Scope first: the record is in the repo and holds the round table the hit is for, so a moved record reads as stale, not as a pass.
+        with open(os.path.join(os.path.dirname(HERE), *MODEL_RECORD.split("/")), encoding="utf-8") as handle:
+            self.assertIn("| Role | Round | Model | Effort |", handle.read(), f"{MODEL_RECORD} holds no round table, so this case proves nothing")
+        self.assertEqual(review_fn(self, "guard_hits")([MODEL_RECORD]), [MODEL_RECORD],
+                         "a docs-only edit of the model record's round rows is no guard change, but it moves review models")
+
+    def test_another_decision_record_is_no_guard_hit(self):
+        # The control for the model record: a decision record with no round table is still no hit.
+        self.assertEqual(review_fn(self, "guard_hits")(["docs/decisions/docs-only-prs-skip-review.md"]), [])
 
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
@@ -16535,6 +16595,14 @@ class ReviewGuardRefusal(ReviewGuardEnv):
             with self.subTest(entry=entry):
                 self.host.changed = [(path, "modified", 0)]
                 self.assert_refused(*self.run_args(*self.review_argv()), path)
+
+    def test_guard_no_refuses_the_model_record_whatever_its_kind(self):
+        # A docs-only edit of the round rows moves review models, so the record is a guard change under a docs-only kind too.
+        # The guard refuses it before the kind is checked, so the Guard reason holds for both kinds.
+        for kind in ("normal", "docs-only"):
+            with self.subTest(kind=kind):
+                self.host.changed = [(MODEL_RECORD, "modified", 0)]
+                self.assert_refused(*self.run_args(*self.review_argv(kind)), MODEL_RECORD, holds="so --guard no is false")
 
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]

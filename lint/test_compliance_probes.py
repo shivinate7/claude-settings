@@ -33,6 +33,14 @@ RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per t
 EXTRAS = layout.layout()["extras"]
 
 
+def load_probes():
+    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
+    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def kind_path(name):
     return layout.layout()["kinds"][name]["path"]
 
@@ -422,6 +430,183 @@ class Ios(unittest.TestCase):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "runs-on: macos-26", "runs-on: macos-latest")
         self.red(repo, "ci runner: gap - .github/workflows/ios.yml: macos-latest")
 
+    # The CI exemption form (skills/ios-apps): one JSON object at tools/ios-ci-exemption.json, with non-empty string `sdk` and
+    # `reason`. A valid form waives the app compile only: `ci checks` passes as `exempt: <sdk>` on a tree whose macOS job cannot
+    # compile the app. It never waives the macOS runner. A broken form grades both gap, and names the problem. A floating macOS
+    # image stays a gap.
+    EXEMPT_FORM = load_probes().IOS_CI_EXEMPTION  # the probe's one home of the path
+    VALID_FORM = {"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"}
+    BROKEN_FORMS = (  # (the form's text, the keys its detail must name)
+        ('{"sdk": "iOS 27.1"}', ("reason",)),
+        ('{"reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "", "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "iOS 27.1", "reason": ""}', ("reason",)),
+        ('{"sdk": 27.1, "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ("{}", ("sdk", "reason")),
+        ('{"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"', ()),  # cut short: invalid JSON
+        ('["iOS 27.1"]', ()),  # JSON, but no object
+        ("", ()),  # a 0-byte file
+    )
+
+    def put_form(self, repo, data, staged=True):
+        """`data` (bytes) at the form path. Staged: the author added it. Not staged: on disk only, so the form is untracked."""
+        full = os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(data)
+        return repo.git("add", "-f", self.EXEMPT_FORM) if staged else repo
+
+    def with_form(self, repo, text, staged=True):
+        return self.put_form(repo, text.encode("utf-8"), staged)
+
+    def cannot_build(self, runner="ubuntu-latest"):
+        """The starter with its macOS job on `runner` and no compile step: a tree that cannot build the app on macos-26."""
+        repo = self.edit(self.gold(), self.FLOW, "runs-on: macos-26", "runs-on: " + runner)
+        return self.edit(repo, self.FLOW, "run: make app-build", "run: echo no compile")
+
+    def line(self, repo, item):
+        """The whole line of one item of the ios group, `<item>: <grade> - <detail>`. Scope first: the run must judge an iOS app."""
+        code, out = repo.run("ios")
+        self.assertFalse(out.startswith("ios: n/a"), out)
+        found = [raw.strip() for raw in out.splitlines() if raw.startswith("  %s:" % item)]
+        self.assertEqual(len(found), 1, "no single '%s' line in:\n%s" % (item, out))
+        return found[0]
+
+    def test_a_valid_exemption_form_waives_only_the_app_compile_on_a_tree_that_cannot_build(self):
+        bare = self.cannot_build()  # green control: without the form, both items are gaps
+        for item in ("ci runner", "ci checks"):
+            line = self.line(bare, item)
+            self.assertTrue(line.startswith(item + ": gap - "), line)
+        for sdk, reason in (("iOS 27.1", "Degen builds with the iOS 27 SDK"),
+                            ("iOS 27.0", "Needs the SDK, see https://example.com/issue #12"),  # `#` after a space, inside a JSON string
+                            ("iOS 27.1", "Degen builds with the iOS 27 SDK. " * 40)):  # a full-size reason
+            with self.subTest(sdk=sdk, reason_chars=len(reason)):
+                repo = self.with_form(self.cannot_build(), json.dumps({"sdk": sdk, "reason": reason}))
+                # The form waives the app compile: ci checks passes as exempt, its package tests and pull_request workflow still counted.
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: %s" % sdk), line)
+                # The form does not waive the macOS runner: this tree has no macOS workflow, so ci runner stays a gap.
+                line = self.line(repo, "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_pass_a_tree_with_no_macos_workflow(self):
+        # The form waives the app compile, not the macOS runner. A macOS job on ubuntu-latest, or no workflow at all, is a gap.
+        removed = self.gold()
+        removed.git("rm", "-q", "-f", self.FLOW)
+        self.assertFalse(os.path.exists(os.path.join(removed.root, *self.FLOW.split("/"))))  # scope: no workflow file is left
+        for label, repo in (("the macOS job on ubuntu-latest", self.cannot_build()), ("no workflow file", removed)):
+            with self.subTest(tree=label):
+                line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_waive_the_package_tests(self):
+        # The form waives the app compile and nothing else: a Kit package with no package-test step stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "run: make kit-test", "run: echo skipped")
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no workflow runs the package tests", line, line)
+
+    def test_a_valid_form_does_not_waive_the_pull_request_workflow(self):
+        # The form waives the app compile and nothing else: a tree with no pull_request workflow stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", "")
+        self.assertNotIn("  pull_request:", self.text(repo, self.FLOW))  # scope: the workflow no longer runs on pull requests
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no pull_request workflow", line, line)
+
+    def test_a_valid_form_waives_the_compile_on_a_pinned_tree_with_package_tests(self):
+        # Green control: a pinned macOS job that runs the package tests and skips the compile. The form passes ci checks as
+        # exempt, and ci runner stays on its pin.
+        repo = self.with_form(self.cannot_build("macos-26"), json.dumps(self.VALID_FORM))
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", self.line(repo, "ci runner"))
+        line = self.line(repo, "ci checks")
+        self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_a_broken_exemption_form_grades_both_items_gap_and_names_the_problem(self):
+        for text, keys in self.BROKEN_FORMS:
+            repo = self.with_form(self.cannot_build(), text)
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=text, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    detail = line.split(" - ", 1)[1]
+                    self.assertIn(self.EXEMPT_FORM, detail, line)
+                    for key in keys:
+                        self.assertIn(key, detail, line)
+
+    def test_a_broken_exemption_form_is_a_gap_on_a_tree_that_builds(self):
+        # A broken form grades both items gap with no condition on the tree: the plain reading of the form rule, which a builder may narrow.
+        repo = self.with_form(self.gold(), '{"sdk": "iOS 27.1"}')
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, line)
+
+    def test_a_valid_form_does_not_excuse_a_floating_macos_runner(self):
+        # Green control: a floating image is a gap on main too. A builder that returns `exempt` before this check turns it red.
+        repo = self.with_form(self.cannot_build("macos-latest"), json.dumps(self.VALID_FORM))
+        line = self.line(repo, "ci runner")
+        self.assertTrue(line.startswith("ci runner: gap - .github/workflows/ios.yml: macos-latest"), line)
+        self.assertNotIn("exempt", line, line)
+
+    def test_a_valid_form_on_a_tree_that_builds_leaves_it_in_shape(self):
+        # Green control: the form changes nothing on a tree that passes, so the starter tree still exits 0.
+        repo = self.with_form(self.gold(), json.dumps(self.VALID_FORM))
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", out)
+
+    def test_an_untracked_exemption_form_is_no_form(self):
+        repo = self.with_form(self.cannot_build(), json.dumps(self.VALID_FORM), staged=False)
+        # Scope first: the form is on disk, and the index does not hold it.
+        self.assertTrue(os.path.isfile(os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))))
+        indexed = subprocess.run(["git", "-C", repo.root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+        self.assertNotIn(self.EXEMPT_FORM, indexed)
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+                self.assertIn("untracked", line, "the gap does not say the form is untracked: " + line)
+
+    def test_a_form_path_that_is_a_directory_or_not_utf8_is_a_gap_naming_it(self):
+        directory = self.gold().write(self.EXEMPT_FORM + "/README.md", "not a form\n")
+        utf16 = self.put_form(self.gold(), json.dumps(self.VALID_FORM).encode("utf-16"))
+        # Scope first: the path is a directory, and the UTF-16 bytes do not decode as UTF-8.
+        self.assertTrue(os.path.isdir(os.path.join(directory.root, *self.EXEMPT_FORM.split("/"))))
+        with open(os.path.join(utf16.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+            raw = handle.read()
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("utf-8")
+        for label, repo in (("a directory", directory), ("UTF-16 text", utf16)):
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=label, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+
+    def test_a_utf8_bom_before_a_valid_form_is_accepted(self):
+        bom = b"\xef\xbb\xbf"
+        forms = (json.dumps(self.VALID_FORM), json.dumps({"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK. " * 40}))
+        for form in forms:
+            with self.subTest(form_chars=len(form)):
+                repo = self.put_form(self.cannot_build("macos-26"), bom + form.encode("utf-8"))
+                # Scope first: the file opens with the BOM, and the rest is a JSON object.
+                with open(os.path.join(repo.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+                    raw = handle.read()
+                self.assertTrue(raw.startswith(bom), "the fixture has no BOM")
+                self.assertIsInstance(json.loads(raw[len(bom):].decode("utf-8")), dict)
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_ios_apps_skill_names_the_exemption_form_and_the_ios_26_5_sdk(self):
+        with open(os.path.join(os.path.dirname(HERE), "skills", "ios-apps", "SKILL.md"), encoding="utf-8") as handle:
+            rows = [row for row in handle.read().splitlines() if row.startswith("|") and self.EXEMPT_FORM in row]
+        self.assertTrue(rows, "no SKILL.md table row names the one CI exemption form")
+        for row in rows:
+            self.assertIn("26.5", row, "the SKILL.md row that names the form does not say the iOS 26.5 SDK")
+
     def test_swift_5_mode_is_red(self):
         repo = self.edit(self.gold(), "native/project.yml", 'SWIFT_VERSION: "6.0"', "SWIFT_VERSION: 5.0")
         self.red(repo, "swift 6: gap - native/project.yml: SWIFT_VERSION 5.0")
@@ -772,11 +957,7 @@ class Ios(unittest.TestCase):
 
     def grade(self, repo, item):
         """The grade of one item line of the ios group: pass, gap or partial."""
-        code, out = repo.run("ios")
-        for line in out.splitlines():
-            if line.strip().startswith(item + ":"):
-                return line.strip().split(": ", 1)[1].split(" - ", 1)[0]
-        self.fail("no '%s' line in:\n%s" % (item, out))
+        return self.line(repo, item).split(": ", 1)[1].split(" - ", 1)[0]
 
     def step(self, repo, command):
         """`repo` with `command` as one more step of the macOS job."""
@@ -1063,14 +1244,6 @@ class Playwright(unittest.TestCase):
     def test_no_playwright_is_na(self):
         code, out = Repo(self).write(self.WORKFLOW, "      - run: npm test\n").run("playwright")
         self.assertEqual((code, out.strip()), (0, "playwright: n/a - no Playwright install"))
-
-
-def load_probes():
-    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
-    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def in_process(root, group="words", probes=None):
