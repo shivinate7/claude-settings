@@ -2258,20 +2258,44 @@ class UnreadStale(FolderCase):
         self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each none question with no reply, in order: " + out[:300])
 
     def test_a_none_question_on_an_item_that_waits_is_listed_as_needing_reply_even_when_its_reply_is_newer(self):
+        # No receipt, so the answer is unread too: each answer prints its answer-unread line, then its answer-needs-reply line.
         with self.subTest(case="one item"):
             self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
-                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")])
             rc, out = self.run_unread()
-            self.assertEqual((rc, output_lines(out)), (1, [needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+            self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY), needs_reply_line("colour-pick", 143, "ops", EARLY)]),
                              "a none question on an item that waits was cleared by a reply newer than the answer: " + out)
         with self.subTest(case="full store"):  # a full page of waiting items, each with a newer reply and a none question: each one is listed
             count = 120
             items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY) for i in range(count)]
             answers = [none_answer_entry("item-%03d" % i, EARLY, "Which shade?") for i in range(count)]
-            self.store(items=items, answers=answers, receipts=[receipt_entry("item-%03d" % i, read=EARLY) for i in range(count)])
+            self.store(items=items, answers=answers)
             rc, out = self.run_unread()
-            expected = [needs_reply_line("item-%03d" % i, i + 1, "ops", EARLY) for i in range(count)]
+            expected = [line for i in range(count)
+                        for line in (unread_line("item-%03d" % i, i + 1, "ops", EARLY), needs_reply_line("item-%03d" % i, i + 1, "ops", EARLY))]
             self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of waiting items with a newer reply did not list each none question, in order: " + out[:300])
+
+    def test_a_none_question_on_an_item_that_waits_is_cleared_only_by_a_receipt_read_at_or_after_the_answer(self):
+        with self.subTest(case="receipt read at the answer's time"):  # `read` at `at` clears the line, so the comparison is inclusive
+            self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+            rc, out = self.run_unread(codes=(0,))
+            self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                             "a receipt read at the answer's time did not clear a none question on an item that waits: " + out)
+        with self.subTest(case="receipt read before the answer"):  # an earlier read clears neither line
+            self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+            rc, out = self.run_unread()
+            self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY), needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                             "a receipt read before the answer cleared a none question on an item that waits: " + out)
+        with self.subTest(case="full store"):  # a full page of waiting items, each with a receipt read at its answer: none is listed
+            count = 120
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY) for i in range(count)]
+            answers = [none_answer_entry("item-%03d" % i, EARLY, "Which shade?") for i in range(count)]
+            self.store(items=items, answers=answers, receipts=[receipt_entry("item-%03d" % i, read=EARLY) for i in range(count)])
+            rc, out = self.run_unread(codes=(0,))
+            self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                             "a full store of waiting items, each with a receipt read at its answer, still listed a none question: " + out[:300])
 
 
 # The close batch (SKILL.md, "Route and close", steps 1 and 2 as one write). The mode reads no clock: its time is `--now`.
@@ -2430,6 +2454,20 @@ class CloseBatch(FolderCase):
                 item = self.write_for(self.good_payload("--done"), "items")
                 self.assertIsNotNone(item, "the --done close of a %s item has no single items write" % case)
                 self.assertEqual(item.get("data", {}).get("status"), "closed", "the --done close of a %s item does not close it: %r" % (case, item))
+
+    def test_a_closed_item_on_a_lane_or_with_waits_closes_without_done_and_the_open_one_still_waits(self):
+        for case, extra in (("lane", {"lane": "batch-runner"}), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
+                self.store(item=item_data(status="closed", **extra))  # a chat answer closed it, so no done report is owed
+                item = self.write_for(self.good_payload(), "items")
+                self.assertIsNotNone(item, "the close of a closed %s item has no single items write" % case)
+                self.assertEqual(item.get("data", {}).get("status"), "closed",
+                                 "the close of a closed %s item without --done does not keep it closed: %r" % (case, item))
+                self.store(item=item_data(**extra))  # the same item, open: it still waits for the done report
+                r = self.close()
+                self.assertEqual(r.returncode, 2, "the close of an open %s item exited %d, want 2 without --done: %s" % (case, r.returncode, r.stdout + r.stderr))
+                self.assertTrue(any(line.startswith("unknown: item waits for a done report") for line in output_lines(r.stdout)),
+                                "the refusal of an open %s item does not say it waits for a done report: %r" % (case, r.stdout))
 
     def test_a_close_with_no_version_known_says_unpinned_on_stderr_and_pinned_false_in_the_payload(self):
         self.write_doc("item.json", item_data(), None)
