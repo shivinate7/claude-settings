@@ -74,6 +74,14 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The progress-claim check (rule `progress-claims-cite-live-read`): on any turn, landed or not, it refuses each line of the
+last reply with a sentence that names a step, lane, batch or PR (`PR #n`, a bare `#n`) and says how far it has got ("in
+progress", "nearly done", "waiting on", "stalled" and the like), unless the same line cites a live read: get_session,
+list_events, pull_request_read, list_pull_requests, "live read", "REST", a PR URL, a read stamp (`read at HH:MM`), or
+"unmeasured", "not read", "unknown". Fences, inline code spans (also across a line break) and lines that end in `?` are
+skipped. One refusal per turn lists the lines and joins any other reason. It checks that a line cites a read, not that
+the read happened. Decision: progress-claims-cite-live-read. Cost: regex over the reply, no file, no process.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -729,6 +737,59 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# progress-claims-cite-live-read: a reply line that says how far a step, lane, batch or PR has got cites a live read
+# made this turn, on the same line. A claim is one sentence with a subject (step, lane, batch, `PR #n`, a bare `#n`) and a
+# progress phrase. A state word such as "merged" is no phrase. Inline code spans are masked over the whole paragraph
+# (a span may break across lines, and a `#` or `//` inside one opens nothing); their text still counts as a cite.
+# A repo path, a commit hash, a bare `PR #n` and a bare time are no live read, so DONE_REF_RE is not reused here.
+PROGRESS_SUBJECT_RE = re.compile(r"\b(?:steps?|lanes?|batch(?:es)?)\b|\bPRs?\s*#?\d+|(?<![\w/&])#\d+\b", re.I)
+PROGRESS_PHRASE_RE = re.compile(
+    r"\b(?:in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:done|finished|complete|there)"
+    r"|waiting\s+(?:on|for)|in\s+flight|stalled|(?:hasn['\u2019]t|has\s+not)\s+finished)\b"
+    r"|\b\d{1,3}\s*%\s*(?:done|complete)", re.I)
+PROGRESS_READ_RE = re.compile(
+    r"\b(?:get_session|list_events|pull_request_read|list_pull_requests|unmeasured|unknown)\b|\bnot\s+read\b"
+    r"|\blive\s+read\b|(?<![\w-])(?-i:REST)(?![\w-])|\bread\s+at\s+\d{1,2}:\d{2}|https?://\S*/pull/\d+", re.I)
+PROGRESS_REASON = owner_line(
+    "Progress-claim guard (rule progress-claims-cite-live-read)",
+    "each line below says how far a step, lane, batch or PR has got and cites no live read made this turn; a live read "
+    "is get_session on a lane (a step's lane too), list_events, pull_request_read on a PR (a batch's PR too), a PR URL "
+    "or a read stamp such as 'read at 11:43 CST', and `unmeasured` stands in place of one; a mention of a phrase in an "
+    "inline code span is no claim") + " Lines: "
+
+
+def _progress_claim_lines(paragraph):
+    """The lines of one paragraph (a list of bodies) that hold a progress claim with no live read on the line."""
+    block = "\n".join(paragraph)
+    plain = PROGRESS_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), block)
+    kept = PROGRESS_SPAN.sub(lambda m: " " * len(m.group(1)) + m.group(2) + " " * len(m.group(1)), block)
+    bad = []
+    for body, p_line, k_line in zip(paragraph, plain.split("\n"), kept.split("\n")):
+        if body.rstrip("*_)\"' ").endswith("?"):
+            continue
+        claim = any(
+            PROGRESS_SUBJECT_RE.search(s) and PROGRESS_PHRASE_RE.search(s)
+            for s in re.split(r"(?<=[.!?])\s+", p_line) if not s.rstrip("*_)\"' ").endswith("?"))
+        if claim and not PROGRESS_READ_RE.search(k_line):
+            bad.append(body)
+    return bad
+
+
+def progress_claim_problem(text):
+    """The refusal for reply lines that say how far a step, lane, batch or PR has got with no live read on the line,
+    else ''."""
+    if not PROGRESS_PHRASE_RE.search(text):
+        return ""
+    bad, paragraph = [], []
+    for body in list(_prose_lines(text, questions=True)) + [""]:
+        if body:
+            paragraph.append(body)
+        elif paragraph:
+            bad += _progress_claim_lines(paragraph)
+            paragraph = []
+    return PROGRESS_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -2791,6 +2852,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        progress = progress_claim_problem(text)
+        if progress:
+            reasons.append(progress)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -2827,6 +2891,7 @@ ASK_TEXT_MAX = 6000
 SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
 # A code span: a run of backticks, its text, and a closing run of the same length (CommonMark).
 CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+PROGRESS_SPAN = re.compile(CODE_SPAN.pattern, re.S)  # the progress-claim check's span, which may break across lines
 QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
 INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
 UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)
@@ -3223,6 +3288,10 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+        except Exception:
+            pass
+        try:
+            relay.append(progress_claim_problem(text))  # joined the same way
         except Exception:
             pass
     cannot = ""
