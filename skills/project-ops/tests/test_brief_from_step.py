@@ -45,6 +45,10 @@ FILES_MARKER = "<coordinator names the files>"
 CHECK_MARKER = "<coordinator names the check that proves done>"
 PARAPHRASE = "(paraphrase, no owner quote)"
 FULL = 30  # the full-size store: one step with this many rulings
+# Word count of templates/brief.md at efc87b0c0, before the rewrite:
+#   git show efc87b0c0:skills/project-ops/templates/brief.md | wc -w
+# Pinned, so the builder's rewrite of the template does not move the cap.
+BASELINE_WORDS = 821
 PASTED_LINES = 40  # a pasted file body in a step note: the brief never carries it
 PATH_IN_NOTE = "skills/project-ops/scripts/brief_from_step.py"  # a path in a note: Files keeps it
 SECTIONS = ["Task", "Files", "Rulings", "Failure classes", "Done-check", "Report cap"]  # after Grant and Lane brief
@@ -350,11 +354,10 @@ class FixedLayout(BriefCase):
 
     def test_two_ruling_brief_is_at_most_sixty_percent_of_the_template_words(self):
         out = self.build(self.make_repo(step=step_doc(), rulings=two_rulings()))
-        template_words = len(read_template().split())
         out_words = len(out.split())
-        self.assertLessEqual(out_words, 0.6 * template_words,
-                             "the brief has %d words, over 60%% of the template's %d words"
-                             % (out_words, template_words))
+        self.assertLessEqual(out_words, 0.6 * BASELINE_WORDS,
+                             "the brief has %d words, over 60%% of the %d-word baseline"
+                             % (out_words, BASELINE_WORDS))
 
 
 class TemplateTail(unittest.TestCase):
