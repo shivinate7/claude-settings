@@ -79,6 +79,10 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+# The pointer is patched by name, not imported: an import line here lists this suite for hooks/guard_pointer.py.
+POINTER_CHECKOUT = "guard_pointer.pointer_checkout"  # the ruled-store cases' patch target
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
@@ -154,7 +158,7 @@ def page_item(tail="", options=None, lines=None, **over):
     if options is not None:
         item["options"] = options
     item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
-    return item
+    return tcj.with_frozen_fields(item)  # ids and `shown` for the options as they stand now
 
 
 TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
@@ -389,9 +393,9 @@ def case_closed_stood_and_updates():
     lacking = copy.deepcopy(ITEM92["options"])
     lacking[1].pop("lose")
     page("an update that carries options with an option that has no loss is refused", "update",
-         entry_of({"kind": "decision", "options": lacking}), (FORM_RULE, "lose"))
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": lacking})), (FORM_RULE, "lose"))
     page("an update that carries options with a gain and a loss each passes, its context not carried", "update",
-         entry_of({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])}), None)
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])})), None)
 
 
 def case_str_replace():
@@ -1488,7 +1492,7 @@ def case_departs_line_forms_pass():
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
     page("a decision with CRLF line endings and a valid Departs from line passes", "set",
-         entry_of(dict(ITEM92, context=crlf)), None)
+         entry_of(tcj.with_frozen_fields(dict(ITEM92, context=crlf))), None)
 
 
 def case_departs_str_replace_forms():
@@ -1731,6 +1735,171 @@ def case_past_rulings_skips_the_debt_notes_file():
     check("past rulings notes: a real debt record still reaches the candidates", tcj.DEBT_WHAT in text, text[:200])
     check("past rulings notes: docs/debts/notes.md is not a record and never reaches the candidates",
           notes_mark not in text, text[:200])
+
+
+# The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
+# ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
+# pass whichever checkout past_rulings reads the store from.
+RULED_ID, RULED_CLOSED_ID = "ruled-apps-keep", "ruled-old-shut"
+RULED_AT = "2026-11-12T14:15:00-06:00"
+RULED_TEXT = "Owner, 2026-11-12, page item 12: keep the apps' access to claude-settings as it is."
+RULED_SUPERSEDES = [{"kind": "main-sentence", "ref": "apps-keep-sentence"},
+                    {"kind": "test", "ref": "hooks/test_question_form.py::case_ruled_store_first_and_carries_supersedes"}]
+
+
+def case_ruled_store_first_and_carries_supersedes():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-first", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_CLOSED_ID: fixture.entry(RULED_CLOSED_ID, status="closed"),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    first = candidates[0] if candidates else ""
+    check("ruled store: the open entry is the first candidate, ahead of the decision records",
+          first.startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store: the first candidate carries the entry's ruling text", RULED_TEXT in first, first[:200])
+    check("ruled store: the first candidate names the owner time and says open, not on main",
+          ("(owner %s; open, not on main; supersedes " % RULED_AT) in first and first.endswith(")"), first[:200])
+    check("ruled store: the first candidate carries each supersedes ref",
+          all(item["ref"] in first for item in RULED_SUPERSEDES), first[:200])
+    check("ruled store: a closed entry is no candidate",
+          not any(c.startswith("ruled:%s:" % RULED_CLOSED_ID) for c in candidates), str(candidates)[:200])
+
+
+RULED_UNREAD_ID = "ruled-unread"
+
+
+def case_ruled_store_marks_an_unread_entry_unchecked():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store unread: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-unread", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_UNREAD_ID: fixture.entry(RULED_UNREAD_ID, at="2026-11-13T09:00:00-06:00", ruling=RULED_TEXT,
+                                       supersedes=None, supersedes_none="unread: triage has not read the supersedes"),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    unread_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_UNREAD_ID)), "")
+    read_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_ID)), "")
+    check("ruled store unread: the unread entry is listed", bool(unread_line), str(candidates)[:200])
+    check("ruled store unread: its candidate line is marked (unchecked, not law)",
+          "(unchecked, not law)" in unread_line, unread_line[:200])
+    check("ruled store unread: a read entry's candidate line carries no unchecked mark",
+          bool(read_line) and "(unchecked, not law)" not in read_line, read_line[:200])
+
+
+def case_ruled_store_absent_is_only_unknown():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store absent: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-absent", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, unknown = fn(tcj.APPS_GOAL, repo)
+    check("ruled store absent: the unknown list names the store as absent",
+          "ruled store (absent)" in unknown, str(unknown)[:300])
+    check("ruled store absent: no candidate is a ruled entry",
+          not any(c.startswith("ruled:") for c in candidates), str(candidates)[:200])
+    check("ruled store absent: the absent store never refuses",
+          "ruled store (absent)" not in question_form.unreadable_sources(unknown), str(unknown)[:300])
+
+
+# Store entries join the candidates only when they share a word with the question (the step rulings' word test), and at
+# most RULED_CAP_MAX of them, the newest first. An entry that shares no word stays out.
+RULED_UNRELATED = "ruled-lunch-menu"
+RULED_UNRELATED_TEXT = "Owner: the cafeteria menu changes on Fridays."
+RULED_CAP_MAX = 8
+
+
+def ruled_ids(candidates):
+    """The ids of the ruled candidates, in the order past_rulings gave them (`ruled:<id>: ...` lines)."""
+    return [c[len("ruled:"):].split(":", 1)[0] for c in candidates if c.startswith("ruled:")]
+
+
+def case_ruled_store_words_filter_leaves_out_an_unrelated_entry():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store words: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-words", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT),
+        # Newer than the matching entry, so newest-first alone would list it first if it were kept.
+        RULED_UNRELATED: fixture.entry(RULED_UNRELATED, at="2026-11-13T09:00:00-06:00", ruling=RULED_UNRELATED_TEXT,
+                                       quote="lunch options", source="page item 40",
+                                       supersedes=[{"kind": "test", "ref": "lunch-menu-check"}]),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store words: the entry that shares words with the question is listed",
+          RULED_ID in listed, str(candidates)[:200])
+    check("ruled store words: the entry that shares words with the question is the first candidate",
+          bool(candidates) and candidates[0].startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store words: the entry that shares no word with the question is left out",
+          RULED_UNRELATED not in listed and RULED_UNRELATED_TEXT not in str(candidates), str(candidates)[:200])
+
+
+def case_ruled_store_caps_matching_entries_at_eight_newest_first():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    entries = {}
+    for day in range(1, 13):
+        rid = "ruled-cap-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: keep the apps' access to claude-settings, round %02d." % day)
+    repo = tcj.make_repo("ruled-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    expected = ["ruled-cap-%02d" % day for day in range(12, 12 - RULED_CAP_MAX, -1)]
+    check("ruled store cap: at most %d matching entries are listed" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+    check("ruled store cap: the %d newest matching entries are listed, newest first" % RULED_CAP_MAX,
+          listed == expected, "listed %r, want %r" % (listed, expected))
+
+
+def case_ruled_store_ranks_by_shared_words_before_recency():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store rank: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    many = "ruled-many-words"
+    entries = {many: fixture.entry(many, at="2026-10-20T09:00:00-06:00",
+                                   ruling="Owner: keep the GitHub apps' access to claude-settings as it is.")}
+    # Nine newer entries, each sharing only the word "apps" with the question: recency alone would list them first.
+    for day in range(4, 13):
+        rid = "ruled-one-word-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: the apps menu changes on Fridays, item %02d." % day)
+    repo = tcj.make_repo("ruled-rank", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store rank: the entry that shares the most words with the question is listed",
+          many in listed, str(listed))
+    check("ruled store rank: the entry that shares the most words is the first candidate, ahead of newer ones",
+          bool(listed) and listed[0] == many, str(listed))
+    check("ruled store rank: still at most %d ruled entries" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
 
 
 class _BrokenPipeGit:
@@ -2036,7 +2205,7 @@ def ma144(repo=OTHER_REPO, checked=None, **over):
     if checked is not None:
         item["checked_with"] = checked
     item.update(over)
-    return item
+    return tcj.with_frozen_fields(item)  # MA144 is the record as written; its options get the ids and shown a write carries
 
 
 def ma144_write(**over):
@@ -2651,6 +2820,11 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
+                 case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
+                 case_ruled_store_caps_matching_entries_at_eight_newest_first,
+                 case_ruled_store_marks_an_unread_entry_unchecked,
+                 case_ruled_store_ranks_by_shared_words_before_recency,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
