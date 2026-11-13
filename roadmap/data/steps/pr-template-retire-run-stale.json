@@ -1,0 +1,14 @@
+{
+ "id": "pr-template-retire-run-stale",
+ "title": "The PR template tells a PR that closes a no-runnable-check debt to add Retire-run:, which now fails lane lint",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane debt-retire-names-test round 3 reviewer, 12:42 CST Nov 13: .github/pull_request_template.md:11 still says so after #3174.",
+ "source": "lane session_013NEJKzojLxj38gMmhdAFeX, 12:42 CST Nov 13",
+ "note": "Todo, record-writer lane after #3174 merges. Fix the line at .github/pull_request_template.md:11 to match the check. Cite the check's own text, not a copy (building-allow-list-is-the-constant).",
+ "updatedAt": "2026-11-13T12:43:03-06:00"
+}
