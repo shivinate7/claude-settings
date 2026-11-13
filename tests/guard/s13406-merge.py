@@ -1292,9 +1292,15 @@ TRUST_TOOLS = {
     "mcp__claude-code-remote__confirm_repository_trust": {"content_digest": "0" * 64},
     "mcp__claude-code-remote__request_computer_folder": {
         "environment_id": "env_X", "computer_name": "box", "folder": "repo"},
+    # R13 point 4, owner-approval card: ask_owner true makes the owner a card to allow the call.
+    "mcp__claude-code-remote__update_trigger": {"trigger_id": "trig_X", "prompt": "p", "ask_owner": True},
 }
 # The remedy steers to get_session. It never tells the session to call either tool.
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
+# The same tool without ask_owner opens no card: a lane may edit its own scheduled task.
+add("trust-card-in-build: update_trigger without ask_owner in a lane session allows", "allow",
+    tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
+    env=ROLE_ENV, trigger_id="trig_X", enabled=False)
 
 
 def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
