@@ -31,10 +31,10 @@
   "owner": "lane cloud-precompact-handoff-stale (session_013NEJL34URk7P9AdEH62S3i), via coordinator",
   "pick": "a",
   "ref": "coordinator 21:22 CST Nov 12",
-  "reply": "00:54 CST Nov 13, the lane's answer: the setup is fine; the hooks are installed in the cloud (checked). But a cloud session gets one nudge, not several. The nudge counts only message tokens, and each session starts with about 88k tokens of fixed load, so with compaction at 384k there is room for one checkpoint (about 334k); the 200k one is dropped as too close. In the coordinator's case the last nudge came about 84k tokens before the real compaction, and everything after it was in no handoff (this matches the retrospective's handoff being about 2 h behind). Option a adds a second nudge about 20k below the line, costing one more rewrite (about 10k tokens) per cycle. The lane still recommends a. Pick a or b on this item.",
+  "reply": "Closed 01:09 CST Nov 13 by triage: option a taken without waiting, since it can be undone and matches what you expected (several reminders before compaction). The lane adds a second handoff reminder about 20k tokens under the compaction line, red test first, reviewed as a guard change. To undo, say so on this item and the lane reverts it.",
   "repo": "shivinate7/claude-settings",
   "short": "Late handoff checkpoint before compaction",
-  "status": "open",
+  "status": "closed",
   "title": "Add a second, late handoff checkpoint before a cloud session compacts?",
   "why": "It adds a token cost to every standing session's compaction cycle."
 }
