@@ -1,0 +1,14 @@
+{
+ "id": "answers-ledger-followups",
+ "title": "Answers the ledger found with no home or no reply: file or reply to each, one at a time",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Ledger of 240 answers without a receipt (subagent adc6069943a7339b8, 13:40 CST Nov 13): 148 FILED, 50 ROUTED-ONLY, 36 QUESTION, 6 UNFILED.",
+ "source": "triage ledger 13:40 CST Nov 13",
+ "note": "Todo. Receipts written 13:4x CST for 139 FILED answers on closed items (receipts only: the answer docs stay in the answers collection, not deleted, as item versions were not at hand). Owner replies owed (open, no reply): guard-line-blind-reask 700 (wants triage opinion), pick-first-red-job-read 728 and qmax-d499-d833-end 720 (want the tradeoff explained), drain-2071-guard-incident 715 (pick a, b or c still open). Route owed: outbox-repo-access 660 (\"yes allowed\"; step outbox-aggregate-plan still waits on it), repeat-judge-retry/batch-cap/mark-split 664 to 666 (accepted picks a, no home), pick-1779-child-pages 721 (ruling child-page-fix-per-repo withdrawn, re-ask pending). Conflict: pick-retire-missing-deps 600 answer a against step retire-missing-deps-unknown \"600 c\". Scope items 534 to 538 and 658, 659: steps global-claude-md-scope-audit and outbox-aggregate-plan still say sign-off open. 9 FILED answers on open items and the 50 ROUTED-ONLY and 36 QUESTION rows are not closed. Unread by the ledger: q_max repo, mailaudit debts, plans/, handoffs/. Ledger file: scratchpad fp_ledger.json.",
+ "updatedAt": "2026-11-13T13:40:56-06:00"
+}
