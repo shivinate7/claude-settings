@@ -192,14 +192,16 @@ class ReviewGrantRules(unittest.TestCase):
         self.assertEqual(self.granted_state("FAIL", guard="yes", net="negative")[0], "held")
 
     def test_round_four_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        for verdict in ("FAIL", "PASS"):
+        # a FAIL round 4 owes its net value; a PASS round 4 reads done without one (owner, page item 741), see the PASS case below
+        for verdict in ("FAIL",):
             with self.subTest(verdict=verdict):
                 state, why = self.granted_state(verdict, guard="yes", net="not owed")
                 self.assertEqual(state, "open", "a net value the guard change owes is not settled by round 4")
                 self.assert_names_round_four(why)
 
-    def test_a_round_four_pass_with_guard_yes_owes_the_net_value_test(self):
-        for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
+    def test_a_round_four_pass_with_guard_yes_is_done_whatever_the_net_value_but_negative(self):
+        # owner, page item 741: a passing final round reads done with net "not owed"; a negative net value still holds it
+        for net, want in (("not owed", "done"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
             with self.subTest(net=net):
                 self.assertEqual(self.granted_state("PASS", guard="yes", net=net)[0], want)
 
@@ -246,7 +248,7 @@ class ReviewGrantFlag(tm.ReviewEnv):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))  # the sibling: the same rounds with the grant pass
         self.assertEqual(rc, 0, "merge refused --round 4 with --grant:\n" + out + err)
         out, err = self.assert_usage_error(*self.granted())
-        self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 3", err)
+        self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 2", err)
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
     def test_round_five_with_a_grant_refuses(self):
