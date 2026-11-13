@@ -5,7 +5,7 @@ Input (env): BASE_SHA, the PR's base commit. The checkout is at HEAD.
 Output: lines written to $GITHUB_OUTPUT (stdout when unset):
   files, any                    every test either OS runs (the union), and whether it is non-empty
   files_windows, any_windows    the tests the Windows job runs
-  files_macos, any_macos        the tests the macOS job runs
+  files_macos, any_macos        the tests the macOS job runs, less the shared hooks suites (MACOS_SHARED, read for MACOS_WORDS), which are skipped with a reason
   matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a JSON list as text
   commands_windows, commands_macos   {path: cmd} over that OS's files. cmd is the interpreter its checks.yml run line starts
                                 with: sh, bash, node, node --test, python, python3, powershell or pwsh (mod-tests.sh files:
@@ -83,6 +83,39 @@ NEEDS_SETUP = {
     "lint/test_ios_ship.sh": "needs macOS tooling (bin/ios-ship); runs in shell-macos only",
     "lint/test_sim_test.sh": "needs macOS tooling (bin/sim-test); runs in shell-macos only",
 }
+
+# R61 part 4: the macOS leg of a lane runs a test only when its subject is macOS. A shared suite (one that runs the same on every
+# OS) proves nothing more on a lane push, and the batch's macOS run covers it. A hooks test is shared by default (MACOS_SHARED,
+# glob -> reason), unless its own text names a macOS thing (MACOS_WORDS: the file is read) or MACOS_SUBJECT names it. An
+# unreadable file and a test no list covers stay on the macOS leg: unknown is not skip. ci-scope.sh's checks_macos flag is too
+# wide to define this (any hooks/ edit sets it), so these lists are the one home. A product file selects its test through
+# candidates(), so a change to janitor/install_launchd.py reaches janitor/test_install_launchd.py.
+MACOS_SHARED = {
+    "hooks/test_*.py": "a hook suite with no macOS word in its text runs the same on every OS",
+}
+# The words that make a test a macOS subject: darwin (also a faked Darwin uname), macos, launchd and xcrun.
+MACOS_WORDS = re.compile(r"darwin|macos|launchd|xcrun", re.IGNORECASE)
+# A test that runs code with a darwin arm or macOS-only tooling. It stays on the macOS leg even inside a shared glob.
+MACOS_SUBJECT = {
+    "janitor/test_install_launchd.py": "tests the launchd installer",
+    "janitor/test_session_end_sweep.py": "tests the session-end sweep, whose process-start read has a darwin arm",
+    "hooks/test_guard_load_os.py": "checks the guard's load reader against the macOS tools (its darwin arm)",
+    "lint/test_rm_shim.py": "tests the rm shim over the real macOS rm (its darwin arm)",
+    "hooks/test_sim_boot_record.py": "tests the iOS simulator boot record, which reads macOS launchd state",
+}
+
+
+def shared_on_macos(test):
+    """The reason `test` is a shared suite that the macOS leg skips, or None when it stays. It stays when MACOS_SUBJECT names
+    it, when its own text has a MACOS_WORDS word, and when the file cannot be read (unknown is not skip)."""
+    why = reason(test, MACOS_SHARED)
+    if not why or reason(test, MACOS_SUBJECT):
+        return None
+    try:
+        with open(test, encoding="utf-8", errors="replace") as f:
+            return None if MACOS_WORDS.search(f.read()) else why
+    except OSError:
+        return None
 
 MAP_DIR = "skills/plain-english-map/"
 MAP_TESTS = MAP_DIR + "tests/"
@@ -401,12 +434,18 @@ def main():
         if not on:
             print(f"skip {test} on {' and '.join(texts)}: no CI job runs it on Windows or macOS ({CI_PATH})")
             continue
+        shared = shared_on_macos(test)
+        listed = [word for word in on if word != "macos" or not shared]
         for word in texts:
-            if word in on:
+            if word in listed:
                 lists[word].append(test)
+            elif word in on:
+                del cmds[word][test]
+                print(f"skip {test} on {word}: not a macOS subject ({shared}), so a lane's macOS leg leaves it to the batch's macOS run")
             else:
                 print(f"skip {test} on {word}: {CI_PATH} runs it on no {labels[word]} job")
-        print(f"run {test} on {' and '.join(on)}")
+        if listed:
+            print(f"run {test} on {' and '.join(listed)}")
     write_outputs(lists["windows"], lists["macos"], cmds)
 
 
