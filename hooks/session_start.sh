@@ -297,20 +297,21 @@ EOF
             # ignored one (a non-ignored one made the tree dirty above): git would overwrite it or write through it, so
             # the move does not run. A tracked one is git's own to replace, and a parent directory holds the new file
             # without harm. --no-renames lists a rename's target as added, so it is checked too.
+            # A tracked directory that origin replaces with a file goes with whatever ignored files it holds, so that
+            # case holds too. Literal pathspecs, so a name holding * or ? cannot match some other tracked path. No
+            # comment, case or quote sits inside the substitution below: bash 3.2 (macOS sh) mis-parses those there.
             ff_hit=$(cd "$toplevel" 2>/dev/null && git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" 2>/dev/null \
               | tr '\0' '\n' | while IFS= read -r ff_p; do
                   ff_in=""
                   if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then ff_in="$ff_p"; fi
                   ff_d="$ff_p"
                   while [ -z "$ff_in" ]; do
-                    case "$ff_d" in */*) ff_d="${ff_d%/*}" ;; *) break ;; esac
+                    [ "${ff_d%/*}" != "$ff_d" ] || break
+                    ff_d="${ff_d%/*}"
                     if [ -L "$ff_d" ] || { [ -e "$ff_d" ] && [ ! -d "$ff_d" ]; }; then ff_in="$ff_d"; fi
                   done
-                  # Literal pathspecs, so a name holding * or ? cannot match some other tracked path.
                   if [ -n "$ff_in" ]; then
                     if [ -z "$(git --literal-pathspecs ls-files -- "$ff_in" 2>/dev/null)" ]; then echo 1; break; fi
-                    # A tracked directory that origin replaces with a file is removed with whatever ignored files it
-                    # holds. tr keeps the NUL-separated names out of the shell's command substitution.
                     if [ -d "$ff_in" ] && [ ! -L "$ff_in" ] \
                       && [ -n "$(git --literal-pathspecs ls-files -z -o -i --exclude-standard -- "$ff_in" 2>/dev/null | tr '\0' '\n')" ]; then echo 1; break; fi
                   fi
