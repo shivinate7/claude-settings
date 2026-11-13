@@ -39,7 +39,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   Triage, as the page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage brings the no-limit
-  rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat. No line counts losses now, so repeats are unmeasured.
+  rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat. Triage reads the `Handoff gave count` line in a session's handoff file at the roadmap review (on demand, no log). Branch cull-report-guard puts that line in the file.
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
