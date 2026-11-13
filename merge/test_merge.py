@@ -22019,6 +22019,208 @@ class TouchesRead(Env):
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
+# `merge --clash`: one line per file that more than one open pull request changes, `PATH: #A HEADREF, #B HEADREF`, the pulls ascending by number.
+# It reads what --touches reads (the open pull list and each open pull's files), takes no lock and merges and posts nothing. The fixtures are --touches'.
+CLASH_NONE_LINE = "no file is touched by more than one open pull request."  # the text of merge.CLASH_NONE, when no file is shared
+CLASH_DOCS = "docs/guide.md"
+
+class ClashRead(Env):
+    """`merge --clash`: the files that more than one open pull request changes. A case that expects a line first runs `--touches --file` on the same
+    fixture. --touches is built, so that control passes on the old code too and shows the fixture shares the file before --clash is asked."""
+
+    def touch_names(self, pulls, files, path, **reads):
+        """The control: the lines of `--touches --file PATH` on a fresh host. The read is built, so the control is green on the old code too."""
+        rc, out, err = self.run_args("--touches", "--file", path, host=TouchesHost(pulls, files, **reads))
+        self.assertEqual(rc, 0, f"setup: --touches --file {path} did not run:\n" + out + err)
+        return out.splitlines()
+
+    def run_clash(self, host):
+        return self.run_args("--clash", host=host)
+
+    def test_clash_lines_is_a_pure_read_that_returns_lines_and_no_unknown(self):
+        pulls = [touch_pull(2402, "wip-guard-tests"), touch_pull(2390, TOUCH_FIX)]  # listed out of number order
+        files = {n: [touch_file(TOUCH_GUARD, "+a guard line")] for n in (2390, 2402)}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the fixture does not share the file")
+        fn = getattr(merge, "clash_lines", None)  # the subject: its name is looked up after the control, so a missing name fails as an assert
+        self.assertTrue(callable(fn), "merge.py has no clash_lines: the --clash read is not built")
+        lines, unknown = fn(TouchesHost(pulls, files))
+        self.assertEqual(lines, [f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"], "clash_lines did not name the shared file with both pulls")
+        self.assertIsNone(unknown, "clash_lines reported unknown on a clean read")
+
+    def test_the_none_line_is_the_named_constant(self):
+        self.assertEqual(getattr(merge, "CLASH_NONE", None), CLASH_NONE_LINE, "merge.py's CLASH_NONE is not the text the no-clash line prints")
+
+    def test_two_open_pulls_on_one_file_name_it_on_one_line_with_both_heads(self):
+        pulls = [touch_pull(2402, "wip-guard-tests"), touch_pull(2390, TOUCH_FIX)]  # listed out of number order: the line sorts them
+        files = {n: [touch_file(TOUCH_GUARD, "+a guard line")] for n in (2390, 2402)}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the fixture does not share the file")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))  # `--clash` alone is valid
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"],
+                         "the shared file was not named on one line with both pulls:\n" + out)
+
+    def test_disjoint_open_pulls_print_the_none_line(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]
+        files = {2390: [touch_file(TOUCH_GUARD, "+a guard line")], 2401: [touch_file("docs/x.md", "+a docs line")]}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: #2390 does not touch the guard file alone")
+        self.assertEqual(self.touch_names(pulls, files, "docs/x.md"), [touch_head(2401, "docs-x", "ready") + "file docs/x.md"],
+                         "setup: #2401 does not touch its own file alone")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [CLASH_NONE_LINE], "disjoint pulls did not print the none line:\n" + out)
+
+    def test_three_open_pulls_on_two_files_print_two_lines_sorted_by_path(self):
+        pulls = [touch_pull(2402, "wip-guard-tests"), touch_pull(2401, "docs-x"), touch_pull(2390, TOUCH_FIX)]  # listed out of order
+        files = {
+            2390: [touch_file(TOUCH_GUARD, "+a guard line"), touch_file(CLASH_DOCS, "+a docs line")],  # the guard file is listed first: the sort puts docs first
+            2401: [touch_file(CLASH_DOCS, "+a docs line")],
+            2402: [touch_file(TOUCH_GUARD, "+a guard line")],
+        }
+        self.assertEqual(self.touch_names(pulls, files, CLASH_DOCS),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {CLASH_DOCS}", touch_head(2401, "docs-x", "ready") + f"file {CLASH_DOCS}"],
+                         "setup: the docs file is not shared by #2390 and #2401")
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the guard file is not shared by #2390 and #2402")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"{CLASH_DOCS}: #2390 {TOUCH_FIX}, #2401 docs-x", f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"],
+                         "the two shared files were not named one line each, sorted by path:\n" + out)
+
+    def test_a_file_two_pulls_share_is_named_and_a_file_one_pull_alone_touches_is_not(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2402, "wip-guard-tests")]
+        files = {2390: [touch_file(TOUCH_GUARD, "+a guard line"), touch_file("docs/x.md", "+a docs line")], 2402: [touch_file(TOUCH_GUARD, "+a guard line")]}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the guard file is not shared by #2390 and #2402")
+        self.assertEqual(self.touch_names(pulls, files, "docs/x.md"), [touch_head(2390, TOUCH_FIX, "ready") + "file docs/x.md"],
+                         "setup: docs/x.md is not touched by #2390 alone")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"],
+                         "the file one pull touches alone was named, or the shared file was not:\n" + out)
+
+    def test_a_dot_slash_path_is_the_same_file_as_the_plain_path(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]
+        files = {2390: [touch_file("./docs/guide.md", "+a docs line")], 2401: [touch_file(CLASH_DOCS, "+a docs line")]}
+        self.assertEqual(self.touch_names(pulls, files, CLASH_DOCS),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {CLASH_DOCS}", touch_head(2401, "docs-x", "ready") + f"file {CLASH_DOCS}"],
+                         "setup: --touches did not match ./docs/guide.md to docs/guide.md")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"{CLASH_DOCS}: #2390 {TOUCH_FIX}, #2401 docs-x"],
+                         "./docs/guide.md and docs/guide.md were not one file, or the path was not normalised:\n" + out)
+
+    def test_a_failed_read_prints_nothing_and_says_unknown(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]  # in order: #2390's files are read before #2401's read fails
+        files = {n: [touch_file(TOUCH_GUARD, "+a guard line")] for n in (2390, 2401)}
+
+        def os_error_on_2401(n):
+            if n == 2401:
+                raise OSError(5, "Input/output error")
+            return files[n]
+
+        def os_error_host():
+            host = TouchesHost(pulls, files)
+            host.pull_files = unittest.mock.Mock(side_effect=os_error_on_2401)  # the read's program fails: an OSError, not a Stop
+            return host
+
+        for read, host_for, why in (
+            ("the open pulls", lambda: TouchesHost(pulls, files, pulls_error="reading the open pulls failed: HTTP 502"),
+             "reading the open pulls failed: HTTP 502"),
+            ("the files of #2401", lambda: TouchesHost(pulls, files, files_error={2401: "reading the files of #2401 failed: HTTP 502"}),
+             "reading the files of #2401 failed: HTTP 502"),
+            ("the files of #2401, an OSError", os_error_host, "[Errno 5] Input/output error"),
+        ):
+            with self.subTest(read=read):
+                rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host_for())  # the control: --touches refuses the same read
+                self.assertEqual((rc, out), (1, ""), f"setup: --touches did not refuse a failed read of {read}:\n" + out + err)
+                rc, out, err = self.run_clash(host_for())
+                self.assertEqual(rc, 1, f"--clash exited {rc} on a failed read of {read}:\n" + out + err)
+                self.assertEqual(out, "", f"--clash printed a partial result beside a failed read of {read}:\n" + out)
+                self.assertIn("merge: unknown (" + why, err, f"--clash did not say unknown for a failed read of {read}:\n" + err)
+                self.assertNotIn("Traceback", err, err)
+
+    def test_a_draft_pull_counts_like_a_ready_one(self):
+        pulls = [touch_pull(2402, "wip-guard-tests", draft=True), touch_pull(2390, TOUCH_FIX)]  # the draft is listed first
+        files = {n: [touch_file(TOUCH_GUARD, "+a guard line")] for n in (2390, 2402)}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "draft") + f"file {TOUCH_GUARD}"],
+                         "setup: the draft does not touch the guard file")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"],
+                         "a draft pull did not count as an open pull that touches the file:\n" + out)
+
+    def test_the_empty_state_and_a_full_page_of_open_pulls_are_read_in_full(self):
+        self.assertEqual(self.touch_names([], {}, TOUCH_GUARD), [TOUCH_NONE], "setup: --touches did not read the empty state")
+        host = TouchesHost([])  # the empty state: no open pull, so no file is read
+        rc, out, err = self.run_clash(host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.file_calls, [], "a file was read with no open pull request")
+        self.assertEqual(out.splitlines(), [CLASH_NONE_LINE], out)
+        numbers = range(2301, 2402)  # 101 open pulls: the list is two pages, and #2401 is on the second
+        pulls = [touch_pull(n, f"feat-{n}") for n in numbers]
+        files = {n: [touch_file(f"docs/pull-{n}.md", "+a line")] for n in numbers}  # each one touches a file of its own ...
+        files[2301] = [touch_file("docs/shared.md", "+a line")]  # ... but #2301 and #2401 share one
+        files[2401] = [touch_file("docs/shared.md", "+a line")]
+        self.assertEqual(self.touch_names(pulls, files, "docs/shared.md", count_gh=True),
+                         [touch_head(2301, "feat-2301", "ready") + "file docs/shared.md", touch_head(2401, "feat-2401", "ready") + "file docs/shared.md"],
+                         "setup: --touches did not name the pull on the second page")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files, count_gh=True))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), ["docs/shared.md: #2301 feat-2301, #2401 feat-2401"],
+                         "the pull on the second page was not read, or the shared file was not named:\n" + out)
+
+    def test_it_reads_one_list_page_and_each_pulls_files_once_and_takes_no_lock_or_writes(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x"), touch_pull(2402, "wip-guard-tests", draft=True)]
+        files = {2390: [touch_file(TOUCH_GUARD, "+a guard line")], 2401: [touch_file("docs/x.md", "+a docs line")],
+                 2402: [touch_file(TOUCH_GUARD, "+a guard line")]}
+        self.assertEqual(self.touch_names(pulls, files, TOUCH_GUARD),
+                         [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}", touch_head(2402, "wip-guard-tests", "draft") + f"file {TOUCH_GUARD}"],
+                         "setup: the fixture does not share the guard file")
+        before, status = self.refs(), sh(self.co, "git", "status", "--porcelain")
+        host = TouchesHost(pulls, files)
+        rc, out, err = self.run_clash(host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.list_calls, [("pulls", {"state": "open"})], "the open pulls were not read as one list page")
+        self.assertEqual(sorted(host.file_calls), [2390, 2401, 2402], "the files were not read once per open pull")
+        self.assertEqual(host.log_calls, [], "--clash read a run's failed lines")
+        self.assertFalse(self.lock_ref(), "--clash took the merge lock")
+        self.assertEqual(self.refs(), before, "--clash moved a ref")
+        self.assertEqual(sh(self.co, "git", "status", "--porcelain"), status, "--clash wrote a file in the checkout")
+
+    def assert_clash_refused(self, *argv, stands_alone):
+        """A usage error (rc 2) from a parser that knows --clash. stderr holds no OLD_PARSER_ERRORS text and no traceback. With `stands_alone`, the
+        refusal also says --clash stands alone, as --touches' does: only the stands-alone check gives that, so a file or run flag, which an existing
+        check refuses already, is not held to it."""
+        rc, out, err = self.run_args(*argv, host=TouchesHost([]))
+        self.assertEqual(rc, 2, f"--clash with {' '.join(argv)} was not refused with a usage error:\n" + out + err)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, f"the parser does not know --clash (it says {old!r}) for argv {argv}")
+        self.assertNotIn("Traceback", err, out + err)
+        if stands_alone:
+            self.assertRegex(err, r"error: [^\n]*stands alone", f"the refusal of argv {argv} does not say --clash stands alone:\n" + err)
+
+    def test_clash_stands_alone_and_any_other_option_is_refused(self):
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())  # the control: a --touches read is valid
+        self.assertEqual(rc, 0, "setup: --touches --file did not run:\n" + out + err)
+        rc, out, err = self.run_clash(TouchesHost([]))  # the flag alone is valid: the none line, exit 0
+        self.assertEqual(rc, 0, "--clash alone was refused:\n" + out + err)
+        self.assertEqual(out.splitlines(), [CLASH_NONE_LINE], out)
+        for argv in (("--clash", "--file", TOUCH_GUARD), ("--clash", "--case", TOUCH_CASE_A), ("--clash", "--run", TOUCH_RUN)):
+            with self.subTest(argv=argv):
+                self.assert_clash_refused(*argv, stands_alone=False)
+        for argv in (("7", "--clash"), ("--clash", "--touches", "--file", TOUCH_GUARD), ("--clash", "--confirm"), ("--clash", "--reviewed"),
+                     ("--clash", "--unlock"), ("--clash", "--role", "coordinator"), ("--clash", "--idle-lanes"), ("--clash", "--release-check", "5")):
+            with self.subTest(argv=argv):
+                self.assert_clash_refused(*argv, stands_alone=True)
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
