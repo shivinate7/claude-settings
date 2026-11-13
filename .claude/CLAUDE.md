@@ -30,4 +30,4 @@ output style load in each session on each repo.
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn). The batch runner
   may push a plain merge of main into a handed-in PR branch when no lane has pushed there in the last 2 hours.
   No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets
-  a fix check and a fresh review record.
+  a fix check and a fresh review record. Source: decision `standing-merge-grant`.
