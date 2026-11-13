@@ -136,6 +136,8 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that reads, watches, replies to and resolves comment threads on an artifact (hooks/guard.py rule page-thread-reply).
+COMMENTS_TOOL = "ArtifactComments"
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"

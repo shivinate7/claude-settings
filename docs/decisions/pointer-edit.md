@@ -38,7 +38,7 @@ has made): PR 2411, 2026-11-09 12:10 CST.
 
 Cost, per the `outcomes-mechanize-rules` rule (cost stated in the record): each Write, Edit, MultiEdit and
 NotebookEdit call reads the global rules file once (at most 64 KiB) and resolves its target paths. It starts no
-process and runs no git. A refusal adds one line to `guard.log`.
+process and runs no git. A refusal adds one line to `guard.log` (unmeasured).
 
 Kind: build
 Plan: docs/decisions/pointer-edit.md#the-ruling (all)
