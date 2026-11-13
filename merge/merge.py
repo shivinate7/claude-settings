@@ -130,7 +130,13 @@
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
-                          A cloud run needs the batch-runner role.
+                          A cloud run needs the batch-runner role. Each run that does not stop ends with one line per pull request that
+                          --reviewed reads done on the base and that no lane set, open pull request or base holds: `merge: #N left out of
+                          batch NAME: none|prose|conflict` (prose: docs-only; conflict: its head conflicts with the base tip). A failed read
+                          prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and keeps the batch result. Added gh cost: one reviewed_read, one open-PR
+                          list read (h.batch_pr) for a missing base or lane set, then per done candidate one compare against each other open pull
+                          request on the base and one against the base. Per code candidate: one `git fetch` of the base (once per run), a
+                          `git cat-file` check, a fetch of its refs/pull/N/head if the clone lacks it, and one `git merge-tree`.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
                           head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
@@ -4323,8 +4329,8 @@ REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when on
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
 def reviewed_read(h):
-    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
-    each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
+    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
+    for each pull request whose newest record reads done (kind is the record's Kind); and the open pull request rows. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
@@ -4348,7 +4354,7 @@ def reviewed_read(h):
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "pass":
-                done.append((n, d["base"]["ref"]))
+                done.append((n, d["base"]["ref"], rec["kind"]))
             else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
@@ -4371,7 +4377,7 @@ def reviewed_block(h):
     runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
     lines, done, pulls = reviewed_read(h)
     out = [f"repo {h.repo}:", *lines]
-    nums = sorted(n for n, base in done if base == h.base)
+    nums = sorted(n for n, base, _kind in done if base == h.base)
     if not nums:
         return out, True
     try:
@@ -5075,7 +5081,51 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
     finally:
         drop_worktree(root, tmp, wt)
 
+def left_out_lines(root, h, name, numbers, base):
+    """-> the lines naming each pull request that `merge --reviewed` reads done on `base`, that is not in the batch's lane set `numbers` and whose
+    head no other open pull request on `base` holds (a batch's draft included) and `base` does not hold: `merge: #N left out of batch NAME: REASON`,
+    ascending. REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
+    with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_reason, the one home of "does this head merge cleanly onto the base"
+    (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one compare per
+    candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. An unknown
+    merge_reason raises Stop; a failed read raises its RELEASE_READ_ERRORS error."""
+    _lines, done, pulls = reviewed_read(h)
+    heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
+    kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
+    fetched, out = {}, []
+    for n in sorted(kinds):
+        if any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n) or h.holds_head(heads[n], base):
+            continue
+        if kinds[n] == "docs-only":
+            why = "prose"
+        else:
+            reason = merge_reason(root, n, base, heads[n], fetched)
+            if reason and is_unknown_reason(reason):
+                raise ValueError(f"cannot tell whether #{n} merges onto {base}: {reason}")
+            why = "conflict" if reason else "none"
+        out.append(f"merge: #{n} left out of batch {name}: {why}")
+    return out
+
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
+    """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. A read error (RELEASE_READ_ERRORS) that reading them raises
+    prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and never hides the batch's own result or its exit code. Returns what batch_build_run returns."""
+    rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config)
+    try:
+        frozen = numbers
+        if ready and not numbers:  # the lane set is the frozen one, which batch_build_run read from the pull request
+            found = h.batch_pr(integration_branch(name))
+            block = parse_freeze(found[1]["body"]) if found else None
+            frozen = sorted(block["lanes"]) if block else []
+        if not base:
+            found = h.batch_pr(integration_branch(name))
+            base = found[1]["base"] if found else "main"
+        for line in left_out_lines(root, h, name, set(frozen), base):
+            say(line)
+    except RELEASE_READ_ERRORS as e:  # merge_reason's later git calls go through sh, which can raise OSError or TimeoutExpired
+        say(f"merge: left-out list unknown ({' '.join(str(e).split())}) {UNKNOWN_CITE}")
+    return rc
+
+def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
     With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
     lint of the integration branch head runs, then the repo's ready checks, and the host is asked to mark the draft ready (Host.ready sends nothing, so

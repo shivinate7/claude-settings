@@ -160,6 +160,9 @@ class FakeHost:
             raise merge.Stop(self.files_error)
         return list(self.changed)
 
+    def pages(self, rel, key=None, fields=None):  # the open pull list reviewed_read reads; none open unless a case scripts one (LeftOutHost serves its own)
+        return []
+
     def pr(self, n):
         self.pr_calls.append(n)
         if n in self.batch_pulls:  # a batch case's pull request, read from its own entry
@@ -20840,6 +20843,308 @@ def cost_host(**reads):
 def unit_failed_line(name):
     """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
     return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
+
+class LeftOutHost(FakeHost):
+    """FakeHost plus the reads `merge --reviewed` makes, so a batch build can name the done pull requests it leaves out: the open pull list and the
+    repo's issue comments through `pages` (Host.issue_comments and reviewed_read parse them, as in production), each head's CI, and whether one head
+    contains another, read from the checkout's history as Host.holds_head reads it. `list_error` fails the open list read. Any other read is a failed case."""
+
+    issue_comments = merge.Host.issue_comments  # the real parse of the comment list, served by pages below (one home)
+
+    def __init__(self, root, other):
+        super().__init__(root, other)
+        self.comments, self.list_error = [], None  # comments: the repo's issue comments, oldest first
+
+    def pages(self, rel, key=None, fields=None):
+        if rel == "pulls":
+            if self.list_error:
+                raise merge.Stop(self.list_error)
+            return [batch_pull(n, p.get("sha") or merge.origin_head(self.root, p["branch"]), base=p["base"], draft=p["draft"], head_ref=p["branch"])
+                    for n, p in sorted(self.batch_pulls.items()) if p["state"] == "OPEN"]
+        if rel == "issues/comments":
+            return list(self.comments)
+        raise AssertionError("unexpected read: " + rel)
+
+    def head_state(self, n, sha=None):
+        return "green"
+
+    def commit_read(self, sha):
+        raise merge.Stop("no commit read in this case")
+
+    def holds_head(self, head, other):
+        """True when `other` (a sha, or the base branch's name) contains `head`: the ancestry Host.holds_head's compare reads as ahead or identical."""
+        ref = other if re.fullmatch(r"[0-9a-f]{40}", other) else f"origin/{other}"
+        return subprocess.run(["git", "merge-base", "--is-ancestor", head, ref], cwd=self.root, capture_output=True).returncode == 0
+
+class LeftOutBatch(CloudSession):
+    """`merge --batch-build` names each pull request that `merge --reviewed` reads done on the batch's base, that the batch's lane set does not
+    name and that no other open pull request holds: `merge: #N left out of batch NAME: <reason>`, reason prose (the newest record is docs-only),
+    conflict (its head merges onto the batch base with a conflict) or none. A failed list read prints `merge: left-out list unknown (why)` and
+    the batch still builds. The lines end the output, one per pull request, in number order. A build, a same-set rerun and a --ready run each print
+    them. The batch fixtures are BatchFreeze's, read from it (one home); this class holds no copy of them. Each case's first assert names its claim."""
+
+    lane = BatchFreeze.lane
+    frozen_batch = BatchFreeze.frozen_batch
+    read_run = BatchFreeze.read_run
+    run_batch = BatchFreeze.run_batch
+    no_lint_or_ready_check = BatchFreeze.no_lint_or_ready_check
+    ancestor = BatchFreeze.ancestor
+
+    def setUp(self):
+        super().setUp()
+        self.host = LeftOutHost(self.co, self.other)
+        self.heads = {}  # lane PR number -> its head sha on origin, as lane() and conflicting_lane() leave it
+        self.runs = {}  # the run answers read_run gives: none are scripted here, so a read of one is a failed case
+        self.host.cited_run = self.read_run
+
+    def pull_ref_lane(self, n):
+        """Pull request #n whose head is on origin only as refs/pull/<n>/head, with no branch: a commit off origin/main that the clone never
+        fetches. The host reports that head as the pull request's head (its `sha`). -> the head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"pull-{n}", "origin/main")
+        put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"lane {n}")
+        sh(o, "git", "push", "-q", "origin", f"pull-{n}:refs/pull/{n}/head")
+        self.host.add_pr(n, f"pull-{n}")
+        self.heads[n] = self.host.batch_pulls[n]["sha"] = sh(o, "git", "rev-parse", f"pull-{n}")
+        return self.heads[n]
+
+    def conflicting_lane(self, n, ref_only=False):
+        """Lane PR #n: a commit on origin's main as it was before one more commit that edits shared.txt. origin's main then gets that commit, so
+        git's merge of lane #n onto main conflicts on shared.txt. With `ref_only`, the head is pushed to refs/pull/<n>/head alone, as
+        pull_ref_lane does. -> the lane's head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        old = sh(o, "git", "rev-parse", "origin/main")
+        sh(o, "git", "checkout", "-q", "-B", "main-moved", "origin/main")
+        put(os.path.join(o, "shared.txt"), "main side\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "main edits shared.txt")
+        sh(o, "git", "push", "-q", "origin", "HEAD:main")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", old)
+        put(os.path.join(o, "shared.txt"), f"lane {n} side\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"lane {n} edits shared.txt")
+        sh(o, "git", "push", "-q", "origin", f"lane-{n}:refs/pull/{n}/head" if ref_only else f"lane-{n}")
+        self.host.add_pr(n, f"lane-{n}")
+        self.heads[n] = sh(o, "git", "rev-parse", f"lane-{n}")
+        if ref_only:
+            self.host.batch_pulls[n]["sha"] = self.heads[n]
+        return self.heads[n]
+
+    def record(self, n, head=None, **fields):
+        """Pull request n's review record, at `head` (default: its lane head), as the repo's comment list gives it."""
+        self.host.comments.append(review_comment(900 + n, n, record_text(n=n, head=head or self.heads[n], **fields)))
+
+    def lint(self, n, head=None):
+        """Pull request n's lane-lint PASS at `head` (default: its lane head)."""
+        self.host.comments.append(lint_of(n, head or self.heads[n]))
+
+    def done(self, n, **fields):
+        """Pull request n's record, a PASS at its lane head, and the lane-lint PASS that a done record needs: `merge --reviewed` reads it done."""
+        self.record(n, **fields)
+        self.lint(n)
+
+    def build(self, *argv):
+        """-> (rc, out) of merge.main in the clone. The clone fetches origin first, as a run's own fetches leave each head in it."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return self.run_batch(*argv)
+
+    def left_out(self, out):
+        """The left-out lines of a run's output, in order: each `left out of batch` line and each `left-out list unknown` line."""
+        return [l for l in out.splitlines() if " left out of batch " in l or l.startswith("merge: left-out list unknown")]
+
+    def assertLeftOut(self, out, want, claim):
+        """The run's left-out lines are `want`, and they end the output."""
+        self.assertEqual(self.left_out(out), want, f"{claim}: %s" % out)
+        if want:
+            self.assertEqual(out.splitlines()[-len(want):], want, f"{claim}: the left-out lines do not end the output: %s" % out)
+
+    def test_a_done_pr_no_batch_holds_is_named_none(self):
+        """A done record, net value zero, in no batch: the build's last line names that pull request none."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.done(103, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, PASS"),
+                  guard="yes", net="zero")
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request no batch holds is not named")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_docs_only_done_pr_is_named_prose(self):
+        """A done pull request whose newest record is docs-only is named `prose`."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.done(103, kind="docs-only", rounds=())
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: prose"], "a docs-only done pull request is not named prose")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_whose_head_conflicts_with_the_batch_base_is_named_conflict(self):
+        """A done pull request whose head merges onto the batch base tip with a conflict is named `conflict`."""
+        self.conflicting_lane(103)
+        for n in (101, 102):
+            self.lane(n)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request that conflicts with the base is not named conflict")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_whose_head_the_clone_lacks_is_named_none(self):
+        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 merges clean onto the base, so it is named
+        none, and no left-out list unknown line is printed."""
+        for n in (101, 102):
+            self.lane(n)
+        self.pull_ref_lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request whose head the clone lacks is not named none")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_whose_head_the_clone_lacks_and_that_conflicts_is_named_conflict(self):
+        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 conflicts with the base, so it is named
+        conflict, and no left-out list unknown line is printed."""
+        self.conflicting_lane(103, ref_only=True)
+        for n in (101, 102):
+            self.lane(n)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request whose head the clone lacks and that conflicts is not named conflict")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_each_left_out_pr_gets_its_own_line_in_number_order(self):
+        """Two left-out done pull requests get one line each, ascending by number, with their own reasons."""
+        for n in (101, 102, 103, 106):
+            self.lane(n)
+        self.done(106, kind="docs-only", rounds=())
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none", "merge: #106 left out of batch nightly: prose"],
+                           "two left-out done pull requests do not each get a line in number order")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_in_the_lane_set_is_not_named(self):
+        """A done pull request inside the lane set gets no line. The control, #103 left out, is named: the line is printed only for it."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.done(101)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request in the lane set is named, or the control is not")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_pr_another_open_pr_holds_is_not_named(self):
+        """#103 is done, and open #104 holds its head (#104 is a lane on #103). #103 gets no line. The control, #105, is done and held by nothing: named."""
+        for n in (101, 102, 103, 105):
+            self.lane(n)
+        self.lane(104, on=103)
+        self.done(103)
+        self.done(105)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #105 left out of batch nightly: none"], "a done pull request another open pull request holds is named, or the control is not")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_pr_that_is_not_done_is_not_named(self):
+        """#103's latest record is FAIL and #104's record is for an older head (stale): neither is done, so neither is named. The control, #105, is named."""
+        for n in (101, 102, 103, 104, 105):
+            self.lane(n)
+        self.record(103, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.lint(103)
+        self.record(104, head=REVIEW_OLD_HEAD)
+        self.lint(104)
+        self.done(105)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #105 left out of batch nightly: none"], "a pull request that is not done is named, or the control is not")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_rerun_of_the_same_set_names_the_left_out_pr(self):
+        """The first build has no done pull request outside the set. A later run of the same set, after #103 is done, names it last."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the first build exited %s: %s" % (rc, out))
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "the same-set rerun does not name a done pull request left out")
+        self.assertEqual(rc, 0, "the rerun exited %s: %s" % (rc, out))
+
+    def test_a_ready_run_names_the_left_out_pr(self):
+        """A --ready run on a built batch names a done pull request outside its frozen set, last."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102], draft=True)
+        self.done(103)
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.build("--batch-build", "nightly", "--ready")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "--ready does not name a done pull request left out")
+        self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
+
+    def test_a_failed_list_read_keeps_the_batch_and_says_unknown(self):
+        """The open list read fails. The batch still builds, and its last line says the left-out list is unknown, with the reason."""
+        for n in (101, 102):
+            self.lane(n)
+        self.host.list_error = "reading the pull requests failed: HTTP 500"
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertIn("merge: batch nightly built", out, "a failed list read stopped the batch build: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertLeftOut(out, ["merge: left-out list unknown (reading the pull requests failed: HTTP 500) " + merge.UNKNOWN_CITE],
+                           "a failed list read is not printed as an unknown left-out list")
+
+    def mid_list_read_raises(self, err):
+        """A build of 101 and 102 with 103 and 104 done code pull requests outside the set. The merge-tree read of the second candidate (the
+        one merge_reason makes from left_out_lines) raises `err`; the first candidate's read is real. -> (rc, out, escaped, merge_tree_calls),
+        where `escaped` is the exception that left the run, or None, and `out` is what the run printed before it ended."""
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        self.done(103)
+        self.done(104)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        real_git, calls = merge.git, []
+
+        def raise_on_second(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "merge_reason" and a[:1] == ("merge-tree",):
+                calls.append(a)
+                if len(calls) == 2:
+                    raise err
+            return real_git(cwd, *a, **kw)
+        out, err_buf, rc, escaped = io.StringIO(), io.StringIO(), None, None
+        with unittest.mock.patch.object(merge, "git", raise_on_second):
+            try:
+                rc = self.run_merge("--batch-build", "nightly", "101", "102", stdout=out, stderr=err_buf)[0]
+            except SystemExit as e:
+                rc = e.code
+            except (OSError, subprocess.TimeoutExpired) as e:
+                escaped = e
+        return rc, out.getvalue() + err_buf.getvalue(), escaped, calls
+
+    def assert_mid_list_read_prints_one_unknown_line(self, err, reason_part, claim):
+        """Shared asserts for a left-out read that raises `err` on the second candidate: the seam was reached, no exception left the run, the
+        batch result stands with exit 0, exactly one unknown line names the reason, and no list line is printed (the first candidate's line
+        is dropped with the rest, because the list is unknown and a partial list would read as a full one)."""
+        rc, out, escaped, calls = self.mid_list_read_raises(err)
+        self.assertEqual(len(calls), 2, "%s: the second candidate's merge-tree read was reached %d times, want 2: the case did not hit its seam: %s" % (claim, len(calls), out))
+        self.assertIsNone(escaped, "%s: the read's %s escaped the batch run as a traceback instead of an unknown line: %r" % (claim, type(err).__name__, escaped))
+        self.assertIn("merge: batch nightly built", out, "%s: the batch result line is missing: %s" % (claim, out))
+        self.assertEqual(rc, 0, "%s: the exit code is %s, want the batch's 0: %s" % (claim, rc, out))
+        unknown = [l for l in out.splitlines() if l.startswith("merge: left-out list unknown (")]
+        self.assertEqual(len(unknown), 1, "%s: want exactly one left-out list unknown line, got %d: %s" % (claim, len(unknown), out))
+        self.assertIn(reason_part, unknown[0], "%s: the unknown line does not name the read's failure: %s" % (claim, unknown[0]))
+        self.assertTrue(unknown[0].endswith(") " + merge.UNKNOWN_CITE), "%s: the unknown line does not end with the cite: %s" % (claim, unknown[0]))
+        self.assertEqual([l for l in out.splitlines() if " left out of batch " in l], [],
+                         "%s: a left out line is printed although the list is unknown: %s" % (claim, out))
+
+    def test_a_read_that_times_out_mid_list_prints_no_list_line_and_one_unknown_line(self):
+        """The left-out read's merge-tree raises TimeoutExpired on the second candidate. The batch line and exit 0 stand, one unknown line
+        names the timeout, and no list line is printed, not even the first candidate's."""
+        self.assert_mid_list_read_prints_one_unknown_line(subprocess.TimeoutExpired(["git", "merge-tree"], 30), "timed out",
+                                                          "a left-out read that times out mid-list")
+
+    def test_an_os_error_mid_list_prints_no_list_line_and_one_unknown_line(self):
+        """The left-out read's merge-tree raises OSError on the second candidate. The batch line and exit 0 stand, one unknown line names
+        the error, and no list line is printed, not even the first candidate's."""
+        self.assert_mid_list_read_prints_one_unknown_line(OSError(5, "Input/output error"), "Input/output error",
+                                                          "a left-out read that raises OSError mid-list")
 
 class TouchesHost(PullsHost):
     """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),
