@@ -200,11 +200,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        does a stamp behind. The reason steers to your own label and prints the real time. No
                        transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
                        three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
-                       update or batch write to collection items (inline, through `file_path`, one local file read
-                       only for an items write with no inline data, or as a str_replace's new text or time
+                       update or batch write to collection items (inline, through `file_path`, a local file read
+                       only for a write with no inline data, or as a str_replace's new text or time
                        fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
                        Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
-                       a judged value is present. An override lifts it.
+                       a judged value is present. It also refuses a blank (empty, spaces or null) or non-ISO time in a
+                       waiting-page ArtifactData write, in its field's own collection (`added`, `replied`, `ruled` in
+                       items; `read`, `filed` in receipts; `read`, `answered` in asks), and in a step file's `updatedAt`
+                       key (Write, Edit, MultiEdit, a number included) and in a key-less step Edit that replaces a whole instant; a str_replace is refused only when its new text is blank. A missing
+                       key passes, and so does a valid ISO value with no offset. The reason names
+                       `~/.claude/bin/now-central --iso`. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
