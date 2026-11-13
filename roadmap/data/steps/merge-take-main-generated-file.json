@@ -10,5 +10,5 @@
  "why": "Lane fan-code-handoffs, 13:10 CST Nov 13: during a main merge into #2801 a builder was refused checkout, restore and reset on docs/records.md, then took main's copy with git update-index --cacheinfo and an amend of the unpushed merge commit.",
  "source": "coordinator 13:11 CST Nov 13, from lane session_013NEJL1yBtihFeuHoX5et11",
  "note": "Todo, a possible guard false alarm. docs/records.md is rebuilt by the merge tool, and decision records-index-at-merge says a merge of the base into a lane brings the base's page and is allowed. The guard that refused the checkout, restore and reset is NOT identified: records-page (hooks/guard.py:4796) refuses only a commit, so it is not it. The builder reads the exact refusal text and rule id first (triage asked the lane). If taking main's generated file mid-merge is right, allow it, and cover both forms in one step: the checkout, restore or reset, and the update-index --cacheinfo route-around, since they are the same act. A refusal whose only open route is a second form of the act is a sign the guard's rule is wrong or its remedy is missing (rule git-remedy-never-names-target).",
- "updatedAt": "2026-11-13T13:10:55-06:00"
+ "updatedAt": "2026-11-13T13:12:32-06:00"
 }
