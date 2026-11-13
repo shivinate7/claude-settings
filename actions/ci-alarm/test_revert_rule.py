@@ -26,8 +26,11 @@ def revert_msg(target):
     return f'Revert "work"\n\nThis reverts commit {target}.\n'
 
 
-def hit(commit_sha, message):
-    return {"sha": commit_sha, "commit": {"message": message}}
+def hit(commit_sha, message, date=None):
+    commit = {"message": message}
+    if date is not None:  # the committer date each search/commits hit carries: the order git log reads (merge.py), which the reverter case needs
+        commit["committer"] = {"date": date}
+    return {"sha": commit_sha, "commit": commit}
 
 
 def search_reply(*hits, total=None, incomplete=False):
@@ -136,6 +139,13 @@ class RuleCase(unittest.TestCase):
     def main(self, head=H):
         with contextlib.redirect_stderr(io.StringIO()):
             return revert_rule.main(["--repo", REPO, "--branch", BRANCH, "--head", head])
+
+    def exit_code(self, head=H):
+        """main's exit code. An exception that escapes main exits the process 1, which alarm.sh reads as no revert: a named failure here."""
+        try:
+            return self.main(head)
+        except Exception as e:
+            self.fail(f"main raised {type(e).__name__} ({e}) instead of an exit code: the process exits 1, which alarm.sh reads as no revert")
 
 
 class LiveRevert(RuleCase):
@@ -258,6 +268,40 @@ class LiveRevert(RuleCase):
         self.assertEqual(self.gh.compared(), [C1], "a full page cost a compare for a decoy, or dropped the real revert")
         self.assertEqual(got, C1, "the reachable revert at the end of a full page did not lift the run")
 
+    def test_a_twice_reverted_commit_gives_one_exit_in_both_search_orders(self):
+        # H is reverted by R1, and R1 is reverted twice, by OLDER and by NEWER, both on the branch. R3 reverts one of those two.
+        # The expected exit is merge.py's rule (merge/merge.py read_lanes and Host.base_state, both through revert_rule.revert_map):
+        # the recs come in git log order, newest first, and revert_map keeps the last line it reads for each commit, so the OLDEST
+        # reverter of R1 wins. H is lifted when R1 is not net-reverted by that chain (exit 0), and stands otherwise (exit 1).
+        # Two cases, so a fix that sorts by sha, takes the newest reverter, or takes the first search answer fails one of them.
+        # Named failure: the exit depends on which reverter search answers first.
+        R1, R3, LOW, HIGH = C1, "e" * 40, C2, C3  # LOW has the lower sha and HIGH the higher, so sha order and date order disagree
+        OLD, NEW, LATEST = "2026-01-03T00:00:00Z", "2026-01-04T00:00:00Z", "2026-01-05T00:00:00Z"
+        cases = {  # name: (the older reverter, the newer one, the reverter R3 reverts, the exit merge.py gives)
+            "R3 reverts the newer reverter": (LOW, HIGH, HIGH, 1),
+            "R3 reverts the older reverter": (HIGH, LOW, HIGH, 0),
+        }
+        for name, (older, newer, reverted, want) in cases.items():
+            dates = {older: OLD, newer: NEW}
+            # recs as git log lists them, newest first: R3, the newer reverter, the older reverter, R1, H
+            recs = [(R3, [reverted], revert_msg(reverted)), (newer, [R1], revert_msg(R1)), (older, [R1], revert_msg(R1)),
+                    (R1, [H], revert_msg(H)), (H, [], "work\n")]
+            undone = revert_rule.revert_map(recs)
+            lifted = not revert_rule.net_reverted(undone, R1)  # H is lifted by R1 when R1 is not net-reverted
+            # Scope first: merge.py's rule, on this history, gives the exit the case names.
+            self.assertEqual(undone[R1], older, f"{name}: revert_map does not keep the older reverter of R1")
+            self.assertEqual(lifted, want == 0, f"{name}: merge.py's rule gives exit {0 if lifted else 1}, the case says {want}")
+            for order, answers in {"newer first": (newer, older), "older first": (older, newer)}.items():
+                with self.subTest(case=name, search=order):
+                    self.gh.search = {
+                        H: search_reply(hit(R1, revert_msg(H), "2026-01-02T00:00:00Z")),
+                        R1: search_reply(*(hit(c, revert_msg(R1), dates[c]) for c in answers)),
+                        reverted: search_reply(hit(R3, revert_msg(reverted), LATEST)),
+                    }
+                    self.gh.compare = {c: compare_reply("ahead") for c in (R1, LOW, HIGH, R3)}
+                    got = self.exit_code()
+                    self.assertEqual(got, want, f"search answering {order} gave exit {got}, merge.py's rule gives {want}")
+
 
 class MainExitCodes(RuleCase):
     def test_exit_0_when_a_live_revert_lifts_the_run(self):
@@ -286,6 +330,54 @@ class MainExitCodes(RuleCase):
                 self.gh.calls.clear()
                 self.assertEqual(self.main(head), 1, "a head that is not 40 hex did not exit 1")
                 self.assertEqual(self.gh.calls, [], "a head that is not 40 hex was read")
+
+
+class FailedReadIsUnknown(RuleCase):
+    """A read the rule cannot judge exits 2, unknown. An exception that escapes main exits 1, which alarm.sh reads as no revert."""
+
+    def test_a_hit_whose_commit_is_a_string_exits_2(self):
+        # A full page of 100 with the malformed hit last, so the whole list is read before the verdict.
+        # Named failure: the hit's commit is a string, so AttributeError escapes main and the process exits 1, read as no revert.
+        page = [hit(f"{i:040x}", f"Retry of {H}") for i in range(99)]
+        page.append({"sha": C1, "commit": "Revert of the head"})
+        self.gh.search[H] = search_reply(*page)
+        got = self.exit_code()
+        self.assertEqual(self.gh.searched(), [H], "the run's head was not searched once")
+        self.assertEqual(got, 2, f"a hit whose commit is a string exited {got}, not 2 (unknown)")
+
+
+class KnownUnknownShapes(RuleCase):
+    """Green controls: these replies already exit 2 on the old code, through the Unread checks in revert_hits. They must stay 2."""
+
+    def test_a_reply_with_no_commit_or_no_list_or_no_string_sha_exits_2(self):
+        shapes = {
+            "a hit with no commit": search_reply({"sha": C1}),
+            "items that are not a list": {"total_count": 1, "incomplete_results": False, "items": "none"},
+            "a hit whose sha is not a string": search_reply({"sha": 7, "commit": {"message": revert_msg(H)}}),
+        }
+        for name, reply in shapes.items():
+            with self.subTest(shape=name):
+                self.gh.calls.clear()
+                self.gh.search[H] = reply
+                got = self.exit_code()
+                self.assertEqual(self.gh.searched(), [H], "the run's head was not searched once")
+                self.assertEqual(got, 2, f"{name} exited {got}, not 2 (unknown)")
+
+
+class NotUtf8IsUnknown(unittest.TestCase):
+    """gh's reply is read as text, so bytes that are not UTF-8 make subprocess.run raise UnicodeDecodeError inside gh_json. That read is unknown."""
+
+    def test_a_reply_that_is_not_utf8_exits_2(self):
+        # The subprocess call is replaced by one that raises as text=True decoding does, so no case runs gh or writes a file.
+        # Named failure: the decode error escapes main, so the process exits 1, read as no revert.
+        run = mock.Mock(side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"))
+        with mock.patch.object(revert_rule.subprocess, "run", run), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                got = revert_rule.main(["--repo", REPO, "--branch", BRANCH, "--head", H])
+            except Exception as e:
+                self.fail(f"main raised {type(e).__name__} ({e}) instead of an exit code: the process exits 1, which alarm.sh reads as no revert")
+        self.assertEqual(run.call_count, 1, "the search was not read")
+        self.assertEqual(got, 2, f"a reply that is not UTF-8 exited {got}, not 2 (unknown)")
 
 
 if __name__ == "__main__":

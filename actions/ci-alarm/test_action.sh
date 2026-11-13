@@ -454,6 +454,11 @@ t unknown revert-search-reply-that-is-not-json-is-unknown-and-opens-no-issue
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
 search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; printf '{}\n' > "$tmp/revert/compare/$V1...main"
 t unknown revert-compare-reply-with-no-status-is-unknown-and-opens-no-issue
+# A hit whose commit is a string: its message cannot be read, so the read is unknown. An uncaught exception would exit 1, which
+# alarm.sh reads as no revert and alarms red.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "{\"sha\": \"$V1\", \"commit\": \"Revert of the head\"}"
+t unknown revert-search-hit-whose-commit-is-a-string-is-unknown-and-opens-no-issue
 # Cost: revert reads only for a red run. None when every run is green, a cancelled run is the only failure, or a re-run is in flight.
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy success 2026-01-01 u0 push 2)"
 t green cost-all-green-makes-no-revert-read "" "" "" "" none
