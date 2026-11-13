@@ -759,6 +759,15 @@ GRANT_UNKNOWN = re.compile(r"^checkout .+: standing grant check unknown, neither
                            r"could be read$")
 GIT_STARTS_LOG = "git-starts.log"
 GIT_TRACE_LOG = "git-trace.log"
+STUB_LOG = "stub-calls.log"  # each git call a PATH stub received, written by the stub before it acts
+
+
+def log_lines(path):
+    """The non-blank lines of a log a stub or a shim wrote, or [] when no log exists because nothing ran."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return [entry.strip() for entry in handle if entry.strip()]
 
 
 def grant_text(tag, count):
@@ -904,11 +913,7 @@ class GitFixtureMixin:
         if os.path.exists(log):
             os.remove(log)
         lines = self.run_checked(session_cwd=session_cwd, path_dir=self.shim_folder)
-        starts = []
-        if os.path.exists(log):
-            with open(log, encoding="utf-8") as handle:
-                starts = [entry.strip() for entry in handle if entry.strip()]
-        return lines, starts
+        return lines, log_lines(log)
 
     def run_traced(self, session_cwd=None, fetch_timeout="30"):
         """The hook's lines, and each git start the run made, read from git's own trace (GIT_TRACE). A PATH shim does not
@@ -927,16 +932,36 @@ class GitFixtureMixin:
         return lines, starts
 
     def make_git_stub(self, name, body):
-        """A folder, named `name` under the run root, whose `git` runs the shell `body` first and then the real git with
-        the same arguments. A body that exits ends the call with its status. Every git stub on PATH is built here."""
-        real = shutil.which("git")
+        """A folder, named `name` under the run root, whose `git` logs its arguments to STUB_LOG in that folder, runs the
+        shell `body` and then the real git with the same arguments. A body that exits ends the call with its status.
+        Every git stub on PATH is built here. The file is written LF, with forward-slash paths, so sh reads it on Windows."""
+        real = shutil.which("git").replace("\\", "/")
         folder = os.path.join(self.root, name)
         os.makedirs(folder)
+        log = os.path.join(folder, STUB_LOG).replace("\\", "/")
         script = os.path.join(folder, "git")
-        with open(script, "w", encoding="utf-8") as handle:
-            handle.write('#!/bin/sh\n%s\nexec "%s" "$@"\n' % (body, real))
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write('#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n%s\nexec "%s" "$@"\n' % (log, body, real))
         os.chmod(script, 0o755)
         return folder
+
+    def stub_starts(self, folder):
+        """Each git call the stub in `folder` received, as its argv without the leading git. Empty when it never ran."""
+        return log_lines(os.path.join(folder, STUB_LOG))
+
+    def assert_stub_reached(self, folder, command, must_name=""):
+        """Scope before subject: the stub in `folder` ran for git `command`, with `must_name` in its argv when given. The
+        assertions after this one test the stub's effect, so a bypassed stub fails here, as this one cause, never as a
+        wrong count. How sh resolves git is read only when the check fails."""
+        starts = self.stub_starts(folder)
+        if any(start.split()[0] == command and must_name in start for start in starts):
+            return
+        _argv, env, _payload, where = self.hook_launch(path_dir=folder)
+        answer = subprocess.run([sh_exe(), "-c", 'command -v git; printf "%s\\n" "$PATH"'], capture_output=True,
+                                text=True, env=env, cwd=where, timeout=60)
+        wanted = " ".join(part for part in (command, must_name) if part)
+        self.fail("the git stub was not reached: no logged call matches git %s (logged: %r); sh with this PATH "
+                  "resolves git to: %r" % (wanted, starts, (answer.stdout + answer.stderr).strip()))
 
     def make_fetch_killed_shim(self):
         """A folder whose `git` exits 143 for `fetch`, the status of a git that SIGTERM ended, and runs the real git for
@@ -1480,6 +1505,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertTrue(self.remote_has_ref("refs/heads/main"), "scope: origin has no main")
         folder = self.make_git_stub("refused-main-shim", 'case "$*" in fetch*refs/heads/main*) exit 1;; esac')
         lines = self.run_checked(path_dir=folder)
+        self.assert_stub_reached(folder, "fetch", "refs/heads/main")
         self.assertEqual(self.resolve("origin/main"), stale, "a refused fetch of main moved or deleted origin/main")
         refresh = [line for line in lines if REFRESH_FAILED.match(line)]
         self.assertEqual(len(refresh), 1, "want one did-not-run line, got %r" % lines)
@@ -1550,6 +1576,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertNotEqual(stale, fresh, "scope: origin/main is already fresh")
         folder = self.make_git_stub("hung-%s-shim" % command, 'if [ "$1" = %s ]; then sleep 20; fi' % command)
         lines = self.run_checked(path_dir=folder, fetch_timeout="1")
+        self.assert_stub_reached(folder, command)
         refresh = [line for line in lines if REFRESH_FAILED.match(line)]
         self.assertEqual(len(refresh), 1, "want one did-not-run line for a hung %s, got %r" % (command, lines))
         self.assertEqual(self.resolve("origin/main"), stale, "origin/main moved in a run where git %s hangs" % command)
