@@ -690,6 +690,10 @@ R48_REF = ('docs/decisions/punct-case-decision.md: "CURRENT demand: the Session 
 R48_TEXT = "- **R48. Fixture ruling whose quoted sentence has other case and punctuation.** Free text: none."
 R49_TEXT = "- **R49. Fixture ruling that retires a whole decision by its docs path.** Free text: none."
 R50_TEXT = "- **R50. Fixture ruling that retires a whole decision by its bare slug.** Free text: none."
+LAST_SLUGS = ("list-oxford-last", "semi-last-decision", "paren-last-decision", "slash-last-decision")  # r51 retires each
+R51_TEXT = "- **R51. Fixture ruling that retires the last slug of each cite list.** Free text: none."
+R52_REF = "lint/report_guard.py:36: 'The refusal remedy never names an owner, per decision guard-remedy-not-to-owner.'"
+R52_TEXT = "- **R52. Fixture ruling whose code-style ref mentions a decision in the middle of its text.** Free text: none."
 KEY_SENTENCE = "The session sees the drift."  # two key words shared with R44's sentence: the deny threshold
 CITE_FORMS = ("docs/decisions/%s.md", "`docs/decisions/%s`", "decision %s", "decisions `%s`", "decision `%s`")
 GIT_IDENT = {"GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
@@ -716,7 +720,9 @@ def store_files():
              "r47.json": ruling_json("r47", R47_TEXT, ({"kind": "decision", "ref": R47_REF},)),
              "r48.json": ruling_json("r48", R48_TEXT, (R48_REF,)),
              "r49.json": ruling_json("r49", R49_TEXT, ("docs/decisions/bare-path-retired.md",)),
-             "r50.json": ruling_json("r50", R50_TEXT, ({"kind": "decision", "ref": "bare-slug-retired"},))}
+             "r50.json": ruling_json("r50", R50_TEXT, ({"kind": "decision", "ref": "bare-slug-retired"},)),
+             "r51.json": ruling_json("r51", R51_TEXT, tuple({"kind": "decision", "ref": s} for s in LAST_SLUGS)),
+             "r52.json": ruling_json("r52", R52_TEXT, ({"kind": "main-sentence", "ref": R52_REF},))}
     for n in range(1, 151):
         files.setdefault("r%d.json" % n, ruling_json("r%d" % n, "Filler ruling %d, supersedes nothing." % n))
     return files
@@ -1119,6 +1125,42 @@ def case_sentence_matches_case_and_punctuation_blind():
           reason.startswith("past-ruling: ") and "punct-case-decision" in reason and "r48" in reason, detail(r))
 
 
+# ---- round 3 of the cite parsing: every slug in a cite list counts, whatever separates them, and a code-style
+# ref that names a decision mid-text (no usable sentence after the cite) refuses no reply per decision.
+
+
+def case_every_slug_in_a_cite_list_is_kept():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r51.json")
+    check("fixture: r51 retires each last slug whole, and names no first slug",
+          all('"ref": "%s"' % s in text for s in LAST_SLUGS)
+          and not any(s in text for s in ("test-practices", "question-form", "semi-first-decision",
+                                          "paren-first-decision", "slash-first-decision")))
+    for cited, last in (
+        ("Settled per decisions test-practices, question-form, and list-oxford-last.", "list-oxford-last"),
+        ("Settled: decisions semi-first-decision; semi-last-decision", "semi-last-decision"),
+        ("Settled (decisions paren-first-decision, paren-last-decision)", "paren-last-decision"),
+        ("Settled, per decisions slash-first-decision / slash-last-decision.", "slash-last-decision"),
+    ):
+        r = past_run(cited, "full")
+        reason = denied(r) or ""
+        check("cite list (%r): deny naming %s and r51" % (cited, last),
+              reason.startswith("past-ruling: ") and last in reason and "r51" in reason, detail(r))
+
+
+def case_mid_text_code_ref_does_not_refuse_per_decision():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r52.json")
+    check("fixture: r52's only ref for guard-remedy-not-to-owner is a code-style line naming it mid-text",
+          "lint/report_guard.py:36" in text and "per decision guard-remedy-not-to-owner." in text
+          and '"ref": "guard-remedy-not-to-owner"' not in text)
+    r = past_run("Settled, per decision guard-remedy-not-to-owner: names its guard.", "full")
+    check("mid-text code ref, no usable sentence after the cite: allow (exit 0, no output, no stderr), judge reached",
+          r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+    r = past_run("Settled, per decision bare-slug-retired.", "full")
+    reason = denied(r) or ""
+    check("bare {kind: decision, ref: <slug>} still denies: deny naming bare-slug-retired and r50",
+          reason.startswith("past-ruling: ") and "bare-slug-retired" in reason and "r50" in reason, detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -1159,7 +1201,9 @@ def case_hook_runs():
                  case_threshold_is_two_shared_key_words,
                  case_whole_decision_ref_refuses_any_settling_cite,
                  case_slug_words_do_not_count,
-                 case_sentence_matches_case_and_punctuation_blind):
+                 case_sentence_matches_case_and_punctuation_blind,
+                 case_every_slug_in_a_cite_list_is_kept,
+                 case_mid_text_code_ref_does_not_refuse_per_decision):
         try:
             case()
         except subprocess.TimeoutExpired as exc:  # run_hook's cap: one FAIL line naming the case, no traceback
