@@ -48,7 +48,8 @@ def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "env": {k: os.environ.get(k) for k in ("HOOK_CATALOG_ROOT", "LINT_STUB_SENTINEL")}}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -161,9 +162,9 @@ class CiJobStub:
                .replace("__DETAILS__", repr(details or {})))
         return self.stub
 
-    def use_ci_job(self, steps, rc, details=None):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc, details=details)
+    def use_ci_job(self, steps, rc, details=None, sleep=0):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`, after `sleep` s when it is set."""
+        self.write_stub(steps, rc, sleep=sleep, details=details)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -175,6 +176,26 @@ class CiJobStub:
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
         return [c for c in calls if "--plan" not in c["argv"]]
+
+    def clear_lint_log(self):
+        """Forget the stub's calls, so the next run's lint calls are its own."""
+        if os.path.exists(self.log):
+            os.remove(self.log)
+
+    def assert_one_lint_run(self, base, head, text):
+        """The lint ran once, as `checks --lint --base origin/<base>`, in a detached tree at `head`, and that tree is gone afterwards.
+        `text` is the run's output, for the message. -> the one call."""
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        run = runs[0]
+        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
+        self.assertEqual(run["head"], head)
+        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
+        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
+        self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
+        self.assertEqual(self.worktrees(), 1)
+        return run
 
 
 WAIT_LINE ="GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
@@ -248,19 +269,9 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
         `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
         head = head or self.head("feat")
-        if os.path.exists(self.log):
-            os.remove(self.log)
+        self.clear_lint_log()
         rc, text = self.run_lane(*argv, cloud=cloud)
-        runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        run = runs[0]
-        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
-        self.assertEqual(run["head"], head)
-        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
-        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
-        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
-        self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
-        self.assertEqual(self.worktrees(), 1)
+        self.assert_one_lint_run(base, head, text)
         return rc, text
 
     def push_release_branch(self):
@@ -2628,6 +2639,216 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+NO_RECORD_PRINTED = re.compile(r"(?i)no (review )?record\b[^\n]*\bprinted")  # a refusal that says the record was not printed
+NO_LINT_LINE = re.compile(r"(?i)\bno lint\b|\bnot linted\b")  # a stderr line that says no lint ran
+NO_JOB_REASON = re.compile(r"(?i)\bchecks\b[^\n]{0,60}\bjob\b")  # the reason, when the workflow has no checks job
+NO_FILE_REASON = re.compile(r"(?i)\bworkflows?\b")  # the reason, when the head tree has no workflow folder or file
+
+
+class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
+    """`merge <pr> --review-record` runs the lane lint on the reviewed head, after every refusal before it, and prints the record only on a
+    PASS (decision pr-review-record; R67, the rebuild of #1760: the lane lint follows the pinned tree). The lint is the real lane_lint, as
+    `checks --lint --base origin/main` in a detached tree at the head, through the stub ci-job. The host is Env's FakeHost, on branch feat, so
+    a PASS posts its lane-lint comment to the fake. Each case that expects a run asserts it ran once before it asserts the result, so a
+    record that never lints fails there by name. REAL_LINT turns off ReviewEnv's stub of the record's lint, which every other class keeps."""
+
+    REAL_LINT = True
+
+    @classmethod
+    def setUpClass(cls):
+        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
+        cls.run_dir = RUN_FOLDER
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # the lint tree is made in the temp dir: keep it in this run's folder
+            super().setUp()
+        self.lock = NoLock()
+        self.init_stub()
+        self.set_feat_workflow(tm.workflow_text("checks", "checks"))
+
+    def head_text(self, path):
+        """-> the text of `path` in origin's feat."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "show", "origin/feat:" + path)
+
+    def head_files(self):
+        """-> the paths in origin's feat."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "ls-tree", "-r", "--name-only", "origin/feat").splitlines()
+
+    def record(self, *argv):
+        """-> (rc, stdout, stderr) of `merge <argv>` in Env's host. The lint tree's temp dir lands in this run's folder."""
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):
+            return self.run_args(*argv)
+
+    def assert_record_on_stdout_only(self, out, head):
+        """stdout holds the record and nothing else, and the record names `head`."""
+        body = tm.posted_body(self, out)
+        self.assertEqual(out.strip().splitlines(), body.strip().splitlines(), "stdout holds lines besides the record: " + out)
+        self.assertEqual(tm.parse_text(self, body)["head"], head, "the record names another head: " + out)
+
+    def assert_one_no_lint_line(self, err, reason):
+        """stderr holds one line that says no lint ran, and that line names the reason."""
+        notes = [line for line in err.splitlines() if NO_LINT_LINE.search(line)]
+        self.assertEqual(len(notes), 1, "stderr does not say once that no lint ran: " + err)
+        self.assertRegex(notes[0], reason, "the line that says no lint ran does not name why: " + notes[0])
+
+    def test_a_failed_lint_refuses_naming_the_failing_step_and_prints_no_record(self):
+        self.use_ci_job(FAILING, 1)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertNotEqual(rc, 0, "a FAIL lint read as a pass: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a FAIL lint: " + out)
+        self.assertIn("comment narration", err, "the refusal does not name the failing step: " + err)
+        self.assertRegex(err, NO_RECORD_PRINTED, "the refusal does not say that no record was printed: " + err)
+
+    def test_an_unknown_lint_refuses_as_unknown_and_offers_no_override_flag(self):
+        # Exit 2 names its unknown step, which --review-record still does not lift. An odd exit (3) names no step, and no flag lifts it.
+        self.use_ci_job(UNKNOWN, 2)
+        head = self.head()
+        for code, steps in ((2, UNKNOWN), (3, PASSING)):
+            with self.subTest(exit=code):
+                self.write_stub(steps, code)
+                self.clear_lint_log()
+                rc, out, err = self.record("7", "--review-record", *self.flags())
+                self.assert_one_lint_run("main", head, out + err)
+                self.assertNotEqual(rc, 0, "an unknown lint read as a pass: " + out + err)
+                self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on an unknown lint: " + out)
+                self.assertIn("unknown, not a pass", err, "the refusal does not say the lint is unknown: " + err)
+                self.assertNotIn("--lint-unknown-ok", err, "the refusal offers --lint-unknown-ok, which --review-record does not take: " + err)
+
+    def test_a_timed_out_lint_refuses_as_unknown_and_prints_no_record(self):
+        self.use_ci_job(PASSING, 0, sleep=60)  # the stub outlasts the bound below, so the run is killed at LINT_SECONDS
+        head = self.head()
+        with unittest.mock.patch.object(merge, "LINT_SECONDS", 2):
+            rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertNotEqual(rc, 0, "a timed-out lint read as a pass: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a timed-out lint: " + out)
+        self.assertIn("unknown, not a pass", err, "the refusal does not say the lint is unknown: " + err)
+
+    def test_a_docs_only_change_is_linted_once_and_prints_the_record(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags("--kind", "docs-only", "--guard", "no"))
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        rec = tm.parse_text(self, tm.posted_body(self, out))
+        self.assertEqual((rec["kind"], rec["head"]), ("docs-only", head), out + err)
+
+    def test_a_passing_lint_prints_only_the_record_on_stdout_and_its_pass_line_on_stderr(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(pass_lines(out), [], "the PASS line went to stdout, where the record is read from: " + out)
+        self.assertEqual(len(pass_lines(err)), 1, "stderr does not hold one PASS line: " + err)
+        self.assert_record_on_stdout_only(out, head)
+
+    def test_a_pass_posts_the_lane_lint_comment_once_at_the_head_it_read(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        LintPostsPassComment.assert_pass_comment(self, self.host.posted, head, out + err)
+
+    def test_the_lint_run_drops_hook_catalog_root_from_its_env(self):
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.dict(os.environ, {"HOOK_CATALOG_ROOT": "/some/other/tree", "LINT_STUB_SENTINEL": "kept"}):
+            state, lines, _log, _liftable = merge.ci_job_run(self.co, "checks", "--lint", "--base", "origin/main")
+        calls = self.lint_calls()
+        self.assertEqual(len(calls), 1, "ci_job_run ran the stub %d times, want once" % len(calls))
+        seen = calls[0]["env"]
+        self.assertEqual(seen["LINT_STUB_SENTINEL"], "kept", "the stub did not see the env ci_job_run passes, so the next line proves nothing")
+        self.assertIsNone(seen["HOOK_CATALOG_ROOT"], "the lint saw HOOK_CATALOG_ROOT=%r, so it reads another tree" % seen["HOOK_CATALOG_ROOT"])
+        self.assertEqual(state, "pass", "ci_job_run read %r, want pass" % (lines,))
+
+    def test_a_head_with_no_workflow_file_runs_no_lint_and_says_why_on_one_stderr_line(self):
+        self.set_feat_workflow(None)
+        self.assertNotIn(".github/workflows/checks.yml", self.head_files(), "the precondition: the head tree still holds the workflow file")
+        self.use_ci_job(PASSING, 0)  # a lint that runs anyway is counted, not missed
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times, want 0, for a head with no workflow file" % len(self.lint_calls()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assert_one_no_lint_line(err, NO_FILE_REASON)
+
+    def test_a_workflow_with_no_checks_job_runs_no_lint_and_says_why_on_one_stderr_line(self):
+        # The job names are near misses on purpose: a match on the word `checks` alone would read checks-merge-install as the checks job.
+        self.set_feat_workflow(tm.workflow_text("checks", "checks-merge-install", "lint"))
+        self.assertIsNone(re.search(r"(?m)^  checks:", self.head_text(".github/workflows/checks.yml")), "the precondition: the head workflow has a checks job")
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times, want 0, for a workflow with no checks job" % len(self.lint_calls()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assert_one_no_lint_line(err, NO_JOB_REASON)
+
+    def test_a_moved_head_refuses_before_any_lint_and_a_matching_head_lints_once(self):
+        self.use_ci_job(PASSING, 0)
+        old = self.head()
+        self.host.head_override = "f" * 40  # the pull request moved on: its live head is not the reviewed one
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the head refusal ran the lint: " + out + err)
+        self.assertNotEqual(rc, 0, "a head refusal printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+        self.assertIn(old[:9], err, "the refusal does not name the reviewed head: " + err)
+        self.assertIn("f" * 9, err, "the refusal does not name the live head: " + err)
+        # The control: the same command with the live head at the reviewed head lints once and prints.
+        self.host.head_override = None
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", old, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_head_pushed_during_the_lint_refuses_as_moved_and_prints_no_record(self):
+        # GitHub shows the reviewed head to the record's own read, and origin has moved on by the lint's read. The lint must refuse before it runs.
+        self.use_ci_job(PASSING, 0)
+        reviewed = self.head()
+        self.commit_feat({"later.txt": "pushed after the review\n"})
+        later = self.head()
+        self.host = LagHost(self.co, self.other, stale=reviewed, lag=1, clock=tm.Clock())
+        rc, out, err = self.record("7", "--review-record", *tm.REVIEW_FLAGS, "--head", reviewed)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a head the review did not read: " + out + err)
+        self.assertNotEqual(rc, 0, "a head pushed during the lint printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+        self.assertIn(later[:9], err, "the refusal does not name the head the lint read: " + err)
+        self.assertIn(reviewed[:9], err, "the refusal does not name the reviewed head: " + err)
+
+    def test_a_closed_pull_request_refuses_before_any_lint_and_an_open_one_lints_once(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        self.host.pr_state = "CLOSED"
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the state refusal ran the lint: " + out + err)
+        self.assertNotEqual(rc, 0, "a closed pull request printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+        # The control: the same command on an open pull request lints once and prints.
+        self.host.pr_state = "OPEN"
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_fix_check_refused_before_any_lint_and_the_same_record_without_it_lints_once(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags("--fix-check", f"{'e' * 40}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"))
+        self.assertEqual(self.lint_calls(), [], "the fix-check refusal ran the lint: " + out + err)
+        self.assertNotEqual(rc, 0, "a fix check with no earlier record printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+        # The control: the same record with no --fix-check lints once and prints.
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
 
 
 class RunFolderSweep(unittest.TestCase):
