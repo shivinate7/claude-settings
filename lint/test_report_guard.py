@@ -1452,7 +1452,7 @@ REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR 978 (git); fact 
 
 
 class CompactionCarryTests(unittest.TestCase):
-    """After a compaction, each report holds a `Recovered:` line and a `Handoff gave:` line (report_guard.py, Stop)."""
+    """Report forms on a compacted turn (report_guard.py, Stop). A compaction demands no carry line, so each form passes."""
 
     def setUp(self):
         self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -1474,34 +1474,6 @@ class CompactionCarryTests(unittest.TestCase):
         return [human("do the task"), compact_boundary(), compact_summary(),
                 tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                 assistant_text(reply)]
-
-    def assertBlocksForRecovered(self, out):
-        self.assertIsNotNone(out, "no block: the first report after a compaction has no Recovered line")
-        self.assertEqual(out["decision"], "block")
-        self.assertIn("Recovered guard", out["reason"])
-
-    def assertBlocksNaming(self, out, *names):
-        """A block whose reason starts "Recovered guard:" and names each of `names`."""
-        self.assertIsNotNone(out, "no block; the reason should name %r" % (names,))
-        self.assertEqual(out["decision"], "block")
-        self.assertTrue(out["reason"].startswith("Recovered guard:"), out["reason"][:200])
-        for name in names:
-            self.assertIn(name, out["reason"])
-
-    def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
-        # Catches: a landed turn after a compaction passes with no Recovered line.
-        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
-
-    def test_cc_red_recovered_line_in_the_wrong_place_blocks(self):
-        rows = [
-            # Catches: a line above the report blockquote counts, when only the blockquote may hold it.
-            "Recovered: none\n\n" + REPORT_NO_LINE,
-            # Catches: a word that ends in "recovered:" is read as the line.
-            "> **Done** BUILT abc123\n> **Deviations** Unrecovered: P3 ruling\n> **Next** ship it",
-        ]
-        for reply in rows:
-            with self.subTest(reply=reply):
-                self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
 
     def test_cc_green_recovered_line_forms_pass(self):
         rows = [
@@ -1533,24 +1505,6 @@ class CompactionCarryTests(unittest.TestCase):
                            assistant_text(REPORT_NO_LINE)]
                 self.assertIsNone(self.stop(records))
 
-    def test_cc_red_earlier_report_without_the_line_does_not_satisfy(self):
-        # Catches: an earlier report with no Recovered line since the boundary satisfies the demand.
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   assistant_text(REPORT_NO_LINE),
-                   human("next task"),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertBlocksForRecovered(self.stop(records))
-
-    def test_cc_red_same_turn_earlier_report_without_line_does_not_satisfy(self):
-        # Catches: a report given earlier in the same turn, with no line, satisfies the final report's demand.
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   assistant_text(REPORT_NO_LINE),
-                   tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertBlocksForRecovered(self.stop(records))
-
     def test_cc_green_bold_recovered_line_keeps_the_report_shape(self):
         # Catches: "**Recovered:**" read as an unknown report label fails the shape and sends the
         # missing-report block. Like "Departs from", it is not a report label.
@@ -1576,24 +1530,17 @@ class CompactionCarryTests(unittest.TestCase):
                    assistant_text(REPORT_NO_LINE)]
         self.assertIsNone(self.stop(records))
 
-    def test_cc_red_two_text_blocks_report_in_the_second_blocks(self):
-        # Catches: a final message split into two text blocks is read from the first block only.
+    def test_cc_green_two_text_blocks_report_in_the_second_blocks(self):
+        # Catches: a final message split into two text blocks is read from the first block only, which misses the
+        # report in the second block and blocks it as having no report.
         final = {"type": "assistant", "isSidechain": False,
                  "message": {"role": "assistant", "content": [
                      {"type": "text", "text": "Committed the guard."},
                      {"type": "text", "text": REPORT_NO_LINE}]}}
         records = [human("do the task"), compact_boundary(), compact_summary(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), final]
-        self.assertBlocksForRecovered(self.stop(records))
-
-    def test_cc_red_boundary_in_an_earlier_turn_demands_the_line_on_the_next_report(self):
-        # Catches: a boundary from an earlier turn, with no report since, is ignored.
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   assistant_text("Working on it."),
-                   human("next task"),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertBlocksForRecovered(self.stop(records))
+        out = self.stop(records)
+        self.assertIsNone(out, "the report in the second text block was refused: %r" % out)
 
     def test_cc_green_no_boundary_no_demand(self):
         # Catches: the line is demanded on a turn that never compacted.
@@ -1601,66 +1548,19 @@ class CompactionCarryTests(unittest.TestCase):
                    tool_result_msg(), assistant_text(REPORT_NO_LINE)]
         self.assertIsNone(self.stop(records))
 
-    def test_cc_red_mid_turn_compaction_landed_without_line_blocks(self):
-        rows = [
-            # Catches: a check that needs the summary record after the boundary misses a boundary with none.
-            [human("do the task"), tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
-             compact_boundary(), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-             assistant_text(REPORT_NO_LINE)],
-            # Catches: a scan that starts at the last human message misses a boundary that sits before the
-            # summary record, which reads as a human message.
-            self.compacted_turn(REPORT_NO_LINE),
-        ]
-        for records in rows:
-            with self.subTest(records=len(records)):
-                self.assertBlocksForRecovered(self.stop(records))
-
-    def test_cc_red_newest_boundary_governs(self):
-        # Catches: the oldest boundary is used, so its satisfied first report hides the newer boundary.
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_BOTH_NONE),
-                   human("next task"), compact_boundary(), compact_summary(),
-                   tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertBlocksForRecovered(self.stop(records))
-
-    def test_cc_red_unlanded_report_after_compaction_blocks(self):
-        # Catches: an unlanded turn whose reply has the report shape passes with no Recovered line.
-        records = [human("what is the status?"), compact_boundary(), compact_summary(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertBlocksForRecovered(self.stop(records))
-
     def test_cc_green_unlanded_prose_after_compaction_passes(self):
         # Catches: the line is demanded on a reply with no report shape.
         records = [human("what is the status?"), compact_boundary(), compact_summary(),
                    assistant_text("Here is what I found.")]
         self.assertIsNone(self.stop(records))
 
-    def test_cc_red_rewrite_after_missing_report_block_names_the_line(self):
+    def test_cc_green_rewrite_after_missing_report_block_passes_without_a_line(self):
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
         self.assertIn("does not end with the report", first["reason"])
-        # The rewrite reads the marker the missing-report block left, and checks the Recovered line once.
-        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
-
-    def test_cc_correction_block_leaves_no_marker(self):
-        # Catches: a Recovered correction leaves a marker, so its rewrite is checked again and loops.
-        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
-        self.assertIsNone(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
-
-    def test_cc_red_handoff_gave_missing_blocks(self):
-        # Catches: a Recovered line with no Handoff gave line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
-
-    def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
-        # Catches: a Handoff gave line with no Recovered line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
-
-    def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
-        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
-        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
-        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+        # The rewrite reads the marker the missing-report block left, and checks the report once.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE), active=True)
+        self.assertIsNone(out, "the rewrite refused a report with no carry line: %r" % out)
 
     def test_cc_green_both_lines_with_sources_pass(self):
         rows = [
@@ -1674,24 +1574,6 @@ class CompactionCarryTests(unittest.TestCase):
         for reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
-
-    def test_cc_red_recovered_item_without_a_source_blocks(self):
-        # Catches: a Recovered item that names no git, page or digest source passes.
-        rows = [
-            (report_lines("Recovered: ruling X", "Handoff gave: none"), "ruling X"),
-            (report_lines("Recovered: rule A (git); fact B", "Handoff gave: none"), "fact B"),
-            (report_lines("Recovered: a (git); b", "Handoff gave: none"), None),
-        ]
-        for reply, name in rows:
-            with self.subTest(reply=reply):
-                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
-
-    def test_cc_red_source_word_must_match_a_whole_word(self):
-        # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
-        for item in ("fact Z (gitlab)", "fact Z (pages)"):
-            with self.subTest(item=item):
-                reply = report_lines("Recovered: " + item, "Handoff gave: none")
-                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), item)
 
     def test_cc_green_bold_handoff_line_keeps_the_report_shape(self):
         # Catches: "**Handoff gave:**" read as an unknown report label fails the shape.
@@ -1722,13 +1604,13 @@ class CompactionCarryTests(unittest.TestCase):
                    assistant_text(REPORT_NO_LINE)]
         self.assertIsNone(self.stop(records))
 
-    def test_cc_red_rewrite_with_recovered_but_no_handoff_blocks(self):
-        # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
+    def test_cc_green_rewrite_with_recovered_but_no_handoff_passes(self):
+        # Catches: the rewrite after a missing-report block refuses a report with no Handoff gave line.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
         self.assertIn("does not end with the report", first["reason"])
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
-                                "Handoff gave")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True)
+        self.assertIsNone(out, "the rewrite refused a report with no Handoff gave line: %r" % out)
 
     def test_cc_green_none_forms_pass_the_source_check(self):
         # Catches: a none with a trailing mark, a backtick, or a word after it is read as a sourceless item.
@@ -1779,20 +1661,6 @@ class CompactionCarryTests(unittest.TestCase):
                            assistant_text(reply)]
                 self.assertIsNone(self.stop(records), reply)
 
-    def test_cc_red_mid_sentence_recovered_does_not_satisfy_the_pending_demand(self):
-        # Catches: a mid-sentence or backticked "recovered:" satisfies the demand for the Recovered line.
-        rows = [
-            "> **Done** BUILT abc123\n> **Deviations** the janitor recovered: 3 files from git\n"
-            "> Handoff gave: none\n> **Next** ship it",
-            "> **Done** BUILT the `Recovered:` guard, PR #5\n> **Deviations** none\n"
-            "> Handoff gave: none\n> **Next** ship it",
-        ]
-        for reply in rows:
-            with self.subTest(reply=reply):
-                out = self.stop(self.compacted_turn(reply))
-                self.assertBlocksNaming(out)
-                self.assertIn("Recovered line", out["reason"])
-
     def test_cc_green_unsourced_recovered_line_after_demand_met_passes(self):
         # Catches: the source check judges a Recovered item after an earlier report already met the demand.
         records = [human("do the task"), compact_boundary(), compact_summary(),
@@ -1808,22 +1676,9 @@ class CompactionCarryTests(unittest.TestCase):
                  "> Recovered:\n> - ruling X (git)\n> **Next** ship it")
         self.assertIsNone(self.stop(self.compacted_turn(reply)))
 
-    def test_cc_red_bare_recovered_line_with_an_unsourced_bullet_blocks(self):
-        # Catches: a bullet under a bare "Recovered:" passes with no source.
-        reply = ("> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n"
-                 "> Recovered:\n> - ruling X\n> **Next** ship it")
-        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "ruling X")
-
-    def test_cc_red_bare_recovered_line_with_nothing_below_blocks(self):
-        # Catches: a bare "Recovered:" with nothing below it passes as a present line.
-        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n> Recovered:\n> **Next** ship it"
-        out = self.stop(self.compacted_turn(reply))
-        self.assertBlocksNaming(out)
-        self.assertIn("Recovered line", out["reason"])
-
 
 class CompactionCarryCostTests(unittest.TestCase):
-    """The compaction-carry check reads the transcript it already opens: no process, and no file
+    """The Stop check on a compacted turn reads the transcript it already opens: no process, and no file
     except the marker a missing-report block already writes."""
 
     def setUp(self):
@@ -1852,16 +1707,6 @@ class CompactionCarryCostTests(unittest.TestCase):
         self.assertNotIn("tried to start a process", run.stderr)
         out = json.loads(run.stdout) if run.stdout.strip() else None
         return out, sorted(self.files() - before)
-
-    def test_cc_cost_recovered_block_starts_no_process_and_writes_no_file(self):
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        out, new = self.run_hook(records)
-        # The block shows the check ran, so the cost below is the check's own.
-        self.assertIsNotNone(out, "no block: the check did not run on the compacted turn")
-        self.assertIn("Recovered guard", out["reason"])
-        self.assertEqual(new, [], "the check wrote files: %r" % new)
 
     def test_cc_cost_missing_report_writes_only_the_marker(self):
         records = [human("do the task"), compact_boundary(), compact_summary(),

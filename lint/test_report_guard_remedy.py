@@ -47,10 +47,10 @@ CITE = "guard-remedy-not-to-owner"
 RECORD = os.path.join(HERE, "..", "docs", "decisions", CITE + ".md")
 FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unstarted", "unvetted",
             "past_ruling", "keys", "pick",
-            "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
+            "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
-            "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
-            "recovered_no_source", "past_ruling_order", "refusal_two_tools")
+            "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered",
+            "past_ruling_order", "refusal_two_tools")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -254,11 +254,6 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             "keys": lambda: case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.KEYS_SAME)],
                                  "key", bare),
             "pick": lambda: case([trg.human("decide"), trg.assistant_text(trg.RELAY)], "pick", bare),
-            # Recovered: a landed report after a compaction that carries no Recovered line.
-            "recovered": lambda: case(trg.CompactionCarryTests.compacted_turn(trg.REPORT_NO_LINE), "recovered", clean),
-            # Recovered, the item names no source: the item names neither git, a page nor a digest.
-            "recovered_no_source": lambda: case(trg.CompactionCarryTests.compacted_turn(
-                trg.report_lines("Recovered: the ruling from chat", "Handoff gave: none")), "recovered", clean),
             # Departs from: a pick with no Departs from line. The writer send keeps the question check quiet.
             "departs_unlanded": lambda: case([trg.human("decide"), *self.sent_to_writer(),
                                               trg.assistant_text(self.PICK)], "departs", clean),
@@ -304,8 +299,8 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                             trg.assistant_text(trg.RELAY)], "unvetted", decided,
                                            env={"CJ_ANSWER": json.dumps({"ok": False, "reason":
                                                 "decisions/ghost-ruling: already decides this, 2026-10-28."})}),
-            # Rewrite paths: the rewrite of a missing-report refusal is checked for the model, Unstarted, answered and
-            # Recovered reasons.
+            # Rewrite paths: the rewrite of a missing-report refusal is checked for the model, Unstarted and answered
+            # reasons.
             "rewrite_model": lambda: self.rewrite("model", builder_turn("sonnet", "All done."),
                                                   builder_turn("sonnet", "> **Done** BUILT abc123 (builder opus)\n"
                                                                "> **Next** Unstarted: none"), "model", clean),
@@ -315,10 +310,6 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             "rewrite_answered": lambda: self.rewrite("answered", builder_turn("sonnet", "All done."),
                                                      builder_turn("sonnet", rw_done + "\n> **Next** Unstarted: none\n"
                                                                   "The owner answered it."), "answered", clean),
-            "rewrite_recovered": lambda: self.rewrite("recovered",
-                                                      trg.CompactionCarryTests.compacted_turn("All done."),
-                                                      trg.CompactionCarryTests.compacted_turn(trg.REPORT_NO_LINE),
-                                                      "recovered", clean),
         }
         return builders[name]()
 
@@ -386,11 +377,6 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         reason = self.assert_past_ruling_verdict(self.run_stop(self.fixture("past_ruling_order")), tcj.APPS_SLUG)
         self.assertNotIn(JUDGE_ORDER, reason, "the judge's order reached the owner word for word: %r" % reason)
         self.assertEqual(RG.session_wording(reason), "", "the reason holds an order to the session: %r" % reason)
-
-    def test_recovered_no_source_names_the_item_miss(self):
-        reason, _ = self.refusal_for("recovered_no_source")
-        self.assertTrue(reason.startswith("Recovered guard"), "the refusal is not the Recovered verdict: %r" % reason)
-        self.assertIn("names no source", reason, "the refusal is not the no-source miss: %r" % reason)
 
     def test_mid_clause_orders_from_the_judge_do_not_reach_the_owner(self):
         decided = tcj.make_repo("remedy-decided-mid", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})

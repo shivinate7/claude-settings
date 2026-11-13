@@ -74,18 +74,6 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
-After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
-may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
-precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
-report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
-Each line is tracked alone: any main-session reply after it that holds the line satisfies that
-demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
-its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
-the current Recovered line (split on ";" outside parentheses) names a whole-word source: git, page
-or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
-whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
-has the report shape. Cost: a scan of the records main()
-already loaded (the rewrite reads the transcript once, as before); no file, log or process.
 On every Stop, landed or not, it also reads <config dir>/state/refusals/<session_id>.jsonl, which
 hooks/refusal_note.py writes for each tool the auto-mode classifier refused. A pending tool the reply
 does not name in its Input Needed section blocks. A built-in tool counts only in backticks; an MCP
@@ -141,8 +129,8 @@ Cost: a regex over the reply; on a claim, one pass over the transcript this hook
 on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
 
 Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
-that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
-"did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
+that holds `round <N>` or `reviewer`, or whose PASS clause holds `reviewers`, and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
+"did not PASS") claims nothing, nor does a PASS inside a statistic on a line that names no PR ("PASS rate 90%", "90% PASS", "9 of 10 lanes got PASS", the tally "PASS 9, FAIL 1"; a bare "PASS 9" is no statistic, a count right after "round" is the round number, and "2 reviewers got PASS" is a claim), nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
@@ -290,7 +278,7 @@ LANDING_TOOLS = {
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
-# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below; none is a report label.
+# "**Recovered:**" or "**Handoff gave:**" is a line a session may still write below; none is a report label.
 LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
@@ -947,139 +935,6 @@ def asks_a_question(text):
     section = input_needed_section(text)
     kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
     return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
-
-
-# compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
-# from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
-# did not), each until one lands. A label counts only where it starts an item: at line start (after
-# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
-# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
-CARRY_MARKS = "*_`\"'“”‘’"
-CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
-               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
-CARRY_LINES = (
-    ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
-    ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
-)
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
-NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
-
-
-def _reply_text(rec):
-    """The text of a main-session assistant record, else None."""
-    if rec.get("type") != "assistant" or rec.get("isSidechain"):
-        return None
-    content = (rec.get("message") or {}).get("content")
-    if not isinstance(content, list):
-        return None
-    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-    return "\n".join(parts) if parts else None
-
-
-def _carry_split(rest):
-    """`rest` split into items on ";" outside parentheses, each stripped of marks and a trailing . or ;."""
-    items, depth, cur = [], 0, ""
-    for ch in rest:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth = max(depth - 1, 0)
-        elif ch == ";" and depth == 0:
-            items.append(cur)
-            cur = ""
-            continue
-        cur += ch
-    items.append(cur)
-    out = []
-    for item in items:
-        item = item.strip(" \t" + CARRY_MARKS).rstrip(" .;").strip(" \t" + CARRY_MARKS)
-        if item:
-            out.append(item)
-    return out
-
-
-def recovered_items(text):
-    """The items of each Recovered line in `text`, or None when it holds no Recovered line. A line's
-    text runs to the end of its line, or to a Handoff gave label on the same line. A bare
-    `Recovered:` takes the lines below it, up to the next report label or carry label, as its items;
-    with nothing below it is no line."""
-    found = None
-    lines = text.splitlines()
-    rx, handoff = CARRY_LINES[0][1], CARRY_LINES[1][1]
-    for n, line in enumerate(lines):
-        m = rx.search(line)
-        if not m:
-            continue
-        cut = handoff.search(line, m.end())
-        items = _carry_split(line[m.end():cut.start() if cut else len(line)])
-        if not items and not cut:
-            for below in lines[n + 1:]:
-                below = below.strip().lstrip(">").strip()
-                label = LABEL_RE.match(below)
-                if label and label.group(1).strip().rstrip(":").strip() in LABEL_ORDER:
-                    break
-                if any(r.match(below) for _, r in CARRY_LINES):
-                    break
-                items.extend(_carry_split(BULLET_RE.sub("", below)))
-        if items:
-            found = (found or []) + items
-    return found
-
-
-def carry_present(name, text):
-    """Whether `text` holds the carry line `name`: a Recovered line with at least one item, or a
-    Handoff gave label where it starts an item."""
-    if name == "Recovered":
-        return recovered_items(text) is not None
-    return bool(dict(CARRY_LINES)[name].search(text))
-
-
-def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
-    An item that starts with "none" or "nothing" needs no source."""
-    for item in recovered_items(block) or []:
-        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
-            return item[:60]
-    return ""
-
-
-def recovered_problem(records, text):
-    """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
-    since, or a Recovered item of `text` names no source while no earlier reply has met the Recovered
-    demand, else ''. The newest `compact_boundary` record anywhere in `records` marks the compaction
-    (its subtype alone is read). Each line is tracked alone: a main-session reply after the boundary
-    that holds it, anywhere in its text, satisfies it, and that reply is not judged for sources. The
-    current reply (the last reply record, when its report block equals `text`'s) counts by its
-    blockquote."""
-    boundary = None
-    last_text = None
-    for i, rec in enumerate(records):
-        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
-            boundary = i
-        if _reply_text(rec) is not None:
-            last_text = i
-    if boundary is None:
-        return ""
-    block = block_text(text)
-    pending = [name for name, _ in CARRY_LINES]
-    for i in range(boundary + 1, len(records)):
-        reply = _reply_text(records[i])
-        if reply is None:
-            continue
-        if i == last_text:
-            if block_text(reply) == block:
-                continue
-            reply = block_text(reply)
-        pending = [name for name in pending if not carry_present(name, reply)]
-    missing = [name for name in pending if not carry_present(name, block)]
-    reasons = []
-    if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since" %
-                       " or ".join(missing))
-    bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
-    if bad:
-        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
-    return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
 
 
 def repo_root(cwd):
@@ -2576,7 +2431,10 @@ def cannot_problem(records, text, refused=()):
 
 
 # Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
+# A trigger anywhere on the line. The plural "reviewers" triggers only in the clause that holds the PASS, so a
+# reviewers word beside a PASS in another clause ("3 reviewers ran; 2 PASS") claims nothing.
 REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewer\b)")
+REVIEW_CLAUSE_TRIGGER_RE = re.compile(r"(?i:\breviewers\b)")
 REVIEW_PASS_RE = re.compile(r"\bPASS(?:ED)?\b")
 # A PASS that a negator governs: the negator, at most one word, then PASS.
 REVIEW_NEGATED_RE = re.compile(r"(?i:(?:\b(?:not|never|nor|cannot)|n't)\s+(?:\w+\s+)?)PASS(?:ED)?\b")
@@ -2585,7 +2443,21 @@ REVIEW_HISTORY_RE = re.compile(
     r"(?i:\b(?:stale|outdated|superseded|invalidated|previously|formerly|no longer)\b"
     r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
+# A PASS inside a statistic, which counts reviews and claims none: "PASS rate", "PASS count", "90%PASS",
+# "9 of 10 lanes got PASS". Only a line that names no pull request holds a statistic: a PR anywhere on the line makes
+# each PASS on it a claim. A bare number after PASS ("PASS 12") is no statistic: it reads as a pull request number.
+# Only a tally ("PASS 9, FAIL 1") is one (REVIEW_TALLY_RE). A count right after "round" is the round number, and a count
+# of reviewers ("2 reviewers got PASS") is a review claim, not a statistic.
+REVIEW_NOT_REF = r"(?<!(?i:round) )(?<![#/\w])"
+REVIEW_COUNT_NOUN = r"(?!(?i:reviewers?)\b)"
+REVIEW_STAT_RE = re.compile(
+    r"PASS(?:ED)?(?=[ \t]+(?i:rate|count|total|ratio|tally|percentage)\b)"
+    r"|%[ \t]*PASS(?:ED)?\b"
+    r"|" + REVIEW_NOT_REF + r"\d+[ \t]+(?:(?i:of)[ \t]+\d+[ \t]+(?:" + REVIEW_COUNT_NOUN + r"[A-Za-z]+[ \t]+){0,2}"
+    r"|(?:" + REVIEW_COUNT_NOUN + r"[A-Za-z]*s[ \t]+){1,2})"
+    r"(?i:got|had|received|earned)[ \t]+(?:a[ \t]+)?PASS(?:ED)?\b")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
+REVIEW_TALLY_RE = re.compile(r"PASS(?:ED)?[ \t]*[:=]?[ \t]*\d+(?=[ \t]*,[ \t]*FAIL(?:ED)?[ \t]*[:=]?[ \t]*\d)")
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
 REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
@@ -2625,12 +2497,17 @@ def review_claims(text):
         if fence:
             continue
         plain = CODE_SPAN.sub(lambda m: m.group(2), body)
-        if not REVIEW_TRIGGER_RE.search(plain):
-            continue
-        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", clause)) and not REVIEW_HISTORY_RE.search(clause)
-                   for clause in REVIEW_CLAUSE_SPLIT_RE.split(plain)):
+        line_trigger = REVIEW_TRIGGER_RE.search(plain)
+        if not line_trigger and not REVIEW_CLAUSE_TRIGGER_RE.search(plain):
             continue
         numbers = [int(g) for m in REVIEW_PR_RE.finditer(plain) for g in m.groups() if g]
+        # The tally spans two clauses, so the statistics go before the split; neither removes a clause mark, so the
+        # clauses of `plain` and `counted` stay paired.
+        counted = plain if numbers else REVIEW_STAT_RE.sub(" ", REVIEW_TALLY_RE.sub(" ", plain))
+        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", stripped)) and not REVIEW_HISTORY_RE.search(clause)
+                   and (line_trigger or REVIEW_CLAUSE_TRIGGER_RE.search(clause))
+                   for clause, stripped in zip(REVIEW_CLAUSE_SPLIT_RE.split(plain), REVIEW_CLAUSE_SPLIT_RE.split(counted))):
+            continue
         claims.append((body, list(dict.fromkeys(numbers))))
     return claims
 
@@ -2791,9 +2668,6 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
-        recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
-        if recovered:
-            reasons.append(recovered)
         return reasons
     except Exception:
         return []
@@ -3250,11 +3124,6 @@ def main():
         pick.append(cannot)
         pick.append(review)
         try:
-            if report_shape_ok(text):
-                pick.append(recovered_problem(records, text))
-        except Exception:
-            pass
-        try:
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
@@ -3306,12 +3175,6 @@ def main():
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
             reasons.append(rewrite)
-    except Exception:
-        pass
-    try:
-        recovered = recovered_problem(records, text) if shape_ok else ""
-        if recovered:
-            reasons.append(recovered)
     except Exception:
         pass
     cite = bare_cite(text)

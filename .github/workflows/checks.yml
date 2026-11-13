@@ -290,6 +290,9 @@ jobs:
       - name: Stop-hook review-record fixture suite
         run: python3 lint/test_report_guard_review.py
 
+      - name: Stop-hook guard cull suite
+        run: python3 lint/test_report_guard_cull.py
+
       - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_ste_autofix.py

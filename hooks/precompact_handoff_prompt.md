@@ -71,6 +71,14 @@ drops one, and the Stop hook names one that is missing. Each sits under its own 
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 
+The handoff also carries one line under `Where things stand`: `Handoff gave count: <n> since <date>`.
+At a reorient after a compaction, count each fact that the prior handoff (step 1) supplied and the
+compaction summary did not. Add that count to the prior n, and replace the line in place. Keep the
+prior date. Outside a compaction, keep the prior line as it is. With no prior line, n starts at 0,
+and the date is today, from `~/.claude/bin/now-central --full`. Triage reads this line from a
+session's handoff file at the roadmap review, on demand. Nothing writes a log, and nothing runs on a
+timer. Cost: one line rewritten per compaction, no new file, no process.
+
 ## 5. Check premises
 
 A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every
@@ -79,7 +87,7 @@ weak or stale premise, check it. Then rewrite its line with the new source and d
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each
-kind, and which kinds are weak: docs/decisions/premise-format.md. After a compaction, put two lines under Deviations: `Recovered: <each ruling or fact you recovered, with its source: git, page or digest; items split on ";" outside parentheses>` or `Recovered: none`, and `Handoff gave: <facts the handoff supplied that the summary did not>` or `Handoff gave: none`. Start each line with its label, at line start or after a report label. The report guard (`lint/report_guard.py`) accepts each line in the report and refuses until it lands after the compaction. Triage counts the `Handoff gave:` lines at each roadmap review.
+kind, and which kinds are weak: docs/decisions/premise-format.md.
 
 ## 6. Update the plan, only when it changed
 
