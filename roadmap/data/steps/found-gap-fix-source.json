@@ -1,0 +1,14 @@
+{
+ "id": "found-gap-fix-source",
+ "title": "Find the owner's own words for \"a found gap gets a fix, not a note\" (13:20 CST Nov 7), or stop citing it as the owner's",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 13:15 CST Nov 13, from lane fan-prose-handoffs: the ruling has no merged home as an owner ruling; main's pr-ledger.md:23 holds it as the coordinator's words.",
+ "source": "coordinator 13:15 CST Nov 13; triage read of origin/main and the roadmap rulings, 13:2x CST",
+ "note": "Todo. Facts: main's docs/decisions/pr-ledger.md:23 reads \"Coordinator, 2026-11-07 13:20 CST: a gap gets fixed, not filed as a note.\" Other cites call it the owner's 13:20 ruling (page-check-at-export.md:16 on main; rulings coordinator-routes-1848-notes, roots-cover-guard-order). The only owner pick I found nearby is item 386, 22:25 CST (a, b, c: findings ride in the lane's own PR), not 13:20. Main's root rule roles-findings-are-debts-or-notes lets a finding be a note, so \"no note ever\" would clash. Not verified by triage: the owner's 13:20 words. A lane reads the Nov 7 13:20 chat or the owner is asked; until then cite pr-ledger.md:23 as the coordinator's order.",
+ "updatedAt": "2026-11-13T13:15:49-06:00"
+}

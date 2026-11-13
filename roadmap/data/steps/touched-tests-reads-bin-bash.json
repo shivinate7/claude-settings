@@ -1,0 +1,14 @@
+{
+ "id": "touched-tests-reads-bin-bash",
+ "title": "touched-tests.py reads a `/bin/bash x.sh` test command instead of failing the lane-touched-tests run (EXPRESS, CI)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane R67-drain, 13:14 CST Nov 13: #1938's lane-touched-tests run (run 43489164990) is red on a main defect: .github/scripts/touched-tests.py:312 cannot read checks.yml:976 (\"/bin/bash lint/test_duo_fold.sh\").",
+ "source": "lane session_013NEJL2Cw94Wfw4xZUeRJwA, 13:14 CST Nov 13",
+ "note": "EXPRESS (CI fix, R67), todo, no lane yet. The same line is on main (checks.yml:976); the job is green on #3222, red on #1938 only because #1938 sits on a 62-commit stack, so its diff selects test_duo_fold.sh. Fix: touched-tests.py reads a command that starts with an interpreter path such as /bin/bash. A check change: test-author red case first, builder, reviewer. Triage pick for the lane (undoable): a separate lane PR from main, as the lane proposed. No earlier step found by triage (grep of steps, 13:20 CST).",
+ "updatedAt": "2026-11-13T13:15:49-06:00"
+}
