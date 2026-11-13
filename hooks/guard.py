@@ -2819,8 +2819,8 @@ MERGE_TEST_REASONS = {
 # The classes in the order the reason names them, when a file holds more than one.
 MERGE_TEST_ORDER = ("unread", "lost", "renamed", "moved", "skip", "body", "new")
 MERGE_SKIP_NAMES = {"skip", "skipif", "skiptest", "skipunless", "xfail", "expectedfailure", "importorskip"}
-# The two manifests a builder may add a dependency to: a conflict there keeps its own content check.
-MERGE_MANIFESTS = {"package.json", "pyproject.toml"}
+# The files a builder may add a dependency to: a conflict there keeps its own content check, not this reading.
+MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg", "tox.ini"}
 
 
 class MergeOffence(str):
@@ -2835,21 +2835,33 @@ def _skip_marks(node) -> int:
                or (isinstance(n, ast.Name) and n.id.lower() in MERGE_SKIP_NAMES))
 
 
+def _node_key(node, prefix):
+    """What names a module or class statement across the parents and the result: a def or class by its name, an
+    assignment by its targets. Any other statement is its own key, so a missing one reads as lost."""
+    import ast
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (prefix, type(node).__name__, node.name)
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return (prefix, "assign", "|".join(ast.dump(t) for t in targets))
+    return None
+
+
 def test_file_parts(text: str):
     """A python test file read with `ast`, or None when it does not parse. `cases` maps each test function by
-    its class path and name to `(dump, node)`. `others` holds each other module statement, and each class with
-    its test functions taken out, as `(dump, node)`; `calls` holds each module-level call statement. Comments
-    are no node, so they are free, and a test written inside a string is no case."""
+    its class path and name to `(dump, node)`. `others` holds each other statement, and each class header with
+    its members taken out as their own entries, as `(dump, node)`; `keys` holds `(key, dump)` for each of them
+    but an import (a union of imports is free) and a bare string, and `calls` each module-level call statement. Comments are no
+    node, so they are free, and a test written inside a string is no case."""
     import ast
     import copy
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return None
-    cases, others, calls = {}, [], []
+    cases, others, keys, calls = {}, [], [], []
 
     def walk(body, prefix, top_level):
-        rest = []
         for node in body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
                 key, count = prefix + node.name, 1
@@ -2859,18 +2871,21 @@ def test_file_parts(text: str):
                 cases[key] = (ast.dump(node), node)
             elif isinstance(node, ast.ClassDef):
                 shell = copy.copy(node)
-                shell.body = walk(node.body, prefix + node.name + ".", False)
+                shell.body = []
                 others.append((ast.dump(shell), shell))
+                keys.append((_node_key(node, prefix), ast.dump(shell)))
+                walk(node.body, prefix + node.name + ".", False)
             elif top_level and isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 calls.append((ast.dump(node), node))
             else:
-                rest.append(node)
-                if top_level:
-                    others.append((ast.dump(node), node))
-        return rest
+                others.append((ast.dump(node), node))
+                # An import, or a bare string (a docstring or a ghost test in a string), runs nothing: free.
+                if not isinstance(node, (ast.Import, ast.ImportFrom)) and not (
+                        isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
+                    keys.append((_node_key(node, prefix) or (prefix, ast.dump(node)), ast.dump(node)))
 
     walk(tree.body, "", True)
-    return {"cases": cases, "others": others, "calls": calls}
+    return {"cases": cases, "others": others, "keys": keys, "calls": calls}
 
 
 def _case_shape(node) -> str:
@@ -2881,9 +2896,17 @@ def _case_shape(node) -> str:
     return ast.dump(bare)
 
 
-def merge_test_issue(result, first, second, elsewhere):
-    """The class of loss in a merge result of a test file, else ''. `result`, `first` and `second` come from
-    `test_file_parts`; `elsewhere(key)` is True when another test file of the merge holds that case as new."""
+def _key_counts(parts):
+    counts = {}
+    for key, _ in parts["keys"]:
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def merge_test_issue(result, first, second, elsewhere, base=None):
+    """The class of loss in a merge result of a test file, else ''. `result`, `first`, `second` and `base` (the
+    merge base's file; None skips the same-name check) come from `test_file_parts`; `elsewhere(key)` is True when
+    another test file of the merge holds that case as new."""
     issues = set()
     parents = (first, second)
     parent_keys = set(first["cases"]) | set(second["cases"])
@@ -2907,6 +2930,19 @@ def merge_test_issue(result, first, second, elsewhere):
         held = [p["cases"][key] for p in parents if key in p["cases"]]
         if held and all(dump != h[0] for h in held):
             issues.add("skip" if _skip_marks(node) > max(_skip_marks(h[1]) for h in held) else "body")
+    if base is not None:
+        # A case both parents hold, each changed from the base and differently: the result keeps one body at most.
+        for key in set(first["cases"]) & set(second["cases"]):
+            mine, theirs = first["cases"][key][0], second["cases"][key][0]
+            origin = base["cases"].get(key, (None,))[0]
+            if mine != theirs and origin not in (mine, theirs):
+                issues.add("lost")
+    # A statement a parent holds (not an import, not a comment) that the result no longer holds.
+    have = _key_counts(result)
+    for part in parents:
+        for key, count in _key_counts(part).items():
+            if have.get(key, 0) < count:
+                issues.add("lost")
     kept = {d for p in parents for d, _ in p["others"]}
     for dump, node in result["others"]:
         if dump not in kept:
@@ -2931,6 +2967,18 @@ def merge_parent_revs(root: str, new):
     answer = guard_core._git(root, "show", "-s", "--format=%P", new)
     found = answer.stdout.split() if answer is not None and answer.returncode == 0 else []
     return tuple(found) if len(found) == 2 else None
+
+
+def merge_base_parts(root: str, parents, rel: str, top: str):
+    """`test_file_parts` of `rel` at the merge base of the two parents; an empty reading when they share no
+    ancestor or the file is new in both; None when git or the parse could not say."""
+    answer = guard_core._git(root, "merge-base", parents[0], parents[1])
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    found = answer.stdout.split()
+    if not found:
+        return {"cases": {}, "others": [], "keys": [], "calls": []}
+    return test_file_parts(text_at(root, found[0], rel, top))
 
 
 def builder_merge_test_path(rel: str, names, conflicts) -> bool:
@@ -2964,6 +3012,9 @@ def builder_merge_test_why(root: str, top: str, rel: str, paths, new=None) -> st
     read = [test_file_parts(text) for text in (result,) + tuple(text_at(root, p, rel, top) for p in parents)]
     if None in read:
         return "unread"
+    base = merge_base_parts(root, parents, rel, top)
+    if base is None:
+        return "unread"
 
     def elsewhere(key):
         for other in paths:
@@ -2977,7 +3028,7 @@ def builder_merge_test_why(root: str, top: str, rel: str, paths, new=None) -> st
                 return True
         return False
 
-    return merge_test_issue(read[0], read[1], read[2], elsewhere)
+    return merge_test_issue(read[0], read[1], read[2], elsewhere, base)
 
 
 def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
