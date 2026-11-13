@@ -1,0 +1,14 @@
+{
+ "id": "ios-apps-lease-bullets-disagree",
+ "title": "Skill ios-apps and degen shared-sim-lease say every session leases a phone sim, while the \"Boot path\" bullet says reuse takes no lease: make them agree",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Two bullets of one skill give different answers for a reused booted simulator, so a session cannot tell whether to lease.",
+ "source": "Batch runner 11 read, 14:40 CST Nov 13, for owner item 737 (confirm-31-pick-rulings).",
+ "note": "Filed 14:37 CST Nov 13. Runner 11's read (unread by triage): bin/sim-test header lines 8-9 \"Reuse takes no lease and shuts nothing down\"; skill ios-apps \"Sharing the Mac\", bullet \"Boot path\": \"The reuse path takes no lease\"; the same skill's \"Leased simulators\" bullet and degen shared-sim-lease say every session leases a phone sim through bin/sim-lease. Fix: one sentence in the \"Leased simulators\" bullet and in shared-sim-lease naming the reuse exception, so main's reading (reuse takes no lease) is the only one. Owner has not ruled on item 737's sim-lease conflict; this step is a wording fix that matches main either way. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:37:02-06:00"
+}
