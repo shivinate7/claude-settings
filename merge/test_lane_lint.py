@@ -3035,7 +3035,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
 class BatchLabelWrite(CiJobStub, tm.CloudSession):
     """`merge --batch-label <pr>` adds the `batch` label to a batch's integration pull request (decision pr-ledger, coordinator 2026-11-10 01:07 CST:
-    `merge --lane-lint` stays read-only, and the label is its own write with a target check). The target is an open PR whose head branch starts with
+    `merge --lane-lint` writes no label, and the label is its own write with a target check). The target is an open PR whose head branch starts with
     `batch-`; any other PR is refused with nothing written. A failed add is a refusal, exit 1. It takes no lint, no lock and no merge role. The gh shim
     answers pull request 7 with the head branch a case names. setUp mirrors LintPostsPassComment, which this class does not subclass, so its cases run once."""
 
@@ -3051,11 +3051,11 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         self.init_stub()
         tm.install_gh_shim(self)
 
-    def as_pr(self, head_ref="batch-x", state="open", **gh_state):
-        """The shim answers pull request 7 with `head_ref` and `state`; `gh_state` is GhHalf.set's keywords."""
+    def as_pr(self, head_ref="batch-x", state="open", merged=False, **gh_state):
+        """The shim answers pull request 7 with `head_ref`, `state` and `merged`; `gh_state` is GhHalf.set's keywords."""
         sha = self.head("feat")
         tm.sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/{head_ref}")
-        tm.GhHalf.set(self, pr_raw={"head": {"ref": head_ref, "sha": sha, "label": "o:" + head_ref}, "state": state}, **gh_state)
+        tm.GhHalf.set(self, pr_raw={"head": {"ref": head_ref, "sha": sha, "label": "o:" + head_ref}, "state": state, "merged": merged}, **gh_state)
 
     def run_label(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout, on the real Host through the shim."""
@@ -3107,6 +3107,26 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         self.assertIn("open", out)
         self.assertEqual(self.labeled(), [], "a closed PR got the batch label:\n" + out)
 
+    def test_a_merged_batch_pull_request_is_refused_and_gets_no_label(self):
+        self.as_pr(state="closed", merged=True)
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("merged", out)
+        self.assertEqual(self.labeled(), [], "a merged PR got the batch label:\n" + out)
+
+    def test_a_failed_read_of_the_pull_request_exits_one_and_writes_nothing(self):
+        self.as_pr(route_fail={"pr": {"n": 1, "msg": tm.rest_err(404, "Not Found")}})
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reading the pull request failed", out)
+        self.assertEqual(self.labeled(), [], "a failed read still wrote a label:\n" + out)
+
+    def test_it_runs_in_the_checkout_that_dash_c_names(self):
+        self.as_pr()
+        rc, out = self.run_label("-C", str(self.co), "--batch-label", "7")
+        self.assertEqual(rc, 0, "`-C PATH --batch-label 7` was refused as not standing alone:\n" + out)
+        self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], out)
+
     def test_a_failed_add_is_a_refusal_that_names_the_pull_request(self):
         self.as_pr(label_fail=tm.rest_err(403, "Forbidden"))
         rc, out = self.run_label("--batch-label", "7")
@@ -3114,7 +3134,7 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         self.assertIn("#7", out)
         self.assertEqual(self.labeled(), [], "the failed add was kept as a label")
 
-    def test_a_lane_lint_pass_on_a_batch_pull_request_adds_no_label(self):  # the 2026-11-10 ruling: --lane-lint stays read-only
+    def test_a_lane_lint_pass_on_a_batch_pull_request_adds_no_label(self):  # the 2026-11-10 ruling: --lane-lint writes no label
         self.as_pr(checks_seq=[[("touched", "pass", "")]])  # the draft's touched job passed: the lint's read of the head's draft run
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_label("--lane-lint", "7")

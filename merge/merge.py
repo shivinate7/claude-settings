@@ -92,7 +92,7 @@
                           add the `batch` label to a batch's integration pull request, so the ledger reads it as a batch run (decision pr-ledger). The PR
                           must be open and its head branch must start with `batch-`; any other PR is refused with nothing written, and a failed read or
                           add exits 1. Stands alone. Takes no lock, no lint and no merge role, and merges and pushes nothing; the batch runner runs it
-                          after the batch head's lane lint, which stays read-only. Cost: at most one `pulls/N` read and one label POST per call.
+                          after the batch head's lane lint, which writes no label. Cost: at most one `pulls/N` read and one label POST per call.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -5459,7 +5459,7 @@ def batch_blame(root, h, name, number, url):
         f"  merge --batch-drop {name} {number}")
     return 0
 
-BATCH_LABEL_CITE = "(decision pr-ledger, the `batch` label is its own write, `merge --batch-label`, and `merge --lane-lint` stays read-only)"
+BATCH_LABEL_CITE = "(decision pr-ledger, the `batch` label is its own write, `merge --batch-label`, and `merge --lane-lint` writes no label)"
 
 def batch_label(host, n):
     """merge --batch-label PR: add PR_BATCH_LABEL to an open pull request whose head branch starts with BATCH_PREFIX, the integration PR of a batch, so the
