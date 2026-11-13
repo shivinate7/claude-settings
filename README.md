@@ -172,8 +172,8 @@ merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process sta
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
-merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
-                        Then the PRs with no record.
+merge --reviewed        one line per open PR: its review state (bad when the newest record does not parse; no record when it has none), its next act with owner and age, and live CI. A next act over its limit, or none, is red.
+                        Then the PRs with no record. Then two number lines: the longest wait from a done record, and the count of open PRs with no next act.
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each, then one batch line per repo:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.

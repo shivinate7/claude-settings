@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, fnmatch, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, calendar, contextlib, fnmatch, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -131,6 +131,8 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+FAKE_NOW = calendar.timegm((2026, 10, 2, 0, 0, 0))  # the clock of every FakeHost, one day after batch_pull's default created_at: Host.now, pinned
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
@@ -138,6 +140,7 @@ class FakeHost:
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
+        self.now = lambda: FAKE_NOW  # Host.now: reviewed_read reads it, so an age is the same on every run
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
@@ -16144,12 +16147,14 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
 
+    # A PR with no record gets its own line with `next: none ... RED`, because the PR ledger gives every open PR one
+    # next act (decision pr-ledger). The `no record:` line is still printed for the same PR.
     def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertIn(8, no_record_numbers(out), out)
-        self.assertFalse([l for l in out.splitlines() if l.startswith("#8 ")], out)
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 \w{9} no record: .*; next: none, owner triage, age .*, RED; CI not read$")
         list_line(self, out, 7)
 
     def test_a_comment_without_the_marker_is_not_a_record(self):
@@ -16161,8 +16166,8 @@ class ReviewedList(ReviewEnv):
     def test_a_record_on_a_pr_that_is_not_open_is_not_listed(self):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 99, record_text(n=99, rounds=REVIEW_PASS))])
         self.assertEqual(rc, 0, out + err)
-        self.assertNotIn("99", out)
         self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn("#99", out)  # "#99", not "99": an age in hours printed by the real clock can hold 99
 
     def test_a_draft_is_listed_with_no_ci_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])

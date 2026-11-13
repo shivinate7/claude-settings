@@ -33,8 +33,15 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
-  merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
-                          live CI; then the PRs with no record.
+  merge --reviewed        one line per open PR, with its review state (bad when the newest record does not parse; no record when it has none),
+                          its one next act, owner and age (`; next: ACT, owner OWNER, age Nh[, RED]`; ACT is batch, lane round N, fix check,
+                          fresh full review, waits on debt:SLUG|page:ID, batch run, blocked on #N, lane lint or none; RED when the act is over its limit
+                          in PR_STATE_AGE_HOURS, or none; a held, parked or replaced label with no valid Waits line reads none, even on a draft;
+                          lane lint, owner lane, is a done record with no lane-lint PASS at its head; blocked on #N
+                          is a PR whose base branch is the head branch of open PR #N) and its live CI (not read for a ready PR with no record); then the PRs with no
+                          record; then two numbers, each target 0: `longest wait from a done record: Nh` (acts batch and lane lint) and `open PRs with no next act: N`
+                          (decision pr-ledger). Label events (`batch`, or `held`/`parked`/`replaced` with a `Waits on: debt:SLUG|page:ID`
+                          comment line) are read only for the PRs that reach those rules. Reads per run, on demand: no file, timer or process.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
@@ -1178,8 +1185,9 @@ class Host:
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
+        waits is {PR number: [(body, created_at) of each comment that has a line starting `Waits on:`, oldest first]}: the held PR's hold line (pr_waits_item reads it).
+        A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and the PR ledger each take their part."""
+        records, lints, waits = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             first = body.splitlines()[:1]
@@ -1187,7 +1195,9 @@ class Host:
                 records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
             elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
                 lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+            if m and any(l.strip().startswith("Waits on:") for l in body.splitlines()):
+                waits.setdefault(int(m.group(1)), []).append((body, c.get("created_at")))
+        return records, lints, waits
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -4374,43 +4384,158 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
+# The PR ledger (decision pr-ledger, part 1): each open pull request gets one next act, read from GitHub alone.
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24, "lane lint": 72}  # hours a next act may wait before it reads RED, by act. Every limit is an unmeasured first guess; decision pr-ledger holds the picks. An act with no key has no limit: waits on, blocked on. The last `lane round` key is the granted extra round past REVIEW_LAST_ROUND (pr_next_round)
+PR_HOLD_LABELS = ("held", "parked", "replaced")  # a label that holds a pull request when a `Waits on:` line names what it waits for
+PR_BATCH_LABEL = "batch"  # an integration pull request in a batch run
+PR_RECORD_STATES = ("done", "open", "stale")  # the review states that give a record act; held and bad give none, so they fall to the label, blocked and draft rules
+PR_WAITS_LINE = re.compile(r"Waits on: ((?:debt|page):[A-Za-z0-9][A-Za-z0-9._-]*)(?: \([^()]*\))?")  # an optional trailing `(note)` is not part of the item
+
+def gh_epoch(ts):
+    """-> the epoch seconds of a GitHub timestamp, or None when `ts` is missing or unreadable."""
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        return None
+
+def pr_waits_item(notes):
+    """-> `debt:<slug>` or `page:<item id>` from the newest comment of `notes` (issue_comments' waits part, oldest first) with a whole `Waits on:` line that names one; else None."""
+    for body, _created in reversed(notes or []):
+        for line in reversed(body.splitlines()):
+            m = PR_WAITS_LINE.fullmatch(line.strip())
+            if m:
+                return m.group(1)
+    return None
+
+def pr_next_round(rec):
+    """-> the round an open record owes next: 1 after a failed fix check, else one past the top recorded round, never past the final round."""
+    if rec.get("fix") and rec["fix"][3] != "PASS":
+        return 1
+    top = max((i for i, *_ in rec["rounds"]), default=0)
+    return min(top + 1, REVIEW_LAST_ROUND + bool(rec.get("grant")))
+
+def pr_event_label(row):
+    """-> the label whose events date the act of `row`, or None when its act reads no label events: only a pull request that reaches the hold rule, with a
+    hold label and a valid `Waits on:` line, or with the batch label. The one home of that test: reviewed_read reads events for it, pr_next_act takes its act from it."""
+    if row["state"] in PR_RECORD_STATES:
+        return None
+    held = [x for x in PR_HOLD_LABELS if x in row["labels"]]
+    if held and row["waits"]:
+        return held[0]
+    return PR_BATCH_LABEL if PR_BATCH_LABEL in row["labels"] else None
+
+def pr_next_act(row, now):
+    """-> (act, owner, age_hours, red): the one next act of an open pull request, and whether it has waited past its limit (PR_STATE_AGE_HOURS). Pure; `now` is epoch seconds.
+    `row` holds: state (the newest record's review state at the live head, or None for no record), record_at (epoch the record was posted), next_round
+    (of an open record), fix (the record's Fix check tuple, or None), lint (a lane-lint PASS names the live head), labels, waits (`debt:..`/`page:..` or
+    None), label_at (epoch of the last `labeled` event of pr_event_label, or None), based_on (the open pull request this one stacks on: its head branch is
+    this one's base ref, or None), draft, touched (epoch of the last update).
+    The first match wins, in decision pr-ledger's order: a done record (act batch, owner batch runner; with no lane-lint PASS at the live head, act lane
+    lint, owner lane: the join refuses it until the lane runs `merge --lane-lint`), an open record, a stale record, the hold label, the batch label, a
+    stacked pull request, a hold label with no valid `Waits on:` line (act none, red, even on a draft: no hold rule holds it), a draft with no record,
+    none. Blocked on #N is never red here: it is red while #N is red, which the caller resolves."""
+    state, hours = row["state"], lambda since: max(0.0, (now - since) / 3600)
+    if state in PR_RECORD_STATES:
+        since = row["record_at"] or row["touched"]
+        if state == "done":
+            act, owner = ("batch", "batch runner") if row["lint"] else ("lane lint", "lane")
+        elif state == "open":
+            act, owner = f"lane round {row['next_round']}", "lane"
+        else:
+            act, owner = ("fix check" if row["fix"] is None else "fresh full review"), "lane"
+    else:
+        label = pr_event_label(row)
+        since = row["label_at"] or row["touched"]
+        if label == PR_BATCH_LABEL:
+            act, owner = "batch run", "batch runner"
+        elif label:
+            act, owner = f"waits on {row['waits']}", ("owner" if row["waits"].startswith("page:") else "coordinator")
+        elif row["based_on"]:
+            act, owner, since = f"blocked on #{row['based_on']}", "lane", row["touched"]
+        elif any(x in row["labels"] for x in PR_HOLD_LABELS):  # label without a valid Waits line, else pr_event_label had named it
+            return "none", "triage", hours(row["touched"]), True
+        elif row["draft"]:
+            act, owner, since = "lane round 1", "lane", row["touched"]
+        else:
+            return "none", "triage", hours(row["touched"]), True
+    age, limit = hours(since), PR_STATE_AGE_HOURS.get(act)
+    return act, owner, age, limit is not None and age > limit
+
 def reviewed_read(h):
-    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
-    for each pull request whose newest record reads done (kind is the record's Kind); and the open pull request rows. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    """-> (lines, done, pulls, totals): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
+    for each pull request whose newest record reads done (kind is the record's Kind); the open pull request rows; and the two PR ledger number lines (decision pr-ledger).
+    Each open pull request gets a line, `#<n> <branch> <sha9> <state>: <why>; next: <act>, owner <owner>, age <H>h[, RED]; CI <ci>`: one with no
+    record too (state `no record`, CI not read, since the ledger reads no CI state); the `no record:` line names those pull requests as well.
+    Reads per run, on demand: two lists (the open pull requests, then the repo's comments since the oldest one); one `issues/<n>/events` list for each
+    pull request that pr_event_label names (a batch label, or a hold label with a valid `Waits on:` line); and, for each ready pull request that
+    has a record, three `gh` calls: the check runs, the commit statuses and the branch protection (decision pr-review-record, the cost). No file,
+    timer or process of its own. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
-    names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
-    request's own base."""
-    main = h.base
+    names `merge --lane-lint <n>`; no extra call. The ledger's act reads that lint too: a done record with no lint PASS reads act `lane lint`, owner
+    lane (the lane runs it); with a PASS it reads `batch`, owner batch runner. The longest wait from a done record counts both acts. A pull request is stacked, and reads `blocked on #N`, when its base ref
+    names the head branch of open pull request #N; a `Based on #N` body line stacks nothing. Each record's clean-merge walk judges against the host's
+    base at entry, the repo's default branch, never the pull request's own base."""
+    main, now = h.base, h.now()
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
-        return ["no open pull requests."], [], pulls
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+        return ["no open pull requests."], [], pulls, ["longest wait from a done record: 0.0h", "open PRs with no next act: 0"]
+    rows, lints, waits = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
-    lines, bare, done = [], [], []
+    posted = {n: gh_epoch(rs[-1][1]) for n, rs in rows.items()}  # when each newest record was posted
+    heads = {}  # head branch -> the open pull requests that hold it, so a pull request whose base ref is one of them is stacked on it
+    for d in pulls:
+        heads.setdefault(d["head"]["ref"], []).append(d["number"])
+    lines, bare, done, acts, longest = [], [], [], {}, 0.0
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
+        based = min((x for x in heads.get(d["base"]["ref"], []) if x != n), default=None)  # a base ref that is no open pull request's head blocks nothing
+        row = {"state": None, "record_at": posted.get(n), "next_round": None, "fix": None, "lint": True, "draft": bool(d.get("draft")),
+               "labels": [x.get("name") for x in d.get("labels") or []], "waits": pr_waits_item(waits.get(n)), "label_at": None,
+               "based_on": based, "touched": gh_epoch(d.get("updated_at")) or gh_epoch(d["created_at"]) or now}
         if not bodies:
             bare.append(f"#{n}")
-            continue
-        rec = parse_review(bodies[-1])
-        rec = rec if rec and rec["n"] == n else None
-        state, why = live_review_state(h, rec, sha, main)
-        if state == "done":
-            lint = lint_state(lints.get(n, []), sha)
-            if lint == "pass":
-                done.append((n, d["base"]["ref"], rec["kind"]))
-            else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
-                state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
-        ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
-        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+            state, why, ci = "no record", "no review record comment", "draft, no run" if d.get("draft") else "not read"
+        else:
+            rec = parse_review(bodies[-1])
+            rec = rec if rec and rec["n"] == n else None
+            state, why = live_review_state(h, rec, sha, main)
+            row["state"], row["fix"] = state, rec and rec.get("fix")
+            if state == "open":
+                row["next_round"] = pr_next_round(rec)
+            if state == "done":
+                lint = lint_state(lints.get(n, []), sha)
+                if lint == "pass":
+                    done.append((n, d["base"]["ref"], rec["kind"]))
+                else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
+                    row["lint"] = False
+                    state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
+            ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
+        label = pr_event_label(row)
+        if label:  # a label act ages from the label's last `labeled` event
+            stamps = [gh_epoch(e.get("created_at")) for e in h.pages(f"issues/{n}/events")
+                      if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label]
+            row["label_at"] = max((t for t in stamps if t is not None), default=None)
+        act, owner, age, red = pr_next_act(row, now)
+        acts[n] = [act, owner, age, red, based]
+        if act in ("batch", "lane lint"):  # both wait from a done record
+            longest = max(longest, age)
+        lines.append((n, f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}", ci))
+    for n, got in acts.items():  # blocked on #N is red while #N is red; a loop of blocks has no one to move it
+        if got[0].startswith("blocked on"):
+            seen, at = {n}, got[4]
+            while acts[at][0].startswith("blocked on") and acts[at][4] not in seen:
+                seen.add(at)
+                at = acts[at][4]
+            got[3] = acts[at][0].startswith("blocked on") or acts[at][3]
+    out = [f"{head}; next: {acts[n][0]}, owner {acts[n][1]}, age {acts[n][2]:.1f}h{', RED' if acts[n][3] else ''}; CI {ci}" for n, head, ci in lines]
+    totals = [f"longest wait from a done record: {longest:.1f}h", f"open PRs with no next act: {sum(1 for a in acts.values() if a[0] == 'none')}"]
+    return out + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, totals
 
 def reviewed_lines(h):
-    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
-    return reviewed_read(h)[0]
+    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo), then its two number lines. `--root` runs this once per
+    root, so the gh calls scale with the number of roots; no new process, file or timer."""
+    lines, _done, _pulls, totals = reviewed_read(h)
+    return lines + totals
 
 def reviewed_block(h):
     """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
@@ -4421,8 +4546,8 @@ def reviewed_block(h):
     `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
     only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
     runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
-    lines, done, pulls = reviewed_read(h)
-    out = [f"repo {h.repo}:", *lines]
+    lines, done, pulls, totals = reviewed_read(h)
+    out = [f"repo {h.repo}:", *lines, *totals]
     nums = sorted(n for n, base, _kind in done if base == h.base)
     if not nums:
         return out, True
@@ -5155,7 +5280,7 @@ def left_out_lines(root, h, name, numbers, base):
     (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one compare per
     candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. An unknown
     merge_reason raises Stop; a failed read raises its RELEASE_READ_ERRORS error."""
-    _lines, done, pulls = reviewed_read(h)
+    _lines, done, pulls, _totals = reviewed_read(h)
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
     kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
     fetched, out = {}, []
