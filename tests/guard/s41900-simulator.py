@@ -4,14 +4,15 @@ FAMILY = "simulator"
 # Owner rulings. A boot is an `xcodebuild -destination` that names a shut-down simulator, or the
 # simulator MCP control tool's `launch` naming a shut-down device. The cap and twin rules judge only
 # those. A raw `xcrun simctl boot` is refused by simulator-boot-bypass before either is read.
-#   simulator-boot-cap   refuses a boot while two simulators are already booted, naming both.
+#   simulator-boot-cap   refuses a boot while the machine is busy by the load brake's bar, naming the reading.
+#                        The booted count does not decide it (owner ruling 2026-11-12 21:59 CST); a cloud session is not braked.
 #   simulator-boot-twin  refuses a boot while an IDLE booted device of the same deviceTypeIdentifier
 #                        and runtime exists, naming its UDID. "Idle" is the shutdown tier's own
 #                        test (owner 2026-10-10): booted 1 hour or more, no outside holder process,
 #                        Simulator.app and Xcode.app not running, both reads readable. "Booted 1
 #                        hour" is the newest line in <config>/state/sim-boots.jsonl. Unrecorded is
 #                        not idle.
-#   The cap counts EVERY booted device, owner-booted and unrecorded included.
+#   A simulator case runs under a machine reading: its `load` (see add in hooks/test_guard.py), else the neutral one.
 #   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
 #                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
 #   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
@@ -42,6 +43,10 @@ SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0)
 # same pair in the boot record. A record that names another pid or start time is an older boot.
 LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
 LSTART = "Sat Oct 10 07:00:00 2026"
+# The machine readings a simulator case runs under (see decide, and add's `load`). SIM_BUSY is over the memory bar of
+# the load brake (85%), SIM_UNREAD leaves every reading unread, which counts as normal.
+SIM_BUSY = {"memory_pct": 91.7, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
+SIM_UNREAD = {"memory_pct": None, "disk_free_gb": None, "disk_total_gb": None}
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
 
@@ -182,27 +187,27 @@ def register_simulator_boot_cases():
     sh("boot a third simulator with two booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=cap_path, config=cap_cfg, carries="sim-test")
-    sh("boot a third simulator with two booted: xcodebuild destination",
+    sh("boot a third simulator with two booted and a busy machine: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
-       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg,
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg,
        carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: simulator MCP launch",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+    add("boot a third simulator with two booted and a busy machine: simulator MCP launch",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: simulator MCP launch names it by udid",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+    add("boot a third simulator with two booted and a busy machine: simulator MCP launch names it by udid",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", udid=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: MCP launch, empty device, udid names it",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="", udid=SIM_UC,
+    add("boot a third simulator with two booted and a busy machine: MCP launch, empty device, udid names it",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device="", udid=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: MCP launch, list in device, udid names it",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=["x"], udid=SIM_UC,
+    add("boot a third simulator with two booted and a busy machine: MCP launch, list in device, udid names it",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device=["x"], udid=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: MCP launch, dict in udid, device names it",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+    add("boot a third simulator with two booted and a busy machine: MCP launch, dict in udid, device names it",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device=SIM_UC,
         udid={"x": 1}, env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    add("boot a third simulator with two booted: MCP launch, lowercase udid",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
+    add("boot a third simulator with two booted and a busy machine: MCP launch, lowercase udid",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
     sh("boot a third simulator with two booted: bash simctl boot, lowercase udid, bypass first",
        "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-bypass",
@@ -210,38 +215,38 @@ def register_simulator_boot_cases():
     # A booted device whose name is the shut-down target's UDID must not skip the boot check.
     udid_name_path, udid_name_cfg = on("cap_udid_name")
     add("boot a shut-down device by udid, a booted device is named like that udid: MCP launch",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", udid=SIM_UC,
         env_path=udid_name_path, config=udid_name_cfg, carries=(SIM_UA, SIM_UB))
     # A name with one booted copy and one shut-down copy on another runtime is a shut-down hit.
     name_split_path, name_split_cfg = on("cap_name_split")
     add("boot a shut-down copy by name, a booted copy shares the name: MCP launch",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="Gamma Mini",
+        "deny", rule="simulator-boot-cap", load=SIM_BUSY, tool=SIM_MCP, action="launch", device="Gamma Mini",
         env_path=name_split_path, config=name_split_cfg, carries=(SIM_UA, SIM_UB))
     os_split_path, os_split_cfg = on("cap_os_split")
     # OS=26.0 names the booted copy, so the boot is a no-op: allowed.
     sh("control: OS= picks the booted copy of a name, the boot is a no-op: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=26.0'",
        "allow", env_path=os_split_path, config=os_split_cfg)
-    # OS=25.0 names the shut-down copy with the cap full: the boot is refused.
-    sh("boot the shut-down copy by OS= with the cap full: xcodebuild destination",
+    # OS=25.0 names the shut-down copy with the cap full and busy: the boot is refused.
+    sh("boot the shut-down copy by OS= with the cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=25.0'",
-       "deny", rule="simulator-boot-cap", env_path=os_split_path, config=os_split_cfg,
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=os_split_path, config=os_split_cfg,
        carries=(SIM_UA, SIM_UE))
     # OS=latest is no version, so it matches no runtime. The guard must not allow a boot on it
     # when the only Delta copy is shut down: the cap is full, so the boot is refused.
     latest_path, latest_cfg = on("cap_latest")
-    sh("boot a shut-down device by name with OS=latest, cap full: xcodebuild destination",
+    sh("boot a shut-down device by name with OS=latest, cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
-       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=latest_path, config=latest_cfg,
        carries=(SIM_UA, SIM_UE))
     # A numeric OS that matches no copy must not leave zero hits. Delta is shut down on 26.0.
-    sh("boot a shut-down device by name with OS=26.0.0, cap full: xcodebuild destination",
+    sh("boot a shut-down device by name with OS=26.0.0, cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=26.0.0'",
-       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=latest_path, config=latest_cfg,
        carries=(SIM_UA, SIM_UE))
-    sh("boot a shut-down device by name with two OS keys, cap full: xcodebuild destination",
+    sh("boot a shut-down device by name with two OS keys, cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest,OS=25.0'",
-       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=latest_path, config=latest_cfg,
        carries=(SIM_UA, SIM_UE))
     # Delta is on two runtimes; OS=latest names neither, so every shut-down copy must be judged.
     twin_two_path, twin_two_cfg = on("twin_two_runtimes")
@@ -250,9 +255,9 @@ def register_simulator_boot_cases():
        "deny", rule="simulator-boot-twin", env_path=twin_two_path, config=twin_two_cfg,
        carries=(SIM_UT0,))
     # An id= destination names one device. OS=26.0 must not hide a shut-down 25.0 copy from the check.
-    sh("boot a shut-down 25.0 copy by id with OS=26.0, cap full: xcodebuild destination",
+    sh("boot a shut-down 25.0 copy by id with OS=26.0, cap full and busy: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
-       + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
+       + ",OS=26.0'", "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
     # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
     # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
@@ -299,7 +304,7 @@ def register_simulator_boot_cases():
     write_sim_records(mixed_cap_cfg, [sim_boot_record(SIM_UA, "Alpha Pro", SIM_TYPE_PRO, SIM_RT,
                                                       2 * 3600)])
     sh("boot a third simulator: a recorded idle device and an owner-booted one both count",
-       sim_boot_by_destination(SIM_UC), "deny", rule="simulator-boot-cap",
+       sim_boot_by_destination(SIM_UC), "deny", rule="simulator-boot-cap", load=SIM_BUSY,
        env_path=cap_path, config=mixed_cap_cfg, carries=(SIM_UA, SIM_UB))
 
     # Rule simulator-boot-twin. The reason names the idle twin's UDID.
@@ -361,9 +366,9 @@ def register_simulator_boot_cases():
        "allow", env_path=one_path, config=one_cfg)
     # Order: route is judged after cap and twin, so a test of a shut-down device that either rule
     # refuses names that rule, not simulator-boot-route.
-    sh("route is judged after the cap: a test of a shut-down simulator with two booted names the cap",
+    sh("route is judged after the cap: a test of a shut-down simulator with two booted and a busy machine names the cap",
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
-       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+       "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
     sh("route is judged after the twin: a test of a shut-down twin names the idle twin",
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
        "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
@@ -719,9 +724,11 @@ def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_di
     return folder + os.pathsep + PY_PATH, cfg
 
 
-def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None):
+def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None,
+                 load=None):
     """One MCP launch case against FIXTURE, naming the device by DEVICE or by UDID. SESSION rides on the payload,
-    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. Returns the case."""
+    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. LOAD is the reading
+    the run sees (add's `load`); None is the neutral one. Returns the case."""
     env_path, config = fixture
     tool_input = {"action": "launch"}
     if device is not None:
@@ -731,7 +738,7 @@ def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_
     if carries is None:
         carries = LEASE_CARRIES if expected == "deny" else ()
     add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
-        carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
+        carries=carries, env=LEASE_ENV, raw=raw, load=load, **tool_input)
     return CASES[-1]
 
 
@@ -922,9 +929,9 @@ def register_simulator_lease_cases():
                  device=duo1, rule=LEASE_RULE)
 
     # The cap and the twin still refuse first, with this session's live lease in place.
-    lease_launch("lease: this session's live slot 1 lease, cap full: simulator-boot-cap still refuses first",
+    lease_launch("lease: this session's live slot 1 lease, cap full and busy: simulator-boot-cap still refuses first",
                  "deny", lease_fixture("cap_full", cap_rows, live, slot1), device=duo1,
-                 rule="simulator-boot-cap", carries=(SIM_UA, SIM_UB))
+                 rule="simulator-boot-cap", load=SIM_BUSY, carries=(SIM_UA, SIM_UB))
     lease_launch("lease: this session's live slot 1 lease, an idle twin: simulator-boot-twin still refuses first",
                  "deny", lease_fixture("twin", twin_rows, live, slot1,
                                        records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
