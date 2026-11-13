@@ -1742,10 +1742,38 @@ class MacOnceByBatch(unittest.TestCase):
                 self.assertTrue(scope_skip_problems("jobs:\n" + text + nightly_skip), label)
 
 
+FULL_SUITE_BASES = (GUARD_JOB, "checks-windows-merge", "checks-windows-rest")
+PLATFORM_SWEEP_FLAG = {"macOS": "checks_macos", "Windows": "checks_windows_sweep"}
+
+
+def full_suite_job(name):
+    """True for a job of the full Windows suite: a guard or merge base or shard, or a rest job (R62)."""
+    return (shard_base(name) or name) in FULL_SUITE_BASES or name.startswith("checks-windows-rest")
+
+
+def step_label(st):
+    """A step's name, else its action or run command, for a failure message."""
+    return st.get("name") or st.get("uses") or key(st)
+
+
+def runs_on(job, st, event, flag_value, draft):
+    """True when a step of `job` runs on `event`, with every scope flag set to flag_value and the pull request's draft state.
+    The job's own if counts, so a shard's draft guard is read with its steps."""
+    if job["if"] is not None and not eval_if(job["if"], event, flag_value, draft=draft):
+        return False
+    expr = step_if(st)
+    return expr is None or eval_if(expr, event, flag_value, draft=draft)
+
+
+def eval_with(expr, event, values, default="false", draft=False):
+    """eval_if with one value per scope flag: `values` maps a flag to its value, and every other flag reads `default`."""
+    rewritten = re.sub(r"needs\.scope\.outputs\.(\w+)", lambda m: repr(values.get(m.group(1), default)), expr)
+    return eval_if(rewritten, event, default, draft=draft)
+
+
 class SweepOnReadyPull(unittest.TestCase):
-    """Owner ruling R62 (the batch PR run carries the full sweep) on checks.yml. The two janitor sweep mutation steps (macOS and
-    Windows) run on a ready pull_request, as they do on push, schedule and dispatch, on their scope flag. Each case reads the
-    real file, so it is red until the change lands."""
+    """R62, "each suite once per batch, on the batch PR", on checks.yml. The two janitor sweep mutation steps (macOS and Windows)
+    run on a ready pull_request, as they do on push, schedule and dispatch. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -1777,6 +1805,16 @@ class SweepOnReadyPull(unittest.TestCase):
         self.assertIsNotNone(expr, f"{job} sweep step has no if")
         self.assertTrue(eval_if(expr, "pull_request", "true"), f"{job} sweep step does not run on a ready pull_request: {expr}")
 
+    def test_both_sweep_mutations_run_on_a_ready_pull_request_whatever_their_platform_flag_says(self):
+        # Named failure: a sweep step is gated on its platform's scope flag, so a ready PR whose flag is false skips the mutation.
+        for label, cmd_jobs, cmd in self.sweep_steps():
+            flag = PLATFORM_SWEEP_FLAG[label]
+            job, st = self.sweep_home(cmd_jobs, cmd)
+            expr = unwrap(step_key(st, "if"))
+            with self.subTest(job=job):
+                self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "sweep": "true"}),
+                                f"{job} sweep step does not run on a ready pull_request when {flag} is false: {expr}")
+
     def test_both_sweep_mutations_still_run_on_push_schedule_and_dispatch(self):
         # Control, green on the old code: the change must keep the events the step already ran on.
         for label, cmd_jobs, cmd in self.sweep_steps():
@@ -1796,8 +1834,9 @@ class SweepOnReadyPull(unittest.TestCase):
 
 
 class ReadyPullShards(unittest.TestCase):
-    """Owner ruling R62 on checks.yml. The Windows shards run on a ready pull_request, and the scope flags decide them: a
-    shard's steps carry its base job's scope condition. Each case reads the real file."""
+    """checks.yml under R62, "each suite once per batch, on the batch PR", and its lean (the full Windows shards run on the ready
+    pull_request, and the slices go). The scope job runs on a ready pull_request and waits on both skip outputs. The
+    ReadyPullFullSuite class holds the step rules. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -1814,8 +1853,9 @@ class ReadyPullShards(unittest.TestCase):
         self.assertFalse(eval_if(expr, "schedule", "true", nightly_skip="true"), f"scope runs when nightly-skip says skip: {expr}")
         self.assertTrue(eval_if(expr, "push", "true", push_skip=""), f"scope skips a push that push-skip leaves unset: {expr}")
 
-    def test_a_shard_job_keeps_its_base_jobs_scope_condition(self):
-        # Named failure: a shard's steps drop the base job's scope flag, so a run with no flag for the base job runs the shard.
+    def test_a_shard_job_steps_carry_their_base_jobs_condition_text(self):
+        # Named failure: a shard's steps carry a different condition from its base job's, so the two run on different events.
+        # A text pin that R62 does not state: it holds under R62 because shards and bases change together.
         jobs = windows_jobs(self.text)
         shards = [n for n in jobs if shard_base(n)]
         self.assertTrue(shards, "no Windows shard jobs")
@@ -1845,6 +1885,64 @@ class ReadyPullShards(unittest.TestCase):
         # Named failure: a GUARD_TESTS or MERGE_TESTS windows-slice value is still set in a step, a job or the workflow.
         self.assertEqual(re.findall(r"(?:GUARD|MERGE)_TESTS:\s*windows-slice", self.text), [],
                          "a windows-slice env is still set in checks.yml")
+
+
+class ReadyPullFullSuite(unittest.TestCase):
+    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows guard and merge shards and the rest jobs run
+    on a ready pull_request whatever the scope flags say, so a docs-only ready PR runs them too. A draft pull_request with no
+    flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch keep their
+    flag rules. Each case reads the real file, so it is red until the change lands."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = windows_jobs(self.text)
+
+    def suite_jobs(self):
+        # Scope first: the bases R62 names must exist before any of their steps is read.
+        names = [n for n in self.jobs if full_suite_job(n)]
+        for base in FULL_SUITE_BASES:
+            self.assertIn(base, names, f"no {base} job in the full Windows suite")
+        return names
+
+    def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
+        # Named failure: a step of a full-suite job is gated on a scope flag or on code, which a docs-only PR leaves false.
+        for name in self.suite_jobs():
+            job = self.jobs[name]
+            for st in job["steps"]:
+                with self.subTest(job=name, step=step_label(st)):
+                    self.assertTrue(runs_on(job, st, "pull_request", "false", draft=False),
+                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with every scope flag false")
+
+    def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
+        # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
+        for name in self.suite_jobs():
+            if shard_base(name) is None:
+                continue
+            expr = self.jobs[name]["if"]
+            with self.subTest(job=name):
+                self.assertIsNotNone(expr, f"{name} has no job-level if, so a draft pull_request starts its shard")
+                self.assertFalse(eval_if(expr, "pull_request", "true", draft=True), f"{name} runs on a draft pull_request: {expr}")
+                self.assertTrue(eval_if(expr, "pull_request", "false", draft=False), f"{name} does not run on a ready pull_request: {expr}")
+
+    def test_no_step_of_a_full_suite_job_runs_on_a_draft_pull_request_with_no_flag_set(self):
+        # Control, green on the old code: a draft with every flag false runs no suite step, so the R62 change must keep that.
+        for name in self.suite_jobs():
+            job = self.jobs[name]
+            for st in job["steps"]:
+                with self.subTest(job=name, step=step_label(st)):
+                    self.assertFalse(runs_on(job, st, "pull_request", "false", draft=True),
+                                     f"{name} step {step_label(st)!r} runs on a draft pull_request with no scope flag set")
+
+    def test_the_full_suite_steps_run_on_push_schedule_and_dispatch_with_every_flag_set(self):
+        # Control, green on the old code: push, schedule and dispatch keep the flag rule, and with every flag set they run.
+        for name in self.suite_jobs():
+            job = self.jobs[name]
+            for st in job["steps"]:
+                for event in ("push", "schedule", "workflow_dispatch"):
+                    with self.subTest(job=name, step=step_label(st), event=event):
+                        self.assertTrue(runs_on(job, st, event, "true", draft=False),
+                                        f"{name} step {step_label(st)!r} does not run on {event} with every flag set")
 
 
 class TopLevelOr(unittest.TestCase):

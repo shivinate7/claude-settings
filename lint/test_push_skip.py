@@ -11,6 +11,7 @@ needs it, so every other job skips through needs as nightly-skip does for scope.
 
     python3 lint/test_push_skip.py
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -119,6 +120,124 @@ class PushSkipDecision(unittest.TestCase):
         value, text = self.skip_value(token=None)
         self.assertEqual(value, "false", "with no pull request read and no token the script must give skip=false")
         self.assertIn("unknown", text.lower(), "with no pull request read and no token the script must say unknown")
+
+
+SHA = "c" * 40  # the push commit
+HEAD = "d" * 40  # a batch head
+LANE_HEAD = "e" * 40  # a lone lane's head, which the read must never touch
+ROLLUP_NAME = "all-jobs-passed"
+EARLY = "2026-11-12T10:00:00Z"
+LATE = "2026-11-12T11:00:00Z"
+
+
+def load_script():
+    """The script as a module. Importing it makes no read: the read is a function the case replaces."""
+    spec = importlib.util.spec_from_file_location("push_skip_under_test", PUSH_SKIP)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_run(conclusion="success", status="completed", started_at=EARLY):
+    """One all-jobs-passed check run in the shape the GitHub read returns."""
+    return {"name": ROLLUP_NAME, "status": status, "conclusion": conclusion, "started_at": started_at}
+
+
+class ReadStub:
+    """Stands in for the script's GitHub read. It answers by path and records each path it is asked."""
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.asked = []
+
+    def __call__(self, path, query, env):
+        self.asked.append(path)
+        if path not in self.answers:
+            raise AssertionError("the script read a path no case expects: %s" % path)
+        return self.answers[path]
+
+
+class RollupResult(unittest.TestCase):
+    def rollup(self, runs):
+        self.assertTrue(os.path.isfile(PUSH_SKIP), SCRIPT_MISSING)
+        module = load_script()
+        path = "commits/%s/check-runs" % SHA
+        module.get = ReadStub({path: {"check_runs": runs}})
+        result = module.rollup_result({"REPO": "owner/repo", "GH_TOKEN": "t"}, SHA)
+        self.assertEqual(module.get.asked, [path], "rollup_result read a path other than the head's check runs")
+        return result
+
+    def test_a_skipped_draft_run_is_not_a_result(self):
+        result = self.rollup([check_run(conclusion="skipped", started_at=LATE), check_run(started_at=EARLY)])
+        self.assertEqual(result, ("completed", "success"), "a skipped check run is the draft run's, so the older green ready run must stand")
+
+    def test_the_newest_started_run_is_the_result_in_either_list_order(self):
+        runs = [check_run(conclusion="failure", started_at=LATE), check_run(started_at=EARLY)]
+        self.assertEqual(self.rollup(runs), ("completed", "failure"), "the newer failed run must be the result when it is first in the list")
+        self.assertEqual(self.rollup(list(reversed(runs))), ("completed", "failure"),
+                         "the newer failed run must be the result when it is last in the list")
+
+    def test_a_newest_cancelled_run_is_the_result_and_is_not_green(self):
+        result = self.rollup([check_run(conclusion="cancelled", started_at=LATE), check_run(started_at=EARLY)])
+        self.assertEqual(result, ("completed", "cancelled"), "a newer cancelled run must be the result, so an older green run cannot stand for it")
+
+    def test_a_queued_run_with_no_started_at_does_not_lose_to_an_older_green_run(self):
+        result = self.rollup([check_run(conclusion=None, status="queued", started_at=None), check_run(started_at=EARLY)])
+        self.assertNotEqual(result, ("completed", "success"),
+                            "a queued run with no started_at lost to an older green run, so a push could skip on a run still in progress")
+
+    def test_no_check_run_gives_none(self):
+        self.assertEqual(self.rollup([]), ("none", None), "a head with no all-jobs-passed run must read as none")
+
+    def test_a_full_page_of_check_runs_is_unknown(self):
+        module = load_script()
+        module.get = ReadStub({"commits/%s/check-runs" % SHA: {"check_runs": [check_run() for _ in range(100)]}})
+        with self.assertRaises(module.Unknown):
+            module.rollup_result({"REPO": "owner/repo", "GH_TOKEN": "t"}, SHA)
+
+
+class ReadHeads(unittest.TestCase):
+    def github_answers(self, runs):
+        return {
+            "commits/%s/pulls" % SHA: [{"head": {"ref": BATCH, "sha": HEAD}}, {"head": {"ref": "lane-y", "sha": LANE_HEAD}}],
+            "git/commits/%s" % HEAD: {"tree": {"sha": TREE}},
+            "commits/%s/check-runs" % HEAD: {"check_runs": runs},
+        }
+
+    def read(self, answers):
+        module = load_script()
+        stub = ReadStub(answers)
+        module.get = stub
+        heads = module.read_heads({"GH_TOKEN": "t", "REPO": "owner/repo", "HEAD_SHA": SHA})
+        return heads, stub.asked
+
+    def test_the_github_read_keeps_only_batch_heads_and_their_newest_result(self):
+        heads, asked = self.read(self.github_answers([check_run(conclusion="skipped", started_at=LATE), check_run(started_at=EARLY)]))
+        self.assertNotIn("git/commits/%s" % LANE_HEAD, asked, "a lone lane's head was read, so the read is wider than the batch heads")
+        self.assertEqual(heads, [{"head_branch": BATCH, "tree": TREE, "status": "completed", "conclusion": "success"}],
+                         "the batch head must carry its tree and its newest all-jobs-passed result")
+
+    def test_a_queued_batch_head_is_not_read_as_green(self):
+        heads, _ = self.read(self.github_answers([check_run(conclusion=None, status="queued", started_at=None), check_run(started_at=EARLY)]))
+        self.assertEqual(len(heads), 1, "the one batch head must be in the read")
+        self.assertNotEqual((heads[0]["status"], heads[0]["conclusion"]), ("completed", "success"),
+                            "a queued run with no started_at lost to an older green run, so the batch head reads green")
+
+    def test_a_full_page_of_pull_requests_is_unknown(self):
+        module = load_script()
+        module.get = ReadStub({"commits/%s/pulls" % SHA: [{"head": {"ref": "lane-y", "sha": LANE_HEAD}} for _ in range(100)]})
+        with self.assertRaises(module.Unknown):
+            module.read_heads({"GH_TOKEN": "t", "REPO": "owner/repo", "HEAD_SHA": SHA})
+
+    def test_prs_json_that_is_not_a_list_is_unknown(self):
+        module = load_script()
+        with self.assertRaises(module.Unknown):
+            module.read_heads({"PRS_JSON": '{"head_branch": "%s"}' % BATCH})
+
+    def test_prs_json_that_is_not_json_is_unknown(self):
+        module = load_script()
+        with self.assertRaises(module.Unknown):
+            module.read_heads({"PRS_JSON": "not json"})
 
 
 class PushSkipWiring(unittest.TestCase):
