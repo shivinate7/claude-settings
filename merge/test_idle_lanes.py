@@ -13,7 +13,9 @@ as an empty one. A session whose id is in keepSessions prints no line and is not
 list, or whose entry has no id, reads as unknown, never as an empty keep list. A padded keepSessions id still skips its
 session. A non-archived session whose unarchived_epoch is an int above 0 prints one hold line, never a lane line, unless
 it waits: a waiting lane prints no line, unarchived or not. A working session prints no line whatever its epoch. An
-unarchived_epoch that is a bool, is not an int, or is negative, reads the whole list as unknown.
+unarchived_epoch that is a bool, is not an int, or is negative, reads the whole list as unknown. The summary's tail tells the
+batch runner to skip, and name in its report, a lane whose get_session shows unarchived_epoch above 0; a lane with no field,
+or one at 0, still archives. The session-tiers decision's archiving bullet carries that rule in one sentence.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -37,12 +39,18 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run
 import test_build as roadmap  # noqa: E402  the roadmap fixture: make_repo, session_row, iso_ago (one home)
 
 REPO = "cs-repo:owner/fixture"
-SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then archive it."
-SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it."
+DECISION = HERE.parent / "docs" / "decisions" / "session-tiers.md"
+# The sentence both summary tails carry (merge/merge.py `idle_lanes`). One home here, so every pinned summary shares it.
+EPOCH_SENTENCE = ("After get_session, skip a lane whose ccr.external_metadata.unarchived_epoch is above 0 (the owner unarchived it) "
+                  "and name it in your report; a lane with no unarchived_epoch field, or one at 0, still archives.")
+SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then archive it. " + EPOCH_SENTENCE
+SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it. " + EPOCH_SENTENCE
 SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
-HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
-MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+HELD_ONE = ("merge: 0 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line. "
+            + EPOCH_SENTENCE)
+MIXED = ("merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line. "
+         + EPOCH_SENTENCE)
 # The hold line the CLI prints for a doing step under a lane. It pins the CLI's output on its own, as the summary lines do.
 DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
@@ -403,6 +411,51 @@ class IdleLanesCli(unittest.TestCase):
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines(), ["session_c (c2; topic -)", SUMMARY_ONE], "a working lane with an unarchived_epoch printed a line or was counted held: %r" % out)
+
+    def test_each_tail_variant_names_unarchived_epoch(self):
+        # Two summaries: the empty list prints the plain tail, and one held lane prints the held tail. Scope first: each run prints
+        # the summary the case names, checked by its prefix so the tail wording is not part of the scope check.
+        self.publish([])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith("merge: 0 lanes to archive. "), "scope: the empty list is not the plain summary: %r" % out)
+        self.assertIn("unarchived_epoch", out.splitlines()[-1], "the plain tail does not name unarchived_epoch: %r" % out)
+        self.publish([lane("session_orphan", "ghost")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.splitlines()[-1].startswith("merge: 0 lanes to archive, 1 held. "), "scope: the held lane's summary is not the held one: %r" % out)
+        self.assertIn("unarchived_epoch", out.splitlines()[-1], "the held tail does not name unarchived_epoch: %r" % out)
+
+    def test_a_lane_with_no_unarchived_epoch_field_still_archives_under_both_tails(self):
+        # The control is session_a, listed as a lane line with no epoch field. Then each tail says a lane with no field still archives.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[:1], ["session_a (c1; topic -)"], "scope: the lane with no field is not listed: %r" % out)
+        self.assertIn("a lane with no unarchived_epoch field, or one at 0, still archives.", out.splitlines()[-1],
+                      "the plain tail does not say a lane with no unarchived_epoch field still archives: %r" % out)
+        self.publish([lane("session_a", "c1"), lane("session_orphan", "ghost")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertIn("session_a (c1; topic -)", out.splitlines(), "scope: the lane with no field is not listed beside a hold: %r" % out)
+        self.assertIn("a lane with no unarchived_epoch field, or one at 0, still archives.", out.splitlines()[-1],
+                      "the held tail does not say a lane with no unarchived_epoch field still archives: %r" % out)
+
+
+class SessionTiersArchiveBullet(unittest.TestCase):
+    """The session-tiers decision's archiving-lanes bullet carries the get_session epoch rule in one sentence."""
+
+    ANCHOR = "The batch runner runs get_session on each listed lane alone, then archives it."
+
+    def test_the_archiving_bullet_has_one_sentence_on_the_epoch_rule(self):
+        text = DECISION.read_text(encoding="utf-8")
+        anchor_lines = [line for line in text.splitlines() if self.ANCHOR in line]
+        # Scope first: the anchor is on one line, the archiving bullet. The epoch sentence is looked for on that line only.
+        self.assertEqual(len(anchor_lines), 1, "scope: the archiving anchor is on %d lines of the session-tiers decision, not one" % len(anchor_lines))
+        sentences = [s for s in re.split(r"(?<=\.)\s+", anchor_lines[0]) if "unarchived_epoch" in s]
+        self.assertEqual(len(sentences), 1, "the archiving bullet names unarchived_epoch in %d sentences, not one: %r" % (len(sentences), anchor_lines[0]))
+        for phrase in ("ccr.external_metadata.unarchived_epoch", "above 0", "skip", "get_session", "not the live file", "1 of 1700"):
+            self.assertIn(phrase, sentences[0], "the epoch sentence lacks %r: %r" % (phrase, sentences[0]))
 
 
 if __name__ == "__main__":
