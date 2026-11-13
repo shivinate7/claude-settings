@@ -1128,6 +1128,7 @@ _BROKE_INTO = (r"(?!\s+(?:(?!by\b|when\b|after\b|and\b|then\b|before\b|if\b|so\b
 MISTAKE_FAULT_RE = re.compile(
     r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke" + _BROKE_INTO + r"|clobbered|overwrote|"
     r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
+    r"should(?:n['\u2019]t|\s+not)\s+have|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
 MISTAKE_NEGATOR_GAP = 3
@@ -1141,6 +1142,12 @@ MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
     "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
+# A mistake report gives a `Cause:` line and a `Guard:` line, each with text. Both lines, or neither (a guard
+# named in prose still clears the admission). One line alone is refused, so the other is not left out.
+MISTAKE_LINE_RE = re.compile(r"^[\s>*-]*(Cause|Guard):\**[ \t]*(\S[^\n]*)$", re.I | re.M)
+MISTAKE_LINES_REASON = owner_line(
+    "Mistake guard (rule building-mistake-names-its-guard)",
+    "Deviations admits a mistake, %s, and gives a %s line but no %s line; give both a `Cause:` line and a `Guard:` line")
 
 
 def _admitted_clause(deviations):
@@ -1167,6 +1174,12 @@ def mistake_problem(text):
     deviations = report_section(text, "Deviations")
     clause = _admitted_clause(deviations)
     if not clause:
+        return ""
+    given = {m.group(1).title() for m in MISTAKE_LINE_RE.finditer(deviations)}
+    if len(given) == 1:
+        have = next(iter(given))
+        return MISTAKE_LINES_REASON % (repr(clause[:80]), have, "Guard" if have == "Cause" else "Cause")
+    if given:
         return ""
     # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
     if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
