@@ -105,6 +105,10 @@ pt_case("push-target-named: a forced push to another branch keeps force-push, no
 # was never read cannot pass as a refusal for a mismatch. A refusal for a brief with no real target carries the remedy.
 pt_case("push-target-named: a none brief refuses the agent's push", VCS + " push origin HEAD:lane-y", "deny",
         "pt-none", rule=PUSH_TARGET_RULE, lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+# A branch literally named none is no exception to a none line: the refusal is the none reason, not the mismatch one.
+pt_case("push-target-named: a none brief refuses a push to a branch named none, with the none reason",
+        VCS + " push origin HEAD:none", "deny", "pt-none", rule=PUSH_TARGET_RULE,
+        carries=("says none",), lacks=(PUSH_TARGET_NO_TARGET,))
 pt_case("push-target-named: a push to a branch the brief does not name is refused",
         VCS + " push origin HEAD:lane-y", "deny", "pt-lane-x", rule=PUSH_TARGET_RULE,
         lacks=("lane-y", PUSH_TARGET_NO_TARGET))
