@@ -25,6 +25,8 @@ The verdict is ask for a report with no review log. A push to the head branch of
 - Head match. A round report names its reviewed head with `Reviewed at head <sha>`, `Diff base A, head B`, or `reviewed <sha>`, above its `agentId:` trailer. A head after `Base:` or `main head` is the base, never the reviewed head. A round report that names a head is cleared only by a review log whose `Head:` line matches one of them. A match is a prefix of 7 or more characters, either way. A fix verifier report is cleared by a review log whose `Head:` or `Fix check:` sha equals the head it names. The merge tool's normal review log has Head B and Fix check A. A report that names no head matches by role, verdict and round alone (known miss, also a report read before any PR is known).
 - A dry run, a commit and a transcript that cannot be read pass.
 - A transcript line that is not a JSON object, or a message with no `content`, is stepped over, and the rest of the transcript is still read (`_transcript_events`). Such a line holds no tool call or result, so the step never lets a push pass that a pending report would stop.
+- A moved head (coordinator, 2026-11-12 23:49 CST). A round report that names a head, when the PR's live head has moved past it (the named head is an ancestor of the live head, not equal to it), gets another ask text. It tells the lane to post a fresh round at the live head with `merge <pr> --review-record --head <live sha>`, and says the record for the old head cannot be posted. It names no target.
+- A superseded report (coordinator, 2026-11-12 23:49 CST). A held round report that names a head stops asking when a posted review log, posted after the report, holds a line with the same role and the same round (any verdict) at a head that is a strict descendant of a head the report names. A log at a sibling or unrelated head, at the same head, or at an earlier head does not clear it. A log posted before the report does not clear it. When the ancestry check cannot run (no checkout, a sha git cannot resolve), the report stays held: this path never fails open.
 - The refusal tells the lane to render the review log with `merge <pr> --review-record --head <reviewed sha>`, post it with the GitHub MCP comment tool, then push. It names no target (rule `git-remedy-never-names-target`).
 - A second refusal, same rule id (coordinator, 2026-11-07 15:19 CST): a push to the head branch of PR n is refused when the transcript holds a successful posted review log, accepted by `parse_review`, with a `Fix check:` line for PR n. It comes before the ask for a pending report. The merge tool takes one fix verifier per review log, so the next fix goes on a new branch and a new PR. The destination is read with `push_destinations`. PR n maps to its head branch through a successful PR-opening call: the `head` of a `create_pull_request` input and the `number` of its result, or the `--head` of a Bash `gh pr create` and the URL it printed. With n's head unknown, the push passes, so the next PR is never deadlocked. This refusal names no branch.
 
@@ -62,7 +64,10 @@ The cases are in `tests/guard/s21305-push-needs-review-log.py` (section 21305, f
 | A PR opened by `gh -R o/r pr create`, `gh --repo o/r pr create` or `gh pr -R o/r create`, then a report with no review log | ask |
 | A FAIL round 1, then its review log posted by `gh -R o/r pr comment` or `gh --repo o/r pr comment`, then a push | allow |
 | A review log post that returned an error, or a comment that is no review log | ask |
-| A report with no review log, then a later report whose review log holds only its own line | ask |
+| A report with no review log, then a later report whose review log holds only its own line, at the same head or a head that does not descend from the first report's head | ask |
+| A round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its review log posted at D2 | allow (superseded) |
+| The same, with no review log at D2 | ask, text names the fresh round at the live head |
+| A round 1 FAIL at head B, then a round 1 review log at head C, no descendant of B | ask |
 | The PR known only from a posted review log, then a later report with no review log | ask |
 | Each report followed by a review log that holds its role and verdict (round, PARTIAL, fix verifier, hand-back) | allow |
 | One review log that holds the lines of two reports, or the report's round line beside another round's | allow |
@@ -116,7 +121,7 @@ The cost case `a push reads git for a held report only when one is held` pins ze
 - A Bash review log post whose command does not hold the review log text (a body read from a file) is not a review log.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
 - Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_log_hit` (`except Exception: pass`; note `push-record-scan-error-fails-open`).
-- A round report pushed over without its review log can never be cleared: `merge --review-record --head A` refuses once the head moved. So every later push in that session asks, and the ask text gives no way out. A typed override is the way.
+- A round report pushed over without its review log cannot get its own record once the head moved (`merge --review-record --head A` refuses). A fresh round at the live head clears it, when its review log holds the same role and round at a descendant head and is posted after the report (see "A superseded report"). The ask text names that route. A report that names no head, a log at a non-descendant head, and an unresolvable head still ask.
 - Ask scope: any push while a report is pending asks, an unrelated branch too (old ruled behaviour).
 
 ## The cost
@@ -129,6 +134,9 @@ The cost case `a push reads git for a held report only when one is held` pins ze
   - the default branch by `read_default_base` (`hooks/git_reads.py`): 1 `git symbolic-ref`, then up to 5 `git rev-parse`, stopping at the first that resolves;
   - per distinct candidate: 1 `git rev-parse`; if it resolves, 1 `git merge-base --is-ancestor` against the default branch; if it is off main, up to 2 more against the head commits. At most 4 reads per candidate.
   - A report stops at its first counting candidate, a report reads at most 8 candidates (`_HELD_SHA_CAP`), and a word is read once per event. So one held report costs at most 8 × 4 = 32 reads per event, and an event at most 2 + 6 + 32 × (held reports).
+- Two reads added, both only while a report is held (coordinator, 2026-11-12 23:49 CST):
+  - At the ask: when the PR's head branch is known, 2 `git rev-parse` for its tips, and per named head of a pending report 1 `git rev-parse` plus up to 2 `git merge-base --is-ancestor`, to choose the moved-head text (`_head_moved`). A push that passes reads none of these.
+  - At a posted review log: one `git merge-base --is-ancestor` per named head of a held round report, only when the log holds a line of that report's role and round at another head (`_RecordLines.supersedes`).
 - No timer, no file, no long-lived process.
 
 ## Risks and notes

@@ -1587,6 +1587,13 @@ REVIEW_LOG_REASON = (
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
     "GitHub MCP comment tool, then push. (decision push-needs-review-log)"
 )
+REVIEW_LOG_MOVED_REASON = (
+    "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "  # glossary-ok: the decision slug, a literal
+    "reviewed, and the pull request's live head has moved past that head, so its review log can no longer be "
+    "posted. Post a fresh round at the live head: review the live head again, render that round with "
+    "`merge <pr> --review-record --head <live sha>`, post it with the GitHub MCP comment tool, then push. "
+    "(decision push-needs-review-log)"
+)
 REVIEW_LOG_FIX_REASON = (
     "push-needs-review-record: the posted review log for this pull request already holds a "
     "`Fix check:` line, "  # glossary-ok: the literal line text the merge tool writes
@@ -1772,6 +1779,7 @@ class _RecordLines:
     def __init__(self, record):
         self.head = record["head"]
         self.rounds = {(role, word, "round", number): self.head for number, role, _, word in record["rounds"]}
+        self.round_lines = [(role, number) for number, role, _, _ in record["rounds"]]
         self.fix = record["fix"]
 
     def __contains__(self, report):
@@ -1786,6 +1794,21 @@ class _RecordLines:
                 return False
             shas = (head,)
         return not heads or any(_same_sha(sha or "", named) for sha in shas for named in heads)
+
+    def supersedes(self, report, where):
+        """True when this log, posted after a round `report` that names its reviewed head, holds a line of the
+        report's role and round (any verdict) at a head that is a strict descendant of a head the report names:
+        the lane re-reviewed the moved head, so the report's own record can no longer be posted. A round line at
+        another head, a report with no named head, no checkout, and any git failure give False (the ask stays).
+        Reads: one `git merge-base --is-ancestor` per named head, only after the report found no matching line."""
+        role, _, kind, number, heads = report
+        if kind != "round" or not heads or not where:
+            return False
+        if not any(line[:2] == (role, number) for line in self.round_lines):
+            return False
+        if any(_same_sha(self.head, named) for named in heads):
+            return False
+        return any(_ancestor(where, named, self.head) is True for named in heads)
 
 
 def _commit_of(where, ref):
@@ -1821,6 +1844,32 @@ def _candidate_counts(where, word, tips, main):
     return any(_ancestor(where, sha, tip) is not False for tip in tips)
 
 
+def _head_tips(where, head):
+    """The commits the PR head branch `head` names in the checkout `where`: the local branch and `origin/<head>`,
+    each when it resolves, distinct. Empty when `head` is None. Reads: 2 `git rev-parse`."""
+    tips = []
+    for ref in ("refs/heads/" + head, "refs/remotes/origin/" + head) if head else ():
+        tip = _commit_of(where, ref)
+        if tip and tip not in tips:
+            tips.append(tip)
+    return tips
+
+
+def _head_moved(where, head, named):
+    """True when a report's reviewed head (one of the shas in `named`) resolves to a commit that is an ancestor of,
+    and not equal to, a tip of the PR head branch `head`: the head moved on after the review. False on any
+    unknown (no checkout, no head, an unresolvable sha). Reads: 2 `rev-parse` for the tips, then per named head 1
+    `rev-parse` and up to 2 `merge-base --is-ancestor`."""
+    if not where or not head or not named:
+        return False
+    tips = _head_tips(where, head)
+    for word in named:
+        sha = _commit_of(where, word)
+        if sha and sha not in tips and any(_ancestor(where, sha, tip) is True for tip in tips):
+            return True
+    return False
+
+
 def _held_counts(held, head, where):
     """The held reports (tuples ending in their sha candidates) that count for a PR whose head branch is `head`
     (None: unknown), read in the checkout `where`, as (role, word, kind, number). A report counts when one of its
@@ -1832,11 +1881,7 @@ def _held_counts(held, head, where):
         return []
     if not where:
         return [report[:-1] for report in held]
-    tips = []
-    for ref in ("refs/heads/" + head, "refs/remotes/origin/" + head) if head else ():
-        tip = _commit_of(where, ref)
-        if tip and tip not in tips:
-            tips.append(tip)
+    tips = _head_tips(where, head)
     main = guard_core.read_default_base(where, "origin")[0]
     seen, counted = {}, []
     for report in held:
@@ -1971,6 +2016,7 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
         merge = merge_module()
         if merge is None:
             return "", ""
+        live = None   # the head branch of the latest PR-opening call that named one
         known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose review log holds a `Fix check:` line
         early = []   # reports read before any PR was known, each ending in its sha candidates
         for event in events:
@@ -1978,6 +2024,7 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
                 known = True
                 if event[1] is not None and event[2]:
                     heads[event[1]] = event[2]
+                live = event[2] or live
                 counted = _held_counts(early, event[2], where)
                 pending += [report + ((),) for report in counted]   # a held report names no head to match
                 early = [report for report in early if report[:-1] not in counted]   # held for a later PR
@@ -2001,13 +2048,14 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
                 held = _RecordLines(record)
                 if record["fix"]:
                     fixed.append(record["n"])
-                pending = [report for report in pending if report not in held]
+                pending = [report for report in pending if report not in held and not held.supersedes(report, where)]
         for number in fixed:   # before the pending ask: a denied push stays denied while a report waits
             if number in heads:
                 if heads[number] in destinations():
                     return "push to the head branch of PR %d, fix verifier recorded" % number, REVIEW_LOG_FIX_REASON
         if pending:
-            return "%s %s %s report, no posted review log" % pending[0][:3], REVIEW_LOG_REASON
+            moved = any(_head_moved(where, live, report[4]) for report in pending)
+            return "%s %s %s report, no posted review log" % pending[0][:3], REVIEW_LOG_MOVED_REASON if moved else REVIEW_LOG_REASON
     except Exception:
         pass
     return "", ""
