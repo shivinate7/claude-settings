@@ -43,7 +43,7 @@ def oj_item(**over):
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
-    return {k: v for k, v in item.items() if v is not None}
+    return with_shown({k: v for k, v in item.items() if v is not None})
 
 
 def oj(name, expected, item, rule=OJ_RULE, **extra):
@@ -62,7 +62,7 @@ def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
 
 
 def oj_write(data, op="set", collection="items"):
-    return {"op": op, "collection": collection, "doc_id": OJ_DOC, "data": data}
+    return {"op": op, "collection": collection, "doc_id": OJ_DOC, "data": with_shown(data)}
 
 
 def oj_batch(name, expected, writes, **extra):
@@ -235,9 +235,9 @@ os.makedirs(os.path.join(ROOT, "oj"), exist_ok=True)
 OJ_FILE_BAD = os.path.join(ROOT, "oj", "bad.json")
 OJ_FILE_GOOD = os.path.join(ROOT, "oj", "good.json")
 with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
-    json.dump(oj_item(), _f)
+    json.dump(with_shown(oj_item()), _f)
 with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
-    json.dump(oj_item(context=OJ_GOOD), _f)
+    json.dump(with_shown(oj_item(context=OJ_GOOD)), _f)
 oj("file_path data with no form lines is denied", "deny", None, file_path=OJ_FILE_BAD)
 oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_GOOD)
 

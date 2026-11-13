@@ -25,7 +25,7 @@ def up_item(**over):
 
 
 def up(name, expected, item, action="set", **extra):
-    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=item)
+    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=with_shown(item))
     kw.update(extra)
     add("uniform pick: " + name, expected, "uniform-pick" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})

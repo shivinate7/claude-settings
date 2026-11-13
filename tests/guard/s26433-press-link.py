@@ -39,7 +39,7 @@ def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
     An item of None sends no `data`, as a str_replace does."""
     kw = dict(action=action, collection="items", doc_id=doc_id)
     if item is not None:
-        kw["data"] = item
+        kw["data"] = with_shown(item)
     kw.update(extra)
     add(name, expected, rule if expected == "deny" else None, tool="ArtifactData", cwd=PQ_REPO,
         **{"url": PQ_URL, **kw})

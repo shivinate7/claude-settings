@@ -2,9 +2,11 @@
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
+import ast
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -2127,6 +2129,162 @@ class UntouchedInLivePhase(UpkeepFixture):
                                  "the unreadable step is listed, and the fresh active step is not")
 
 
+class LiveStatusPhase(UpkeepFixture):
+    """A phase is live when it holds an open step whose status is in build.LIVE_STATUS (doing, and the legacy active).
+    The two rows, `untouched 5 days in a live phase` (updatedAt STALE_DAYS old or more) and `no note in a live phase`
+    (an empty note), read the open steps of a live phase whose status is todo, ready, queued or live. A step with no
+    phase never makes a phase live and is never listed. A phase holding only blocked, queued or ready steps is not live."""
+
+    STALE = "untouched 5 days in a live phase"
+    EMPTY = "no note in a live phase"
+
+    def ten_days_ago(self):
+        return iso_ago(10 * 24 * 60)
+
+    def stale_and_empty(self):
+        """((count, sorted entries) of the stale row, the same of the empty row), from one build of main with no --live file."""
+        _, out = self.build_from_main()
+        stale_count, stale = self.row(out, self.STALE)
+        empty_count, empty = self.row(out, self.EMPTY)
+        return (stale_count, self.entries(stale)), (empty_count, self.entries(empty))
+
+    def test_a_phase_holding_a_doing_step_is_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        self.commit_step("later-todo", status="todo", phase="later", note="", updatedAt=self.ten_days_ago(), order=4)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]),
+                         "build holds a doing step, so it is live and its ready step, untouched 10 days, is listed")
+        self.assertEqual(empty, (1, ["build-todo"]),
+                         "build is live, so its empty todo step is listed; later is not live, so later-todo is in neither row")
+
+    def test_a_phase_holding_only_blocked_or_queued_steps_is_not_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("stuck-blocked", status="blocked", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=3)
+        self.commit_step("waiting-queued", status="queued", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
+        (_, stale), (_, empty) = self.stale_and_empty()
+        self.assertIn("build-ready", stale, "scope first: build holds a doing step, so its ready step is listed")
+        self.assertNotIn("stuck-blocked", stale + empty, "stuck holds only a blocked step, so it is not live")
+        self.assertNotIn("waiting-queued", stale + empty, "waiting holds only a queued step, so it is not live")
+
+    def test_a_legacy_active_step_still_makes_its_phase_live(self):
+        # A legacy active step still makes its phase live, which the upkeep rows in this file depend on.
+        self.commit_step("legacy-active", status="active", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]), "an active step makes build live, so its ready step is listed")
+        self.assertEqual(empty, (1, ["build-todo"]), "an active step makes build live, so its empty todo step is listed")
+
+    def test_live_status_is_exactly_doing_and_active(self):
+        self.assertTrue(hasattr(build, "LIVE_STATUS"),
+                        "build has no LIVE_STATUS, so upkeep spells its live statuses out")
+        self.assertEqual(tuple(build.LIVE_STATUS), ("doing", "active"),
+                         "LIVE_STATUS holds doing and the legacy active; done, ready and todo are not live")
+        unknown = [s for s in build.LIVE_STATUS if s not in build.KNOWN_STATUS]
+        self.assertEqual(unknown, [], "each LIVE_STATUS entry is in KNOWN_STATUS")
+
+    def test_upkeep_spells_no_status_literal_of_its_own(self):
+        # Any status word in upkeep's code is a second spelling, so the check reads each string constant against
+        # build.KNOWN_STATUS, the one home of the status words.
+        tree = ast.parse(inspect.getsource(build.upkeep))
+        literal = sorted(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value in build.KNOWN_STATUS)
+        self.assertEqual(literal, [], "upkeep spells a status word itself, at these lines of its source; "
+                                      "it must read the status constants in build")
+
+    def test_thirty_stale_steps_in_a_live_phase_are_all_listed(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        ids = sorted("ready-%02d" % i for i in range(30))
+        for n, sid in enumerate(ids, start=2):
+            self.commit_step(sid, status="ready", phase="build", note="Parked for a lane.",
+                             updatedAt=self.ten_days_ago(), order=n)
+        (count, stale), _ = self.stale_and_empty()
+        self.assertEqual(count, 30, "all 30 stale ready steps in build are counted")
+        self.assertEqual(stale, ids, "the row lists all 30, with no cut-off for a long list")
+
+    def test_folded_and_blocked_steps_are_read_by_neither_row_and_queued_is_read_like_todo(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-folded", status="folded", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-blocked", status="blocked", phase="build", note="", updatedAt=self.ten_days_ago(), order=3)
+        self.commit_step("build-queued", status="queued", phase="build", note="", updatedAt=self.ten_days_ago(), order=4)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=5)
+        (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
+        self.assertIn("build-todo", stale, "scope first: build is live, so its todo step, untouched 10 days, is listed")
+        self.assertEqual((stale_count, stale), (2, ["build-queued", "build-todo"]),
+                         "the stale row reads todo, ready, queued and live steps, so folded and blocked are not listed")
+        self.assertEqual((empty_count, empty), (2, ["build-queued", "build-todo"]),
+                         "the empty row reads todo, ready, queued and live steps, so folded and blocked are not listed")
+
+    def test_a_step_with_no_phase_makes_no_phase_live_and_is_never_listed(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        for name, phase in (("absent", _ABSENT), ("null", None)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("nophase-doing", status="doing", phase=phase, note="Working.", updatedAt=iso_ago(5), order=3)
+                self.commit_step("nophase-todo", status="todo", phase=phase, note="", updatedAt=self.ten_days_ago(), order=4)
+                (_, stale), (_, empty) = self.stale_and_empty()
+                self.assertIn("build-ready", stale, "scope first: build is live, so its ready step, untouched 10 days, is listed")
+                self.assertNotIn("nophase-todo", stale, "a step with no phase is never listed in the stale row")
+                self.assertNotIn("nophase-todo", empty, "a step with no phase is never listed in the empty row")
+
+    def test_a_doing_step_and_an_active_step_are_listed_in_both_rows(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="", updatedAt=self.ten_days_ago(), order=1)
+        self.commit_step("legacy-active", status="active", phase="legacy", note="", updatedAt=self.ten_days_ago(), order=2)
+        (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
+        self.assertEqual((stale_count, stale), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the stale row")
+        self.assertEqual((empty_count, empty), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the empty row")
+
+    def test_a_phase_holding_only_a_ready_step_is_not_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("ready-only", status="ready", phase="ready-only", note="", updatedAt=self.ten_days_ago(), order=3)
+        (_, stale), (_, empty) = self.stale_and_empty()
+        self.assertIn("build-todo", empty, "scope first: build is live, so its empty todo step is listed")
+        self.assertEqual(stale, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
+        self.assertEqual(empty, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
+
+    def test_blocked_queued_and_folded_are_known_statuses(self):
+        missing = [s for s in ("blocked", "queued", "folded") if s not in build.KNOWN_STATUS]
+        self.assertEqual(missing, [], "KNOWN_STATUS lacks these statuses, so upkeep reports a step in one as unknown")
+
+    def test_blocked_queued_and_folded_steps_are_not_unknown_status_entries(self):
+        self.commit_step("c-waiting", status="waiting", order=1)  # an unknown status is still listed
+        for order, status in enumerate(("blocked", "queued", "folded"), start=2):
+            self.commit_step("c-" + status, status=status, order=order)
+        self.publish(sessions=[])
+        _, detail = self.row(self.out_with_live(), StaleInProgress.ROW)
+        self.assertIn('c-waiting (unknown status "waiting")', self.entries(detail),
+                      "scope first: the row lists a step with an unknown status")
+        self.assertEqual(self.entries(detail), ['c-waiting (unknown status "waiting")'],
+                         "blocked, queued and folded are known statuses, so the row does not list them as unknown")
+
+    def test_build_spells_the_live_statuses_only_in_live_status(self):
+        path = HERE / "build.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        home = set()  # the nodes of the LIVE_STATUS assignment, the one place the two words are listed together
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LIVE_STATUS" for t in node.targets):
+                home.update(id(n) for n in ast.walk(node.value))
+        words = ("doing", "active")
+        lists = sorted(n.lineno for n in ast.walk(tree)
+                       if isinstance(n, (ast.Tuple, ast.List, ast.Set)) and id(n) not in home
+                       and all(w in {e.value for e in n.elts if isinstance(e, ast.Constant)} for w in words))
+        compares = sorted(n.lineno for n in ast.walk(tree)
+                          if isinstance(n, ast.Compare) and any(isinstance(op, ast.Eq) for op in n.ops)
+                          and any(isinstance(x, ast.Constant) and x.value in words for x in [n.left, *n.comparators]))
+        self.assertEqual(lists, [], "a tuple or list holds both doing and active at these lines of build.py, outside LIVE_STATUS")
+        self.assertEqual(compares, [], "an == comparison with doing or active is at these lines of build.py")
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
@@ -2842,8 +3000,11 @@ class WaitOnClosedPull(UpkeepFixture):
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
     with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
-    12 h before the live read, when no live session names its step. An entry reads `#<number> (<branch or title>)`,
-    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone."""
+    12 h before the live read, when no live session names its step, and the runner's list does not name it (`held`
+    true) and no review log is posted (`reviewLog` true). An entry reads `#<number> (<branch or title>)`,
+    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone. A held
+    draft reads no entry at all, so its missing createdAt is not an unknown entry. A `held` or `reviewLog` that is
+    not a JSON bool makes the pull row skipped, which reads the row unknown."""
 
     READY = "ready todo steps"
     DRAFT = "draft PRs over 12 h with no live lane"
@@ -2946,6 +3107,59 @@ class ReadyAndDraftRows(UpkeepFixture):
                 count, detail = self.row(self.out_with_live(), self.DRAFT)
                 self.assertEqual((count, self.entries(detail)),
                                  (2, ["#1000 (lone-draft)", "unknown (#998 has no createdAt)"]))
+
+    def test_draft_with_a_posted_review_log_is_not_listed(self):
+        # The #2818 shape: lane lane-ruleset-read, not the step id, and no live session names merge-reads-ruleset.
+        # reviewLog true is the only mark. lone-draft is the control.
+        self.commit_step("merge-reads-ruleset", status="doing")
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), reviewLog=True),
+            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
+                         "a draft whose review log is posted is not listed")
+
+    def test_draft_the_runner_holds_is_not_listed_without_a_review_log(self):
+        # The same shape as the #2818 case, with held true and no review log. lone-draft is the control.
+        self.commit_step("merge-reads-ruleset", status="doing")
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), held=True),
+            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
+                         "a draft the runner's list names (held true) is not listed")
+
+    def test_orphan_draft_and_false_flags_are_still_listed(self):
+        # The false alarm control: no key, no lane, over 12 h, so listed. held false and reviewLog false name nothing.
+        self.publish(sessions=[], pulls=[
+            self.draft(1001, "orphan-draft", self.created_before(780)),
+            dict(self.draft(1002, "held-false", self.created_before(780)), held=False),
+            dict(self.draft(1003, "review-false", self.created_before(780)), reviewLog=False)])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)),
+                         (3, ["#1001 (orphan-draft)", "#1002 (held-false)", "#1003 (review-false)"]),
+                         "a draft with no mark, or with held or reviewLog false, is listed")
+
+    def test_non_bool_held_or_review_log_skips_the_pull_row(self):
+        # A JSON string or number is a wrong shape. The pull row is skipped, so the row reads unknown and lists nothing.
+        for key in ("held", "reviewLog"):
+            for value in ("yes", 1):
+                with self.subTest(key=key, value=value):
+                    self.publish(sessions=[], pulls=[
+                        dict(self.draft(1001, "lone-draft", self.created_before(780)), **{key: value}),
+                        self.draft(1002, "other-draft", self.created_before(780))])
+                    count, detail = self.row(self.out_with_live(), self.DRAFT)
+                    self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
+                                     "a %s that is not a JSON bool skips its pull row" % key)
+
+    def test_held_draft_with_no_created_at_is_not_an_unknown_entry(self):
+        # held skips the pull before the createdAt check, so only the control lone-draft is listed.
+        self.publish(sessions=[], pulls=[
+            dict(self.draft(998, "held-no-date", None), held=True),
+            self.draft(1000, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1000 (lone-draft)"]),
+                         "a held draft with no createdAt reads no unknown entry")
 
     def test_no_live_file_reads_the_draft_row_unknown(self):
         _, out = self.build_from_main()
@@ -3858,6 +4072,9 @@ class IdleLanes(UpkeepFixture):
     never an empty list. Each negative case shares its live file with a listed control, so an empty row cannot pass."""
 
     ROW = "lanes to archive"
+    # The hold line for a lane a doing step still holds: the step id(s), then the way out, then the lane. Pinned here and
+    # in merge/test_idle_lanes.py, the CLI's copy of the same line.
+    DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
     def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
@@ -3890,15 +4107,20 @@ class IdleLanes(UpkeepFixture):
         count, detail = self.row(out, self.ROW)
         return count, self.entries(detail)
 
+    def steps_and_marks(self):
+        """The record's steps and the landed marks main gives them, read as the build reads them for idle_lanes."""
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        return steps, marks
+
     def idle_direct(self):
         """build.idle_lanes on the fixture's live file, with the steps, marks and repo name the build reads."""
         fn = getattr(build, "idle_lanes", None)
         if fn is None:
             self.fail("build.idle_lanes is absent: no function names the lanes to archive")
-        source, why = build.record_source(self.repo, "roadmap")
-        self.assertIsNotNone(source, why)
-        steps = build.load(source)["steps"]
-        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        steps, marks = self.steps_and_marks()
         work = build.live_work(str(self.live), steps, self.SLUG)
         return fn(work, steps, marks, self.SLUG, self.repo)
 
@@ -3910,6 +4132,24 @@ class IdleLanes(UpkeepFixture):
     @staticmethod
     def named(entries, sid):
         return any(sid in entry for entry in entries)
+
+    def reported(self):
+        """build.idle_lanes_report on the fixture's live file: the entries `merge --idle-lanes` prints, unjoined."""
+        return build.idle_lanes_report(self.repo, str(self.live))
+
+    def line_for(self, entries, sid):
+        """The one entry of lane `sid`: its archive line `<sid> (...)`, or its hold line, which ends `; lane <sid>)`."""
+        found = [e for e in entries if e.startswith(sid + " (") or e.endswith("; lane %s)" % sid)]
+        self.assertEqual(len(found), 1, "lane %s has %d lines, not one: %r" % (sid, len(found), entries))
+        return found[0]
+
+    def assert_held(self, line, sid):
+        """A per-lane verdict that cannot archive reads `hold (<why>; lane <sid>)`."""
+        self.assertTrue(line.startswith("hold (") and line.endswith("; lane %s)" % sid), "not a hold line: %r" % (line,))
+
+    def assert_no_unknown_line(self, entries):
+        """`unknown (` is the form for a read the whole list cannot make. A per-lane reason never reads that way."""
+        self.assertFalse([e for e in entries if e.startswith("unknown (")], "a per-lane reason reads unknown: %r" % (entries,))
 
     def test_control_the_live_file_builds_and_an_existing_upkeep_row_reads(self):
         # Green on the old code too: the fixture builds with a live file, and a row that exists now reads. So the red
@@ -4019,14 +4259,22 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
-    def test_lane_with_no_cs_step_is_never_listed(self):
+    def test_lane_with_no_cs_step_is_held_with_its_reason_and_never_listed(self):
+        # A completed lane with no cs-step tag is held, and the hold names the missing tag. A working lane with no step is
+        # not idle, so it reads no line. session_a is the listed control.
         self.land({"c1": {"status": "done", "order": 1}})
         no_step = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO,
                               status_bucket=BUCKET_COMPLETED)
-        self.publish(sessions=[no_step, self.lane("session_a", "c1")])
-        count, entries = self.archive()
-        self.assertFalse(self.named(entries, "session_nostep"), entries)
-        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+        busy = session_row("session_busy", "SESSION_STATUS_RUNNING", "cs-build:lane", self.REPO,
+                           status_bucket=BUCKET_WORKING)
+        self.publish(sessions=[no_step, busy, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_nostep")
+        self.assert_held(line, "session_nostep")
+        self.assertIn("no cs-step tag", line)
+        self.assertEqual([e for e in entries if "session_busy" in e], [], "a working lane with no step got a line: %r" % (entries,))
+        self.assert_no_unknown_line(entries)
 
     def test_session_without_the_lane_tag_is_ignored(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
@@ -4043,15 +4291,18 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
-    def test_step_id_not_on_the_record_branch_reads_the_lane_unknown(self):
+    def test_step_id_not_on_the_record_branch_with_no_trailer_holds_the_lane_and_is_never_unknown(self):
+        # No Step trailer on main and no other repo tag, so the step cannot be shown landed. The hold names the step and
+        # the missing trailer. session_a is the listed control.
         self.land({"c1": {"status": "done", "order": 1}})
-        self.publish(sessions=[self.lane("session_ghost", "ghost"), self.lane("session_a", "c1")])
-        count, entries = self.archive()
-        unknown = [entry for entry in entries if "unknown (" in entry]
-        self.assertEqual(count, 2, entries)
-        self.assertEqual(len(unknown), 1, entries)
-        self.assertIn("step ghost not on the record branch", unknown[0])
-        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("ghost", line)
+        self.assertIn("no Step trailer on main", line)
+        self.assert_no_unknown_line(entries)
 
     def test_stale_live_read_is_one_unknown_entry_and_no_lane_is_listed(self):
         self.land({"c1": {"status": "done", "order": 1}})
@@ -4106,6 +4357,100 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual(count, 32)
         self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in range(1, 33)))
+
+    def test_absent_step_with_a_step_trailer_on_main_is_landed_and_its_lane_is_listed(self):
+        # The step is not on the record branch, and a Step trailer on main names it, so the step reads as landed.
+        # session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assert_no_unknown_line(entries)
+
+    def test_absent_step_with_a_trailer_held_by_an_open_pull_has_no_line(self):
+        # A lane that waits on an open pull reads no line, whether or not its step has a trailer. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")],
+                     pulls=[{"number": 61, "title": "lane ghost", "branch": "lane/ghost"}])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual([e for e in entries if "session_orphan" in e], [],
+                         "a lane held by an open pull got a line: %r" % (entries,))
+        self.assert_no_unknown_line(entries)
+
+    def test_absent_step_with_another_repo_tag_holds_the_lane_and_names_that_tag(self):
+        # No Step trailer on main, and the lane also carries another repo's cs-repo tag. The hold names that tag.
+        # session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        other = session_row("session_orphan", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:ghost", self.REPO,
+                            "cs-repo:owner/other", status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[other, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("cs-repo:owner/other", line)
+        self.assert_no_unknown_line(entries)
+
+    def test_absent_step_with_a_trailer_and_another_repo_tag_is_still_listed(self):
+        # The other repo's tag holds a lane only when no Step trailer on main names its step. The trailer is the positive
+        # proof here, so the lane is listed. session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        other = session_row("session_orphan", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:ghost", self.REPO,
+                            "cs-repo:owner/other", status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[other, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assert_no_unknown_line(entries)
+
+    def test_lanes_to_archive_row_lists_a_trailer_landed_lane_and_holds_an_absent_step_lane(self):
+        # The row prints the list merge --idle-lanes prints, so its raw detail carries the archive line and the hold
+        # line. The detail is read raw: a hold reason is not split on the row's ", " joiner. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("gone")
+        self.publish(sessions=[self.lane("session_landed", "gone"), self.lane("session_orphan", "ghost"),
+                               self.lane("session_a", "c1")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        _, detail = self.row(out, self.ROW)
+        self.assertIn("session_a (c1; topic -)", detail, out)
+        self.assertIn("session_landed (gone; topic -)", detail, out)
+        self.assertIn("hold (", detail, out)
+        self.assertIn("; lane session_orphan)", detail, out)
+        self.assertNotIn("unknown (", detail, out)
+
+    def test_empty_record_reads_one_whole_read_unknown_and_holds_no_lane(self):
+        # A record branch with no step files cannot judge any lane, so the whole list reads one unknown entry. The lane
+        # names cs-step:x, which the per-lane reading holds. The scope check runs first: the record has no step file.
+        git(self.repo, "rm", "-rq", "roadmap/data/steps")
+        git(self.repo, "commit", "-q", "-m", "drop every step")
+        self.assertEqual(list((self.data / "steps").glob("*.json")), [], "the record still has step files")
+        self.publish(sessions=[self.lane("session_x", "x")])
+        entries = self.reported()
+        self.assertEqual(entries, ["unknown (the record branch has no steps)"], entries)
+
+    def test_failed_second_trailer_read_reads_one_whole_read_unknown_and_no_hold(self):
+        # landed_marks reads the Step trailers once, and that read succeeds. The lane's absent step makes idle_lanes read
+        # them again, and that read fails. The list cannot be judged, so it is one whole-read unknown, not a hold on the lane.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_orphan", "ghost")])
+        real = build.step_trailers
+        reads = []
+
+        def second_read_fails(repo, ref):
+            reads.append(ref)
+            return real(repo, ref) if len(reads) == 1 else None
+
+        with mock.patch.object(build, "step_trailers", side_effect=second_read_fails):
+            entries = self.reported()
+        self.assertGreaterEqual(len(reads), 2, "the Step trailers were read %d time(s), so no second read ran" % len(reads))
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown (the Step trailers on"), entries)
+        self.assertEqual([e for e in entries if e.startswith("hold (")], [], entries)
 
     def test_only_a_closed_page_item_releases_its_lane(self):
         # The waiting page's statuses are open and closed (skill waiting-page, the item fields). An answered item is
@@ -4296,6 +4641,199 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+    def test_completed_lane_with_a_doing_step_under_it_is_held_not_archived(self):
+        # c1 is the lane's own step, landed. c2 is still doing and names this lane, so nothing else owns it: the lane reads
+        # a hold line that names c2, and no archive line. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), "session_a", "scope: c2 does not name session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 "),
+                        "a completed lane with a doing step still under it was archived, not held: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2", "session_a"), "session_b (c3; topic -)"],
+                         "the doing-step hold line is not the pinned text")
+
+    def test_completed_lane_with_an_active_step_under_it_is_held_not_archived(self):
+        # The same shape with status active. The hold wording is the spec's one line, so it still reads "still doing".
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "active", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual((steps["c2"].get("status"), steps["c2"].get("lane")), ("active", "session_a"),
+                         "scope: c2 is not an active step under session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still open")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 "),
+                        "a completed lane with an active step still under it was archived, not held: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2", "session_a"), "session_b (c3; topic -)"],
+                         "the doing-step hold line is not the pinned text")
+
+    def test_two_doing_steps_under_a_completed_lane_are_one_hold_line_naming_both_sorted(self):
+        # c2 and c3 are doing under session_a, and their order fields run the other way, so the hold line must sort by
+        # step id, not by order. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 3, "lane": "session_a"},
+                   "c3": {"status": "doing", "order": 2, "lane": "session_a"}, "c4": {"status": "done", "order": 4}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c4")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual([k for k in sorted(steps) if steps[k].get("lane") == "session_a" and k not in marks], ["c2", "c3"],
+                         "scope: the two doing steps under session_a are not both open")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 c3 "),
+                        "two doing steps under a completed lane did not read as one sorted hold line: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2 c3", "session_a"), "session_b (c4; topic -)"],
+                         "the doing-step hold line is not the pinned text")
+
+    def test_doing_step_under_another_session_does_not_hold_this_lane(self):
+        # c2 is doing under session_other, which has no live row here. session_a is archived as it is today.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_other"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), "session_other", "scope: c2 does not name session_other")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so the lane is not held by a landed step")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a doing step under another session changed this lane's archive line")
+
+    def test_completed_lane_with_no_doing_step_under_it_is_archived_unchanged(self):
+        # c2 names this lane and is done, not doing, so no step is still open under it. session_a is archived as today.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), "done", "scope: c2 is not done, so it is not the control")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a done step under a completed lane changed its archive line")
+
+    def test_doing_step_under_a_lane_landed_by_a_step_trailer_on_main_does_not_hold_it(self):
+        # c2 still reads doing on the record, but a Step trailer on main lands it, so it is not still open under the lane.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"}})
+        self.trailer_on_main("c2")
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertIn("c2", marks, "scope: the Step trailer on main did not land c2")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a doing step that a Step trailer on main landed still held its lane")
+
+    def test_lane_waiting_on_its_own_step_a_pull_or_an_item_gets_no_line_under_a_doing_step(self):
+        # Each lane waits on one thing: its own step c1 still doing, an open pull on lane/c2, or an open item on c3. Each
+        # has a doing step under it (c1, c4, c5, c6), so a hold check placed before a wait check shows a line here.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1, "lane": "session_own"},
+                   "c2": {"status": "done", "order": 2}, "c3": {"status": "done", "order": 3},
+                   "c4": {"status": "doing", "order": 4, "lane": "session_own"},
+                   "c5": {"status": "doing", "order": 5, "lane": "session_pull"},
+                   "c6": {"status": "doing", "order": 6, "lane": "session_item"},
+                   "c7": {"status": "done", "order": 7}})
+        self.publish(sessions=[self.lane("session_own", "c1"), self.lane("session_pull", "c2"),
+                               self.lane("session_item", "c3"), self.lane("session_b", "c7")],
+                     pulls=[{"number": 61, "title": "lane c2", "branch": "lane/c2"}],
+                     items=[self.item(1, home="step c3", status="open", lane="c3")])
+        steps, marks = self.steps_and_marks()
+        under = {"session_own": ("c1", "c4"), "session_pull": ("c5",), "session_item": ("c6",)}
+        for sid, ks in under.items():
+            for k in ks:
+                self.assertEqual((steps[k].get("lane"), k in marks), (sid, False),
+                                 "scope: %s is not a doing step still open under %s" % (k, sid))
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c7; topic -)", entries)
+        for sid, wait in (("session_own", "its own step c1 still doing"), ("session_pull", "an open pull on lane/c2"),
+                          ("session_item", "an open page item on c3")):
+            with self.subTest(lane=sid, wait=wait):
+                self.assertEqual([e for e in entries if sid in e], [],
+                                 "a lane waiting on %s got a line under its doing steps: %r" % (wait, entries))
+
+    def test_a_done_or_todo_step_under_a_lane_id_does_not_hold_it(self):
+        # c8 is done and c9 is todo, and each names session_a. Only a doing step holds a lane, so session_a is archived as
+        # today. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c8": {"status": "done", "order": 8, "lane": "session_a"},
+                   "c9": {"status": "todo", "order": 9, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual([(steps[k].get("status"), steps[k].get("lane")) for k in ("c8", "c9")],
+                         [("done", "session_a"), ("todo", "session_a")],
+                         "scope: c8 and c9 do not read done and todo under session_a")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
+                         "a done or todo step under session_a changed the lane's archive line")
+
+    def test_doing_step_with_a_padded_lane_id_holds_its_lane(self):
+        # c2 is doing, and its lane field is " session_a" with a leading space. The lane is session_a, so c2 holds it.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": "doing", "order": 2, "lane": " session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), " session_a", "scope: c2 does not carry the padded lane id")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a padded lane id did not hold its lane: %r" % line)
+
+    def test_doing_step_with_a_capitalised_status_holds_its_lane(self):
+        # c2 reads "Doing", capitalised. The status is the word doing in any casing, so c2 holds session_a.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": "Doing", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), "Doing", "scope: c2 does not read Doing")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a capitalised status did not hold its lane: %r" % line)
+
+    def test_doing_step_with_a_padded_status_holds_its_lane(self):
+        # c2 reads " doing " with a space on each side. The status is the word doing with the spaces trimmed, so c2 holds
+        # session_a. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": " doing ", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), " doing ", "scope: c2 does not read \" doing \"")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a padded status did not hold its lane: %r" % line)
+
+    def test_done_or_todo_in_any_casing_under_a_lane_does_not_hold_it(self):
+        # The control for the casing cases. "Done", "DONE", "TODO" and "Todo" are not the word doing, so each names
+        # session_a and holds nothing. session_a is archived as today. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c8": {"status": "Done", "order": 8, "lane": "session_a"},
+                   "c9": {"status": "DONE", "order": 9, "lane": "session_a"},
+                   "c10": {"status": "TODO", "order": 10, "lane": "session_a"},
+                   "c11": {"status": "Todo", "order": 11, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual([(steps[k].get("status"), steps[k].get("lane")) for k in ("c8", "c9", "c10", "c11")],
+                         [("Done", "session_a"), ("DONE", "session_a"), ("TODO", "session_a"), ("Todo", "session_a")],
+                         "scope: the cased done and todo steps do not read under session_a")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
+                         "a done or todo step in another casing changed session_a's archive line")
+
+    def test_the_doing_hold_line_names_the_way_out_as_todo_or_done(self):
+        # A hold a doing step causes must say how the lane is released: set the step's status to todo or done.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual((steps["c2"].get("status"), steps["c2"].get("lane")), ("doing", "session_a"),
+                         "scope: c2 is not a doing step under session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        line = self.line_for(self.idle_direct(), "session_a")
+        self.assert_held(line, "session_a")
+        self.assertIn("set the step's status to todo or done", line,
+                      "the doing-step hold line does not say how to clear it: %r" % line)
 
 
 class SharedTagNames(unittest.TestCase):

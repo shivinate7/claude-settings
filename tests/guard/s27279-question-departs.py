@@ -18,11 +18,11 @@ def qd_item(**over):
             "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
-    return {k: v for k, v in item.items() if v is not None}
+    return with_shown({k: v for k, v in item.items() if v is not None})
 
 
 def qd(name, expected, item, action="set", **extra):
-    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=item)
+    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=with_shown(item))
     kw.update(extra)
     add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})

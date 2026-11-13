@@ -110,6 +110,12 @@ sh("ask-alone: a settings write that names neither cap variable, chained, allows
 sh("ask-alone: a chain of git reads in a worktree allows",
    VCS + " status && " + VCS + " diff --stat", "allow", cwd=GITWT)
 
+# A forced push in a heredoc body is text, even when the file it writes is later formatted by npx. The formatter
+# reads the file and runs nothing in it, so the chain holds no live ask command.
+sh("ask-alone: a heredoc body holding a forced push, written to a file npx formats, chained, allows",
+   "cat > notes.md <<'EOF'\n" + VCS + " push --force origin main\nEOF\nnpx prettier --write notes.md",
+   "allow", cwd=NOGIT)
+
 # (e) A DENY ANYWHERE STILL WINS, in either order: a deny that stands after the ask in the guard's own
 # rule order (kill, env file, a stash push) still prints. The printed reason is the deny rule's own,
 # and never the ask-alone reason.

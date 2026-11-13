@@ -36,12 +36,16 @@ The modes, as the builder implements them. This file is their interface.
   `runpy.run_path`) whose path names `<stem>.py`. The loads are
   found with `ast`, never a grep. A path that a function takes as a parameter counts too: a call of a function defined in
   the same file counts when its argument for that parameter, by position or by keyword, names `<stem>.py`. Calls through
-  an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped. A guard section
+  an attribute, such as `json.load`, are not followed. A path expression (`open`, `shutil.copy*`, `subprocess.run`,
+  `os.path.join`, `Path`, `/`) that names the basename of PATH counts for any PATH, .py or not. A tracked test that fails
+  to parse is skipped, unless it sits beside PATH. A guard section
   file (a `.py` in the folder that `hooks/test_guard.py` reads its sections from) that loads the module counts as a load
   of `hooks/test_guard.py`, which is printed in its place. The section file itself is never printed.
+- `--lint-suites BASE`. It prints each suite that tests a file of `git diff BASE...HEAD`, and each changed suite. A suite
+  reaches a changed file through a module it loads, followed through the imports of that module (LintSuitesChainTests).
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
-`replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
+`replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`, `lint_suites_main`. A case checks for its entry point first and
 fails by name when it is missing. So a red run never reaches the guard campaign that main() runs for an argument it
 does not know.
 
@@ -88,7 +92,8 @@ from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  t
 PY = sys.executable
 CLI_LIMIT = 300  # seconds a mode run may take before its case fails
 KNOWN_DEFECTS_FILE = ".github/known-defects.json"
-ENTRY = {"--changed": "changed_main", "--known-defects": "known_defects_main", "--tests-for": "tests_for_main"}
+ENTRY = {"--changed": "changed_main", "--known-defects": "known_defects_main", "--tests-for": "tests_for_main",
+         "--lint-suites": "lint_suites_main"}
 
 RUN = ""  # this run's folder, made in setUpModule and removed in tearDownModule
 CACHE = {}  # the fixture of a case built once per run, where a case reuses it
@@ -1496,6 +1501,7 @@ TESTS_FOR_BESIDE = {
     "pkg/test_widget.py": "VALUE = 1\n",
     "pkg/test_widget_extra.py": "VALUE = 1\n",
     "pkg/test_widget_also.py": "import widget\n",  # beside and a load: printed once
+    "pkg/test_widget_broken.py": "def broken(:\n",  # beside, and unparsable: printed all the same, as the beside rule is by name
 }
 TESTS_FOR_LOADS = {
     "tests/test_form_import.py": "import widget\n",
@@ -1553,15 +1559,16 @@ TESTS_FOR_MENTIONS = {
     "tests/test_no_wrapper_bare_name.py": wrapper_suite(
         "def load(path, name):", 'BARE = load(os.path.join(HERE, "widget"), "x_under_test")\n'),
     # json.load is an attribute call, not a load of the module. The loader in this file is called with another module.
+    # The name is a bare string, not a path expression: a path expression (open, join) of widget.py is a read of it.
     "tests/test_no_json_load.py": "import json\n" + wrapper_suite(
         "def load(path, name):",
-        'DATA = json.load(open(os.path.join(HERE, "widget.py"), encoding="utf-8"))\n'
+        'DATA = json.load("widget.py")\n'
         'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n'),
     # Two functions share the parameter name `path`. Only the loader is called with another module, so only a
-    # per-function read keeps widget.py out of the loader's path.
+    # per-function read keeps widget.py out of the loader's path. describe gets a bare string: a join of widget.py is a read.
     "tests/test_no_shared_param_name.py": SPEC_HEADER
         + "\n\ndef describe(path):\n    return os.path.basename(path)\n\n\ndef load(path, name):\n" + LOADER_BODY
-        + '\nNAME = describe(os.path.join(HERE, "widget.py"))\n'
+        + '\nNAME = describe("widget.py")\n'
         + 'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n',
     "tests/test_no_prefix.py": "import widget_extra\n",
     "tests/test_broken.py": "import widget\ndef broken(:\n",
@@ -1593,7 +1600,8 @@ def tests_for_fixture():
 class TestsForTests(unittest.TestCase):
     """`--tests-for PATH`. A listed path prints exactly its REPORT_TARGETS suites, with no union. An unlisted .py path
     prints the tests beside it plus each tracked test_*.py in the repository that loads its module by name or by file.
-    Any other unlisted path prints the tests beside it only. A tracked test that fails to parse is skipped."""
+    Any unlisted path also gets each suite that names its basename in a path expression. A tracked test that fails to
+    parse is skipped, unless it sits beside the path."""
 
     def test_a_listed_path_prints_its_report_targets_suites(self):
         targets = dict(mutate_guard.REPORT_TARGETS)
@@ -1663,7 +1671,7 @@ class TestsForTests(unittest.TestCase):
         code, out, err = run_cli(["--tests-for", "pkg/widget.mjs"], cwd=repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(sorted(out.splitlines()), sorted(TESTS_FOR_BESIDE),
-                         "a non-.py path gets the beside suites only, with no loads")
+                         "a non-.py path that no suite names gets the beside suites only, with no loads")
 
     def test_an_unparsable_suite_is_skipped_and_the_command_exits_zero(self):
         repo = tests_for_fixture()
@@ -1756,6 +1764,121 @@ class TestsForTests(unittest.TestCase):
                 self.assertIn(suite, printed[target],
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
 
+    def test_a_path_constant_naming_guard_py_prints_the_suite_that_copies_it(self):
+        target = "hooks/guard.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
+        loader = "hooks/test_wrappers.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^GUARD_PY = os\.path\.join\(HERE, "guard\.py"\)$',
+                         "the fixture: %s binds guard.py to the GUARD_PY path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s copies guard.py by its GUARD_PY path constant, so --tests-for %s must print it" % (loader, target))
+
+    def test_a_path_constant_naming_settings_json_prints_the_suite_that_opens_it(self):
+        target = "settings.json"
+        loader = "hooks/test_wrappers.py"
+        self.assertRegex(show(REPO, "HEAD", loader),
+                         r'(?m)^SETTINGS = .*os\.path\.join\(HERE, "\.\.", "settings\.json"\)$',
+                         "the fixture: %s binds settings.json to the SETTINGS path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s opens settings.json by its SETTINGS path constant, so --tests-for %s must print it" % (loader, target))
+
+    def test_a_path_constant_naming_bin_ci_job_prints_the_suite_that_runs_it(self):
+        target = "bin/ci-job"
+        loader = "lint/test_ci_job.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^CI_JOB = os\.path\.join\(HERE, "\.\.", "bin", "ci-job"\)$',
+                         "the fixture: %s binds bin/ci-job to the CI_JOB path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s runs bin/ci-job by its CI_JOB path constant, so --tests-for %s must print it" % (loader, target))
+
+    def test_a_beside_suite_that_fails_to_parse_is_still_printed(self):
+        repo = tests_for_fixture()
+        self.assertIn("pkg/test_widget_broken.py", git(repo, "ls-files").split("\n"),
+                      "the fixture: the broken suite is tracked")
+        code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn("pkg/test_widget_broken.py", out.splitlines(),
+                      "a suite beside pkg/widget.py is printed by name, though it fails to parse")
+
+    def test_a_non_hooks_file_that_no_suite_names_prints_nothing(self):  # the control for the lint case below
+        repo = tests_for_fixture()
+        code, out, err = run_cli(["--tests-for", "docs/notes.md"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out, "", "no suite sits beside docs/notes.md, and none names it, so nothing is printed")
+
+
+CHAIN_SUITE = "hooks/test_chain.py"  # opens hooks/entry.py by a path constant, so it loads entry.py
+CHAIN_OPENS = ("import os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\nENTRY = os.path.join(HERE, \"entry.py\")\n"
+               "with open(ENTRY, encoding='utf-8') as handle:\n    handle.read()\n")
+CHAIN_LOADS = {"import": "import leaf\n\nVALUE = leaf.V\n",  # entry.py loads leaf.py by an import
+               "importlib": "import importlib\n\nleaf = importlib.import_module(\"leaf\")\n"}  # or by importlib
+
+
+def chain_repo(entry_text, lane):
+    """A repository whose base holds CHAIN_SUITE, hooks/entry.py (`entry_text`) and hooks/leaf.py. The branch `lane` then
+    writes `lane` (path -> text) and commits, so main...HEAD is the files `lane` names."""
+    repo = new_repo()
+    put(repo, {CHAIN_SUITE: CHAIN_OPENS, "hooks/entry.py": entry_text, "hooks/leaf.py": "V = 1\n"})
+    commit(repo, "base")
+    git(repo, "checkout", "-qb", "lane")
+    put(repo, lane)
+    commit(repo, "change")
+    return repo
+
+
+class LintSuitesChainTests(unittest.TestCase):
+    """`--lint-suites BASE` picks a suite that reaches a changed file through a module the suite loads. CHAIN_SUITE opens
+    hooks/entry.py by a path constant, and entry.py loads hooks/leaf.py by an import, or by importlib.import_module. A diff
+    that changes only leaf.py picks the suite (one case per form). A diff that changes entry.py picks it too (the control)."""
+
+    def picked(self, repo):
+        code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        return out.splitlines()
+
+    def changed(self, repo):
+        return git(repo, "diff", "--name-only", "main...HEAD").split("\n")
+
+    def test_a_diff_of_only_a_module_that_a_suite_reaches_by_import_picks_the_suite(self):
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/leaf.py": "V = 2\n"})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: entry.py imports it, and the suite opens entry.py"
+                      % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_that_a_suite_reaches_by_importlib_picks_the_suite(self):
+        repo = chain_repo(CHAIN_LOADS["importlib"], {"hooks/leaf.py": "V = 2\n"})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: entry.py loads it by importlib, and the suite "
+                      "opens entry.py" % CHAIN_SUITE)
+
+    def test_a_diff_that_changes_the_file_the_suite_opens_picks_the_suite(self):  # the control
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/entry.py": CHAIN_LOADS["import"] + "# changed\n"})
+        self.assertEqual(self.changed(repo), ["hooks/entry.py"], "the scope: the diff holds only entry.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo), "--lint-suites must pick %s for a diff of the file it opens" % CHAIN_SUITE)
+
+    def test_a_diff_that_deletes_a_module_that_a_suite_reaches_by_import_picks_the_suite(self):
+        # the control is test_a_diff_of_only_a_module_that_a_suite_reaches_by_import_picks_the_suite: the same fixture, with
+        # leaf.py edited. Here the lane deletes leaf.py, and the unchanged entry.py still imports it.
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/leaf.py": None})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only the deletion of leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff that deletes hooks/leaf.py: entry.py, unchanged, imports it, and the "
+                      "suite opens entry.py" % CHAIN_SUITE)
+
+    def test_a_diff_touching_no_hooks_file_picks_no_suite(self):  # the control: CHAIN_SUITE is a hooks suite in this repository
+        repo = chain_repo(CHAIN_LOADS["import"], {"docs/notes.md": "one\n"})
+        self.assertEqual(self.changed(repo), ["docs/notes.md"], "the scope: the diff holds only a file no hooks suite names")
+        self.assertEqual(self.picked(repo), [],
+                         "--lint-suites must pick no suite for a diff that touches no hooks file, though %s is in the repository"
+                         % CHAIN_SUITE)
+
 
 # GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) gives a guard module its family suites, hooks/test_guard.py::<family>,
 # and the import walk's suites come with them. WALK_SUITES holds those walk suites for each row: the walk of the tracked
@@ -1771,7 +1894,9 @@ WALK_SUITES = {
     "hooks/guard_stream.py": [],
     "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_report_guard_review.py", "lint/test_settings_matcher.py"],
+    # hooks/test_shared_names.py opens guard_merge.py by its path (a path read, so it is a walk suite since the path forms).
+    "hooks/guard_merge.py": ["hooks/test_shared_names.py", "lint/test_hook_catalog.py", "lint/test_report_guard_review.py",
+                             "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
 }

@@ -126,6 +126,67 @@ add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
 add("floor step-up: builder Round 1 of 3 on opus is denied (only round 3 is a standing grant)", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
+# ---- Step-up, a fix verifier (decision agent-model-cap, the reviewer row). A reviewer whose brief's first non-blank
+# line is `Fix check` runs Sonnet, set per spawn, so the step-up refuses it on Haiku or with no model, as it refuses a
+# later-round brief. Sonnet passes; Opus stays under the ceiling. The spelling is typed here, so a rename of the marker
+# constant cannot quietly change what these cases pin. This section loads before the names are read (s30130 and s40805
+# read them), and s40805's fix verifier checks fail if FIX_CHECK_MARKER is renamed. Failure classes: a false allow (a fix
+# verifier on Haiku or with no model runs Haiku); a false refusal (a builder, or a marker not on line one, is refused).
+FIX_VERIFIER = "Fix check"
+FIX_BRIEF = FIX_VERIFIER + ". Re-check the diff."
+FIX_VERIFIER_REASON = "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
+add("floor step-up: reviewer fix verifier with no model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="reviewer", carries=(FIX_VERIFIER_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer fix verifier on haiku is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, model="haiku", subagent_type="reviewer", carries=(FIX_VERIFIER_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer fix verifier on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type="reviewer")
+# Opus is not a step-up grant for a fix verifier: the Opus ceiling refuses it under its own rule, as it does today.
+add("floor step-up: reviewer fix verifier on opus is denied under agent-model-cap, the ceiling as before", "deny",
+    "agent-model-cap", tool="Agent", prompt=FIX_BRIEF, model="opus", subagent_type="reviewer")
+# The marker is a reviewer's: a builder's fix verifier is judged as the same brief without it.
+add("floor step-up: builder fix verifier on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type="builder")
+add("floor step-up: builder fix verifier with no model is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="builder")
+# The marker counts on the first non-blank line, opening it. On line two, or after prose on line one, it is prose.
+add("floor step-up: reviewer with the fix verifier on line two, on haiku, is allowed", "allow",
+    tool="Agent", prompt="Check the diff.\n" + FIX_BRIEF, model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer with prose ahead of the fix verifier on line one, on haiku, is allowed", "allow",
+    tool="Agent", prompt="Re: " + FIX_VERIFIER + " of PR 7. Re-check the diff.", model="haiku", subagent_type="reviewer")
+# The round form of the marker, a round line with the fix words after it, is read by the round row, so that row keeps its reason.
+ROUND_TWO_FIX = "Round 2 of 3 (fix check). Re-check the diff."
+add("floor step-up: reviewer Round 2 of 3 fix verifier with no model is denied, with the round-2 reason", "deny",
+    STEP_UP, tool="Agent", prompt=ROUND_TWO_FIX, subagent_type="reviewer",
+    carries=("Reviewer round 2 runs on Sonnet.",))
+add("floor step-up: reviewer Round 2 of 3 fix verifier on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt=ROUND_TWO_FIX, model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 fix verifier on sonnet is allowed", "allow",
+    tool="Agent", prompt=ROUND_TWO_FIX, model="sonnet", subagent_type="reviewer")
+# The role is matched without case or surrounding space, as role_key reads it (decision agent-model-cap), and a blank
+# model is no model. Failure classes: a false allow (a reviewer spelled `Reviewer` or ` reviewer `, or with a blank
+# model, on a fix verifier or a later-round brief runs Haiku); a false refusal (a padded Sonnet model, or a builder
+# spelled `Builder`, is refused).
+add("floor step-up: reviewer spelled Reviewer, fix verifier with no model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="Reviewer", carries=(FIX_VERIFIER_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer spelled with surrounding spaces, fix verifier with no model is denied, and names Sonnet",
+    "deny", STEP_UP, tool="Agent", prompt=FIX_BRIEF, subagent_type=" reviewer ", carries=(FIX_VERIFIER_REASON,),
+    lacks=("Opus",))
+add("floor step-up: reviewer spelled Reviewer, Round 2 of 3 with no model is denied, with the round-2 reason", "deny",
+    STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="Reviewer",
+    carries=("Reviewer round 2 runs on Sonnet.",))
+add("floor step-up: reviewer fix verifier with a blank model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, model="  ", subagent_type="reviewer", carries=(FIX_VERIFIER_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer spelled Reviewer, fix verifier on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type="Reviewer")
+add("floor step-up: reviewer spelled with surrounding spaces, fix verifier on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type=" reviewer ")
+add("floor step-up: reviewer spelled Reviewer, Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="Reviewer")
+add("floor step-up: reviewer fix verifier with a padded sonnet model is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model=" sonnet ", subagent_type="reviewer")
+add("floor step-up: builder spelled Builder, fix verifier with no model is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="Builder")
 # A Workflow agent() call steps up the same way, read statically. The prompt is the first argument
 # or a `prompt` key. A prompt, model or options object the scan cannot read as plain literals is
 # unseen and passes.
@@ -214,6 +275,23 @@ for _name, _verdict, _script in (
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
+# A literal fix verifier on a Workflow reviewer. The step-up judges a call that names no model (decision agent-model-cap),
+# so the literal form with no model is refused, as the round-2 form is. A brief, a model or an options object the scan
+# cannot read is skipped, so those forms pass.
+FIX_SCRIPT = _step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer'")
+add("floor step-up: Workflow reviewer with a literal fix verifier and no model is denied, as round 2 is", "deny",
+    STEP_UP, tool="Workflow", script=FIX_SCRIPT)
+add("floor step-up: Workflow reviewer with a literal fix verifier on haiku is denied", "deny", STEP_UP,
+    tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: 'haiku'"))
+add("floor step-up: Workflow reviewer with a literal fix verifier on sonnet is allowed", "allow",
+    tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: 'sonnet'"))
+add("floor step-up: Workflow reviewer with a fix verifier in a variable brief and no model is allowed, the static read skips it",
+    "allow", tool="Workflow",
+    script="const brief = '%s. Re-check the diff.';\n" % FIX_VERIFIER + _step_flow("brief", "agentType: 'reviewer'"))
+add("floor step-up: Workflow reviewer with a fix verifier and a model in a variable is allowed, the static read skips it",
+    "allow", tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', model: m"))
+add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
+    tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', ...opts"))
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
 # refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
