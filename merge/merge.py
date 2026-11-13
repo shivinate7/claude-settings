@@ -196,8 +196,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
-sys.path.append(os.path.dirname(ALARM_EVENTS))  # actions/ci-alarm, beside events.json: the failed-run clear and the revert rule live there, and the CI alarm calls them too
-from revert_rule import REVERT_LINE, revert_map, net_reverted  # noqa: E402  the one home of the revert rule (actions/ci-alarm/revert_rule.py); the CI alarm reads it through the API
+
+def revert_rule():
+    """The one home of the revert rule (actions/ci-alarm/revert_rule.py, beside events.json; the CI alarm reads it through the API). Loaded when a read needs it,
+    not at the top, as clear_rule is: a copy of this file alone still loads. A missing file raises ImportError, which base_state reads as unknown and read_lanes' callers as a refused read."""
+    if os.path.dirname(ALARM_EVENTS) not in sys.path:
+        sys.path.append(os.path.dirname(ALARM_EVENTS))
+    import revert_rule as rule
+    return rule
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -1629,6 +1635,7 @@ class Host:
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+            rule = revert_rule()  # loaded here, not at the top: a copy of this file alone still loads, and a missing file is unknown (ImportError, caught below)
             import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
@@ -1668,9 +1675,9 @@ class Host:
                         reverts["recs"] = read_log(self.base_root, "-F", "--grep=This reverts commit", f"origin/{base}")
                     except (ValueError, subprocess.TimeoutExpired, OSError) as e:
                         raise Stop(f"reading the reverts on origin/{base} failed, so the revert clear is unknown (decision no-merge-onto-red-main): {e}")
-                    reverts["undone"] = revert_map(reverts["recs"])
+                    reverts["undone"] = rule.revert_map(reverts["recs"])
                 head = r.get("head_sha")
-                return next((h for h, _, body in reverts["recs"] if head and h != head and head in REVERT_LINE.findall(body) and not net_reverted(reverts["undone"], h)), None)
+                return next((h for h, _, body in reverts["recs"] if head and h != head and head in rule.REVERT_LINE.findall(body) and not rule.net_reverted(reverts["undone"], h)), None)
 
             def reverted(r):  # True, with a line for the green detail, when a live revert of the red run r is on the base
                 rev = revert_of(r)
@@ -2578,8 +2585,9 @@ def read_lanes(wt, base_ref, sha):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
     merge is net-reverted on the batch (net_reverted). A read that fails raises."""
+    rule = revert_rule()
     recs = read_log(wt, f"{base_ref}..{sha}")
-    undone = revert_map(recs)
+    undone = rule.revert_map(recs)
     took = {}  # tip -> the merges that took it in
     for h, parents, _ in recs:
         for t in parents.split()[1:]:
@@ -2592,7 +2600,7 @@ def read_lanes(wt, base_ref, sha):
                              "`git fetch --unshallow`)")
         if not c:
             tips.append(t)
-    return tips, {t for t in tips if all(net_reverted(undone, h) for h in took[t])}
+    return tips, {t for t in tips if all(rule.net_reverted(undone, h) for h in took[t])}
 
 def lane_tips(wt, base_ref, sha):
     """read_lanes, read before the merge. A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""

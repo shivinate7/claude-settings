@@ -12,14 +12,16 @@ a re-run in flight or a failed read; the caller (alarm.sh) does not pass those h
 The API read (command). One `search/commits` read per head, filtered here to the 40-hex revert line (a hit that names the head some
 other way, a short sha, or a sha one digit off is no revert), and one `compare` read per hit, `<hit>...<branch>`: status `ahead` or
 `identical` means the hit is reachable from the branch, `behind` or `diverged` means it is not. Each reachable hit is followed the same
-way for its own revert, so a chain costs one search and one compare per link. Commit search reads the default branch only, so a branch
+way for its own revert, so a chain costs one search and one compare per link. When a commit has several reverters, the OLDEST reachable one by
+commit date is followed, as merge.py's revert_map keeps the oldest of a log read newest first; a missing date or a tie reads unknown. Commit search reads the default branch only, so a branch
 that is not the default usually finds no revert: it alarms and never clears. A reply that is not JSON, has no status, or is a page
 that cuts hits off (`incomplete_results`, or `total_count` above the items) is a failed read.
 
 Command: revert_rule.py --repo OWNER/REPO --branch BRANCH --head SHA. Calls `gh api`. Exit 0 when a live revert lifts the run, 1 when
-none does, 2 on a failed read (unknown, never lifted). Stdlib only: the action runs from a bare action path with no checkout.
+none does, 2 on a failed read or any reply it cannot judge (unknown, never lifted). Stdlib only: the action runs from a bare action path with no checkout.
 """
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -69,8 +71,23 @@ def gh_json(*args):
     return reply
 
 
+def commit_time(item):
+    """-> the commit's committer date (else author date) as an aware datetime, or None when the hit carries none that parses."""
+    commit = item.get("commit")
+    for who in ("committer", "author"):
+        person = commit.get(who) if isinstance(commit, dict) else None
+        stamp = person.get("date") if isinstance(person, dict) else None
+        if isinstance(stamp, str):
+            try:
+                when = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            return when if when.tzinfo else None
+    return None
+
+
 def revert_hits(repo, head):
-    """-> the shas of commits whose message has the revert line for `head`, other than `head`. One search read."""
+    """-> [(sha, committer time or None)] of the commits whose message has the revert line for `head`, other than `head`. One search read."""
     reply = gh_json("-X", "GET", "search/commits", "-f", f'q="This reverts commit {head}" repo:{repo}', "-f", "per_page=100")
     items = reply.get("items")
     if not isinstance(items, list) or reply.get("incomplete_results") or (isinstance(reply.get("total_count"), int) and reply["total_count"] > len(items)):
@@ -78,11 +95,12 @@ def revert_hits(repo, head):
     hits = []
     for it in items:
         sha = it.get("sha") if isinstance(it, dict) else None
-        message = (it.get("commit") or {}).get("message") if isinstance(it, dict) else None
+        commit = it.get("commit") if isinstance(it, dict) else None
+        message = commit.get("message") if isinstance(commit, dict) else None
         if not isinstance(sha, str) or not isinstance(message, str):
             raise Unread(f"the revert search for {head[:9]} gave a hit with no sha or message")
         if sha != head and head in REVERT_LINE.findall(message):
-            hits.append(sha)
+            hits.append((sha, commit_time(it)))
     return hits
 
 
@@ -97,10 +115,23 @@ def reachable(repo, branch, sha):
 
 
 def live_hit(repo, branch, sha, seen):
-    """The first reachable revert of `sha`, or None (one search, one compare per hit)."""
-    for h in revert_hits(repo, sha):
-        if h not in seen and reachable(repo, branch, h):
-            return h
+    """The reachable reverter of `sha` that revert_map would keep, or None (one search, one compare per hit read).
+    merge.py reads `git log` newest first and revert_map lets the later line overwrite, so the OLDEST reachable reverter of a commit wins, whatever
+    order search lists them in. Hits are tried oldest first by committer date, and the first reachable one is the pick. With two or more hits, a hit
+    whose date is missing or does not parse, or a pick whose date ties another reachable hit's, cannot be ordered as git log orders them:
+    unknown (Unread), never a guess. A pick already in `seen` ends the chain, as net_reverted ends it on a cycle."""
+    hits = revert_hits(repo, sha)
+    if len(hits) > 1 and any(when is None for _, when in hits):
+        raise Unread(f"the revert search for {sha[:9]} gave reverters with no usable commit date, so the oldest cannot be told")
+    ordered = sorted(hits, key=lambda h: h[1]) if len(hits) > 1 else hits
+    for i, (h, when) in enumerate(ordered):
+        if not reachable(repo, branch, h):
+            continue
+        if h in seen:
+            return None
+        if any(w == when and reachable(repo, branch, o) for o, w in ordered[i + 1:]):
+            raise Unread(f"two reachable reverters of {sha[:9]} share one commit date, so the oldest cannot be told")
+        return h
     return None
 
 
@@ -108,7 +139,7 @@ def live_revert(repo, branch, head):
     """-> the sha of a live revert of `head` on `branch`, or None. Raises Unread on a failed read.
     Builds `undone` for each reachable revert's chain, then asks net_reverted, as merge.py does with its git log."""
     seen = {head}
-    for first in revert_hits(repo, head):
+    for first, _ in revert_hits(repo, head):
         if first in seen or not reachable(repo, branch, first):
             continue
         undone, link = {}, first
@@ -137,6 +168,9 @@ def main(argv=None):
         return 0 if live_revert(a.repo, a.branch, a.head) else 1
     except Unread as e:
         print(f"revert_rule: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:  # a reply shape or text this rule did not expect is unknown: an escaped exception exits 1, which alarm.sh reads as no revert
+        print(f"revert_rule: unread reply ({type(e).__name__}: {e})", file=sys.stderr)
         return 2
 
 
