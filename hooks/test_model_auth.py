@@ -75,6 +75,8 @@ _spec.loader.exec_module(dw)
 SCRATCH = tss.SCRATCH  # one run folder per run: the Stop harness makes it and removes it at exit
 
 FAKE_TOKEN = "sk-ant-oat01-FAKE"
+KEY_NAME = "ANTHROPIC_API_KEY"
+FAKE_KEY = "sk-ant-api03-FAKE"  # a fake value: a failure names the key's presence, never its value
 UNREADABLE_MARK = b"BYTES-MARKER"
 SETUP = "claude setup-token"
 HOOK_TOKEN_REL = os.path.join("state", "hook-token")
@@ -169,19 +171,26 @@ class Probe:
 
 
 @contextlib.contextmanager
-def scratch_config(name):
-    """Point CLAUDE_CONFIG_DIR at this case's own folder under the run folder, then restore it."""
+def scratch_config(name, parent_key=None):
+    """Point CLAUDE_CONFIG_DIR at this case's own folder under the run folder, and set or clear this
+    process's ANTHROPIC_API_KEY, then restore both. A case that names no key starts with it cleared."""
     cfg = os.path.join(SCRATCH, "config-" + name)
     os.makedirs(cfg, exist_ok=True)
-    prior = os.environ.get("CLAUDE_CONFIG_DIR")
+    keys = ("CLAUDE_CONFIG_DIR", KEY_NAME)
+    prior = {k: os.environ.get(k) for k in keys}
     os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    if parent_key is None:
+        os.environ.pop(KEY_NAME, None)
+    else:
+        os.environ[KEY_NAME] = parent_key
     try:
         yield cfg
     finally:
-        if prior is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = prior
+        for k in keys:
+            if prior[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior[k]
 
 
 def token_file(cfg, data):
@@ -311,6 +320,40 @@ def C3_no_token_and_probe_fails_warns_once_with_the_fix():
     problems += expect(SETUP in text, "the warning does not name %r: %r" % (SETUP, text))
     problems += expect(path in text, "the warning does not name the hook-token path %r: %r" % (path, text))
     problems += expect(STDERR in text, "the warning does not carry the probe error: %r" % text)
+    return problems
+
+
+@case
+def C15_the_fix_line_names_the_api_key_the_judge_uses_when_no_setup_token_is_saved():
+    """C15. no token file and a failed probe: the one fix line names ANTHROPIC_API_KEY. Why: a judge uses that key
+    when no setup token is saved, so an account with only an API key is told the route it can use."""
+    with scratch_config("c15") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        probe = Probe((None, Kinded(FAIL_ERR, "AUTH")))  # an authentication failure: the fix applies
+        text = fn(model_call=probe)
+    if text == "":
+        return problems + ["no token file and the probe failed: auth_check printed nothing"]
+    problems += expect(KEY_NAME in text, "the fix line does not name ANTHROPIC_API_KEY: %r" % text)
+    return problems
+
+
+@case
+def C16_the_fix_line_never_says_the_api_key_is_not_offered():
+    """C16. no token file and a failed probe: the fix line does not say the API key is not offered. Why: that
+    text is false for a judge with no setup token, so it would send the owner away from a working route."""
+    with scratch_config("c16") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        probe = Probe((None, Kinded(FAIL_ERR, "AUTH")))  # an authentication failure: the fix applies
+        text = fn(model_call=probe)
+    if text == "":
+        return problems + ["no token file and the probe failed: auth_check printed nothing"]
+    problems += expect("not offered" not in text, "the fix line still says the API key is not offered: %r" % text)
     return problems
 
 
@@ -487,6 +530,82 @@ def C8_fake_token_reaches_no_stdout_and_no_written_file_but_the_token_file():
             with open(os.path.join(cfg, rel), "rb") as f:
                 if FAKE_TOKEN.encode("utf-8") in f.read():
                     problems.append("the fake token is in the written file %s" % rel)
+    return problems
+
+
+@case
+def C14_a_judge_error_that_holds_the_api_key_keeps_its_text_and_loses_the_key():
+    """C14. no token file, the key in this process, and a judge error that echoes the key: the Stop line keeps
+    the error text around the key, and the key is in no stdout and no written file. Why: the judge holds the key
+    when no token is saved, so the error path must scrub the key as it scrubs the token."""
+    sid = "model-auth-c14"
+    with scratch_config("c14", parent_key=FAKE_KEY) as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        problems += expect(os.environ.get(KEY_NAME) == FAKE_KEY, "scope: this process does not carry the fake key")
+        problems += expect(not os.path.exists(os.path.join(cfg, HOOK_TOKEN_REL)), "scope: a token file is present")
+        if problems:
+            return problems
+        for _ in range(3):
+            invoke_failing(stderr="auth failed for " + FAKE_KEY, session_id=sid)
+        p, msg, out = stop_message(sid)
+    problems += p
+    problems += expect("Model calls: 3 failed in a row" in msg, "no Stop line after three failures")
+    problems += expect("auth failed for" in msg, "the Stop line lost the error text around the key")
+    problems += expect(FAKE_KEY not in msg, "the API key value is in the Stop line")
+    problems += expect(FAKE_KEY not in out, "the API key value is in the Stop output")
+    for rel in files_under(cfg):
+        with open(os.path.join(cfg, rel), "rb") as f:
+            if FAKE_KEY.encode("utf-8") in f.read():
+                problems.append("the API key value is in the written file %s" % rel)
+    return problems
+
+
+@case
+def C17_an_undecodable_token_file_with_the_api_key_set_never_hands_the_call_to_the_key():
+    """C17. an undecodable token file, with ANTHROPIC_API_KEY set in this process: the judge call fails closed
+    (no verdict, no judge start), and the key value is in no judge env, no error text, no Stop output, and no
+    outcome record. Why: the key is a fallback for a judge with no setup token only, so an undecodable token file
+    must never hand the call to the key. Scope: a file that exists and cannot be decoded. A token path that exists
+    but cannot be opened is not covered here."""
+    sid = "model-auth-c17"
+    with scratch_config("c17", parent_key=FAKE_KEY) as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        problems += expect(os.environ.get(KEY_NAME) == FAKE_KEY, "scope: this process does not carry the fake key")
+        token_file(cfg, b"\x80\x81\xfe" + UNREADABLE_MARK)
+        problems += expect(os.path.isfile(os.path.join(cfg, HOOK_TOKEN_REL)), "scope: no token file was written")
+        if problems:
+            return problems
+        judge_envs = []
+
+        def judge_start(argv, *args, **kwargs):
+            judge_envs.append(dict(kwargs.get("env") or {}))
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": json.dumps(OK_VERDICT)}), "")
+
+        with model_run(judge_start):
+            verdict, error = dw.invoke_model("judge this", session_id=sid)
+        text = error or ""
+        problems += expect(verdict is None,
+                           "undecodable token file with the key set: the judge returned a verdict, want none")
+        problems += expect("token file" in text.lower() and "could not be read" in text.lower(),
+                           "undecodable token file with the key set: the error does not say the token file "
+                           "could not be read: %r" % text)
+        problems += expect(UNREADABLE_MARK.decode() not in text, "the error text holds the token file's bytes")
+        problems += expect(FAKE_KEY not in text, "the API key value is in the error text")
+        problems += expect(not judge_envs,
+                           "undecodable token file with the key set: %d judge start(s), want 0" % len(judge_envs))
+        for env in judge_envs:
+            problems += expect(KEY_NAME not in env and FAKE_KEY not in env.values(),
+                               "the API key reached the judge env")
+        p, msg, out = stop_message(sid)
+        problems += p
+        problems += expect("Model calls: 1 failed in a row" in msg, "no Stop line to check for the key: %r" % msg)
+        problems += expect(FAKE_KEY not in out, "the API key value is in the Stop output")
+        record = files_under(cfg, skip=(HOOK_TOKEN_REL,))
+        problems += expect(bool(record), "control: the failed call wrote no outcome record")
+        for rel in record:
+            with open(os.path.join(cfg, rel), "rb") as f:
+                if FAKE_KEY.encode("utf-8") in f.read():
+                    problems.append("the API key value is in the written file %s" % rel)
     return problems
 
 

@@ -4,7 +4,7 @@
 Modes:
 - --auth-check: At session start, checks that a model call can log in. With a token file it does nothing.
   With none it makes one short probe call. It prints one systemMessage line with the fix when that call cannot
-  authenticate (or answers with a login prompt), and says an API key is no route for hook judges. It shows that fix
+  authenticate (or answers with a login prompt), and says a judge uses ANTHROPIC_API_KEY when no setup token is saved and ANTHROPIC_API_KEY is set. It shows that fix
   once per missing token: a later start with no token file prints nothing, and the line returns after a token file
   has been present and is gone, or after a judge call has succeeded. It prints nothing otherwise. One probe costs
   about $0.02 (one cloud sample) and runs at the model's default effort, and runs only when no fix mark is set.
@@ -585,9 +585,9 @@ JUDGE_INSTRUCTIONS = (
 # shape list that can only grow. `JUDGE_ENV_ALLOWLIST` inverts it: the child's environment
 # holds only the named variables the runtime genuinely needs to execute and reach the API
 # host, built fresh, never copied from the parent and never carrying a name this list does
-# not say. A session authenticated by `ANTHROPIC_API_KEY` rather than the OAuth credential
-# file will see the isolated call fail closed, reported as UNKNOWN like any other model-
-# call failure, never silently allowed through with the key attached.
+# not say. `ANTHROPIC_API_KEY` is not on the list: `_judge_isolation` adds it only when the
+# token file holds no token, and a call that cannot authenticate with it fails closed,
+# reported as UNKNOWN like any other model-call failure.
 #
 # WHAT REMAINS. `_judge_isolation`'s `cwd`/`CLAUDE_CONFIG_DIR` is the layer that does not
 # depend on any flag or env entry being right at all: there is no `.claude/settings.json`
@@ -600,12 +600,17 @@ JUDGE_INSTRUCTIONS = (
 # THE TOKEN FILE. The copied credentials file never renews: its access token expires and
 # the child cannot refresh it (measured expiry 2026-09-23). `state/hook-token` in the config
 # directory holds a one-year token. `_hook_token` reads it; the child gets it as
-# `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
-# path. A file that opens but is not text fails closed: no call is made. The
-# parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See docs/decisions/reply-judge-samples-never-refuses.md.
+# `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened (a directory,
+# a permission error) means no token: the child then gets the parent's `ANTHROPIC_API_KEY` when
+# it is set (test K1). With neither, the child falls back to the copied credentials
+# file or the `ANTHROPIC_BASE_URL` host's own auth, and the call goes ahead (test K3); a call
+# that cannot authenticate fails closed, reported as UNKNOWN. A file that opens but is not text
+# fails closed: no call is made. The parent's own env token is never passed (the allowlist stays closed), and
+# `invoke_model` scrubs the token and the key from any error text it returns.
+# See docs/decisions/reply-judge-samples-never-refuses.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 
 class TokenUnreadable(Exception):
@@ -636,8 +641,8 @@ def _hook_token():
 # reach the right host at all; it names a destination, never a secret. Deliberately
 # absent: `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
 # `CLAUDE_CODE_HOST_SESSION_ID`, `CLAUDE_CODE_OAUTH_SCOPES`, and `ANTHROPIC_API_KEY`: the
-# host IPC channel, the session identifier, and a secret this call does not need to do its
-# one job of reading text and returning a verdict.
+# host IPC channel, the session identifier, and a secret that `_judge_isolation` passes only
+# when no setup token is saved.
 JUDGE_ENV_ALLOWLIST = (
     "PATH", "SystemRoot", "windir", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
     "TEMP", "TMP", "ANTHROPIC_BASE_URL",
@@ -647,8 +652,9 @@ JUDGE_ENV_ALLOWLIST = (
 def _judge_isolation():
     """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
     project, holding only a copy of the login credential, and an environment built from
-    `JUDGE_ENV_ALLOWLIST`, plus `TOKEN_ENV` when the token file holds a readable token, never
-    copied from this process's own environment, so
+    `JUDGE_ENV_ALLOWLIST`, plus `TOKEN_ENV` when the token file holds a readable token, else
+    `API_KEY_ENV` from this process's environment when it is set, never any other name copied
+    from this process's own environment, so
     there is nothing here for a tool call to inherit, write into, or signal back to, even
     if one somehow ran, and the call can still authenticate and reach the API host."""
     token = _hook_token()  # first, so a TokenUnreadable leaves no temp dir behind
@@ -661,12 +667,27 @@ def _judge_isolation():
         try:
             shutil.copyfile(creds, os.path.join(config_dir, CREDENTIALS_FILENAME))
         except Exception:
-            pass  # no credential to copy: the call below fails closed, as an auth error
+            pass  # no file copied: a token or key set below still logs in; with neither, the call fails as an auth error
     env = {name: os.environ[name] for name in JUDGE_ENV_ALLOWLIST if name in os.environ}
     env["CLAUDE_CONFIG_DIR"] = config_dir
     if token:
         env[TOKEN_ENV] = token
+    elif os.environ.get(API_KEY_ENV):
+        env[API_KEY_ENV] = os.environ[API_KEY_ENV]
     return root, env
+
+
+def _scrubber(env):
+    """Return a function that replaces each credential value in `env` (the setup token, the API key)
+    with a placeholder in a text, so error text never carries one."""
+    secrets = [(env[name], placeholder) for name, placeholder in ((TOKEN_ENV, "[token]"), (API_KEY_ENV, "[key]"))
+               if env.get(name)]
+
+    def scrub(text):
+        for value, placeholder in secrets:
+            text = text.replace(value, placeholder)
+        return text
+    return scrub
 
 
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
@@ -743,8 +764,7 @@ def _invoke_model(prompt, model, timeout, shape, effort):
         root, env = _judge_isolation()
     except TokenUnreadable:
         return None, ModelError("token file could not be read", "AUTH")
-    token = env.get(TOKEN_ENV, "")
-    scrub = lambda text: text.replace(token, "[token]") if token else text
+    scrub = _scrubber(env)
     try:
         run = _nowindow.run(
             [
@@ -837,7 +857,7 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
 # The error's `kind` decides the probe. AUTH gives the setup-token fix, and its Stop line comes at the first failure. RUN (a timeout or a failed start) says
 # the check failed and names the error, with no fix, since the login may be fine; its Stop line waits for STREAK_MIN. REPLY (`ReplyError`) means the
 # model ran and answered badly: that login works, so it stays silent and resets the streak.
-# A token is never printed or written: `invoke_model` scrubs it from the error before either reader.
+# A token or API key is never printed or written: `invoke_model` scrubs both from the error before either reader.
 STREAK_SUB = "model-streak"
 STREAK_MIN = 3  # failures in a row before the Stop line speaks, for a failure that does not name the login
 PROBE_TIMEOUT = 20  # seconds; far under MODEL_TIMEOUT and the hook's own timeout in settings.json
@@ -850,13 +870,13 @@ def _token_path():
     return os.path.join(guard.config_dir(), "state", "hook-token")
 
 
-NO_API_KEY_NOTE = "An API key is not offered to hook judges: it does not replace the token."
+API_KEY_NOTE = "A judge uses ANTHROPIC_API_KEY when no setup token is saved and ANTHROPIC_API_KEY is set."
 
 
 def _token_fix():
-    """The one fix text. It needs nothing from the state it repairs. It says plainly that an API key is no
-    route, so an account with only an API key is told and nothing fails quietly (decision mods-no-cli-key-headless)."""
-    return "run `claude setup-token`, then save the printed token as %s. %s" % (_token_path(), NO_API_KEY_NOTE)
+    """The one fix text. It needs nothing from the state it repairs. It says the judge uses ANTHROPIC_API_KEY
+    when no setup token is saved and ANTHROPIC_API_KEY is set, so an account with only an API key is told its route."""
+    return "run `claude setup-token`, then save the printed token as %s. %s" % (_token_path(), API_KEY_NOTE)
 
 
 def _one_line(text):
