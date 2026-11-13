@@ -1878,7 +1878,7 @@ def lane_unread_line(item_id, n, owner, at, lane, woke=WOKE):
 
 
 def lane_missing_line(item_id, n, owner):
-    """The line for an open item that holds a lane (`holds` set) with no `lane`."""
+    """The line for an open item whose lane wait is flagged (`holdsLane` true) with no `lane`."""
     return "lane-missing %s (item %s, owner %s)" % (item_id, n, owner)
 
 
@@ -2150,8 +2150,8 @@ class UnreadStale(FolderCase):
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
 
     # The lane fields. An item that holds a lane carries it in `lane`, and a listed answer names that lane, so the wake can message
-    # it. An open item that holds (`holds` set) with no `lane` is named lane-missing. A holding item with a lane, or an item that
-    # holds nothing, is not named.
+    # it. An open item whose lane wait is flagged (`holdsLane` true) with no `lane` is named lane-missing. A merge or PR wait (`holds`
+    # alone, no `holdsLane`) is not, nor is a closed item, a holding item with a lane, or an item that holds nothing.
 
     def test_an_answer_on_an_item_with_a_lane_names_that_lane(self):
         self.store(items=[item_entry("colour-pick", "open", n=143, owner="triage", lane="batch-runner")], answers=[pick_answer_entry("colour-pick", EARLY)])
@@ -2232,8 +2232,8 @@ class UnreadStale(FolderCase):
             self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of routed answers with an earlier receipt did not list each one with its lane: " + out[:300])
 
     def test_a_holding_item_with_no_lane_is_reported_as_lane_missing(self):
-        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS),
-                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, lane="")}
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, lane="")}
         for case, item in cases.items():
             with self.subTest(case=case):
                 self.store(items=[item])
@@ -2252,8 +2252,8 @@ class UnreadStale(FolderCase):
         self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an item that holds nothing was reported as lane-missing: " + out)
 
     def test_a_holding_item_with_waits_and_no_lane_is_reported_as_lane_missing(self):
-        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, waits=WAITS),
-                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, waits=WAITS, lane="")}
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS, lane="")}
         for case, item in cases.items():
             with self.subTest(case=case):
                 self.store(items=[item])
@@ -2262,10 +2262,58 @@ class UnreadStale(FolderCase):
                                  "a holding item with waits and %s was not reported as lane-missing: %s" % (case, out))
         with self.subTest(case="full store"):  # a full page of holding items that wait and have no lane: each one is named, in order
             count = 120
-            self.store(items=[item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS, waits=WAITS) for i in range(count)])
+            self.store(items=[item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS) for i in range(count)])
             rc, out = self.run_unread()
             expected = [lane_missing_line("item-%03d" % i, i + 1, "ops") for i in range(count)]
             self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of holding items with waits did not name each one as lane-missing: " + out[:300])
+
+    # `holds` alone is a merge or a PR wait: the item has no `holdsLane`, so it names no lane, with or without `waits`. The line is
+    # for a lane wait only, which `holdsLane` flags. Each case below also runs a full store of the same shape.
+
+    def assert_lane_lines(self, items, want, why):
+        """Stores `items` with no answers and checks the --unread lines: `want` lines and exit 1, or `unread: clean` and exit 0 when `want` is empty."""
+        self.store(items=items)
+        rc, out = self.run_unread(codes=(0, 1))
+        self.assertEqual((rc, output_lines(out)), (1, want) if want else (0, ["unread: clean"]), "%s: %s" % (why, out[:300]))
+
+    def test_a_merge_wait_with_holds_alone_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS)], [],
+                               "an open item with holds and no holdsLane and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS) for i in range(120)], [],
+                               "a full store of open items with holds and no holdsLane and no lane was reported as lane-missing")
+
+    def test_a_pr_wait_with_holds_and_waits_and_no_holdsLane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, waits=WAITS)], [],
+                               "an open item with holds and waits and no holdsLane and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS, waits=WAITS) for i in range(120)], [],
+                               "a full store of open items with holds and waits and no holdsLane and no lane was reported as lane-missing")
+
+    # A lane wait is flagged by `holdsLane` true. With no `lane`, the open item is named lane-missing. The fixtures here carry the flag
+    # alone, so the line follows the flag, not the `holds` sentence; the re-pointed cases above carry both.
+
+    def test_an_open_item_flagged_as_a_lane_wait_with_no_lane_is_reported_as_lane_missing(self):
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True, lane="")}
+        for case, item in cases.items():
+            with self.subTest(case=case):
+                self.assert_lane_lines([item], [lane_missing_line("colour-pick", 143, "ops")],
+                                       "an open item with holdsLane true and %s was not reported as lane-missing" % case)
+        with self.subTest(case="full store"):
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holdsLane=True) for i in range(120)]
+            self.assert_lane_lines(items, [lane_missing_line("item-%03d" % i, i + 1, "ops") for i in range(120)],
+                                   "a full store of open items with holdsLane true and no lane was not named lane-missing in order")
+
+    def test_an_open_item_flagged_as_a_lane_wait_with_a_lane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True, lane="batch-runner")], [],
+                               "an open item with holdsLane true and a lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holdsLane=True, lane=LANE) for i in range(120)], [],
+                               "a full store of open items with holdsLane true and a lane was reported as lane-missing")
+
+    def test_a_closed_item_flagged_as_a_lane_wait_with_no_lane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "closed", n=143, owner="ops", holdsLane=True)], [],
+                               "a closed item with holdsLane true and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "closed", n=i + 1, owner="ops", holdsLane=True) for i in range(120)], [],
+                               "a full store of closed items with holdsLane true and no lane was reported as lane-missing")
 
     # A `none` answer that asks a question (its note ends in `?`, or its note is not empty) needs a reply on the item: a `reply` with
     # text, and `replied` later than the answer's `at`. Each case reads the answer's receipt back, so only the reply check can list it.
