@@ -35,6 +35,34 @@ Not claude-settings: the Claude desktop app
 * SendMessage reports "delivered, not confirmed read". There is no read receipt, so a session can't tell a lane that is ignoring it from one that is busy.
 ```
 
+## Batch 2, word for word
+
+The owner pasted this at 21:30 CST Nov 12. It adds items 19 to 24 and corrects two batch 1 lines.
+
+```text
+ill get that back to you. meanwhile, more feedback reporting from the degen repo: claude-settings fixes, batch 2 (from 2026-11-12 21:00 CST)
+Batch 1 (items 1–18) went to the owner at 20:48 CST. New items start here.
+
+19. Skill ios-apps has no testing standard for screens. It names the tools (XCTest for UI tests, sim-test, make native-check) but not what each kind of test is for. With no standard, Degen grew 381 slow, flaky XCUITest cases that check layout and run folded only. Home grew the opposite: source scans that read view code as text and never check what is drawn. Degen's 49 Save-menu failures came from a helper tapping the corner of a 44×44 frame, outside the drawn 44 pt circle. Fix: add a test-shape section to ios-apps, and to its starter so new apps begin that way:
+   * pure rules, in swift test;
+   * render or layout tests that host each screen at every shipped size (both Duo fold states), with no app launch;
+   * one or two XCUITest smoke cases per screen, only for presses, gestures and navigation, run in every fold state;
+   * taps aimed at the drawn shape's centre through one shared helper, never a frame corner or an offset;
+   * waits on state, never fixed sleeps;
+   * a source scan only where no render test can see the thing.
+20. The Pro lease blocks the Duo. sim-lease grants no Duo slot while the Pro slot is held (decide(): if "pro" in held: return None). At 20:57 CST my Duo take was refused after 30 s at a 1-minute load of 25, with the Pro held by lane menu-bar-text (iPhone shots) and the Duo slot empty. Fix: allow Duo slot 1 beside the Pro when the load is under the bar, or state in the tool's record why both must not run at once.
+21. builder-test-edit blocks merges that touch tests. This is a second shape of item 9. At 21:14 CST, two builders in lane downloads-type-filter were refused while merging PR 656's branch into PR 605's, because the merge conflicts sat in test-file headers. The lane session did the merge by hand instead. So a merge with test conflicts can't go to any agent: a builder may not touch tests, and a test-author may not touch product code. Fix: let a builder resolve a merge (a commit with two parents) whose test-file hunks come only from either parent, and still refuse new test edits.
+
+Correction to batch 1, app section
+
+* The app item "can't start new sessions while you're on Remote Control" was wrong. Both refusals (2026-11-12 04:34 CST and earlier) came on turns that another session's message had started. The app refuses new sessions on such turns, but its error said "The user is working over Remote Control". A start on a turn the owner began worked at 21:19 CST. The app fix: name the real reason in the refusal. The workflow fix: a coordinator queues starts for its next owner turn, and doesn't borrow idle lanes.
+* The pin item from lane mac-suite-green (CI pins claude-settings actions at old commits, so lane-lint passes and CI fails) is Degen's own work, now in lane ci-milestone-shards. No claude-settings change is needed.
+
+22. The live hooks don't match the claude-settings clone. Degen's compliance check (2026-11-12 21:21 CST) found that the live ~/.claude settings' hooks block differs from the clone's (PostToolUse, PreToolUse). So it couldn't mark guard rules as covered by the parent. This is after the 20:18 CST install. Fix: make the installer, or a --check mode, diff the live hooks against the clone and print the difference. Also, the compliance-check skill could name which copy it trusts.
+23. Evidence for batch 1 item 3, the merge tool restarting a lane after a merge-forced fix. It happened a third time at 21:22 CST: lane downloads-type-filter merged 656 into PR 605, needed a 2-line doc fix after its fix check, and the merge tool refused a second fix check. The work moved to new PR 667 at round 1, and 605 will close. That's three PRs (597 → 635 → 656 earlier, now 605 → 667) restarted at round 1 for merge-forced edits. Raise its priority.
+24. The Words check counts false alarms, so compliance-check ranks a non-problem. compliance-check listed 70 Degen Words hits besides "gate" (inbox, owner, hole, tier, entry, shape, worker) as fix #4. Lane words-lint found every one is a record slug, a code identifier, a quoted owner word or the word used in its correct sense, and changed nothing (2026-11-12 21:27 CST). A lane's worth of work bought nothing. Fix: the Words probe skips slugs, code spans and identifiers, and quoted owner text, and compliance-check ranks only hits that survive that filter.
+```
+
 ## Ledger
 
 Classes: ruled (already ruled or fixed), step (an existing step takes it), new (a new step), owner (needs the owner's call), elsewhere (not claude-settings).
@@ -59,5 +87,12 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D16 | Isolation check refuses edits outside git | elsewhere | Claude Code harness; step harness-worktree-git-probe; debt note split-sentence-eight-copies | raise upstream | none |
 | D17 | Inbox needs an item for every message | owner | decision owner-feedback-inbox, feedback_guard.py:241-248; step inbox-skip-bash-echo once ruled | asked | none |
 | D18 | Model-cap guards disagree | owner | same root as D7 | asked | none |
-| D19 | No session start while on Remote Control | elsewhere | Claude desktop app, no home yet | raise upstream | none |
+| D19 | No session start while on Remote Control (corrected in batch 2: refused on turns another session started) | elsewhere | Claude desktop app, no home yet | raise upstream | none |
 | D20 | SendMessage has no read receipt | elsewhere | Claude harness; workaround session-messages.md:27,87; PR #2990 | raise upstream | none |
+| D21 | Item 19: ios-apps has no test-shape standard | pending | pending | open | none |
+| D22 | Item 20: the Pro lease blocks the Duo | pending | pending | open | none |
+| D23 | Item 21: builder-test-edit blocks merges with test conflicts | pending | pending | open | none |
+| D24 | Item 22: live hooks differ from the clone | pending | pending | open | none |
+| D25 | Item 23: third merge-forced restart (evidence for D3) | pending | with D3 | open | none |
+| D26 | Item 24: Words probe counts false alarms | pending | pending | open | none |
+| D27 | Correction: coordinator borrows idle lanes instead of queuing starts | pending | pending | open | none |
