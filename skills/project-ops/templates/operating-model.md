@@ -81,7 +81,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   - Each PR close comes from the PR ledger (decision `pr-ledger`, read by `merge --reviewed`), with its comment: one agent per close. A step close stays with triage.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
   - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
-  - Before it builds a combined PR (a batch) or merges a PR, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled (`merge --lane-lint` reads it). The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
+  - Before each merge, and before each batch build where a repo still batches, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled (`merge --lane-lint` reads it). The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
   - The per-PR fix verifiers and the records start at once, in parallel, never one after another.
   - A build it started in the background is never waited on in the foreground. It ends its turn and sets a one-time check-in, so the next hand-off gets a turn. This holds for builds and CI waits, not for `--confirm`, which stays foreground (record `merge-confirm-repo`).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
