@@ -11,7 +11,7 @@
  ],
  "why": "Lane mailbox-all-messages (PR #2890) 13:41 CST Nov 12: hooks/feedback_guard.py and lint/_transcript.py SEND_TOOLS count only send_message/SendMessage.",
  "source": "coordinator 13:41 CST Nov 12",
- "note": "Debt mail-guards-read-send-message is filed in PR #2890. The waiting-page skill's lane-to-parent, answer-unread and park tells still name send_message, pinned by test_skill_park_relay.py; moving them needs this guard change plus the open doorbell pick. Coordinator pick (reversible): blocked by mailbox-wake-routes, whose measure feeds the doorbell pick; it gets a lane after that. Unblocked 13:55 CST Nov 12: mailbox-wake-routes measured. Express, 12:28 CST Nov 13 (coordinator 12:37 CST, owner 12:26 CST via retro): now doing, lane started (id follows from the coordinator; tag cs-step:mail-guards-read-send-message). Ruling mailbox-replaces-send-message.",
- "updatedAt": "2026-11-13T12:28:18-06:00",
+ "note": "Debt mail-guards-read-send-message is filed in PR #2890. The waiting-page skill's lane-to-parent, answer-unread and park tells still name send_message, pinned by test_skill_park_relay.py; moving them needs this guard change plus the open doorbell pick. Coordinator pick (reversible): blocked by mailbox-wake-routes, whose measure feeds the doorbell pick; it gets a lane after that. Unblocked 13:55 CST Nov 12: mailbox-wake-routes measured. Express, 12:28 CST Nov 13 (coordinator 12:37 CST, owner 12:26 CST via retro): now doing, lane started (id follows from the coordinator; tag cs-step:mail-guards-read-send-message). Ruling mailbox-replaces-send-message. Priority 15:38 CST Nov 13 (owner 15:37 via retro): #2890 (this step's debt PR) leaves the priority lane and drains later, with the rest of the backlog.",
+ "updatedAt": "2026-11-13T15:38:32-06:00",
  "blocked": []
 }
