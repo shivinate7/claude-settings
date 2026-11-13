@@ -8,10 +8,10 @@ How does a roadmap step's shown state stay true? Owner, 2026-11-06 11:39 CST: "h
 
 - Nobody types a step's `doing` status. Triage's build (`skills/roadmap/build.py`) sets it from live PRs. GitHub Issues play no part. Ruling: owner 2026-11-11 16:44 CST, "agreed on p". p′ is the refuter's revised plan, in restart plan commit 69fb75f.
 - Triage lists the stale drafts on build.py's upkeep list (the row "draft PRs over STALE_DRAFT_HOURS h with no live lane"). It never closes one (coordinator, 2026-11-13 11:54 CST, relayed by triage 12:00 CST). Its per-batch close pass stays stopped until step `bulk-close-needs-ledger` (a close needs a ledger row) lands on main.
-  - Closes go only through the batch runner, from the backlog-drain evidence ledger (ruling `pr-close-by-batch-runner`, close-by-batch-runner; home: decision `session-tiers`, bullet "Closing PRs"). Each close posts one comment naming the closing session and the ruling it acts under.
+  - Closes go only through the batch runner, from the backlog-drain evidence ledger (ruling `pr-close-by-batch-runner`, close-by-batch-runner; home: decision `session-tiers`, bullet "Closing PRs"). The comment rule lives there.
   - A pass skips any PR with a review record or a hand-in, not only a PR with a live lane, because a lane's session is archived after hand-in.
   - No fixed time cutoff: drop the 12 h cutoff (coordinator, 2026-11-13 12:04 CST, on the owner's words, 11:36 CST Nov 13: "these hard static time limits are not something i approve or am a fan of"). Not yet built: build.py still carries `STALE_DRAFT_HOURS`.
-  - Incident: 73 drafts closed 23:46 to 23:49 CST Nov 12 with work not on main (2 reopened), then 18 at 02:29 CST Nov 13. Steps: `bulk-close-needs-ledger`, `stale-draft-reads-runner-holds` (a stale-draft read honours the runner's hold).
+  - Incident (as triage reported it, 2026-11-13 12:00 CST; not in another record): 73 drafts closed 23:46 to 23:49 CST Nov 12 with work not on main (2 reopened), then 18 at 02:29 CST Nov 13. Steps: `bulk-close-needs-ledger`, `stale-draft-reads-runner-holds` (a stale-draft read honours the runner's hold).
 - A `doing` or `active` step with no live lane is a **stalled step**. A live lane is a session in this repo tagged `cs-step` that is not completed or failed (idle and `review_ready` stay live), or an open PR on branch `<id>` or `lane/<id>`. Rulings: owner 2026-11-07 12:22 CST; coordinator 2026-11-07 12:33 CST and 14:40 CST.
 - An answered waiting-page item whose lane is gone is stalled too.
 - Each stalled step needs a disposition:
