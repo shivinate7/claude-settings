@@ -212,12 +212,12 @@ if [ -z "$udid" ]; then
     have_lease=
   else
     udid=$granted
-    # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
-    # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
-    booted_by_me=$udid
     # iOS 27.1 PosterBoard keeps one snapshot per fold or launch and never frees it (41 GB in 10 days). The store is
     # rebuilt on boot, so it goes while the device is shut down. rm -rf on a symlink removes the link, not its target.
     rm -rf "${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$udid/data/Library/Application Support/PRBPosterExtensionDataStore"
+    # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
+    # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
+    booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
   fi
