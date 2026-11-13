@@ -1999,8 +1999,9 @@ def _pr_number(body: str):
 
 
 def _record_of(merge, text: str, from_shell: bool):
-    """The record `text` holds, parsed by the merge tool's parse_review, else None. A comment tool's body is the
-    record itself. A shell call's text holds it between the marker line and the CI line, inside the command."""
+    """The review log `text` holds, parsed by the merge tool's parse_review, else None. A comment tool's body is
+    the review log itself. A shell call's text holds it between the marker line and the CI line, inside the
+    command."""
     if not from_shell:
         return merge.parse_review(text)
     start = text.find(merge.REVIEW_MARKER)
@@ -2010,8 +2011,11 @@ def _record_of(merge, text: str, from_shell: bool):
 
 def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
-    branch names the push writes; it runs only when a posted review log holds a `Fix check:` line. `where` is the
-    push's checkout, where a held report's sha is read against the PR's head.
+    branch names the push writes. It runs in two cases only: a posted review log holds a `Fix check:` line for a
+    PR whose head branch is known; or, at the ask, a report is pending, `where` is set, and a pending round report
+    names a head. The caller passes `push_destinations`, which reads once per hook process: none for a named
+    refspec, one `git symbolic-ref` for `HEAD`, and for a bare push one `symbolic-ref` and up to two `git config`.
+    `where` is the push's checkout, where a held report's sha is read against the PR's head.
     1. A PR known to the session and a reviewer report with no later posted review log holding a line with that
        report's role, verdict and round (a fix verifier: the `Fix check:` line's role and verdict), and, when a report
        read after the PR names its reviewed head, whose Head is that head (a fix verifier: that Head, or the
