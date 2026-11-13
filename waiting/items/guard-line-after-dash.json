@@ -36,10 +36,10 @@
   ],
   "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
   "ref": "lane habit-is-not-a-guard, draft PR #2881, Nov 12, 14:00 CST",
-  "reply": "Reworded 14:18 CST with the lane's options.",
+  "reply": "Closed 11:03 CST Nov 13 by triage: you asked for an independent blind agent's view. It picked differently from the lane, so item 700 shows both picks and replaces this one. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Guard line: labels, word, or judge",
-  "status": "open",
+  "status": "closed",
   "title": "How the check finds a guard line in a report",
   "why": "A test pins the form your incident used as passing."
 }

@@ -1,0 +1,73 @@
+{
+  "added": "2026-11-13T17:02:00Z",
+  "context": "Goal: a report that admits a mistake names a PR, commit, step or debt, never a habit.\nProblem (rule): \"The builders broke X \u2014 Guard: future briefs run Y first.\" passes today with no ref.\nBased on (read): lint/report_guard.py MISTAKE_FIRST_PERSON_RE counts only \"I\" and \"my\" as admitting a mistake.\nBased on (ruling): decision mistake-means-missing-guard, Incident line (\"named the builders, not I\").\nDeparts from: main, where an admission needs \"I\" or \"my\" and the label must lead its sentence \u2014 widens the label forms, and option b also adds role subjects.",
+  "home": "step habit-is-not-a-guard",
+  "id": "guard-line-blind-reask",
+  "kind": "decision",
+  "n": 700,
+  "options": [
+    {
+      "gain": "Closes the dash form today, at the same cost as now.",
+      "how": "Widen the label match: \"Missing guard:\", \"(Guard:\", and a label after a dash, comma or \"and\". Role subjects (builder, reviewer, lane, agent, we) become their own step, built only after their false alarms are measured.",
+      "id": "wider-labels",
+      "key": "a",
+      "label": "More label forms now (lane's pick, Recommended)",
+      "lose": "Until that step lands, \"The builders broke X; future briefs run Y first.\" (no word guard, no I) still passes."
+    },
+    {
+      "gain": "Fixes the cause, so reworded admissions are caught with no model call.",
+      "how": "As a, but a label after a dash only in the colon form, and \"we\" and the agent roles join \"I\" and \"my\" as subjects that admit a mistake. Measure false alarms on the test fixtures and recent final reports before building.",
+      "id": "labels-plus-subjects",
+      "key": "b",
+      "label": "Labels plus role subjects (blind agent's pick)",
+      "lose": "False alarms on lines like \"the reviewer found the builder's test wrong\" (unmeasured), and it changes the Incident line of your decision."
+    },
+    {
+      "gain": "No label forms to keep up.",
+      "how": "Every sentence that contains \"guard\" must cite a PR, commit, step or debt.",
+      "id": "any-guard-word",
+      "key": "c",
+      "label": "Any sentence with the word guard",
+      "lose": "False alarms on \"guard_merge.py\" and \"the push guard refused it\"; both agents reject it."
+    },
+    {
+      "gain": "Catches any wording.",
+      "how": "A model call judges each landed report for an admitted mistake with no ref.",
+      "id": "judge-model",
+      "key": "d",
+      "label": "A model reads each report",
+      "lose": "One model call per report, results vary, and no fixed red proof; both agents reject it."
+    }
+  ],
+  "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
+  "pick": "a",
+  "ref": "your 10:57 CST answer on item 629; lane 11:01 CST with a blind agent",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard line: blind agent beside lane",
+  "shown": [
+    {
+      "id": "wider-labels",
+      "key": "a",
+      "label": "More label forms now (lane's pick, Recommended)"
+    },
+    {
+      "id": "labels-plus-subjects",
+      "key": "b",
+      "label": "Labels plus role subjects (blind agent's pick)"
+    },
+    {
+      "id": "any-guard-word",
+      "key": "c",
+      "label": "Any sentence with the word guard"
+    },
+    {
+      "id": "judge-model",
+      "key": "d",
+      "label": "A model reads each report"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "How should the check find a report that admits a mistake with no guard named?",
+  "why": "You asked for an independent blind agent's view on 629. It picked differently from the lane, so both are here. This replaces 629."
+}
