@@ -4818,7 +4818,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
-    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
+    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen, read_forms=True)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
@@ -6693,7 +6693,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     if tool in SHELL_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
-        return bool(git_env_command_hit(raw, stripped) or shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
+        return bool(git_env_command_hit(raw, stripped) or shell_write_hit(raw, cwd, is_frozen, _holds_frozen, read_forms=True)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (shell_write_hit(raw, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd, tool)))

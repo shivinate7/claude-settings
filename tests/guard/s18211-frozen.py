@@ -331,6 +331,197 @@ sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still
 sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
    "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
+# --------------------------------------------------------------------------- frozen read form: read-only forms
+#
+# A read that only NAMES a frozen path writes nothing, so each ALLOW below is a false alarm that refuses today as
+# frozen-path. The shell scanner reads a mutating word (rm, mv, copy) anywhere before the frozen path as a write
+# to it: a sed -n whose pattern holds `rm`, a `git rm --cached` (the index only, the file stays on disk), and a
+# test run whose GUARD_UNDER_TEST path holds the word `copy`. Each CONTROL after them stays refused: a sed -i,
+# a redirect, a real delete, and a frozen file named as an xargs operand.
+# Run only this block: MUTATE_ONLY="read form:" python3 hooks/test_guard.py (the name filter).
+SCRATCH_COPY = slash(os.path.join(ROOT, "copy-of-main", "guard.py"))   # a scratchpad copy of main's guard.py
+READ_FORM_TEST_RUN = ("GUARD_UNDER_TEST=" + SCRATCH_COPY + " python3 "
+                      + slash(os.path.join(CFG, "hooks", "test_guard.py")))   # a read-only suite run
+sh("frozen read form: sed -n with rm in its pattern reads a frozen settings file and is allowed",
+   "sed -n '/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: sed -n with mv in its pattern reads a frozen hook and is allowed",
+   "sed -n '/mv x/p' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen read form: git rm --cached of a frozen settings file, index only, is allowed",
+   VCS + " rm --cached " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: git rm --cached of a frozen settings file, then cat of it, is allowed",
+   VCS + " rm --cached " + CFG_SETTINGS + " && cat " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# A `< FILE` redirect reads FILE, so the file it names is input. `git -C DIR` names the folder git works in, not
+# its subcommand, so the rm --cached after it drops only the index entry and reads as the same index-only form.
+sh("frozen read form: grep -c with the frozen settings file on stdin is allowed",
+   "grep -c rm < " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# `-k install` names the tests to select, so `install` is a filter word and the run only reads the frozen file.
+sh("frozen read form: python -m pytest -k install with a frozen settings file as its operand is allowed",
+   "python3 -m pytest -k install " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: git -C a folder, then rm --cached of a frozen settings file, index only, is allowed",
+   VCS + " -C /tmp rm --cached " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: a read-only test run whose GUARD_UNDER_TEST copy sits in a copy folder is allowed",
+   READ_FORM_TEST_RUN, "allow", cwd=NOGIT)
+sh("frozen read form: control, sed -n read then sed -i on the same frozen settings file stays denied",
+   "sed -n '/rm x/p' " + CFG_SETTINGS + " && sed -i '' s/a/b/ " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen read form: control, sed -i on a frozen hook stays denied", "sed -i '' s/a/b/ " + CFG_HOOK,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, git rm of a frozen settings file, which deletes it, stays denied",
+   VCS + " rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, rm of a frozen hook stays denied", "rm " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, a redirect onto a frozen settings file after a test run stays denied",
+   READ_FORM_TEST_RUN + " > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, xargs rm with a frozen settings file as its operand stays denied",
+   "xargs rm " + CFG_SETTINGS + " < /dev/null", "deny", "frozen-path", cwd=NOGIT)
+
+# --------------------------------------------------------------------------- frozen form: a write inside a command word
+#
+# A write to a frozen file stays refused when the shell runs it from inside a command word: a $( ) or backtick
+# substitution, a <( ) process substitution, a subshell, a function body, a case arm or a coproc. Such a word holds
+# `$`, a backtick, `(` or `{`, so it is read as the shell reads it, and the write inside it is still a write. A git
+# rm --cached never hides a rm inside its own substitution. Each case below is a REFUSE that names the frozen file.
+# Run only this block: MUTATE_ONLY="frozen form:" python3 hooks/test_guard.py (the name filter).
+sh("frozen form: rm inside a $( ) command substitution is refused",
+   "echo $(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside backticks is refused",
+   "echo `rm " + CFG_SETTINGS + "`", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a $( ) assignment is refused",
+   "x=$(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a <( ) process substitution given to cat is refused",
+   "cat <(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a <( ) process substitution given to diff is refused",
+   "diff <(rm " + CFG_SETTINGS + ") x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a subshell after && is refused",
+   "true && (rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a bare subshell is refused",
+   "(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a function body that is then called is refused",
+   "cleanup() { rm " + CFG_SETTINGS + "; }; cleanup", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a case arm is refused",
+   "case x in x) rm " + CFG_SETTINGS + ";; esac", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: coproc running rm is refused",
+   "coproc rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git rm --cached with a $( ) rm inside it is refused",
+   VCS + " rm --cached $(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+# THE RUNNERS THE LIST DOES NOT NAME. Each one runs its operand as a command, so the rm it carries writes the frozen file.
+sh("frozen form: stdbuf running rm is refused", "stdbuf -o0 rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: flock running rm is refused", "flock /tmp/l rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: busybox running rm is refused", "busybox rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: parallel running rm is refused", "parallel rm ::: " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: su -c running rm is refused", "su -c 'rm " + CFG_SETTINGS + "'", "deny", "frozen-path",
+   cwd=NOGIT)
+# A RUNNER'S TEXT IS A COMMAND. git's alias, rebase -x, submodule foreach and bisect run, sed's e command and rg's
+# --pre each run their text as a command, so the rm in it writes the frozen file. git's -c and -C options come
+# before its subcommand, so the subcommand is still the mover, and a python script handed mv may run it.
+sh("frozen form: git -c alias that runs rm is refused",
+   VCS + " -c alias.w='!rm " + CFG_SETTINGS + "' w", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git rebase -x that runs rm is refused",
+   VCS + " rebase -x 'rm " + CFG_SETTINGS + "' HEAD", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git submodule foreach that runs rm is refused",
+   VCS + " submodule foreach 'rm " + CFG_SETTINGS + "'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git bisect run of rm is refused",
+   VCS + " bisect run rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed with an e command that runs rm is refused",
+   "sed '1e rm " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+# An `e` flag after a delimiter other than `/` runs the text it ends, so the rm in it writes the path. The path is
+# glued to the delimiter here (`CFG/hooks/guard.py|e`). It still sits under the frozen hooks folder, so the
+# refusal holds for the glued form, but the reader does not see the flag after `|`, `#`, `:`, `@`, `%` or `-e`.
+sh("frozen form: sed s with an e flag after a pipe that runs rm of a frozen hook is refused",
+   "sed 's|a|rm " + CFG_HOOK + "|e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed s with an e flag after a hash that runs rm of a frozen hook is refused",
+   "sed 's#a#rm " + CFG_HOOK + "#e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed s with an e flag after an at-sign that runs rm of a frozen hook is refused",
+   "sed 's@a@rm " + CFG_HOOK + "@e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed s with an e flag after a percent that runs rm of a frozen hook is refused",
+   "sed 's%a%rm " + CFG_HOOK + "%e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -e s with an e flag after a pipe that runs rm of a frozen hook is refused",
+   "sed -e 's|a|rm " + CFG_HOOK + "|e' x", "deny", "frozen-path", cwd=NOGIT)
+if os.name != "nt":   # a Windows drive letter's colon would end the sed delimiter early, so this case is POSIX only
+    sh("frozen form: sed s with an e flag after a colon that runs rm of a frozen hook is refused",
+       "sed 's:a:rm " + CFG_HOOK + ":e' x", "deny", "frozen-path", cwd=NOGIT)
+# Here the path ends at a space, so it is a word of its own, and the flag follows a pipe.
+sh("frozen form: sed s with an e flag after a pipe, the frozen settings file as its own word, is refused",
+   "sed 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+# THE SCRIPT GLUED TO -e, OR GIVEN AS --expression=. The script is then the text of that one word, so the e flag
+# after a pipe, or an e command, runs the rm the same as a script in a word of its own.
+sh("frozen form: sed -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ne glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -ne's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -E -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -E -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -i -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -i -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --expression= with an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed --expression='s|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --expression= with an e command that runs rm of the frozen settings is refused",
+   "sed --expression='e rm " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+# Controls: a glued or --expression script that only reads a line, and a plain s script, stay allowed.
+sh("frozen form: control, sed -n -e glued to a script that reads a rm line of the frozen settings is allowed",
+   "sed -n -e'/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed --expression= reading a rm line of the frozen settings is allowed",
+   "sed --expression='/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed -e with a plain s script reading the frozen settings is allowed",
+   "sed -e 's|a|b|' x " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# THE IN-PLACE FLAG GLUED INTO A SHORT-OPTION GROUP, OR GIVEN A SUFFIX. In GNU sed `i` ends a group and takes the rest
+# of its word as the backup suffix, so `-ri`, `-Ei` and `-ni` set the flag, and `-ibak` and `-ie` set it with a suffix.
+# The long forms `--in-place` and `--in-place=SUFFIX` set it too. Each one rewrites the frozen file in place, so each denies.
+sh("frozen form: sed -ri, the in-place flag ending a group after r, onto the frozen settings is refused",
+   "sed -ri 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -Ei, the in-place flag ending a group after E, onto the frozen settings is refused",
+   "sed -Ei 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ni, the in-place flag ending a group after n, onto the frozen settings is refused",
+   "sed -ni 's/a/b/p' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ibak, the in-place flag with the suffix bak, onto the frozen settings is refused",
+   "sed -ibak '/rm/d' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ie, the in-place flag with the suffix e, onto the frozen settings is refused",
+   "sed -ie 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --in-place onto the frozen settings is refused",
+   "sed --in-place 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --in-place=.bak onto the frozen settings is refused",
+   "sed --in-place=.bak 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A dotted suffix already denies. This pins it beside the glued forms, so a change to the in-place reading keeps it.
+sh("frozen form: sed -i.bak, the in-place flag with the suffix .bak, onto the frozen settings is refused",
+   "sed -i.bak 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# SEVERAL -e SCRIPTS IN ONE SED CALL. Each `--expression` word is a script of its own, and a later one whose e flag runs
+# rm of the frozen file writes it. In `-ie` the i ends the group, so the e is the backup suffix and the -e word is the script.
+sh("frozen form: two --expression words, the second an s script whose e flag runs rm of the frozen settings, is refused",
+   "sed -n --expression p --expression 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ie with a separate -e script whose e flag runs rm of the frozen settings is refused",
+   "sed -ie -e 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+# Controls: a plain s script that only reads the frozen settings, with the path after it, stays allowed.
+sh("frozen form: control, sed -n with a plain s script reading the frozen settings is allowed",
+   "sed -n 's/a/b/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed -e with a plain s script, the frozen settings after it, is allowed",
+   "sed -e 's/a/b/' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# Controls: a comma or a bang delimiter already refuses the glued path, and must keep refusing it.
+sh("frozen form: control, sed s with a comma that runs rm of a frozen hook is refused",
+   "sed 's,a,rm " + CFG_HOOK + ",e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: control, sed s with a bang that runs rm of a frozen hook is refused",
+   "sed 's!a!rm " + CFG_HOOK + "!e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rg --pre that runs a sh -c rm is refused",
+   "rg --pre 'sh -c \"rm " + CFG_SETTINGS + "\"' x f", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: a python script handed mv of the frozen settings file is refused",
+   "python3 hooks/x.py mv " + CFG_SETTINGS + " /tmp/g.json", "deny", "frozen-path", cwd=NOGIT)
+# A python script handed a mutating word may run it, so cp, install, tee and copy are read as mv and rm are.
+sh("frozen form: a python script handed cp that writes a frozen settings file is refused",
+   "python3 hooks/x.py cp /tmp/a " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: a python script handed install that writes a frozen settings file is refused",
+   "python3 hooks/x.py install /tmp/a " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: a python script handed tee of a frozen settings file is refused",
+   "python3 hooks/x.py tee " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: a python script handed copy that writes a frozen settings file is refused",
+   "python3 hooks/x.py copy /tmp/a " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git with two -c options before mv of the frozen settings file is refused",
+   VCS + " -c a=1 -c b=2 mv " + CFG_SETTINGS + " /tmp/g.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git with -C and -c before rm of the frozen settings file is refused",
+   VCS + " -C /tmp -c a=1 rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,

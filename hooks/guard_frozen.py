@@ -235,9 +235,20 @@ def _mutates_as_command(command: str, words) -> bool:
     if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "git":
+        # git's own options (`-C DIR`, `-c K=V`, `--git-dir D`) come before its subcommand.
+        words = _git_from_subcommand(words)
         rest = [word for word in words if not word.startswith("-")]
+        # `git rm --cached` drops the index entry and leaves the file on disk, so it writes no file.
+        flags = words[:words.index("--")] if "--" in words else words
+        if rest[:1] == ["rm"] and "--cached" in flags:
+            return False
         return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+def _git_from_subcommand(words):
+    """The words of a git call from its subcommand on, past git's own options (`_git_subcommand_index`)."""
+    return list(words[guard_core._git_subcommand_index(["git", *words], 0) - 1:])
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -252,9 +263,8 @@ def _script_mutates(script: str) -> bool:
         return True
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
-        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+        # `sed -i` is no mutating word: `writes_to` reads it by the sed option reader, so it must get that far.
+        if _mutates_as_command(command, rest) or (command == "sed" and _sed_options(rest, split_at_blanks=True)[1]):
             return True
     return False
 
@@ -276,12 +286,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        # The caller splits a quoted word into pieces (`_words_of`), so the words are read as split at blanks.
+        return command == "sed" and _sed_options([_unquoted(word) for word in words], split_at_blanks=True)[1]
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return _sed_in_place_span(target, cmd)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1054,8 +1063,143 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+# Commands that only read what their arguments name. A mutating word among their arguments is data
+# (`grep rm F`, `sed -n 'rm x' F`), so a segment led by one is read at its command position alone.
+_READS_ITS_ARGUMENTS = frozenset((
+    "grep", "egrep", "fgrep", "rg", "ag", "sed", "cat", "head", "tail", "less", "more", "wc", "diff", "cmp",
+    "ls", "stat", "file", "git", "python", "python3", "pytest", "test", "["))
+# A substitution or backtick that the shell runs inside a word that is not single-quoted.
+_RUNS_A_SUBSTITUTION = re.compile(r"\$[({]|`|[<>]\(")
+# A sed `e` command or flag, or a `w`/`W` command or flag: at a script's start, or after an address or a
+# separator (`1e cmd`, `$e`, `/x/e`, `s/a/b/e`, `;w f`).
+_SED_RUNS_OR_WRITES = re.compile(r"(?:^|[\d$/;{}!,\s])\s*[ewW](?:\s|;|}|$)")
+# The start of a sed `s` command: at a script's start or after an address or a separator, then its delimiter.
+_SED_S_COMMAND = re.compile(r"(?:^|(?<=[\d$/;{}!,\s]))s(?=[^\w\s\\])")
+
+
+def _sed_s_flag_runs(script: str) -> bool:
+    """True when a sed `s` command in `script` ends in an `e` flag, whatever its delimiter: the delimiter is
+    the character after the `s`, so `s|a|rm F|e` and `s#a#rm F#e` read as `s/a/rm F/e` does. A backslash
+    escapes the next character. A command that never closes its two parts has no flags to read."""
+    for found in _SED_S_COMMAND.finditer(script):
+        delimiter, at, closed = script[found.end()], found.end() + 1, 0
+        while at < len(script) and closed < 2:
+            if script[at] == "\\":
+                at += 1
+            elif script[at] == delimiter:
+                closed += 1
+            at += 1
+        if closed == 2 and "e" in re.match(r"[A-Za-z0-9]*", script[at:]).group():
+            return True
+    return False
+
+
+def _sed_options(words, split_at_blanks=False) -> tuple:
+    """The scripts a sed command line gives with `-e`, and whether it edits files in place, read as sed's
+    option parser reads them. A script is a separate word (`-e S`, `--expression S`), glued (`-eS`,
+    `--expression=S`), or follows the `e` ending a short-option group (`-ne S`, `-Ee S`, `-neS`). The in-place
+    flag is `--in-place`, `--in-place=SUFFIX`, or an `i` in a short-option group (`-i`, `-ri`, `-ibak`,
+    `-i.bak`). In a group, `f` and `l` take the rest as their own argument and `i` takes it as a backup
+    suffix, so `-ie` is in place with no script. A group spelt `-ei` or `-nei` also counts as in place: sed
+    reads the `i` as the script, but the fail-closed side refuses it. Options end at `--`.
+    `split_at_blanks` reads words cut at blanks, where a quoted script falls into pieces: a piece may be
+    `--` or follow `-e`, so options do not end at `--` and `-e` takes no next word, the fail-closed side."""
+    scripts, in_place, at = [], False, 0
+    while at < len(words):
+        word = words[at]
+        at += 1
+        if word == "--" and not split_at_blanks:
+            break
+        if word == "--in-place" or word.startswith("--in-place="):
+            in_place = True
+        elif word.startswith("--expression="):
+            scripts.append(word[len("--expression="):])
+        elif word == "--expression":
+            if at < len(words) and not split_at_blanks:
+                scripts.append(words[at])
+                at += 1
+        elif re.match(r"-[^-]", word):
+            for place, letter in enumerate(word[1:], 2):
+                if letter == "e":
+                    rest = word[place:]
+                    if rest:
+                        scripts.append(rest)
+                    elif at < len(words) and not split_at_blanks:
+                        scripts.append(words[at])
+                        at += 1
+                    in_place = in_place or bool(re.match(r"[A-Za-eg-km-z]*i", rest))
+                    break
+                if letter == "i":
+                    in_place = True
+                    break
+                if letter in "fl":
+                    break
+    return scripts, in_place
+
+
+def _sed_in_place_span(target: str, cmd: str) -> bool:
+    """True when a sed call in the text edits files in place and names the target after its `sed` word, in
+    one segment. The words between are read by `_sed_options`, split at blanks."""
+    return any(_sed_options(found.group(1).split(), split_at_blanks=True)[1]
+               for found in re.finditer(r"\bsed\b([^\n;|&]*)" + target, cmd))
+
+
+def _runs_a_substitution(word: str) -> bool:
+    """True when the shell runs a `$( )`, `${ }`, backtick or `<( )` in `word`: one not inside single quotes,
+    read by the one quote walk (`walk_quotes`), so `'a'$(x)'b'` runs its `$(`. A spot the walk steps over
+    (an escaped pair) counts as run."""
+    quotes = {at: quote for at, _char, quote in guard_core.walk_quotes(word)}
+    return any(quotes.get(found.start(), "") not in ("'", "$'") for found in _RUNS_A_SUBSTITUTION.finditer(word))
+
+
+def _runs_its_text(command: str, rest) -> bool:
+    """True when a reader's arguments hold text it runs as a command: a git alias that starts with `!`,
+    `git rebase -x`, `git submodule foreach`, `git bisect run`, a sed `e` or `w` command, `rg --pre`, or a
+    python script handed a mutating word (`MUTATING_COMMAND`), which it may run."""
+    words = [_unquoted(word) for word in rest]
+    if command == "git":
+        values = [value for flag, value in zip(words, words[1:]) if flag == "-c"]
+        if any(re.match(r"alias\.[^=]*=\s*!", value) for value in values):
+            return True
+        call = _git_from_subcommand(words)
+        subcommand, after = (call[0], call[1:]) if call else ("", [])
+        plain = [word for word in after if not word.startswith("-")]
+        return ((subcommand == "rebase" and any(re.match(r"--ex(?:e(?:c)?)?(?:=|$)|-[A-Za-z]*x", word)
+                                                 for word in after))
+                or (subcommand == "submodule" and "foreach" in plain)
+                or (subcommand == "bisect" and plain[:1] == ["run"]))
+    if command == "sed":
+        scripts = _sed_options(words)[0]
+        if not scripts:
+            scripts = [word for word in words if not word.startswith("-")][:1]
+        return any(_SED_RUNS_OR_WRITES.search(script) or _sed_s_flag_runs(script) for script in scripts)
+    if command in ("python", "python3"):
+        # pytest's `-k EXPR` names tests to select, so its value is a filter word, not a command.
+        selected = {at + 1 for at, word in enumerate(words) if word == "-k" and "pytest" in words[:at]}
+        return any(re.fullmatch(MUTATING_COMMAND, word) for at, word in enumerate(words) if at not in selected)
+    if command == "rg":
+        return any(word == "--pre" or word.startswith("--pre=") for word in words)
+    return False
+
+
+def _reads_by_position(command_and_rest, raw_words) -> bool:
+    """True when a segment's mutating words may be read at its command position alone (`read_forms`), as the
+    fail-closed rule allows. False reads it by the plain-argument rule, which refuses more. The shell may run
+    a mutating word in a command word it cannot name (a subshell, a function body, a command built from a
+    `$` or a backtick), in a `$( )`, backtick or `<( )` substitution, or after a leading word that hands
+    its arguments to a command (`stdbuf`, `flock`, `su -c`, `coproc`, a `case` arm): the old reading."""
+    command, rest = command_and_rest
+    if not command:
+        return False
+    if any(_runs_a_substitution(word) for word in raw_words) or _runs_its_text(command, rest):
+        return False
+    if command in _READS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS or _mutates_as_command(command, rest):
+        return True
+    return not any(re.fullmatch(MUTATING_COMMAND, word) for word in rest)
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False, read_forms=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -1071,7 +1215,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
     scripts = ([[_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
-               if command_position else parsed)
+               if command_position or read_forms else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -1123,17 +1267,25 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        # `read_forms` (the frozen callers) reads a plain command's arguments by command position and leaves a
+        # printer's or PowerShell's quoted text alone: it may be a program another command runs
+        # (`echo '...' | python -`, a scriptblock).
+        by_position = command_position or (
+            read_forms and kinds[number] not in ("printer", "message") and not is_powershell(cmd)
+            and _reads_by_position(_segment_command(script), scripts[number]))
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
-        for word in words:
+        for word, previous in zip(words, [""] + words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
+            if re.fullmatch(r"\d*<", previous):
+                continue   # the file `< FILE` names is read as input and never written
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if by_position else ())):
                 return word
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
@@ -1175,7 +1327,7 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
-def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None, read_forms=False) -> str:
     """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
     A shell reads the command with its heredoc bodies dropped, except a body a shell runs
     (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
@@ -1184,7 +1336,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
     falls back to reading every body, which refuses more and never less."""
     try:
         hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
-                           script_data=True)
+                           read_forms=read_forms, script_data=True)
         texts = []
         resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
         for lang, body, quote in interpreter_bodies(resolved):
@@ -1198,7 +1350,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
             hit = hit or _shell_write_hit(text, cwd, predicate, holds)
         return hit
     except Exception:
-        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds, read_forms=read_forms)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:

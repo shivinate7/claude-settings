@@ -92,6 +92,15 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE READ-ONLY LIST. `xargs rm < FILE` reads FILE as xargs's input: rm runs on the names the file lists, and FILE is
+# not written. The builder shell check reads the input file as an rm operand, so a list under tests/ refuses: a false
+# alarm. The operand form (`xargs rm FILE`) and a plain rm of a test file still refuse. Run only this block:
+# MUTATE_ONLY="read form:" python3 hooks/test_guard.py (the name filter).
+sh("builder read form: xargs rm with a test list as its input, read only, is allowed",
+   "xargs rm < tests/list.txt", "allow", **B)
+sh("builder read form: control, xargs rm with a test file as its operand stays refused",
+   "xargs rm tests/list.txt < /dev/null", "deny", rule=BT, **B)
+sh("builder read form: control, rm of a test file stays refused", "rm tests/x.py", "deny", rule=BT, **B)
 # THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
 # tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
 # join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
@@ -297,6 +306,19 @@ sh("builder script file: a run named in a trailing # comment is allowed",
    "ls  # python3 probe.py", "allow", **SB)
 sh("builder script file: a run named in a double-quoted string with an apostrophe is allowed",
    "echo \"don't run python3 probe.py\"", "allow", **SB)
+
+# FROZEN SCANNER. A comment opener, a lone quote and a real newline inside a quoted argument are text, not shell
+# syntax, so none of them hides a frozen file the command reads or writes. The first case is a read and is allowed;
+# its control is the same pattern with sed -i, which writes the frozen file and stays refused.
+sh("frozen scanner: a # inside a sed pattern on a frozen settings file is a read and is allowed",
+   "sed -n '/# rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen scanner: control, a # inside a sed pattern does not hide sed -i on a frozen settings file, which stays refused",
+   "sed -i '/# rm x/p' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen scanner: a lone quote in an echo does not hide the rm of a frozen settings file after it, which stays refused",
+   "echo \"don't\" && rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The \n escape below makes a real newline inside the double quotes, so the command has two lines.
+sh("frozen scanner: a real newline inside a quoted sed script does not hide sed -i on a frozen settings file, which stays refused",
+   "sed -i \"s/x\ny/\" " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 # RED, a heredoc that adds to a script file: the file's own body on disk is judged, and each body the
 # command writes to it is judged, not the first one only. A heredoc body never hides the file it adds to.
