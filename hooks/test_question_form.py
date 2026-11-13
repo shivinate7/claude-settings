@@ -25,7 +25,7 @@ Interface the module must match (the lane's form contract):
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
   same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
   box judges it in `question`; a page decision in `context`.
-- A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo should change
+- A widening option: page `widens: true`, never `recommended`; chat `Goes against your ruling: a repo should change
   to fit the shared tool, rather than the tool change to fit a repo` in its label or description, and never
   `(Recommended)` in its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
