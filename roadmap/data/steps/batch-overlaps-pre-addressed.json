@@ -1,0 +1,14 @@
+{
+ "id": "batch-overlaps-pre-addressed",
+ "title": "Batch overlaps are pre-addressed so no lane waits on a conflicting neighbour",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner words 14:13 CST Nov 13 (relayed by runner 10 via the coordinator) had no home after item 760 closed moot.",
+ "source": "Owner 14:13 CST Nov 13 in runner 10's chat: \"batch overlaps pre-addressed so no lane waits\"; item 760 closed moot (runner 10 withdrew 14:14 CST); post-compaction audit 14:27 CST Nov 13.",
+ "note": "Filed 14:27 CST Nov 13. Goal: no lane waits on a conflicting neighbour. Runner 10's pairwise check ran 105 merge-tree checks over 14 hand-ins and found no conflicts. Not yet run: #3214 against #2716 and #2717, and the 14 hand-ins against batch 139's lanes. Owner: runner 10. The cross-lane merge (item 760 b) is not ruled and not asked. Past ruling: step post-batch-conflict-merge (done) covers main into a lane after a batch. Unread by triage.",
+ "updatedAt": "2026-11-13T14:27:05-06:00"
+}
