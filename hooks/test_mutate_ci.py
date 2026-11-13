@@ -1708,6 +1708,8 @@ class TestsForTests(unittest.TestCase):
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         # hooks/guard.py has a GUARD_MODULE_FAMILIES row, so hooks/test_guard.py prints as `hooks/test_guard.py::<family>` lines:
         # the file counts as printed when one of its family lines is.
+        families = {line.split("::")[1] for line in out.splitlines() if line.startswith("hooks/test_guard.py::")}
+        self.assertEqual(families, set(guard_table()[target]), "the row's families are the family lines it prints")
         printed = {line.split("::")[0] for line in out.splitlines()}
         for name in sorted(beside):
             with self.subTest(beside=name):
@@ -1778,7 +1780,7 @@ class TestsForTests(unittest.TestCase):
                 self.assertIn(suite, printed[target],
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
 
-    def test_a_path_constant_naming_guard_py_prints_the_suite_that_copies_it(self):
+    def test_a_path_constant_naming_guard_py_is_read_but_its_suite_is_dropped_as_unusable(self):
         target = "hooks/guard.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
         loader = "hooks/test_wrappers.py"

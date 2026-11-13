@@ -1500,8 +1500,9 @@ jobs:
   # its setup (installs and control runs, before the deadline's mutants), not the 337 s the old start-only budget took on batch 11
   # (59bff081..0497265b, limit 10, suite timeout 180 s). `--known-defects` took 7 s there, with a checkout and setup around
   # 1 min; that run used a profile with no install. `--known-defects` now runs its own install after the `--changed` step removes
-  # its deps: one per lockfile hash, install and link, each up to INSTALL_TIMEOUT (900 s). The 45 min cap is the bound (1800 s budget plus
-  # setup and the known-defects step; interim stopgap, was 15 min); the first
+  # its deps: one per lockfile hash, install and link, each up to INSTALL_TIMEOUT (900 s). The 45 min cap covers the measured runs (1800 s budget plus
+  # setup and the known-defects step; interim stopgap). A profile with an install can pass it: 1800 s plus 3 defects, each
+  # an install and 2 suite runs of up to 180 s, is 2880 s. The first
   # CI run on a batch with an install replaces the 7 min figure.
   mutation-report:
     runs-on: ubuntu-latest
