@@ -1430,7 +1430,7 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
     branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
     if branch is None or branch.returncode != 0:
         return False
-    return branch.stdout.strip().removeprefix("lane/") == slug
+    return branch.stdout.strip() in lane_head_refs(slug)
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
