@@ -1,0 +1,14 @@
+{
+ "id": "bulk-close-needs-ledger",
+ "title": "No bulk close of PRs until the evidence ledger for them exists",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 11:27 CST Nov 13: triage delegated the backlog-drain lane's 87-PR close list to a Sonnet agent; it closed 35 with no comment before the coordinator's hold arrived, 3 of them marked keep (1585, 2129, 1748). All 35 reopened 11:30 CST, read back 11:33 CST: none still closed. The lane judged from diffs only; the owner asked whether the closes were checked beyond titles.",
+ "source": "coordinator 11:25 and 11:26 CST Nov 13; triage incident",
+ "note": "Guard: a close of more than a few PRs in one pass needs a ledger first, one row per PR: work on main at commit X, superseded by #N, or judgment only (a second fresh reviewer reads judgment-only rows), plus where its ruling now lives. Each close carries a comment naming that home, or \"no ruling\". Before a close, grep each PR's body and comments for owner rulings with no home on main or the roadmap, and file them first (#1561 is the known case). Checked at the close call itself, not by a timer. Backlog-drain part 6 waits on this.",
+ "updatedAt": "2026-11-13T11:27:44-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "claude-md-load-once",
+ "title": "A session loads one copy of the global CLAUDE.md plus only its own repo's, not seven files",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2xcwpVXbzB8tcaFqe",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:23 CST Nov 13 via retrospective, on its option a: \"if it loses nothing approved\". A session started in /home/user loads 7 CLAUDE.md files (claude-settings twice, plus q_max, degen and home): +27k tokens on every Explore start (44.2k vs 71.9k, 19 runs).",
+ "source": "owner 11:23 CST Nov 13 via retrospective 11:24 CST; coordinator 11:26 CST",
+ "note": "Task: one copy of the global CLAUDE.md per session plus only the session's own repo's. How Claude Code loads the sub-repo files is unknown: the lane's first task is to find that out. Done check: Explore first-call token count before and after; every rule anchor still loads once. Express (ruling drain-first-hold, part 5). Separate from child-claude-md-dedupe. Lane session_013NEJL2xcwpVXbzB8tcaFqe.",
+ "updatedAt": "2026-11-13T11:27:44-06:00"
+}

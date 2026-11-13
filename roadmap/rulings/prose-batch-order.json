@@ -1,0 +1,10 @@
+{
+ "id": "prose-batch-order",
+ "at": "2026-11-13T11:24:00-06:00",
+ "title": "Prose and code mix in one batch when that lands both sooner; prose never merges ahead of the code it describes",
+ "ruling": "Owner 11:19 and 11:24 CST Nov 13, in runner 10 chat, relayed by the retrospective 11:25 CST: prose and code stay in separate batches \"when it's faster\". His 20:24 CST Nov 11 words (page item 521) were about merge order, not a wall. Reading (restart-plan 168159d3, 3.13): the batch runner mixes prose and code in one batch when that lands both sooner; a prose lane that describes code not yet on main never merges ahead of that code; the same batch is fine. Replaces the readings \"as their own batches\" (retrospective) and \"never share a batch\" (coordinator 11:34 CST Nov 12). Home to add: a docs/decisions record, by a record-writer lane (the item home is the plan only).",
+ "quote": "when it's faster",
+ "source": "owner in runner 10 chat 11:19 and 11:24 CST Nov 13; retrospective relay 11:25 CST",
+ "status": "open",
+ "step": "backlog-drain"
+}
