@@ -13,7 +13,9 @@ State: the red-main check below and the `--base-red-ok` reason flag are live now
 
 Owner ruling Q3 i (when the brake on a red main lifts), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: "a red main stops merges only until the revert merges."
 
-PICK PENDING OWNER: the build wording is "until the revert's run on main is green". It differs from the owner's words, so it stays a pick until the owner rules on it. Its options are (a) the revert's run on main is green, which is the build wording, or (b) the revert merge itself lifts the brake.
+Owner ruling 745 b (page item 745, pick b), 2026-11-13 13:20 CST, against the triage recommendation (a): after a red main, merges resume when the revert merges, with the revert's own run still going. This is the ruled wording for Q3 i. Ruling ow-29 (item 622 b, 2026-11-12 14:17 CST, a restatement of the 09:46 CST answer) stands. Target, not live: the built check lifts the brake on "until the revert's run on main is green", so the revert merge does not yet lift it. The merge tool and this decision change in a lane; that change is not built.
+
+Owner ruling 746 b (page item 746, pick b), 2026-11-13 13:20 CST, against the triage recommendation (a): while main is red, a lane that touches none of the blamed paths may merge. Target, not live. The blame step (bisect) that names the blamed paths is not built. The ruling places it in PR #3152, act 3, but the State line above names pull request 2889 for act 3. Unsettled: which PR holds act 3. The merge tool changes in a lane; that change is not built.
 
 The red-main check: the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job. The preview prints the same verdict on its `<base> run:` line.
 
