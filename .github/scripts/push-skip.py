@@ -5,9 +5,9 @@ Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. 
 is a visible success and scope reads its output.
 
 skip=true only when the push commit's tree equals the tree of an integration PR head (a batch-* branch) whose all-jobs-passed check
-run concluded success. An integration PR is ready, and its ready run runs the Windows guard, merge and rest jobs in full whatever the
-scope flags say. Every other job ran under its scope flags, as on any PR, and the janitor sweep mutation steps ran only when the sweep
-flag was set. Any read failure writes skip=false and says "unknown": an unknown state runs everything, never skips.
+run concluded success. An integration PR is ready, and its ready run runs the Windows guard, merge and rest jobs in full, and
+ci-scope.sh sets every scope flag on for a ready pull request from a batch-* branch, so that run is the all-flags run: no job or suite
+skipped on the PR head's diff. Any error from the read, of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
 
 The result is read from the head's all-jobs-passed check run, not from the checks.yml run's own conclusion: a draft run skips every
 job and concludes success, and it must not stand for the ready run. A skipped check run (the draft run's) is not a result.
@@ -21,7 +21,6 @@ import importlib.util
 import json
 import os
 import sys
-import urllib.error
 import urllib.parse
 
 BATCH_PREFIX = "batch-"
@@ -50,8 +49,8 @@ def get(path, query, env):
         url += "?" + urllib.parse.urlencode(query)
     try:
         return api.api_get(url, env["GH_TOKEN"])
-    except (urllib.error.URLError, OSError, ValueError) as ex:
-        raise Unknown("the read of %s failed (%s)" % (path, ex))
+    except Exception as ex:  # any read error (URLError, a cut-off http.client.IncompleteRead, bad JSON) is an unknown state
+        raise Unknown("the read of %s failed (%s: %s)" % (path, type(ex).__name__, ex))
 
 
 def rollup_result(env, sha):
@@ -122,7 +121,7 @@ def main(env=None):
     try:
         skip = decide(read_heads(env), env.get("PUSH_TREE"))
         print("push-skip: skip=%s" % str(skip).lower())
-    except Unknown as ex:
+    except Exception as ex:  # Unknown, or a record shape the reads did not expect: either way the push runs everything and the job stays green
         skip = False
         print("push-skip: unknown (%s), so the push runs everything" % ex)
     line = "skip=%s\n" % str(skip).lower()
