@@ -217,6 +217,7 @@ RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
+SUITE_GATE_JOB = "scope"  # the job of checks.yml that decides which suites run; base_state reads a green push run whose every other job was skipped as a run that ran no suites
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
 FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
@@ -1450,7 +1451,10 @@ class Host:
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
+        A push run that succeeded with every job but `scope` skipped ran no suites (job conclusions, `SUITE_GATE_JOB`). It reads green only when a green pull-request run
+        of the same workflow file and tree (`head_commit.tree_id`) is on the newest 100 successful pull-request runs. Otherwise the newest older run of its file and group
+        that ran its suites stands for it, and keeps its own verdict. With none on the page the read is unknown, never green.
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. So does each newest push run that succeeded, and each older one the walk past a skipped run reads. A skipped push run costs one pull-request runs read. A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1506,6 +1510,36 @@ class Host:
                     if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need) and all(x in theirs for x in names):
                         return True
                 return False
+            def ran_suites(r):  # judged from job conclusions: some job other than the gate ran. A run with no jobs listed is not judged a skip
+                jobs = jobs_of(r)
+                return not jobs or any(j.get("conclusion") != "skipped" and j["name"] != SUITE_GATE_JOB for j in jobs)
+
+            covered_trees = []  # the trees of the green pull-request runs on the page, read once and only for a skipped push run
+
+            def covered(r):  # a green pull-request run of r's own tree proved what r skipped: the squash commit keeps the pull request's tree
+                tree = (r.get("head_commit") or {}).get("tree_id")
+                if not covered_trees:
+                    c, got = self.api("actions/runs", fields={"event": "pull_request", "status": "success", "per_page": 100})
+                    if c:
+                        raise Stop(f"reading the pull-request runs from GitHub failed, so a skipped push run cannot be judged: {got}")
+                    covered_trees.append({((x.get("head_commit") or {}).get("tree_id"), x["path"].split("@")[0]) for x in json.loads(got)["workflow_runs"]
+                                          if x["status"] == "completed" and x["conclusion"] == "success"})
+                return bool(tree) and (tree, r["path"].split("@")[0]) in covered_trees[0]
+            for key, r in list(newest.items()):
+                if r["event"] != "push" or r["status"] != "completed" or r["conclusion"] != "success" or ran_suites(r) or covered(r):
+                    continue
+                # A skipped push run proved no suite, and no pull-request run of its tree did: the run it stands for is the newest one that ran them.
+                for older in judged[age[r["id"]] + 1:]:
+                    if (older["path"], self.BASE_EVENTS[older["event"]]) != key or older["conclusion"] in ("skipped", "neutral"):
+                        continue
+                    if older["status"] == "completed" and older["conclusion"] == "success" and not ran_suites(older):
+                        continue
+                    newest[key] = older
+                    break
+                else:
+                    del newest[key]
+                    unknown.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')}) ran no suites, no green pull-request run has its tree, "
+                                   "and no earlier run on the page ran its suites, so main is unknown")
             for r in newest.values():
                 if r["status"] != "completed":  # a re-run in flight: its jobs are mid-change, so none are read
                     unknown.append(f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})")
