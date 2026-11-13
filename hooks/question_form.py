@@ -1917,23 +1917,31 @@ def _tree_names(body, hash_size):
     return out
 
 
-def _read_steps(root):
-    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
-    through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
-    "unreadable: <why>" (git failed, odd answer, bad JSON). Before the read, `origin/roadmap` is fetched when its last
-    roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT (lint/roadmap_ref.py, once). When the
-    fetch failed, or the check could not run, an "ok" state reads "ok, read as of <time>" (or "ok, read as of
-    unknown: <why>")."""
-    if _git_root_of(root) is None:
-        return {}, "absent"
+def _fresh_note(root):
+    """The freshness note of origin/roadmap in `root` (roadmap_ref.fresh_ref: "" when fresh or just fetched, else "read as
+    of ..."); "read as of unknown: <why>" when the check cannot run. A read is never silent about how fresh it is."""
     try:
         lint = os.path.join(HERE, "..", "lint")
         if lint not in sys.path:
             sys.path.append(lint)
         import roadmap_ref
-        note = roadmap_ref.fresh_ref(root)
-    except Exception as exc:  # a read is never silent about how fresh it is
-        note = "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+        return roadmap_ref.fresh_ref(root)
+    except Exception as exc:
+        return "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+
+
+def _read_steps(root, note=None):
+    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
+    through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
+    "unreadable: <why>" (git failed, odd answer, bad JSON). Before the read, `origin/roadmap` is fetched when its last
+    roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT (lint/roadmap_ref.py, once). When the
+    fetch failed, or the check could not run, an "ok" state reads "ok, read as of <time>" (or "ok, read as of
+    unknown: <why>"). A caller that already ran the check for `root` passes its `note` ("" for none), and no
+    second check runs."""
+    if _git_root_of(root) is None:
+        return {}, "absent"
+    if note is None:
+        note = _fresh_note(root)
     steps, state = _read_steps_of(root)
     return (steps, state + ", " + note) if note and state == "ok" else (steps, state)
 
@@ -2018,14 +2026,15 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
-def _ruled_candidates(roots, unknown, words):
+def _ruled_candidates(roots, unknown, words, note=None):
     """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
     question (`words`, the step rulings' word test), as
     `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
     newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
     with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
     claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
-    "ruled store (unreadable: git)"."""
+    "ruled store (unreadable: git)". `note` is the freshness note of the first root, when the caller ran the
+    check for it already."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -2036,7 +2045,7 @@ def _ruled_candidates(roots, unknown, words):
         return []
     state = "absent"
     for root in roots:
-        entries, state = ruled_store.read_store(root)
+        entries, state = ruled_store.read_store(root, note=note if root == roots[0] else None)
         if state == "ok":
             opened = ruled_store.open_entries(entries, root)
             lines = []
@@ -2073,7 +2082,9 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
-    candidates += _ruled_candidates(roots, unknown, _words(question_text))
+    # One freshness check for the repo, shared by the ruled store read and the step read: a failed fetch is not retried.
+    note = _fresh_note(repo_root) if _git_root_of(repo_root) is not None else ""
+    candidates += _ruled_candidates(roots, unknown, _words(question_text), note)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
@@ -2082,7 +2093,7 @@ def past_rulings(question_text, repo_root):
             candidates += lines
         if not found:
             unknown.append("%s (absent)" % label)
-    steps, state = _read_steps(repo_root)
+    steps, state = _read_steps(repo_root, note)
     if state.startswith("ok"):
         candidates += _step_rulings(steps, _words(question_text))
         if state != "ok":

@@ -168,19 +168,22 @@ def _fresh_note(repo_dir, ref):
         return "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
 
 
-def _read(repo_dir, ref):
-    """(entries, state, bad, note): _load after one fresh_ref call. The one place a read of the store ref fetches."""
-    note = _fresh_note(repo_dir, ref)
+def _read(repo_dir, ref, note=None):
+    """(entries, state, bad, note): _load after one fresh_ref call. The one place a read of the store ref fetches. A
+    caller that already ran the freshness check for repo_dir passes its `note` ("" for none), and no second check runs."""
+    if note is None:
+        note = _fresh_note(repo_dir, ref)
     return _load(repo_dir, ref) + (note,)
 
 
-def read_store(repo_dir, ref=STORE_REF):
+def read_store(repo_dir, ref=STORE_REF, note=None):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
     listing worked). A file that is not a JSON object is skipped. When `ref` is STORE_REF the read first fetches
     origin/roadmap if it is older than roadmap_ref.MAX_AGE, bounded at roadmap_ref.FETCH_TIMEOUT; a fetch that fails
-    reads the ref as it is, and session_lines says "read as of <time>". Never raises."""
-    return _read(repo_dir, ref)[:2]
+    reads the ref as it is, and session_lines says "read as of <time>". A caller that already ran the check for
+    repo_dir passes `note` (its result, "" for none) to skip a second one. Never raises."""
+    return _read(repo_dir, ref, note)[:2]
 
 
 def ruled_entries(repo_dir, ref=STORE_REF):
