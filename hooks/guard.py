@@ -390,8 +390,8 @@ Other tools, in `judge` order:
                        and before the two rules below. The remedy is `sim-test`. An override
                        lifts it. (sim-test-is-the-one-boot-path)
   simulator-boot-cap, simulator-boot-twin
-                       deny. A simulator boot past the cap, or one that duplicates an idle device.
-                       They judge only `xcodebuild -destination` and the simulator MCP `launch`.
+                       deny. A simulator boot while the machine is busy by the load brake's bar,
+                       or one that duplicates an idle device. They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
   simulator-boot-route
                        deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
@@ -5073,7 +5073,6 @@ def impeccable_command_hit(raw: str) -> str:
 # A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
 # `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
-SIM_BOOT_CAP = 2
 
 
 def _simctl_boot_args(word: str, rest: list):
@@ -5234,7 +5233,8 @@ def sim_lease_holds(session: str, udids: list) -> bool:
 
 
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    """Refuse a boot of any of NAMES when the machine is busy by the load brake's bar (simulator-boot-cap; the
+    booted count never decides, sims-load-brake-only, owner 2026-11-12 21:59 CST), or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
     simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
     slot is the launched device (sim_lease_holds)."""
@@ -5249,6 +5249,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
     if devices is None:
         return
     shut_down = []
+    busy = None  # the load brake's busy readings, read once and only when a boot is judged
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
         key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
@@ -5260,10 +5261,13 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
         if not hits:
             continue  # unknown device, or every match already up: not a boot
         booted = [d for d in devices if d["state"] == "Booted"]
-        if len(booted) >= SIM_BOOT_CAP:
+        if busy is None:
+            busy = [] if is_cloud() else load_busy(read_load())
+        if busy:
             refuse(tool, "deny", "simulator-boot-cap",
-                   "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
-                   "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
+                   "The machine is busy: %s. Booting another simulator now would add load. Booted now: %s. "
+                   "Wait until the load falls, or use a booted simulator (decision machine-load-brake)."
+                   % (", ".join(busy), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted) or "none"),
                    name)
         boots, table, now = (sweep.sim_read_boots(os.path.join(guard_core.config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())

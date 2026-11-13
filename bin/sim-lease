@@ -20,8 +20,8 @@ Limits on every grant: the machine-load brake is not busy (decision machine-load
   or a family module is missing or broken) grants nothing: take exits 1 with one stderr line, "brake could not be loaded",
   and leaves no lease and no queue place; status prints that line and exits 0 (decision guard-hooks-fail-closed).
   The load average is never read.
-  duo: slot 1 when it is free; slot 2 only while slot 1 is held, under the same bar.
-  pro: only while nothing else is leased. A held pro lease refuses every duo.
+  duo: the first free slot of 1 and 2. pro: slot pro, when no one holds it. No device waits on another: no pairing
+  and no count of simulators (sims-load-brake-only, owner 2026-11-12 21:59 CST); the load brake alone limits them.
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
@@ -226,19 +226,15 @@ class State:
 
 
 def decide(data, entry, load):
-    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None. A busy machine (the brake's
-    busy bar) grants nothing, slot 2 included; an unread reading counts as normal."""
+    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None. Only the queue head is
+    granted, and only while the brake's busy bar is clear (an unread reading counts as normal) and its own
+    device has a free slot: a duo takes the first free of 1 and 2, a pro takes `pro`."""
     if data["queue"][0]["pid"] != entry["pid"] or busy_now(load):
         return None
     held = {e["slot"] for e in data["leases"]}
-    if entry["device"] == "pro":
-        return None if held else "pro"
-    if "pro" in held:
-        return None
-    if "1" not in held:
-        return "1"
-    if "2" not in held:
-        return "2"
+    for slot in ("pro",) if entry["device"] == "pro" else ("1", "2"):
+        if slot not in held:
+            return slot
     return None
 
 
