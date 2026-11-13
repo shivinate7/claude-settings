@@ -43,6 +43,11 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
+The upkeep list also holds the row "status drift" (status_drift): a step whose hand status differs from the derived one
+(done on a merged proof, else doing on an open pull on lane_head_refs, else the hand status; hand active counts as doing;
+no session tag is a source). The build prints `status drift: <id> (hand <x>, derived <y>)` per entry and the exit code is
+unchanged. Cost: no GitHub read; it reads the live file's pulls and landedPulls and one more git log of main.
+
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
 STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
@@ -149,6 +154,8 @@ STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
 # Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
 STALLED_LINE = "stalled step"
+# The upkeep row's label and the start of each printed drift line: `status drift: <id> (hand <x>, derived <y>)`.
+DRIFT_LINE = "status drift"
 # Every ready line starts with this. It never changes the exit code.
 READY_LINE = "ready not started"
 # A ready step whose age is more than this many whole hours goes red (a `ready over limit` line, exit 1). Unmeasured:
@@ -425,8 +432,10 @@ def step_trailers(repo, ref):
     return [(sid, sha, owner.get(sha)) for sha, ids in steps.items() for sid in ids]
 
 
-def landed_marks(repo, ref, branch, steps):
-    """({open step: [pull request or commit]}, [trailer that names no step], why or None)."""
+def landed_marks(repo, ref, branch, steps, with_done=False):
+    """({open step: [pull request or commit]}, [trailer that names no step], why or None). With `with_done` a step
+    whose status is done is marked too, so status_drift can read a merged proof for it; the marks that drive the
+    landed rows never pass it."""
     found = step_trailers(repo, ref) if ref else None
     if found is None:
         return {}, [], "no %s branch in this checkout" % branch if ref is None else "git log failed on " + ref
@@ -435,7 +444,7 @@ def landed_marks(repo, ref, branch, steps):
         where = pr or sha[:7]
         if sid not in steps:
             strays.append("%s in %s%s" % (sid, sha[:7], " (%s)" % pr if pr else ""))
-        elif steps[sid].get("status") != "done" and where not in marks.setdefault(sid, []):
+        elif (with_done or steps[sid].get("status") != "done") and where not in marks.setdefault(sid, []):
             marks[sid].append(where)
     return {k: v for k, v in marks.items() if v}, strays, None
 
@@ -454,17 +463,18 @@ def head_on_main(repo, ref, head, seen=None):
     return seen[head]
 
 
-def pull_landed_marks(repo, ref, steps, work):
+def pull_landed_marks(repo, ref, steps, work, with_done=False):
     """{open step: ["#N", ...]} from the live file's landedPulls rows (closed pulls the publisher read from GitHub).
 
     A row marks step S when its branch is S or lane/S (lane_head_refs), S is a known step that is not done, and the
     pull is merged (JSON true, merged into main: the row has no base field) or its head sha is an ancestor of `ref`.
     A closed pull that was never merged and whose head is off main marks nothing: its work did not land. With no
-    `ref` nothing marks, as landed_marks marks nothing then."""
+    `ref` nothing marks, as landed_marks marks nothing then. With `with_done` a done step is marked too (status_drift)."""
     rows = (work or {}).get("landedPulls") or []
     if not steps or not rows or not ref:
         return {}
-    by_branch = {name: sid for sid, d in steps.items() if d.get("status") != "done" for name in lane_head_refs(sid)}
+    by_branch = {name: sid for sid, d in steps.items() if with_done or d.get("status") != "done"
+                 for name in lane_head_refs(sid)}
     marks, seen = {}, {}
     for row in sorted(rows, key=lambda r: r["number"]):
         sid = by_branch.get(row["branch"])
@@ -1666,6 +1676,35 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
 
 
+def status_drift(steps, work, repo, main_branch, ref):
+    """[(id, hand, derived)] in step order for each step whose hand status differs from the derived one.
+
+    Derived is done when a merged proof names the step (a Step trailer on main, or a landedPulls row), else doing when
+    an open pull's branch is in lane_head_refs(step), else the hand status, which then never differs. Merged beats
+    open. Hand `active` equals derived doing (LIVE_STATUS). Session tags are no source. With no usable pulls read
+    (pair_why) open pulls are unknown and derive nothing. A hand status that is not text is left to the unknown-status
+    entry of unlaned."""
+    found, _, _ = landed_marks(repo, ref, main_branch, steps, with_done=True)
+    proven = set(found) | set(pull_landed_marks(repo, ref, steps, work, with_done=True))
+    branches = set() if pair_why(work) else {p.get("branch") for p in work["pulls"]}
+    out = []
+    for sid, d in sorted(steps.items(), key=lambda kd: kd[1].get("order", 1e9)):
+        hand = d.get("status")
+        if not isinstance(hand, str):
+            continue
+        if sid in proven:
+            derived = "done"
+        elif any(name in branches for name in lane_head_refs(sid)):
+            derived = "doing"
+        else:
+            continue
+        if derived != "done" and hand in LIVE_STATUS:
+            continue  # derived doing, and the hand status is a live one
+        if hand != derived:
+            out.append((sid, hand, derived))
+    return out
+
+
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
@@ -1698,6 +1737,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
     ready = [k for k, d in open_ if d.get("status") in TODO_STATUS and READY_SENTENCE.search(d.get("note") or "")]
+    drift = status_drift(steps, work, repo, main_branch, ref)
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
@@ -1713,6 +1753,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
             ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
+            (DRIFT_LINE, ["%s (hand %s, derived %s)" % t for t in drift]),
             ("done without check", done_without_check(steps))]
     # A hold line is shown, never counted as a lane to archive.
     print("upkeep: " + "; ".join(
@@ -1720,6 +1761,8 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
+    for t in drift:
+        print("%s: %s (hand %s, derived %s)" % ((DRIFT_LINE,) + t))
 
 
 if __name__ == "__main__":
