@@ -68,13 +68,19 @@ setup minutes (step 19).
 
 ## 3b. Required checks
 
-Read the protection rule:
+Read the ruleset first, the way the merge tool does:
+
+```sh
+gh api repos/<owner>/<repo>/rules/branches/<branch>
+```
+
+Read its `required_status_checks` rule. It must name one check: `all-jobs-passed`. If no ruleset names a check, read the classic protection:
 
 ```sh
 gh api repos/<owner>/<repo>/branches/<branch>/protection
 ```
 
-Read `required_status_checks` in the output. It must name one check: `all-jobs-passed`.
+Read `required_status_checks` in that output. It must name one check: `all-jobs-passed`.
 
 A skipped job fails the rollup. So skip a scoped-out suite at its CI step, and the job still
 passes. A required job that never starts, because of a path filter on the whole workflow, stops
@@ -82,8 +88,8 @@ the merge. Require a matrix through one fan-in job with `if: always()`. Its chec
 when the matrix changes.
 
 Rename a required check by moving the rule to `all-jobs-passed`. `protect.py`, the one script that
-writes branch protection, accepts only that name for `--check`. It refuses any other name. Preview
-first. The preview changes nothing. It prints any check names it would drop.
+writes the ruled ruleset, accepts only that name for `--check`. It refuses any other name. Preview
+first. The preview changes nothing. It prints what differs from the ruled form, such as the checks the ruleset holds now.
 
 ```sh
 # Preview: changes nothing
@@ -93,12 +99,14 @@ python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --
 python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --check all-jobs-passed --branch <branch> --confirm
 ```
 
-On a branch with a check rule, the script sets only the check list, with a PATCH. `strict` and every
-other rule stay. `merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no
-edit. A repo that pins a list there edits it too. The write needs an admin login. Push rights are
-not enough. A branch with protection but no check rule is refused. `protect.py` names the
-protection's keys and sets nothing. Do not add the check with `gh api` by hand: a PUT replaces the
-other rules. Ask the owner.
+With no ruleset on the branch, the script creates one (POST): the one check, deletion and force-push
+blocked, and the Admin role able to bypass on pull requests only. A ruleset that differs from that
+form is updated in place (PUT): its other rules, its conditions and its strict value stay. The PUT sets the bypass list to the Admin role alone, so any other bypass actor is dropped. A ruleset
+already in the form is left alone. The script never reads or writes classic protection.
+`merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no edit. A repo that
+pins a list there edits it too. The write needs an admin login. Push rights are not enough on the
+classic write, and the ruleset write is unmeasured (decision `main-branch-protection`). Do not write
+the rule with `gh api` by hand: a PUT to a ruleset replaces its rules. Ask the owner.
 
 ## 4. Cancel superseded runs
 

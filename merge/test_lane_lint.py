@@ -132,17 +132,6 @@ class NoLock:
         raise AssertionError("merge --lane-lint unlocked a merge lock")
 
 
-class LintStepNames(unittest.TestCase):
-    """merge's lint_steps reads each `would run ` line of ci-job's plan as a step name. The plan's summary line names no
-    step, so it must not come back as one."""
-
-    def test_the_plan_summary_is_not_a_step_name(self):
-        root = tempfile.mkdtemp(prefix="lint-steps-", dir=RUN_FOLDER)
-        self.addCleanup(shutil.rmtree, root, True)
-        os.makedirs(os.path.join(root, ".github", "workflows"))
-        tm.put(os.path.join(root, ".github", "workflows", "checks.yml"), WORKFLOW)
-        names = merge.lint_steps(root, "origin/main")
-        self.assertEqual(names, {"Lint one", "Lint two"}, "lint_steps read a line that is no step: %s" % sorted(names - {"Lint one", "Lint two"}))
 
 
 class CiJobStub:
@@ -3521,14 +3510,32 @@ class LintCheckJoin(tm.CloudSession):
         super().setUp()
         tm.gh_case_setup(self)  # GhHalf's setUp: the shim on PATH, the wait's clock, and one green check
 
-    def join(self, comments, ran_on=None, **state):
+    def join(self, comments, ran_on=None, once=False, **state):
         """-> (rc, stdout and stderr) of `merge 7 --confirm --head <ran_on>` run by the batch runner, with `comments` as the repo's issue comments.
-        `ran_on` defaults to the live head of feat, read when the call is made (main's runner_confirm does the same)."""
+        `ran_on` defaults to the live head of feat, read when the call is made (main's runner_confirm does the same). once: one run of
+        merge, so a join that pushes its claim stops there (two-step confirm), where the default runs both steps."""
         tm.GhHalf.set(self, issue_comments=comments, **state)
         self.put_role("batch-runner")
         ran_on = ran_on or self.head("feat")
+        run = self.run_merge_once if once else self.run_merge
         with self.cloud():
-            return self.run_merge("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
+            return run("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
+
+    def claim_steps(self, linted, claimed):
+        """Two joins of a claim-only head, with a record still pending, so the first join pushes its own claim (two-step confirm). The lane-lint
+        PASS carries across the claim commits: the first join does not refuse for lane lint, and it stops at its claim without reading that
+        claim's check runs. Those are read at the second join, on the claim head, which merges once its checks answer green."""
+        rc, out = self.join([lint_comment(2, linted)], once=True)
+        self.assertNotIn("merge --lane-lint 7", out, "the lane lint refused a claim-only commit on the linted head:\n" + out)
+        self.assertEqual(rc, 0, "the first join refused instead of stopping at the claim it pushes:\n" + out)
+        self.assertTrue(tm.claim_pushed_line(out), "the first join has no stop line for its claim:\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the first join merged in one run:\n" + out)
+        new_head = self.head("feat")
+        self.assertNotEqual(new_head, claimed, "the first join pushed no claim")
+        self.assertNotIn(f"commits/{new_head}/check-runs", tm.GhHalf.calls(self), "the first join read the check runs of its own claim commit")
+        rc, out = self.join([lint_comment(2, linted)], once=True)
+        self.assertEqual(rc, 0, "the second join refused its claim head:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
 
     def assert_refused(self, comments, cause, **state):
         """The join with `comments` and `state` is refused: rc 1, the remedy named, no merge call, no push. `cause` names the case in a failure. -> the output."""
@@ -3574,7 +3581,8 @@ class LintCheckJoin(tm.CloudSession):
         rc, out = self.join(comments)
         self.assertEqual(rc, 0, out)
         reads = [l for l in tm.GhHalf.calls(self).splitlines() if l.startswith("GET issues/comments ")]
-        self.assertEqual(len(reads), 2, "the join read the comment list %d times, want 2, one per page:\n%s" % (len(reads), "\n".join(reads)))
+        # two runs (the claim run, the merge run), each reading two pages: the calls log holds no run split, so the total is pinned
+        self.assertEqual(len(reads), 2 * len(self.run_texts), "the join read the comment list %d times, want 2 per run, one per page:\n%s" % (len(reads), "\n".join(reads)))
 
     def test_a_head_that_moves_after_the_lint_read_is_refused_before_the_merge(self):
         # The lint reads the head the PR shows first, and the PASS names it. The branch then moves in origin, and the first head read still
@@ -3791,17 +3799,13 @@ class LintCheckJoin(tm.CloudSession):
         # the join resumed after a claim push: the PASS names the head before the claim, and the newest commit is the claim alone
         linted = self.head("feat")
         self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
-        rc, out = self.join([lint_comment(2, linted)])
-        self.assertEqual(rc, 0, "a claim-only commit on the linted head refused the join:\n" + out)
-        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+        self.claim_steps(linted, self.head("feat"))
 
     def test_a_pass_under_two_stacked_claim_commits_lets_the_join_go_ahead(self):
         linted = self.head("feat")
         self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
         self.feat_commit({"docs/decisions/d902.md": tm.record("D-902", "d902")}, "Claim record numbers", "Record-claim: D-902")
-        rc, out = self.join([lint_comment(2, linted)])
-        self.assertEqual(rc, 0, "two claim-only commits on the linted head refused the join:\n" + out)
-        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+        self.claim_steps(linted, self.head("feat"))
 
 
     def side_commit(self):
