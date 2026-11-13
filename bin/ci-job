@@ -59,14 +59,14 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
-# --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
+# --pinned is for merge's ready check and the lane lint (merge --lane-lint passes it with --lint, so both judge a pinned step by the same tree): a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
 # copy. The tree is `git archive <sha>` of the whole repo, from the clone beside this file, else the pointer checkout
 # (hooks/guard_pointer.pointer_checkout); never a worktree on it. A sha the clone lacks is fetched once (`git fetch origin <sha>`,
 # with GIT_TERMINAL_PROMPT=0; it writes objects and FETCH_HEAD into that clone); a failed fetch, or a tree without the harness file, makes the step unknown (exit 2), never a pass. The ste-lint step
 # stays local under --pinned: the exported tree has no .git, so its bin/ste-changed could not see drift, and a stale ste-lint pin
 # must keep exiting 3 with its remedy. A non-sha ref (@main) and a local uses: keep
-# the local copy under --pinned, as does a run without it; --lint ignores --pinned. Cost: at most one fetch and one archive per
+# the local copy under --pinned, as does a run without it; --plan ignores --pinned. Cost: at most one fetch and one archive per
 # distinct sha per run, into a fresh temp dir that is deleted when the run ends. The pin's sha pattern: hooks/action_pin.py.
 # Symlink members are not extracted: the harness reads none, and a host that refuses os.symlink would fail the export.
 # Limits: the uses: owner is not checked, since the fetch reads the clone's origin. An uppercase or quoted 40-hex pin does
@@ -615,7 +615,7 @@ def main(argv):
         del args[i:i + 2]
     dry = "--plan" in args
     lint = "--lint" in args
-    pinned = "--pinned" in args and not (dry or lint)
+    pinned = "--pinned" in args and not dry
     args = [a for a in args if a not in ("--plan", "--lint", "--pinned")]
     if len(args) != 1 or (wanted and lint):
         print(USAGE)
@@ -696,7 +696,7 @@ def main(argv):
     for i, found in enumerate(suites):  # a step with a picked suite runs as a lint step does
         if picked is not None and picked.intersection(found):
             kind[i] = "suite"
-    planned = [plan(st, bool(base), values, top, lint) if k else None for st, k in zip(steps, kind)]
+    planned = [plan(st, bool(base), values, top, lint, pinned) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     ctx = (top, base, values, pinned)

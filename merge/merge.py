@@ -3224,7 +3224,7 @@ def refuse_incomplete_tree(wt, head, base):
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
-    """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
+    """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --pinned --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
@@ -3277,7 +3277,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--pinned", "--base", f"origin/{base}", notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
     finally:
