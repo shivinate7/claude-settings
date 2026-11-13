@@ -4155,7 +4155,7 @@ def rollup_green(h, n, head):
     """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's row is red. The newest run is the largest id in
     the row links (/actions/runs/<id>/): a draft run skips the rollup job and the ready run after it passes it, so both sit on one head and the newer
     run decides. An older run's skipped, cancelled or pending row is ignored. An older run's red row (bucket "fail" or "timed out ...") still holds the
-    rollup not green, as the merge gate reads it, so the skip line never prints for a head the gate then refuses. A row that names no run cannot be
+    rollup not green, as the merge check reads it, so the skip line never prints for a head the check then refuses. A row that names no run cannot be
     placed, so it must pass whatever the newest run says. No row, any other bucket among the deciding rows, or a failed read is False, so the caller
     keeps its own check. Cost: the one read h.checks already makes."""
     try:
