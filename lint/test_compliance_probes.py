@@ -1022,6 +1022,7 @@ class LaneCap(unittest.TestCase):
 
 
 PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
+SKILL_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md")
 
 
 class Playwright(unittest.TestCase):
@@ -1548,18 +1549,34 @@ class LiveHooks(unittest.TestCase):
         return [line[2:] for line in out.splitlines()[1:]
                 if line[2:3] in ("+", "-") and not line.startswith(("  ---", "  +++"))]
 
-    def clone(self, text):
-        """A claude-settings clone whose settings.json holds `text`; with no settings.json when `text` is None."""
+    def dangling_link(self, path):
+        """A symlink at `path` whose target does not exist. A case skips where this platform makes no symlinks."""
+        try:
+            os.symlink("missing.json", path)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+
+    def clone(self, text, dangling=False):
+        """A claude-settings clone whose settings.json holds `text`; with no settings.json when `text` is None.
+        `dangling`: the settings.json is a symlink to a file that is not there, and git tracks it."""
         repo = Repo(self)
+        if dangling:
+            self.dangling_link(os.path.join(repo.root, "settings.json"))
+            return repo.git("add", "-f", "settings.json")
         return repo.write("settings.json", text) if text is not None else repo.write("README.md")
 
-    def live(self, text):
-        """A HOME folder whose ~/.claude/settings.json holds `text`; with no file when `text` is None."""
+    def live(self, text, dangling=False):
+        """A HOME folder whose ~/.claude/settings.json holds `text`; with no file when `text` is None.
+        `dangling`: that file is a symlink to a file that is not there."""
         home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, home, True)
-        if text is not None:
+        if text is not None or dangling:
             os.makedirs(os.path.join(home, ".claude"))
-            with open(os.path.join(home, ".claude", "settings.json"), "w", encoding="utf-8") as handle:
+        path = os.path.join(home, ".claude", "settings.json")
+        if dangling:
+            self.dangling_link(path)
+        elif text is not None:
+            with open(path, "w", encoding="utf-8") as handle:
                 handle.write(text)
         return home
 
@@ -1690,6 +1707,23 @@ class LiveHooks(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         self.assertTrue(head(out).startswith("hooks: n/a"), err or out)
 
+    def test_a_dangling_settings_json_link_is_unknown_not_na(self):
+        """A settings.json link to a file that is gone is a file the probe cannot read: unknown. Only a file that is not there is n/a."""
+        text = self.text(self.source())
+        for side in ("clone", "live"):
+            with self.subTest(side=side):
+                if side == "clone":
+                    repo, home = self.clone(None, dangling=True), self.live(text)
+                    path = os.path.join(repo.root, "settings.json")
+                else:
+                    repo, home = self.clone(text), self.live(None, dangling=True)
+                    path = os.path.join(home, ".claude", "settings.json")
+                self.assertTrue(os.path.islink(path) and not os.path.exists(path), path)  # scope first: a link to nothing
+                code, out, err = self.probe(repo, home)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
     def test_no_hooks_on_either_side_is_in_shape(self):
         empty = self.text({"hooks": {}})
         code, out, err = self.check(empty, empty)
@@ -1744,6 +1778,33 @@ class LiveHooks(unittest.TestCase):
             rows = [line for line in handle.read().splitlines()
                     if line.startswith("|") and "compliance_probes.py hooks" in line]
         self.assertTrue(rows, "probes.md has no table row that runs `compliance_probes.py hooks`")
+
+    def hooks_arguments(self):
+        """The argument after `compliance_probes.py hooks` on each line of probes.md that runs the hooks group."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            return re.findall(r"compliance_probes\.py hooks +([^\s`|]+)", handle.read())
+
+    def test_probes_md_runs_the_hooks_group_on_the_parent_clone(self):
+        """The probe reads the settings.json of the root it is given, so that root is the parent clone `$P`. A child root
+        has no clone settings.json: `.` is n/a, and n/a passes."""
+        args = self.hooks_arguments()
+        self.assertTrue(args, "probes.md has no command that runs `compliance_probes.py hooks`")  # scope first
+        for arg in args:
+            with self.subTest(arg=arg):
+                self.assertIn(arg, ("$P", '"$P"'), "probes.md runs the hooks probe on `%s`, not the parent clone `$P`" % arg)
+
+    def skill_text(self):
+        """SKILL.md as one run of words, so a line break cannot split a phrase."""
+        with open(SKILL_MD, encoding="utf-8") as handle:
+            return " ".join(handle.read().split())
+
+    def test_skill_parent_covered_check_names_the_hooks_probe(self):
+        text = self.skill_text()  # a boolean, not assertIn: a failure must not print the whole file
+        self.assertTrue("compliance_probes.py hooks" in text, "SKILL.md's parent-covered check does not name the hooks probe")
+
+    def test_skill_parent_covered_check_drops_the_same_hooks_block_comparison(self):
+        text = self.skill_text()
+        self.assertFalse("same `hooks` block" in text, "SKILL.md still compares the live hooks block with the parent's by hand")
 
 
 def live_anchors():
@@ -2056,7 +2117,7 @@ class Supersede(unittest.TestCase):
         self.assertRegex(items[0], r"^  departs, no exemption: (CLAUDE|AGENTS)\.md:1: " + re.escape(self.DEPARTS) + "$")
 
     def test_skill_md_names_supersede_among_the_groups_that_list_items(self):
-        with open(os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md"), encoding="utf-8") as handle:
+        with open(SKILL_MD, encoding="utf-8") as handle:
             text = handle.read()
         found = re.search(r"([^.]*?)\blist each item under the\s+group line", text)
         self.assertIsNotNone(found, "SKILL.md no longer says which groups list each item")
