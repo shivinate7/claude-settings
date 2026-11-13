@@ -73,7 +73,7 @@ Protects: the owner sees live data on the page, and a lost page or an account sw
 
 ## Cost
 
-These steps add no process, timer or log. The export check already runs at a Stop. The lag read runs inside the writer's existing wake and prints on demand. Route B, if triggered, adds a hosted Worker on the free plan.
+`waiting-export-miss-cloud`, `waiting-copy-backup-only` and `waiting-lag-read` add no process, timer or log. The export check already runs at a Stop. The lag read runs inside the writer's existing wake and prints on demand. Route B, if triggered, adds a hosted Worker on the free plan.
 
 Refuter: revise, on the plan that judged all four routes. The owner's rulings at 12:10 and 12:40 CST then chose among its routes; no new plan was made.
 
