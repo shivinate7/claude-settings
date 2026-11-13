@@ -7,8 +7,8 @@ The step is roadmap/data/steps/SLUG.json at REF in DIR (default: the current fol
 are the store's entries (lint/ruled_store.py) whose step is SLUG, open or closed, plus each entry whose id or alias the
 step note names. Each ruling prints with its quote word for word, its time and its source.
 
-A step file has no field for files, a done-check or a topic. The tool prints a marker for each, for the coordinator to
-fill, and invents nothing. Under Files it lists only the paths the step note names; it copies no other note text.
+A step file has no field for files or a topic, and an optional `done_check` (text) and `ci_only` (true). The tool prints
+a marker for each one missing, for the coordinator to fill, and invents nothing; `ci_only` adds `proved at batch CI`. Under Files it lists only the paths the step note names; it copies no other note text.
 An absent or unreadable store prints `Rulings: unknown (store ...)`, never "no rulings".
 
 Exit 0 with the brief on stdout; exit 1 when the step file is missing or unreadable; exit 2 on a bad argument.
@@ -28,6 +28,8 @@ TEMPLATE = os.path.join(HERE, "..", "templates", "brief.md")  # the one template
 FILES_MARKER = "<coordinator names the files>"
 CHECK_MARKER = "<coordinator names the check that proves done>"
 TOPIC_MARKER = "<topic-slug>"
+PROVED = "proved at batch CI"  # the Done-check form for a check only batch CI can prove
+CI_ONLY_LINE = "[ci_only] "  # a template line that prints only when the step sets ci_only
 PARAPHRASE = "(paraphrase, no owner quote)"
 DEFAULT_CAP = 25  # a brief with no cap named caps the report at 25 lines
 # A file name in step-note text; the same shape the test reads as "a path".
@@ -109,6 +111,13 @@ def files_block(step):
     return "\n".join(head + [FILES_MARKER])
 
 
+def check_line(step):
+    """The Done-check line from the step's optional `done_check` text and `ci_only` flag. The note is never read."""
+    given = step.get("done_check")
+    line = given.strip() if isinstance(given, str) and given.strip() else CHECK_MARKER
+    return line + " (%s)" % PROVED if step.get("ci_only") is True else line
+
+
 def build(slug, repo=".", ref=ruled_store.STORE_REF, topic=None, cap=DEFAULT_CAP):
     """The brief text for step `slug`. Raises NoStep when the step file cannot be read."""
     step = read_step(slug, repo, ref)
@@ -118,9 +127,12 @@ def build(slug, repo=".", ref=ruled_store.STORE_REF, topic=None, cap=DEFAULT_CAP
     values = {
         "slug": slug, "topic": topic or text("topic") or TOPIC_MARKER, "title": text("title"), "why": text("why"),
         "source": text("source") or "unknown", "files": files_block(step), "rulings": rulings_block(slug, step, repo, ref),
-        "check": CHECK_MARKER, "cap": str(cap),
+        "check": check_line(step), "cap": str(cap),
     }
     # One pass, so a quote that holds `{{x}}` is never filled again.
+    keep = step.get("ci_only") is True  # the batch-CI rule shows only for a step with such a check
+    lines = [l for l in template.split("\n") if keep or not l.startswith(CI_ONLY_LINE)]
+    template = "\n".join(l[len(CI_ONLY_LINE):] if l.startswith(CI_ONLY_LINE) else l for l in lines)
     return PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
