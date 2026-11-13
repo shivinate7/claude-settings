@@ -154,6 +154,7 @@ class FakeHost:
         self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+        self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -266,6 +267,39 @@ class FakeHost:
 
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
+
+    def draft_run_state(self, sha):  # the draft's touched-tests run at `sha` -> (state, lines), as Host.draft_run_state judges it
+        """A case that scripts no rows (draft_rows None) reads a pass, so every other case keeps its lane. With `draft_rows`, the real judge
+        reads them through DraftRunReads, and each read lands in draft_reads."""
+        if self.draft_rows is None:
+            return "pass", []
+        return DraftRunReads(self.draft_rows, self.draft_reads).draft_run_state(sha)
+
+DRAFT_RUN = 4300  # the run id that a draft's lane-touched-tests rows link to
+
+def draft_row(name, conclusion="success", status="completed", job=1):
+    """One check run of a draft head, as `pages("commits/<sha>/check-runs")` lists it. Its links name run DRAFT_RUN and job `job`; html_url and
+    details_url both carry the link, as GitHub gives them. An unfinished run has no conclusion."""
+    link = job_link(DRAFT_RUN, job)
+    done = status == "completed"
+    return {"id": 4000 + job, "name": name, "status": status, "conclusion": conclusion if done else None, "html_url": link, "details_url": link}
+
+class DraftRunReads(merge.Host):
+    """The real Host with its one read scripted: `pages` answers `commits/<sha>/check-runs` from `rows` (a head with no entry has no runs) and
+    records each read's path in `reads`. Any other read answers []. The judge is merge.Host.draft_run_state itself, never a copy of it."""
+
+    def __init__(self, rows, reads):
+        super().__init__(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+        self.rows, self.reads = rows, reads
+
+    def pages(self, rel, key=None, fields=None):
+        self.reads.append(rel)
+        m = re.fullmatch(r"commits/([0-9a-f]+)/check-runs", rel)
+        return list(self.rows.get(m.group(1), [])) if m else []
+
+def check_run_reads(reads):
+    """The shas whose check runs were read, in the order read. A read of any other path is not in it."""
+    return [m.group(1) for r in reads if (m := re.fullmatch(r"commits/([0-9a-f]+)/check-runs", r))]
 
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 
@@ -20595,6 +20629,116 @@ def cost_host(**reads):
 def unit_failed_line(name):
     """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
     return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
+
+class BatchDraftRuns(BatchFreeze):
+    """merge --batch-build reads each lane's draft run at the lane's head, before it builds, pushes or readies anything (decision
+    lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A failed windows or macOS run refuses the batch, names the lane and its link,
+    and pushes nothing. A run not finished, or no touched row, refuses --ready unless --lint-unknown-ok gives a reason (a plain build takes
+    no such flag). The reads are one check-runs read per lane head, and the batch's own head is never read. Each case scripts the rows of
+    the lane heads in draft_rows; FakeHost's default passes the others."""
+
+    def passing_rows(self, *numbers):
+        """Rows for each lane in `numbers`: its touched job passed, and it ran no test job."""
+        return {self.heads[n]: [draft_row("touched")] for n in numbers}
+
+    def script(self, rows):
+        self.host.draft_rows, self.host.draft_reads = rows, []
+
+    def test_a_failed_windows_run_on_one_lane_refuses_the_build_and_pushes_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        rows = self.passing_rows(101, 103)
+        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)]
+        self.script(rows)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "a failed windows run on lane #102 did not refuse the build (exit %s):\n%s" % (rc, out))
+        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly:\n" + out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed:\n" + out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request:\n" + out)
+
+    def test_a_failed_macos_run_on_a_lane_refuses_ready_before_the_batch_is_rebuilt_or_pushed(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready would rebuild it and push
+        rows = self.passing_rows(101)
+        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)]
+        self.script(rows)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "a failed macOS run on lane #102 did not refuse --ready (exit %s):\n%s" % (rc, out))
+        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_build_reads_one_check_run_list_per_lane_head_and_no_status_and_never_the_batch_head(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.script(self.passing_rows(101, 102, 103))
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "a build of three passing lanes exited %s:\n%s" % (rc, out))
+        reads = self.host.draft_reads
+        self.assertEqual(sorted(check_run_reads(reads)), sorted(self.heads.values()),
+                         "the build did not read each lane head's check runs once, and nothing else:\n" + out)
+        self.assertEqual([r for r in reads if r.endswith("/status")], [], "the build read commit statuses, which the draft run does not use:\n" + out)
+
+    def test_a_ready_reads_each_lane_head_and_never_the_batch_head(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        batch_head = self.head("batch-nightly")
+        self.script(self.passing_rows(101, 102))
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        reads = check_run_reads(self.host.draft_reads)
+        self.assertEqual(sorted(reads), sorted([self.heads[101], self.heads[102]]), "--ready did not read each lane head's check runs once:\n" + out)
+        self.assertNotIn(batch_head, reads, "--ready read the batch's own head's check runs:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with every lane green did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with every lane green exited %s:\n%s" % (rc, out))
+
+    def unfinished_lane_setup(self):
+        """Lanes #101 and #102 in a draft batch-nightly, reset to main so --ready rebuilds and pushes it. #102's touched job is still running.
+        -> the batch's pull request number and its snapshot."""
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.drift_batch("nightly", [])
+        rows = self.passing_rows(101)
+        rows[self.heads[102]] = [draft_row("touched", status="in_progress")]
+        self.script(rows)
+        return pr, self.snapshot(pr)
+
+    def test_a_ready_with_an_unfinished_lane_is_refused_without_a_reason_and_pushes_nothing(self):
+        pr, snap = self.unfinished_lane_setup()
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 1, "an unfinished draft run did not refuse --ready without a reason (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of an unfinished draft run cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_an_unfinished_lane_goes_on_only_with_a_reason_and_the_reason_is_logged(self):
+        pr, _ = self.unfinished_lane_setup()
+        reason = "the windows run is still going"
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
+        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the unfinished draft run:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with a reason did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with a reason for an unfinished draft run exited %s:\n%s" % (rc, out))
+
 
 class TouchesHost(PullsHost):
     """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),

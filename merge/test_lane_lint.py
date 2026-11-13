@@ -2688,6 +2688,150 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
                 self.assertEqual(cwd, self.b_co, "the lane lint's pull request read ran in %r, not the named checkout" % (cwd,))
 
 
+class DraftRun(LaneFixture):
+    """`merge --lane-lint <pr>` reads the draft's touched-tests run at the lane's live head (decision lanes-run-no-full-ci-job; workflow
+    lane-touched-tests.yml). A failed `run (windows-latest)` or `run (macos-latest)` row refuses the lane and names its link. A row not yet
+    finished, or no touched row on the head, is unknown: refused, and lifted only by --lint-unknown-ok. A run on an older head is never read
+    for the live one. A ref or commit target reads nothing. Each case scripts the rows of each head in self.host.draft_rows (FakeHost's
+    default is a pass, so the other cases keep their lane). The cases read the scripted rows through the real Host judge (tm.DraftRunReads)."""
+
+    def run_case(self, rows, *argv):
+        """Runs merge on argv in the lane checkout with `rows` as each head's draft rows (None: no rows scripted, a pass). Clears the reads and the
+        lint's log first, so each run reads alone. -> (rc, stdout and stderr together)."""
+        self.host.draft_rows, self.host.draft_reads = rows, []
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        return self.run_lane(*argv)
+
+    def refused_by_failed_run(self, name):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        rows = {head: [tm.draft_row("touched"), tm.draft_row(name, "failure", job=2)]}
+        rc, out = self.run_case(rows, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the draft's runs of the live head for a %s failure:\n%s" % (name, out))
+        self.assertEqual(rc, 1, "a failed %s run on the live head did not refuse the lane (exit %s):\n%s" % (name, rc, out))
+        self.assertIn(tm.job_link(tm.DRAFT_RUN, 2), out, "the refusal of a failed %s run does not name its link:\n%s" % (name, out))
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a failed %s run:\n%s" % (name, out))
+        self.assertEqual(pass_lines(out), [], "a lane with a failed %s run printed a PASS line:\n%s" % (name, out))
+
+    def test_a_failed_windows_run_on_the_live_head_refuses_the_lane_and_names_its_link(self):
+        self.refused_by_failed_run("run (windows-latest)")
+
+    def test_a_failed_macos_run_on_the_live_head_refuses_the_lane_and_names_its_link(self):
+        self.refused_by_failed_run("run (macos-latest)")
+
+    def test_a_draft_whose_touched_job_passed_and_that_ran_no_test_job_passes_on_one_read_of_its_head(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        rc, out = self.run_case({head: [tm.draft_row("touched")]}, "--lane-lint", "7")
+        self.assertEqual(self.host.draft_reads, [f"commits/{head}/check-runs"], "the lint did not read the live head's check runs once, and no status:\n" + out)
+        self.assertEqual(rc, 0, "a draft with a passed touched job and no test job was refused (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_test_job_rows_that_passed_or_skipped_do_not_refuse_the_lane(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        for name, conclusion in (("run (windows-latest)", "success"), ("run (macos-latest)", "skipped")):
+            with self.subTest(job=name, conclusion=conclusion):
+                rc, out = self.run_case({head: [tm.draft_row("touched"), tm.draft_row(name, conclusion, job=2)]}, "--lane-lint", "7")
+                self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs:\n" + out)
+                self.assertEqual(rc, 0, "a %s %s row refused the lane (exit %s):\n%s" % (name, conclusion, rc, out))
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_draft_run_not_yet_finished_waits_and_is_lifted_only_by_a_reason(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        cases = (("touched", [tm.draft_row("touched", status="in_progress")]),
+                 ("run (windows-latest)", [tm.draft_row("touched"), tm.draft_row("run (windows-latest)", status="in_progress", job=2)]))
+        for name, head_rows in cases:
+            with self.subTest(job=name):
+                rc, out = self.run_case({head: head_rows}, "--lane-lint", "7")
+                self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs for an unfinished %s:\n%s" % (name, out))
+                self.assertEqual(rc, 1, "an unfinished %s did not refuse the lane (exit %s):\n%s" % (name, rc, out))
+                self.assertNotIn("FAILs:", out, "an unfinished %s was read as a failed lint:\n%s" % (name, out))
+                self.assertIn(name, out, "the refusal does not name the unfinished %s:\n%s" % (name, out))
+                self.assertIn("--lint-unknown-ok", out, "the refusal of an unfinished %s cannot be lifted by name:\n%s" % (name, out))
+                self.assertEqual(self.lint_calls(), [], "the lint ran past an unfinished %s:\n%s" % (name, out))
+                rc, out = self.run_case({head: head_rows}, "--lane-lint", "7", "--lint-unknown-ok", "the windows run is still going")
+                self.assertEqual(rc, 0, "a reason did not lift an unfinished %s (exit %s):\n%s" % (name, rc, out))
+                self.assertIn("the windows run is still going", out, "the reason that lifted an unfinished %s is not logged:\n%s" % (name, out))
+                self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once after an unfinished %s was lifted:\n%s" % (name, out))
+
+    def test_no_touched_row_on_the_live_head_is_unknown_and_is_lifted_only_by_a_reason(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        cases = (("no rows on the head", {}),
+                 ("a run row and no touched row", {head: [tm.draft_row("run (windows-latest)", job=2)]}))
+        for label, rows in cases:
+            with self.subTest(case=label):
+                rc, out = self.run_case(rows, "--lane-lint", "7")
+                self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs (%s):\n%s" % (label, out))
+                self.assertEqual(rc, 1, "%s did not refuse the lane (exit %s):\n%s" % (label, rc, out))
+                self.assertNotIn("FAILs:", out, "%s was read as a failed lint:\n%s" % (label, out))
+                self.assertIn("--lint-unknown-ok", out, "%s cannot be lifted by name:\n%s" % (label, out))
+                self.assertEqual(self.lint_calls(), [], "the lint ran past %s:\n%s" % (label, out))
+                rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "no touched row yet")
+                self.assertEqual(rc, 0, "a reason did not lift %s (exit %s):\n%s" % (label, rc, out))
+
+    def stale_head_case(self, old_rows):
+        """The lane's head moves after its draft run was judged: the old head has `old_rows`, the live head has none. -> (rc, output)."""
+        self.use_ci_job(PASSING, 0)
+        old = self.head("feat")
+        self.competitor_push()
+        new = self.head("feat")
+        self.assertNotEqual(new, old, "setup: the push did not move the lane's head")
+        rc, out = self.run_case({old: old_rows}, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [new], "the lint read the draft's runs of the old head, not the live head:\n" + out)
+        self.assertNotIn(tm.job_link(tm.DRAFT_RUN, 2), out, "the lint named a run of the old head for the live head:\n" + out)
+        self.assertEqual(rc, 1, "a run on an older head counted for the live head (exit %s):\n%s" % (rc, out))
+        self.assertNotIn("FAILs:", out, "a run on an older head was read as a failed lint for the live head:\n" + out)
+        self.assertIn("--lint-unknown-ok", out, "the live head's missing run cannot be lifted by name:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a live head with no draft run:\n" + out)
+        return rc, out
+
+    def test_a_green_run_on_an_older_head_is_not_read_for_the_live_head(self):
+        self.stale_head_case([tm.draft_row("touched"), tm.draft_row("run (windows-latest)", job=2)])
+
+    def test_a_red_run_on_an_older_head_is_not_read_for_the_live_head(self):
+        self.stale_head_case([tm.draft_row("touched"), tm.draft_row("run (windows-latest)", "failure", job=2)])
+
+    def test_a_ref_target_reads_no_draft_run_so_a_failed_run_on_its_sha_does_not_refuse(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        sha = self.head("feat")
+        rc, out = self.run_case({sha: [tm.draft_row("touched"), tm.draft_row("run (windows-latest)", "failure", job=2)]}, "--lane-lint", sha)
+        self.assertEqual(self.host.draft_reads, [], "a ref target read the draft's runs:\n" + out)
+        self.assertEqual(rc, 0, "a ref target refused on a failed draft run it does not read (exit %s):\n%s" % (rc, out))
+
+    def real_host_run(self, rows, *argv):
+        """-> (rc, output) of merge with the real Host, which reads the head's check runs through the gh shim. The shim answers `rows` for every
+        read, so a head of more than one page serves the same rows on each page. Run outside the cloud, as LintPostsPassComment runs its real-host cases."""
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, checks_seq=[rows])
+        with self.cloud(CLAUDE_CODE_REMOTE=None):
+            rc, out = self.run_merge(*argv, host=merge.Host())
+        return rc, out
+
+    def test_a_real_host_reads_a_failed_windows_run_on_page_two_of_the_head_rows(self):
+        head = self.head("feat")
+        link = tm.job_link(tm.DRAFT_RUN, 2)
+        rows = [("touched", "pass", "")] + [("lint-%d" % k, "pass", "") for k in range(100)] + [("run (windows-latest)", "fail", link)]
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.real_host_run(rows, "--lane-lint", "7")
+        calls = tm.GhHalf.calls(self).splitlines()
+        self.assertTrue(any(line.startswith(f"GET commits/{head}/check-runs") and "page=2" in line for line in calls),
+                        "the lint did not read page 2 of the live head's check runs:\n" + "\n".join(calls))
+        self.assertEqual(rc, 1, "a failed windows run on page 2 did not refuse the lane (exit %s):\n%s" % (rc, out))
+        self.assertIn(link, out, "the refusal does not name the failed run's link:\n" + out)
+
+    def test_a_real_host_passes_the_same_rows_when_the_windows_run_passed(self):  # control: green on the old code
+        head = self.head("feat")
+        rows = [("touched", "pass", "")] + [("lint-%d" % k, "pass", "") for k in range(100)] + [("run (windows-latest)", "pass", tm.job_link(tm.DRAFT_RUN, 2))]
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.real_host_run(rows, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "a passed windows run on page 2 refused the lane (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+
 def other_comment(cid, n=7):
     """A comment that is no lint: the filler that pushes a later comment onto the next page."""
     return {"id": cid, "created_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{n}",
@@ -2742,7 +2886,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
     def test_a_real_host_posts_the_pass_as_one_rest_comment_on_the_pull_request(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        tm.GhHalf.set(self, checks_seq=[[("touched", "pass", "")]])  # the draft's touched job passed: the lint's read of the head's draft run
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
@@ -2776,7 +2920,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
     def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
+        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"), checks_seq=[[("touched", "pass", "")]])
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
