@@ -635,5 +635,87 @@ class CiWorkflow(unittest.TestCase):
                         "the Retire step does not gate on a pull request, where its base ref exists")
 
 
+class CiStepRunsMainCopy(Case):
+    """The Retire step runs the classifier as main has it, with the modules it imports, never the copy the PR head holds: a PR
+    cannot rewrite the check that judges its own close (decision debt-close-runs-retire). The step's python3 is a stand-in that
+    keeps a copy of the folder of each .py script it is given, so the case reads which copy ran."""
+
+    MAIN = "# main's classifier\n"
+    MAIN_LAYOUT = "# main's layout module\n"
+    PR = "# the PR head's classifier: passes every close\n"
+    PR_LAYOUT = "# the PR head's layout module\n"
+    STAND_IN = ("#!/bin/sh\n"
+                "for arg in \"$@\"; do\n"
+                "  case \"$arg\" in\n"
+                "    *.py) mkdir -p \"$STAND_IN_KEPT\" && cp -R \"$(dirname \"$arg\")/.\" \"$STAND_IN_KEPT/\" ;;\n"
+                "  esac\n"
+                "done\n"
+                "exit 0\n")
+
+    def fixture(self):
+        """A repo whose main holds the classifier and its layout module, and whose PR head rewrites both."""
+        self.dir = tempfile.mkdtemp(prefix="repo-", dir=self.folder)
+        sh(self.dir, "git", "init", "-q", "-b", "main")
+        put(os.path.join(self.dir, "lint", "check_debt_retire.py"), self.MAIN)
+        put(os.path.join(self.dir, "lint", "layout.py"), self.MAIN_LAYOUT)
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "-m", "base")
+        self.base = sh(self.dir, "git", "rev-parse", "HEAD")
+        sh(self.dir, "git", "update-ref", "refs/remotes/origin/main", self.base)
+        self.change(write={"lint/check_debt_retire.py": self.PR, "lint/layout.py": self.PR_LAYOUT})
+
+    def retire_step(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = gating_text(f.read())
+        blocks = [job_block(text, job) or "" for job in CHECKS_SUITE_JOBS]
+        steps = [st for block in blocks for st in step_blocks(block) if RETIRE_RUN_STEP.search(run_body(st) or "")]
+        self.assertTrue(steps, "scope: checks.yml has no step that runs the Retire classifier")
+        return steps[0]
+
+    def run_step(self, body):
+        """The step's run body under bash, in the PR head's checkout, with the env the step gives it and the stand-in first on PATH."""
+        bindir = os.path.join(self.folder, "stand-in")
+        kept = os.path.join(self.folder, "kept")
+        put(os.path.join(bindir, "python3"), self.STAND_IN)
+        os.chmod(os.path.join(bindir, "python3"), 0o755)
+        env = {**os.environ, "PATH": bindir + os.pathsep + os.environ.get("PATH", ""), "STAND_IN_KEPT": kept,
+               "BASE_REF": "main", "HEAD_SHA": self.head, "GH_TOKEN": "fixture-token"}
+        return subprocess.run(["bash", "-e", "-c", body], cwd=self.dir, capture_output=True, text=True, env=env), kept
+
+    def test_c6_the_ci_step_runs_the_main_copy_of_the_classifier_and_its_modules(self):
+        self.fixture()
+        got, kept = self.run_step(run_body(self.retire_step()))
+        self.assertTrue(os.path.isdir(kept), "scope: the Retire step ran no .py script: " + got.stdout + got.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(kept, "layout.py")), "scope: the folder the step ran holds no layout module")
+        with open(os.path.join(kept, "check_debt_retire.py"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.MAIN, "the Retire step ran the PR head's classifier, not main's")
+        with open(os.path.join(kept, "layout.py"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.MAIN_LAYOUT, "the Retire step ran the PR head's layout module, not main's")
+
+
+class ChildEnv(Case):
+    """A check runs the PR head's test in a child that holds no token: the CLI's GH_TOKEN and GITHUB_TOKEN stay with the CLI, so
+    the test code the PR wrote never reads them."""
+
+    SEEN = ("import os, sys\n"
+            "keys = [k for k in ('GH_TOKEN', 'GITHUB_TOKEN') if k in os.environ]\n"
+            "with open(os.environ['RETIRE_ENV_MARKS'], 'a', encoding='utf-8') as f:\n"
+            "    f.write(os.path.basename(__file__) + ' ' + ','.join(keys) + '\\n')\n"
+            "sys.exit(0)\n")
+    RETIRE = "Delete the old helper. Check: `tests/test_seen.py`."
+
+    def test_e1_the_check_child_gets_no_token_from_the_cli_environment(self):
+        self.repo(debts={"d-seen": self.RETIRE})
+        self.change(write={"tests/test_seen.py": self.SEEN}, rm=["docs/debts/d-seen.md"])
+        marks = os.path.join(self.folder, "env-marks.txt")
+        token = {"GH_TOKEN": "fixture-token", "GITHUB_TOKEN": "fixture-token", "RETIRE_ENV_MARKS": marks}
+        with unittest.mock.patch.dict(os.environ, token):
+            found = self.findings()
+        self.assertTrue(os.path.exists(marks), "scope: the check's test did not run: %r" % pairs(found))
+        with open(marks, encoding="utf-8") as f:
+            seen = f.read().strip()
+        self.assertEqual(seen, "test_seen.py", "the PR head's check test read a token from the CLI environment: %s" % seen)
+
+
 if __name__ == "__main__":
     unittest.main()
