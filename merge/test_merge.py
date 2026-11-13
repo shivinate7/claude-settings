@@ -21371,6 +21371,11 @@ class LeftOutBatch(CloudSession):
     run_batch = BatchFreeze.run_batch
     no_lint_or_ready_check = BatchFreeze.no_lint_or_ready_check
     ancestor = BatchFreeze.ancestor
+    record_pushes = BatchFreeze.record_pushes
+    pushes = BatchFreeze.pushes
+    body = BatchFreeze.body
+    snapshot = BatchFreeze.snapshot
+    assert_untouched = BatchFreeze.assert_untouched
 
     def setUp(self):
         super().setUp()
@@ -21433,6 +21438,76 @@ class LeftOutBatch(CloudSession):
         """-> (rc, out) of merge.main in the clone. The clone fetches origin first, as a run's own fetches leave each head in it."""
         sh(self.co, "git", "fetch", "-q", "origin")
         return self.run_batch(*argv)
+
+    # handin-cannot-drop: a build with no PR list takes the done set that merge --reviewed reads (base-filtered, a held pull request left
+    # off), and --leave N "reason" takes one done pull request out, its reason printed in the body outside the freeze markers.
+    def lane_lines(self, pr):
+        """The `Lane:` lines of pull request pr's frozen block, sorted."""
+        return sorted(x for x in (block_lines(self.body(pr)) or []) if x.startswith("Lane: "))
+
+    def test_a_build_with_no_pr_list_takes_every_done_pull_request(self):
+        self.lane(101)  # open, with no record: not done, so no build takes it
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)  # done, and no caller names it
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "a build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}", f"Lane: #103 {self.heads[103]}"],
+                         "the build does not hold the done set: %s" % out)
+
+    def test_a_leave_takes_its_pull_request_out_and_prints_the_reason_outside_the_block(self):
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "--leave", "103", "waits for the schema change")
+        self.assertEqual(rc, 0, "a build with --leave was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}"], "the left-out pull request is still in the frozen block")
+        body = self.body(pr)
+        outside = body.split(BATCH_BEGIN)[0] + body.split(BATCH_END)[-1]
+        self.assertIn("#103", outside, "the body outside the freeze markers names no #103: %r" % body)
+        self.assertIn("waits for the schema change", outside, "the reason is not in the body outside the freeze markers: %r" % body)
+        self.assertNotIn("waits for the schema change", "\n".join(block_raw(body) or []), "the reason is inside the freeze block")
+
+    def test_a_leave_of_a_pull_request_outside_the_done_set_is_refused_before_anything_is_pushed(self):
+        self.lane(102)
+        self.done(102)
+        self.lane(103)  # open, with no record: not in the done set
+        self.record_pushes()
+        rc, out = self.build("--batch-build", "nightly", "--leave", "103", "not ready")
+        self.assertIn("#103", out, "the refusal names no #103: %s" % out)
+        self.assertNotEqual(rc, 0, "a --leave of a pull request outside the done set was not refused: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+
+    def test_a_second_build_of_the_same_done_set_is_allowed_and_changes_nothing(self):
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the first build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the same done set again was refused; the freeze allows the same set: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_done_pull_request_another_open_pull_request_holds_is_left_off_a_build_with_no_list(self):
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        self.lane(104, on=103)  # open and not done: its head contains #103's head, so it holds #103
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}"], "a held done pull request is in the build: %s" % out)
 
     def left_out(self, out):
         """The left-out lines of a run's output, in order: each `left out of batch` line and each `left-out list unknown` line."""
