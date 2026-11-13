@@ -2640,6 +2640,13 @@ MUTATIONS = [
      'def _workspace_reify(words) -> bool:',
      'def _workspace_reify(words) -> bool:\n    return False',
      "guard", 'linked-nm: npm version patch -w a --workspaces-update (Bash) in a linked folder is refused'),
+    # The member judge: from a member under a real root, npm install and npm ci reify the member's own link. The
+    # anchor is the member's own link test. The mutant reads a folder that is never a link, so both member
+    # deny cases (npm install and npm ci) are allowed. The root form stays allowed (a known limit).
+    ("linked-node-modules: a workspace member's own link is never read, so npm install and npm ci from the member are allowed under a real root",
+     'is_link(os.path.join(npm_walk(where, False)[0], "node_modules")):',
+     'is_link(os.path.join(npm_walk(where, False)[0], "never-a-member-folder")):',
+     "guard", "from a member whose node_modules is a link, under a real root, is refused"),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
