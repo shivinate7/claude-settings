@@ -3169,7 +3169,7 @@ class ReadyAndDraftRows(UpkeepFixture):
 
 
 class HandedInRow(UpkeepFixture):
-    """The upkeep row `handed in over 6 h, in no batch` (build.STALE_HANDIN_HOURS = 6, named by build.HANDIN_LINE). A pull row whose
+    """The upkeep row `handed in 6 h or more, in no batch` (build.STALE_HANDIN_HOURS = 6, named by build.HANDIN_LINE). A pull row whose
     reviewLog is true (its review log is posted), whose batched is not true (no batch integration pull holds it), and whose reviewLogAt is
     6 h or more before the live read, lists as `#<number> (<H>h)`. A reviewLog true with no usable reviewLogAt reads
     `unknown (#<number> has no reviewLogAt)`, unless batched is true: batched takes the pull out before that check, as held does for
@@ -3178,7 +3178,7 @@ class HandedInRow(UpkeepFixture):
     time is whole seconds, so the 6 h boundary is exact. A pull whose newest record reads open or bad (reviewDone false) is not handed in:
     its review log is posted, but the lane has not answered it. reviewDone is a JSON bool, like reviewLog."""
 
-    HANDIN = "handed in over 6 h, in no batch"
+    HANDIN = "handed in 6 h or more, in no batch"
 
     def read_when(self):
         """The live read's time: whole seconds, five minutes ago, so a case measures the 6 h boundary exactly."""
