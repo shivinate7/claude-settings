@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-13T05:20:00Z",
+  "context": "Goal: main green again, and the queued batches unblocked.\nProblem (risk): main has been red since 19:53 CST on the Windows merge test shards; the fix batch's own CI run is all green, but the harness's permission layer refused the batch runner's merge as \"undermining oversight\", so it needs your word.\nBased on (read): runner 10's message at 23:19 CST, relayed by the coordinator at 23:20 CST; batch PR #3080 (batch 119, holding #3052, the Windows test-scope fix, and #2849, the Mac mail un-hold) passed every job on run 43366798173.\nBased on (ruling): your Cockpit pick 178 a (2026-11-03 22:31 CST): Claude may type the merge tool's red-main reason flag, with a logged reason, only for the batch that carries the fix.\nDeparts from: main refuses every batch merge while main is red \u2014 this one fix batch merges onto red main, with its reason in the merge commit.\nWhy yours: the harness refused the act, so only your yes lets it run.",
+  "home": "decision no-merge-onto-red-main; standing grant Relayed yes",
+  "id": "merge-fix-onto-red-main",
+  "kind": "decision",
+  "n": 684,
+  "options": [
+    {
+      "gain": "Main can turn green on the next push run, and the queued batches (the #2992 fix-chain PR first) and every lane waiting on main move again.",
+      "how": "Runner 10 merges #3080 at commit 888481daa with the merge tool's red-main reason flag, reason \"batch carries the main-red fix (#3052 scope_run resolve_program)\", under every other merge check.",
+      "id": "merge-fix-batch",
+      "key": "a",
+      "label": "Yes, merge batch 119 now (recommended)",
+      "links": [
+        {
+          "label": "Batch PR #3080",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3080"
+        },
+        {
+          "label": "Fix PR #3052",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3052"
+        },
+        {
+          "label": "Next PR #2992",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2992"
+        }
+      ],
+      "lose": "If the fix does not cure Windows, main stays red one more run; a fix lane starts at once."
+    },
+    {
+      "gain": "Nothing lands on a red main.",
+      "how": "Nothing merges; batch 119 waits.",
+      "id": "wait",
+      "key": "b",
+      "label": "No, wait",
+      "lose": "Main stays red and every batch stays blocked, since only a batch carrying the fix can turn it green."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), relayed to runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "pick": "a",
+  "ref": "coordinator 23:20 CST Nov 12; runner 10 23:19 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge the red-main fix batch",
+  "status": "open",
+  "title": "May batch 119, which carries the fix for red main, merge now?",
+  "why": "The harness refused the merge, so it needs your word."
+}

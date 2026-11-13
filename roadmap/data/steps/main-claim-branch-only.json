@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The check refuses plain lines like \"same as the main window\", \"matches the main points\" and \"worse than the main menu\", because it takes any word after main. Cost today: one rewrite per false alarm.",
  "source": "lane claim-vs-main-needs-read (session_013NEJL1D4J39Z3Xqh1gfQag, draft PR 3068), 22:42 CST Nov 12",
- "note": "Narrow the check so only a branch-like use counts, red test first. The code-span escape is in the record's Known limit.",
- "updatedAt": "2026-11-12T23:18:28-06:00"
+ "note": "Narrow the check so only a branch-like use counts, red test first. The code-span escape is in the record's Known limit. Lane 23:19 CST Nov 12: the check (main_claim_problem in lint/report_guard.py) is only on unmerged draft PR 3068, not on main 36807ad19; triage filed the step without saying so. The lane stacks on 3068 head ed3d6c958, red test first, draft PR based on 3068, merging after it (triage 23:21 CST: yes).",
+ "updatedAt": "2026-11-12T23:21:17-06:00"
 }
