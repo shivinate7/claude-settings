@@ -72,6 +72,54 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: bash .github/scripts/ci-scope.sh
 
+  # The lane lint (`bin/ci-job checks --lint`, the one home of the lint steps) runs beside the heavy jobs, never before them, so a green
+  # run waits no longer (owner ruling R4, 14:56 CST Nov 10; decision lanes-run-no-full-ci-job). A red lint posts its comment early through
+  # red-lint-comment. The lint steps stay in `checks` too: the full suite is still the final check (roles-each-layer-proves-once).
+  lint:
+    runs-on: ubuntu-latest
+    needs: scope
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Lane lint
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bin/ci-job checks --lint --base "origin/$BASE_REF"
+
+  # Posts the red comment as soon as lint ends red, so a waiting session wakes before the heavy jobs end. It does not cancel the run: a cancelled
+  # run concludes `cancelled`, which `merge --blame` refuses, and the tool takes no second accepted form (coordinator, 13:55 CST Nov 12;
+  # decision uniform-over-variants). So no job holds a write permission for runs. Its job-level if is always() and not a draft (a draft run skips
+  # every job): without always() GitHub skips the job when lint fails (actions/all-jobs-passed/action.yml). Each step reads the red lint itself,
+  # and a green lint skips them all.
+  red-lint-comment:
+    runs-on: ubuntu-latest
+    needs: lint
+    if: ${{ always() && !github.event.pull_request.draft }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.lint.result == 'failure' }}
+        with:
+          persist-credentials: false
+
+      - name: Comment that lint ended red
+        if: ${{ needs.lint.result == 'failure' }}
+        uses: $/actions/ci-done-comment
+        with:
+          needs: ${{ toJSON(needs) }}
+
   checks:
     runs-on: ubuntu-latest
     needs: scope
@@ -353,6 +401,9 @@ jobs:
 
       - name: all-jobs-passed needs every pull-request job
         run: python3 lint/test_all_jobs_passed.py
+
+      - name: Lint job runs beside the heavy jobs and a red lint comments early
+        run: python3 lint/test_lint_first_cancel.py
 
       - name: Scope detector fixture suite
         run: python3 lint/test_ci_scope.py
@@ -2007,6 +2058,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - scope
+      - lint
+      - red-lint-comment
       - checks
       - checks-merge-install
       - checks-guard
@@ -2045,6 +2098,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - scope
+      - lint
+      - red-lint-comment
       - checks
       - checks-merge-install
       - checks-guard

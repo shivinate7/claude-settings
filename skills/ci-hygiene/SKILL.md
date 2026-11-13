@@ -59,20 +59,23 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
-   on the batch head, after the draft step's page push. The batch ready route (`merge --batch-build NAME --ready`) runs the lint, then the repo's ready checks (`merge.readyChecks`), and no touched tests.
+   `~/.claude/bin/merge --lane-lint <pr>` once, before it hands off. The batch runner runs no lint.
+   The join reads that hand-off PASS comment at the live head. A red lane does not join.
+   The batch's CI run has a `lint` job that runs beside the other jobs. When it goes red, it posts the
+   red comment at once. The run is not cancelled, so `--blame` still reads a failed run
+   (decision `lanes-run-no-full-ci-job`). The red files name the lane to drop. The next run is the one that merges.
+   The batch ready route (`merge --batch-build NAME --ready`) runs the repo's ready checks (`merge.readyChecks`), no lint and no touched tests.
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
-   merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
-   reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
+   satisfy the join.
+   The lint counts a clash between two heads only when both merge clean with their base.
+   A hand list of checks never stands in for that run: `bin/ci-job` reads its steps from the
+   workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
    triggers a rebuild. The one change after the freeze is the drop of a blamed lane, with any
    lane that depends on it. A lane is blamed when a red run of the batch head names it. Build the batch as a draft,
-   run the batch-head lane lint, then mark the integration PR ready, with no rebuild between
+   run the ready checks, then mark the integration PR ready, with no rebuild between
    (decision `draft-until-reviewed`). A draft run skips every job, so never rebuild a draft batch
    only to close it. The
    next batch builds and runs on top of the one in CI. While its head holds the running batch's head,
@@ -81,9 +84,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    on the new head.
    The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
    builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
-   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
-   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
+   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the ready
+   checks on the batch head, then records the head that passed. When the head moved since the last pass, it runs them again. It does not mark the PR ready:
+   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of a ready check
    stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
    refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
    `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
@@ -112,8 +115,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.
    Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
-   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted at hand-off and
-   once at the join, before the build, and the batch head once, before ready (decision
+   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted once, at hand-off (decision
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.

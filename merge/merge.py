@@ -145,9 +145,9 @@
                           request on the base and one against the base. Per code candidate: one `git fetch` of the base (once per run), a
                           `git cat-file` check, a fetch of its refs/pull/N/head if the clone lacks it, and one `git merge-tree`.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
-                          lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
-                          head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
-                          real host the run stops there and names the session's route to mark it ready. A FAIL of the lint or of a ready
+                          run the repo's ready checks on the head of batch-NAME (no lane lint: batch CI runs the lint first, and each lane
+                          linted at hand-off), and record the head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
+                          real host the run stops there and names the session's route to mark it ready. A FAIL of a ready
                           check stores each lane it names (Blamed:) and prints its drop command. A FAIL, or an unknown with no reason,
                           leaves the draft and exits 1. A lane's draft run still running, missing, or skipped refuses here, naming --lint-unknown-ok, which a non-blank reason lifts; a failed one never lifts. A PR list, if given, must be the frozen set. A ready pull request whose head is the
                           Linted head is left as it is. Takes no lock. A cloud run needs the batch-runner role.
@@ -4775,7 +4775,7 @@ def freeze_markers(lines):
 
 def parse_freeze(body):
     """-> None when the body holds no block, else {name, on: (branch, sha) or None, base: sha or None, lanes: {PR: head}, dropped: [PR],
-    blamed: [PR] (the lanes the last FAILing lint of the batch head blamed), linted: sha or None (the head a lint and the ready checks passed), at: (begin line, end line)}.
+    blamed: [PR] (the lanes the last FAILing ready check of the batch head blamed), linted: sha or None (the head the ready checks passed), at: (begin line, end line)}.
     A body with more or fewer than one begin and one end marker, or a line in the block this tool cannot read, is a Stop."""
     lines = body.split("\n")
     begins, ends = freeze_markers(lines)
@@ -4812,7 +4812,7 @@ def parse_freeze(body):
 def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=None):
     """-> the block's lines, markers included. `lanes` is {PR: head}, listed by PR number; `on` is (branch, sha) or None; `base` is the sha
     of the base branch the batch was built on, or None (a block made before Base was recorded). `blamed` is the lanes the last FAILing lint of the
-    batch head blamed, the only lanes a drop may take off after the build. `linted` is the head a lint and the ready checks passed, or None: a
+    batch head blamed, the only lanes a drop may take off after the build. `linted` is the head the ready checks passed, or None: a
     rebuild leaves it None, because the new head is no head a lint read."""
     return [BATCH_BEGIN, f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *([f"Base: {base}"] if base else []),
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
@@ -4886,7 +4886,7 @@ def lane_list(numbers):
 
 def return_to_draft(h, n, info):
     """Before a push to the integration branch of pull request `n`: send a ready one back to draft, so the push's CI run is a draft run and `--ready`
-    lints the new head. A refused return never stops the push; it restarts CI whatever the flag says. A draft is left as it is.
+    checks the new head. A refused return never stops the push; it restarts CI whatever the flag says. A draft is left as it is.
     -> True when the pull request is a draft now; the caller says `needs_ready` after the push."""
     if info["draft"]:
         return True
@@ -4897,11 +4897,11 @@ def return_to_draft(h, n, info):
 
 def needs_ready(name, drafted=True):
     """The line after a push that moved the integration branch of a batch that was ready when read. `drafted` False: the return to draft was refused, so the
-    pull request is still ready on a head no lint has read, and `--ready` alone leaves a ready one as it is: it must go back to draft first."""
+    pull request is still ready on a head no ready check has read, and `--ready` alone leaves a ready one as it is: it must go back to draft first."""
     if drafted:
         say(f"merge: batch {name} needs `merge --batch-build {name} --ready` again before it goes ready.")
     else:
-        say(f"merge: batch {name} is still ready, on a head no lint has read. Return its pull request to draft by hand, then run `merge --batch-build {name} --ready`.")
+        say(f"merge: batch {name} is still ready, on a head no ready check has read. Return its pull request to draft by hand, then run `merge --batch-build {name} --ready`.")
 
 def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
     """Batch branch `moved` has a new head. Rebuild each open batch whose block says `On: moved` on it: the same lanes, the On sha updated, force-with-lease,
@@ -5038,7 +5038,7 @@ VERDICT_HEADER = re.compile(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (
 FAIL_COMMAND = re.compile(r"FAIL (\S.*?) rc=-?\d+(?: .*?)? \([\d.]+s\)(?: log=|$)")  # bin/verdict's FAIL line: a note (killed by signal, no tests ran, ...) may sit after rc
 
 def failed_step_text(fail):
-    """-> the text bin/verdict kept for each step that FAILed in a lane lint, or None when it cannot be read. ci-job keeps one log for all its steps, each
+    """-> the text bin/verdict kept for each step that FAILed in a ready check, or None when it cannot be read. ci-job keeps one log for all its steps, each
     section headed by `=== verdict run <time>: <command>`, and the FAIL line carries the same command. The passing steps' sections are left out, so a
     path a passing step printed blames no lane. The FAIL line has no section time, so a command that heads more sections than it has FAIL lines is two steps
     of one name, and which of them failed is not known: None, because a lane is never named from a section that may have passed."""
@@ -5064,7 +5064,7 @@ def failed_step_text(fail):
     return "\n".join(kept) if kept else None
 
 def blamed_lanes(root, fail, lanes, base):
-    """-> {PR: [path]} of each frozen lane whose diff against `base` touches a path the FAILed lane-lint step names, or None when that cannot be read.
+    """-> {PR: [path]} of each frozen lane whose diff against `base` touches a path the FAILed ready-check step names, or None when that cannot be read.
     A lane is matched by its paths, not by a path grammar: a path counts when it is a whole token of the step's output, bare, after `./`, or after an absolute prefix."""
     text = failed_step_text(fail)
     if text is None:
@@ -5116,7 +5116,7 @@ def record_in_block(h, branch, **fields):
 
 def batch_ready_checks(root, cfg, pr, name, branch, base):
     """The ready checks of `--batch-build NAME --ready` (decision lanes-run-no-full-ci-job): the repo's merge.readyChecks, run once on the batch head,
-    after its lint and before the ready mark, as the draft step runs them. A repo with none runs none."""
+    before the ready mark, as the draft step runs them. The batch head runs no lane lint: each lane linted at hand-off, and batch CI runs the lint first. A repo with none runs none."""
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         return
@@ -5193,10 +5193,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
 
 def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
-    With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
-    lint of the integration branch head runs, then the repo's ready checks, and the host is asked to mark the draft ready (Host.ready sends nothing, so
-    a real run stops there and names the route). The block records the head that passed (`Linted:`), and the lanes a FAIL of the lint or of a ready
-    check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is linted again,
+    With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the repo's ready checks run, and the host is asked to mark the draft ready (Host.ready sends nothing, so
+    a real run stops there and names the route). The block records the head that passed (`Linted:`), and the lanes a FAIL of a ready
+    check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is checked again,
     ready or not. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
     branch = integration_branch(name)
@@ -5271,9 +5270,8 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
         refuse_draft_runs(h, heads, unknown_ok, ready=True)
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
-        cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the lint: a config that cannot be read stops the run before the 14 minutes
+        cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the ready checks: a config that cannot be read stops the run early
         try:
-            lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
             batch_ready_checks(root, cfg, pr, name, branch, base)  # a FAIL here blames by the same path as a lint FAIL
         except LintFail as e:
             blamed = blamed_lanes(root, e, heads, base)
@@ -5285,7 +5283,7 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
                 say(f"merge: the blame could not be stored ({why}); a drop of a blamed lane will be refused until a blame is stored.")
             raise Stop("\n".join([str(e), *blame_lines(name, blamed, base, stored), DRAFT_CITE])) from None
         tip = fetch_branch(root, branch, FREEZE_CITE)
-        pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is linted again only when its head moves
+        pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is checked again only when its head moves
         if info["draft"]:
             ok, why = h.ready(pr)
             if not ok:
@@ -5484,7 +5482,7 @@ def build_parser():
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as batch CI's lint job does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
@@ -5493,7 +5491,7 @@ def build_parser():
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
-    p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
+    p.add_argument("--ready", action="store_true", help="with --batch-build: run the ready checks on the head of batch-NAME (no lane lint), then ask the host to mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--blame", type=pr_arg, metavar="PR", help="with --batch-build NAME and --run: store that a failed CI run of the batch's current head blames lane PR, so a drop may take it off; nothing else")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")

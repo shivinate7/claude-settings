@@ -332,7 +332,8 @@ FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
-LINT_JOBS = CHECKS_SUITE_JOBS
+LINT_JOBS = CHECKS_SUITE_JOBS + ("lint",)  # lint: the lane-lint job (step lane-lint-once-fail-fast), no scope condition either
+CANCEL_JOB = "red-lint-comment"  # needs lint, not scope: its steps carry the red-lint condition, checked in lint/test_lint_first_cancel.py
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
 ALL_JOBS_PASSED_JOB = "all-jobs-passed"
 
@@ -602,7 +603,7 @@ def scope_problems(text):
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
         # alone (actions/ci-done-comment/test_comment.py checks its needs and if).
-        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB):
+        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, CANCEL_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 

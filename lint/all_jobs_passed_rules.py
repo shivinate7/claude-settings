@@ -23,6 +23,7 @@ ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
 ALL_JOBS_PASSED_RUNS_ON = "ubuntu-latest"
 TO_JSON = "${{ toJSON(needs) }}"
+ALWAYS_IF = "${{ always() && !github.event.pull_request.draft }}"  # the one job-level if a needed job may keep: red-lint-comment runs after a red lint, never on a draft
 FAN_IN = "ci-done"  # comments on a red run; it needs all-jobs-passed, and all-jobs-passed never needs it
 CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
 STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green
@@ -84,7 +85,7 @@ def split_jobs(text):
     for name, job in all_jobs(text).items():
         if name in (ALL_JOBS_PASSED_JOB, FAN_IN):
             continue
-        if job["if"] is None:
+        if job["if"] in (None, ALWAYS_IF):
             needed.append(name)
             continue
         try:
@@ -174,7 +175,7 @@ def off_problems(text):
     for name in needed:
         if shard_base(name):
             problems.append(f"shard {name} is in all-jobs-passed's needs: a shard runs only off pull_request")
-        elif name != "scope" and jobs[name]["if"] is not None:
+        elif name != "scope" and jobs[name]["if"] not in (None, ALWAYS_IF):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems
