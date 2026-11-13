@@ -635,6 +635,120 @@ def scratchpad_writer_of(where: str, session_id: str) -> str:
         return ""
 
 
+SCRATCHPAD_WALK_CAP = 5000   # entries one folder check reads, at most
+SCRATCHPAD_GLOB_MAGIC = re.compile(r"[*?\[]")
+SCRATCHPAD_BRACE_CAP = 256   # words one brace list expands to, at most
+_BRACE_RANGE = re.compile(r"(-?\d+)\.\.(-?\d+)|([A-Za-z])\.\.([A-Za-z])")
+
+
+def _brace_group(text: str, start: int):
+    """(index of the closing brace, the parts) of the brace expression opened at `text[start]`, or None when
+    it is no expression: bash keeps `{x}`, an unclosed `{` and `${x}` literal. A part is a comma-separated item
+    at depth one, or the items of a `{1..3}` or `{a..c}` range."""
+    depth, parts, last, at = 0, [], start + 1, start
+    while at < len(text):
+        char = text[at]
+        if char == "\\":
+            at += 2
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[last:at]
+                if parts:
+                    return at, parts + [body]
+                found = _BRACE_RANGE.fullmatch(body)
+                if found and found.group(1) is not None:
+                    low, high = int(found.group(1)), int(found.group(2))
+                    step = 1 if high >= low else -1
+                    if abs(high - low) < SCRATCHPAD_BRACE_CAP:
+                        return at, [str(n) for n in range(low, high + step, step)]
+                elif found:
+                    low, high = ord(found.group(3)), ord(found.group(4))
+                    step = 1 if high >= low else -1
+                    return at, [chr(n) for n in range(low, high + step, step)]
+                return None
+        elif char == "," and depth == 1:
+            parts.append(text[last:at])
+            last = at + 1
+        at += 1
+    return None
+
+
+def expand_shell_braces(word: str, cap: int = SCRATCHPAD_BRACE_CAP):
+    """The words brace expansion makes of `word`: `S/{a,b}` is `S/a` and `S/b`, a list nests, and a `{1..3}` or
+    `{a..c}` range counts. A one-element `{x}`, a `${x}`, an escaped brace and an unclosed one stay as written, as
+    in bash. Unlike bash, it drops a range's zero padding (`{01..03}` gives `1 2 3`) and keeps a stepped range
+    (`{1..3..1}`) literal; the list stops at `cap` words (the rest is unread). Quotes are not known here: a quoted
+    brace list expands too, which can only widen a refusal."""
+    for at, char in enumerate(word):
+        if char == "\\":
+            continue
+        if char != "{" or (at and word[at - 1] in "$\\"):
+            continue
+        group = _brace_group(word, at)
+        if not group:
+            continue
+        end, parts = group
+        out = []
+        for part in parts:
+            for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):
+                out.append(head)
+                if len(out) >= cap:
+                    return out
+        return out
+    return [word]
+
+
+def scratchpad_folder_writer(where: str, session_id: str, agent_id: str, cap: int = SCRATCHPAD_WALK_CAP):
+    """(path, writer) of the first file under `where` whose record names an agent other than `agent_id`, else
+    None. `where` is a folder, the scratchpad root, or a glob pattern that the shell would expand
+    (`S/sub/*`), and a brace list in it (`S/{a,b}`) is expanded first, as bash does before `rm` runs, with the
+    differences `expand_shell_braces` names: each word
+    is read against the real folder now, as the shell will. A root that is a link and has no trailing slash is
+    unlinked by `rm` or `mv`, and its target is left alone, so it is skipped. The walk reads every level
+    and skips the record folder. It stops after `cap` entries, and then the rest is unread: a folder past the
+    cap passes unless a file in the first `cap` entries already names another agent. That favours the agent that
+    clears its own large folder (a checkout, a build output) over a rare miss. A folder that cannot be listed
+    is skipped, and the walk goes on. The records are the ones `scratchpad_writer_of` reads: no second format."""
+    left = [cap]
+    skip = os.path.join(session_scratchpad_root(where, session_id) or "\0", SCRATCHPAD_WRITERS)
+    try:
+        roots = []
+        for word in expand_shell_braces(where):
+            if SCRATCHPAD_GLOB_MAGIC.search(word) and not os.path.lexists(word):
+                import glob   # lazy: only a pattern needs it
+                roots.extend(sorted(glob.glob(word)))
+            else:
+                roots.append(word)
+        for root in roots:
+            tops = [root]
+            while tops:
+                top = tops.pop()
+                if os.path.normcase(os.path.realpath(top)) == os.path.normcase(skip):
+                    continue
+                if left[0] <= 0:
+                    return None
+                left[0] -= 1
+                if os.path.islink(top):
+                    continue   # an `rm` or `mv` of a link leaves its target alone; a trailing slash makes `islink` false
+                if os.path.isdir(top):
+                    try:
+                        with os.scandir(top) as entries:
+                            tops.extend(entry.path for entry in entries)
+                    except OSError:
+                        pass   # a folder that cannot be listed is not judged; the others still are
+                    continue
+                writer = scratchpad_writer_of(top, session_id)
+                if writer and writer != agent_id:
+                    return top, writer
+    except Exception:
+        return None   # a path the walk cannot read at all is not judged, as a write the guard cannot read is not
+    return None
+
+
 def scratchpad_clear_writer(where: str, session_id: str) -> None:
     """Delete the record of the scratchpad file `where`, when a call with no `agent_id` has written it. No
     record, or a record that cannot be deleted, leaves things as they are."""
