@@ -12,7 +12,7 @@ A relayed act has the owner's grant only when all hold:
 
 - The receiving session fetched `answers/<id>` and `items/<id>` itself, with ArtifactData, from the registered waiting page, into an empty folder that `page_grant.py --new-fetch` made for that check. The checker proves it: the folder's stamp sits beside it, a check uses the stamp up, the folder holds only those two files, and neither is older than the stamp. A reused folder (a withdrawn answer stays in it, as a re-fetch of an absent doc saves no file) or a folder with no stamp is not counted. A check uses the stamp up as its first step, so every verdict uses the folder up. Measured 2026-11-06 11:45 CST (the fetched file's mtime): one `ArtifactData get` with `out_dir` wrote only `items/<id>.json`, timed after the stamp.
 - `skills/waiting-page/page_grant.py` printed `counted` for that item, run with `--pick` equal to the page's choice. The line ends with `label=<label>`: the picked option's label as one JSON string, a JSON list for a multi item, `null` for an overturn. The receiver reads the act from that label, not from the page.
-- The item is open. An arbiter overturn is the one exception.
+- The item is open. Two closed items count. An arbiter ruling counts as an overturn. A routed close counts under rule 4 of `page_grant.py`: `status` is `closed`, `lane` and `home` are non-blank strings, `arbiter` is not true, and `lastAnswer.at` equals the answer's `at`. The grant is still the fetched `answers/<id>`. `lastAnswer` only says this answer is the routed one.
 - The act is the one the picked option's label on the page names. Nothing wider.
 - One settings change counts as that act only when the label names `settings.json` and the entry by its exact title or key. One entry per grant.
 

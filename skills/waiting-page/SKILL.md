@@ -513,7 +513,7 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-read. The writer reads the item first. When the item has `lane`,
 the writer finds the receiver by the lookup in "Never-ending wait", before any update. It sends it by `send_message` only the page URL,
 the item id and that the act is withdrawn. If that lookup finds no session or cannot run (status `unknown`), the close still goes
-ahead and the writer names the miss in its report. `page_grant.py` already refuses a closed item. An item with no `lane` gets no tell.
+ahead and the writer names the miss in its report. `page_grant.py` counts a closed item only as a routed close, one whose `lastAnswer.at` is the answer's `at`. An item with no `lane` gets no tell.
 The writer adds `{id, ref, note}` to
 `meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it is a slug of 32 characters or fewer and
 unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
