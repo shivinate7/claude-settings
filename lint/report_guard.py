@@ -746,7 +746,8 @@ def answered_problem(text):
 # Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
 # list) exempts it. The sentences and clauses are the parser's (lint/_clause.py, see _pre_clauses); a clause also ends at
 # a lead-in word of the parser's lists and at "which".
-# A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
+# A question holds a claim only before its last clause (_claim_part); a question that opens with an auxiliary or a wh-word holds none.
+# Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
 PRE_DESCRIBES_AFTER_RE = re.compile(
     r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b"
@@ -867,6 +868,23 @@ def _names_main_run(kept, cwd=None, cache=None):
     return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
 
 
+QUESTION_OPENER_RE = re.compile(
+    r"\s*(?:is|are|was|were|do|does|did|has|have|had|can|could|should|would|will|shall|may|might|must"
+    r"|which|what|why|how|whether)\b", re.I)
+
+
+def _claim_part(sentence):
+    """The part of `sentence` that can hold a claim. A sentence that does not end in `?` is all claim. A question that opens
+    with an auxiliary or a wh-word asks from its first word and holds none. Any other question holds the claim before its last
+    clause ("The lint failure is pre-existing, so should I merge anyway?"); a question of one clause holds none."""
+    if not sentence.rstrip("*_)\"' ").endswith("?"):
+        return sentence
+    found = _clause.clauses(sentence, [False] * len(sentence))
+    if len(found) < 2 or QUESTION_OPENER_RE.match(sentence):
+        return ""
+    return sentence[:found[-1].lead_at]
+
+
 def pre_existing_problem(text, cwd=None):
     """The refusal for reply lines that call a failure pre-existing with no run on main on the line, else ''.
     `cwd` is the hook's: the repo whose history says whether a cited hash is on the base."""
@@ -879,8 +897,7 @@ def pre_existing_problem(text, cwd=None):
             continue
         if fence:
             continue
-        sentences = [body[a:b] for a, b in _clause.sentences(body, [False] * len(body))
-                     if not body[a:b].rstrip("*_)\"' ").endswith("?")]
+        sentences = [_claim_part(body[a:b]) for a, b in _clause.sentences(body, [False] * len(body))]
         if not any(_claims_pre_existing(s) for s in sentences):
             continue
         if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body), cwd, cache):
