@@ -222,7 +222,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `hooks/`, `mods/`, `lint/`, the map skill). A docs path with no arm turns none (line 90). Read the
     arms before you call a path docs-only. In the `checks` job (`checks.yml`, lines 75-667),
     149 of 167 steps have no `if:` and 5 more gate only on the event name, so 154 carry no scope
-    `if:`. A docs-only PR runs at least those 154 and skips the 13 scope-gated steps. The audit's
+    `if:`. A docs-only PR runs at least those 154 and skips the 13 scope-gated steps. The Nov 13
     audit counts 149 ran in run 43466545532 (batch 133, docs only); this skill did not re-read that
     run's step list. Run ids and minutes in steps 21-29 come from the two blind audits of Nov 13
     (the batch runner session) and were not re-read here. Only the workflow, script and record lines
