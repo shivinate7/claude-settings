@@ -580,6 +580,110 @@ def case_guard_merge_reads_the_shared_merge_tiers():
     return not problems, "; ".join(problems) or "guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple"
 
 
+ROLE_SESSION = "cse_role_reader_check"  # a made-up environment session id (the form hooks/override.py reads)
+
+
+def _role_config(label, text):
+    """This run's config folder for one role case: state/merge-role.json holds `text`, or no file when `text` is None."""
+    cfg = os.path.join(RUN, "role-config", label)
+    os.makedirs(os.path.join(cfg, "state"), exist_ok=True)
+    if text is not None:
+        with open(os.path.join(cfg, "state", "merge-role.json"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    return cfg
+
+
+def _role_file(session, role):
+    return json.dumps({"session": session, "role": role})
+
+
+def _role_read(cfg, session, reader):
+    """`reader()` with CLAUDE_CONFIG_DIR set to `cfg` (None: unset) and the session id set to `session` (None: unset).
+    The environment is restored after."""
+    keys = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_REMOTE_SESSION_ID")
+    saved = {key: os.environ.get(key) for key in keys}
+    try:
+        for key, value in (("CLAUDE_CONFIG_DIR", cfg), ("CLAUDE_CODE_REMOTE_SESSION_ID", session)):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        return reader()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def case_read_merge_role_returns_the_batch_runner_for_its_own_record():
+    """Control for the merge-tier cases below: the session's own batch-runner record is read as the merge role."""
+    shared = _shared()
+    cfg = _role_config("own-batch-runner", _role_file(ROLE_SESSION, "batch-runner"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got == "batch-runner", "read_merge_role on its own batch-runner record = %r" % (got,)
+
+
+def case_read_merge_role_refuses_the_coordinator_tier():
+    """The coordinator never merges (decision session-tiers): its own coordinator record reads as no merge role."""
+    shared = _shared()
+    cfg = _role_config("own-coordinator", _role_file(ROLE_SESSION, "coordinator"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got is None, "read_merge_role on its own coordinator record = %r, want None" % (got,)
+
+
+def case_read_merge_role_refuses_another_sessions_record():
+    shared = _shared()
+    cfg = _role_config("other-session", _role_file("cse_someone_else", "batch-runner"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got is None, "read_merge_role on another session's batch-runner record = %r, want None" % (got,)
+
+
+def case_read_merge_role_is_none_with_no_session_id():
+    """An absent id never equals an absent record: with no session id, a record that holds no session key reads as no role."""
+    shared = _shared()
+    cfg = _role_config("no-session-key", json.dumps({"role": "batch-runner"}))
+    got = _role_read(cfg, None, shared.read_merge_role)
+    return got is None, "read_merge_role with no session id and a record with no session key = %r, want None" % (got,)
+
+
+def case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record():
+    """Fails closed: an empty file, a file that is not JSON, and a role that is a list each read as no merge role."""
+    shared = _shared()
+    problems = []
+    for label, text in (("empty", ""), ("not-json", "{not json"), ("list-role", _role_file(ROLE_SESSION, ["batch-runner"]))):
+        try:
+            got = _role_read(_role_config("bad-" + label, text), ROLE_SESSION, shared.read_merge_role)
+        except Exception as error:  # a raise here is a fail-open risk, so the case names it
+            problems.append("%s raised %s" % (label, type(error).__name__))
+            continue
+        if got is not None:
+            problems.append("%s read as %r" % (label, got))
+    return not problems, "; ".join(problems) or "empty, malformed and list-role records all read as no merge role"
+
+
+def case_read_recorded_role_returns_the_coordinator_tier_of_its_own_record():
+    """The guard reads a session's tier whatever it is, so the coordinator's record reads as 'coordinator' here.
+    Only read_merge_role narrows to the merge tiers."""
+    shared = _shared()
+    cfg = _role_config("own-coordinator-any-tier", _role_file(ROLE_SESSION, "coordinator"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_recorded_role)
+    return got == "coordinator", "read_recorded_role on its own coordinator record = %r" % (got,)
+
+
+def case_role_path_is_state_merge_role_under_the_config_folder():
+    """role_path is <config folder>/state/merge-role.json, and ~/.claude/state/merge-role.json when no config folder is set."""
+    shared = _shared()
+    cfg = os.path.join(RUN, "role-config", "path-probe")
+    got = str(_role_read(cfg, None, shared.role_path))
+    want = os.path.join(cfg, "state", "merge-role.json")
+    unset = str(_role_read(None, None, shared.role_path))
+    default = os.path.join(os.path.expanduser("~"), ".claude", "state", "merge-role.json")
+    ok = got == want and unset == default
+    return ok, "role_path with a config folder = %r (want %r); with none = %r (want %r)" % (got, want, unset, default)
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -621,6 +725,20 @@ CASES = [
      case_merge_role_reader_is_imported_not_copied),
     ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple of its own",
      case_guard_merge_reads_the_shared_merge_tiers),
+    ("(r3) read_merge_role returns batch-runner for this session's own batch-runner record",
+     case_read_merge_role_returns_the_batch_runner_for_its_own_record),
+    ("(r4) read_merge_role refuses the coordinator's own record: the coordinator never merges",
+     case_read_merge_role_refuses_the_coordinator_tier),
+    ("(r5) read_merge_role refuses another session's batch-runner record",
+     case_read_merge_role_refuses_another_sessions_record),
+    ("(r6) read_merge_role is None with no session id, even for a record that holds no session",
+     case_read_merge_role_is_none_with_no_session_id),
+    ("(r7) read_merge_role is None for an empty, malformed or list-role record",
+     case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record),
+    ("(r8) read_recorded_role returns the coordinator tier of this session's own record",
+     case_read_recorded_role_returns_the_coordinator_tier_of_its_own_record),
+    ("(r9) role_path is state/merge-role.json under the config folder, and under ~/.claude when none is set",
+     case_role_path_is_state_merge_role_under_the_config_folder),
 ]
 
 
