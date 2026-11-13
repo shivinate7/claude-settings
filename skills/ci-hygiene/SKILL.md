@@ -147,7 +147,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
       earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
       then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool lints the merge head first
       (the lane lint, run as a background command) and prints the log only on a PASS: post the printed
-      text as a PR comment. The tool refuses a chain it cannot prove (record
+      text as a PR comment. A FAIL-only log prints with no lint. The tool refuses a chain it cannot prove (record
       `pr-review-record`, the fix verifier order).
    4. After a fix-check log (step 3), the print already ran the lane lint at the merge head and posted its PASS comment. For a clean merge of main there is no new log, so the lane runs `merge --lane-lint <pr>` itself on the new head, as a background command. Then hand in again.
    A PASS ends review only where the log allows it. A change with `Guard or check: yes` still owes

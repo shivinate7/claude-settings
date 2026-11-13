@@ -34,7 +34,7 @@ Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", fo
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
 `~/.claude/bin/merge <pr> --review-record ...` once and report its verdict. It runs the lane lint on the reviewed head
-and prints the review log only on a PASS. The lint runs `bin/ci-job checks --lint` at the PR head: the fast lint steps
+and prints the review log only on a PASS. A review log whose every line is FAIL prints with no lint. The lint runs `bin/ci-job checks --lint` at the PR head: the fast lint steps
 of the checks job, the STE lint among them, and no full suite. A red lane prints no review log and does not hand off.
 Run it as a background command: the lint can run for minutes.
 `~/.claude/bin/merge --lane-lint <pr>` is the same lint as an early check; report its verdict when you run it.
