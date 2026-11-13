@@ -68,6 +68,13 @@
                           Cost per call: API reads only: the open pull list pages (one call per 100 PRs), one pulls/N/files read (its pages)
                           per open PR, and for --run the jobs read pages (one call per 100 jobs) and one log read per failed job but the
                           rollup. No file, process or timer.
+  merge --clash           one line per file that more than one open PR changes: `PATH: #A HEADREF, #B HEADREF`, sorted by path, the PRs
+                          ascending by number. Reads what --touches reads (the open pull list and each open PR's files); paths are normalised
+                          (`./a` is `a`); a draft counts as open. No file shared prints `no file is touched by more than one open pull request.`
+                          A failed read, or a program that cannot start, prints only `merge: unknown (...)` on stderr and exits 1, never the
+                          none line. Stands alone; takes no lock, merges and posts nothing; any session may run it.
+                          Cost per call: API reads only, on demand: the open pull list pages (one call per 100 PRs) and one pulls/N/files read
+                          (its pages) per open PR. No file, process or timer.
   merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
                           the checks before a batch runner gets a PR, one line per N in the order given: `#N PASS`, or `#N FAIL: ` and the
                           reasons joined by `; `. A check that cannot run is a reason (`unknown (...)`), so no PR is ever left without a line,
@@ -4444,6 +4451,7 @@ PATCH_FILE_HEADER = re.compile(r"\+\+\+ ")  # a patch's `+++ <path>` file header
 UNITTEST_SUMMARY = re.compile(r"FAILED \((?:\w+=\d+(?:, )?)+\)")  # unittest's last line, `FAILED (failures=2, errors=1)`: a count, not a failing case
 GUARD_NOTE = re.compile(r"\s{2,}\(.*\)$")  # hooks/test_guard.py's suffix on a line that has a reason: `  (the reason ...)`
 TOUCH_NONE = "no open pull request touches them."
+CLASH_NONE = "no file is touched by more than one open pull request."
 TOUCH_UNKNOWN = "unknown: no failing case read from run {run}; pass --case or --file and run the query without --run (with --run kept, it still exits 1) "  # a --run alone: the cite follows
 TOUCH_UNKNOWN_BESIDE = ("unknown: run {run} gave no failing line that names a case or a file, so any matches printed came from the explicit "
                         "--case and --file only ")  # a --run beside --case or --file: the cite follows
@@ -4515,6 +4523,18 @@ def touches_lines(h, run, cases, files):
         if hits:
             out.append(f"#{d['number']} {d['head']['ref']} {d['head']['sha'][:9]} {'draft' if d.get('draft') else 'ready'}: " + "; ".join(hits))
     return (out or ([] if unknown else [TOUCH_NONE])), unknown
+
+def clash_lines(h):
+    """-> (lines, unknown): the lines of `merge --clash` and why it is unknown, or None (always None: a failed read raises Stop or OSError before any line is made).
+    A line `PATH: #A HEADREF, #B HEADREF` per file that more than one open pull request changes, sorted by path, the pulls ascending by number; the one
+    CLASH_NONE line when no file is shared. Paths are posixpath.normpath'd, so `./a` and `a` are one file. Reads the same as touches_lines: the open
+    pull list pages and one Host.pull_files per open pull request."""
+    by_path = {}
+    for d in sorted(h.pages("pulls", fields={"state": "open"}), key=lambda d: d["number"]):
+        for path in {posixpath.normpath(f.get("filename") or "") for f in h.pull_files(d["number"])}:
+            by_path.setdefault(path, []).append(d)
+    out = [f"{path}: " + ", ".join(f"#{d['number']} {d['head']['ref']}" for d in pulls) for path, pulls in sorted(by_path.items()) if len(pulls) > 1]
+    return (out or [CLASH_NONE]), None
 
 def default_branch(root):
     """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
@@ -5515,6 +5535,7 @@ def build_parser():
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
+    p.add_argument("--clash", action="store_true", help="list each file that more than one open pull request changes, `PATH: #A HEADREF, #B HEADREF`; stands alone, takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
@@ -5547,6 +5568,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--touches stands alone")  # any other option set, a mode flag or not
         if not (a.run or a.case or a.file):
             p.error("--touches needs --run, --case or --file")
+    if a.clash and any(v != p.get_default(k) for k, v in vars(a).items() if k != "clash"):
+        p.error("--clash stands alone")  # any other option set, a mode flag or not
     if a.lint and not a.release_check:
         p.error("--lint goes with --release-check")
     if a.release_check:
@@ -5586,7 +5609,7 @@ def main(argv, host=None, lock=None, hosts=None):
                                  "config", "session", "undo_check_unknown_ok", "base_red_ok"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.idle_lanes or a.touches or a.clash or a.release_check:
         pass  # stands alone: checked above
     elif batch:
         name, *numbers = a.batch_build or a.batch_drop
@@ -5658,6 +5681,15 @@ def main(argv, host=None, lock=None, hosts=None):
             if unknown:
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
+            return 0
+        if a.clash:  # before the role check and any lock: it reads, merges and posts nothing
+            try:
+                lines, unknown = clash_lines(host or Host())
+            except (Stop, OSError) as e:  # an OSError is a read whose program cannot start (no gh): unknown, never a traceback
+                why = " ".join(str(e).split())
+                print("merge: " + (why if why.startswith("unknown") else f"unknown ({why}) {UNKNOWN_CITE}"), file=sys.stderr)
+                return 1
+            say(*lines)
             return 0
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing

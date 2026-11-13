@@ -194,6 +194,10 @@ merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
                         Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
                         For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
+merge --clash           one line per file that more than one open PR changes: `PATH: #A HEADREF, #B HEADREF`, sorted by path, PRs ascending. Reads what --touches
+                        reads, so a draft counts. No file shared prints the clear line only when every read succeeded; a failed read prints `merge: unknown (...)` on stderr
+                        and exits 1. Stands alone: no lock, no merge, no post.
+                        Cost: API reads only, on demand. The pull list, one call per page of 100. One files read (its pages) per open PR.
 merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
                         one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
                         live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
