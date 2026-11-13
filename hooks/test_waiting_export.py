@@ -705,6 +705,20 @@ def case_n17_writer_write_by_path_to_items_blocks():
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
 
 
+def case_n18_export_clock_counts_a_write_to_another_artifact():
+    """The export run comes after the page write at 19:00 and before a write to the reference artifact at 19:20. The
+    export clock is the newest exported-collection write to any artifact, so the run at 19:10 is before it and makes
+    this session the writer. The copy is at 17:00, older than the newest page write, so the stop blocks. The control
+    has no write after the run: the run is after the only page write, so nothing makes this session the writer."""
+    root = base_repo("n18")
+    check("N18 scope: the reference url is not the waiting page's", not page_names(root, REF_URL), REF_URL)
+    check("N18 scope: the extras file holds no page-writer key", key_writer(root) is None, key_writer(root))
+    before = [owner(at(18, 50))] + page_write(at(19), tid="w1") + export_run(at(19, 10), verdict="changed 1")
+    expect_pass("N18 control", run_stop("n18-none", root, before, writer=None))
+    records = before + page_write(at(19, 20), tid="w2", url=REF_URL)
+    expect_block("N18", run_stop("n18", root, records, writer=None), (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- wake cases (a Send on the waiting page)
 
 WAKE_HEADER = "[Artifact comment sent to Claude]"  # the banner a Send opens its turn with
@@ -861,15 +875,15 @@ def case_w14_writer_key_naming_this_session_blocks_a_wake():
     expect_block("W14", run_stop("w14", root, records, writer=None), (SCRIPT,))
 
 
-def case_w15_writer_key_naming_another_session_overrules_an_export_run():
-    """No meta/page read. An export run before the wake would make this session the writer, but the extras key
-    "page-writer" names another session, so the key decides and the wake passes. The control has no key, so the
-    export run decides and the wake blocks."""
-    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + [owner(at(19), WAKE)]
+def case_w15_writer_key_naming_another_session_does_not_exempt_an_export_run():
+    """No meta/page read. The extras key "page-writer" names another session. An export run before the wake makes
+    this session the writer, and a key never exempts it, so the wake blocks. The control has the same wake with no
+    export run: nothing makes this session the writer, so the wake passes."""
     root = base_repo("w15", page_writer="session_other")
     check("W15 scope: the extras key names another session", key_writer(root) == "session_other", key_writer(root))
-    expect_block("W15 control", run_stop("w15-nokey", base_repo("w15-nokey"), records, writer=None), (SCRIPT,))
-    expect_pass("W15", run_stop("w15", root, records, writer=None))
+    expect_pass("W15 control", run_stop("w15-none", root, [owner(at(18, 50)), owner(at(19), WAKE)], writer=None))
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + [owner(at(19), WAKE)]
+    expect_block("W15", run_stop("w15", root, records, writer=None), (SCRIPT,))
 
 
 def case_w16_writer_key_naming_the_remote_session_blocks_a_wake():
@@ -974,6 +988,7 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_export_clock_counts_a_write_to_another_artifact,
     case_w1_wake_blocks_when_copy_is_older_than_the_wake,
     case_w2_copy_commit_after_the_wake_passes,
     case_w3_same_export_after_the_wake_passes,
@@ -988,7 +1003,7 @@ CASES.extend((
     case_w12_wake_naming_another_artifact_passes,
     case_w13_wake_without_an_artifact_line_passes,
     case_w14_writer_key_naming_this_session_blocks_a_wake,
-    case_w15_writer_key_naming_another_session_overrules_an_export_run,
+    case_w15_writer_key_naming_another_session_does_not_exempt_an_export_run,
     case_w16_writer_key_naming_the_remote_session_blocks_a_wake,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
