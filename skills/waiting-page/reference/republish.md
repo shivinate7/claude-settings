@@ -30,7 +30,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
-   `<out>` first, with `splice.py --add-design <slug>=<mockup file>`, and republish once ("Add a design").
+   `<out>` first, with
+   `python3 ~/.claude/skills/waiting-page/splice.py --page <out> --add-design <slug>=<mockup file> --out <out>`, and republish once ("Add a design").
 5. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.

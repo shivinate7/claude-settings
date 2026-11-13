@@ -25,11 +25,11 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
-   Put the whole mockup in one HTML string. Write `<` as `\u003c`.
+   Put the whole mockup in one HTML file, raw HTML.
 3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, from the saved live page:
    `<out>` keeps the live roadmap block with the live designs. Add each mockup to `<out>` with
    `python3 ~/.claude/skills/waiting-page/splice.py --page <out> --add-design <slug>=<mockup file> --out <out>`
-   (repeat `--add-design` for more). It writes `<` as `<` and changes no other byte. It works in a local and a cloud
+   (repeat `--add-design` for more). It writes `<` as `\u003c` and changes no other byte. `FILE` is read as given from the current directory: run it from the repo root (a wrong directory refuses as a missing file). It works in a local and a cloud
    session, and a local session needs no file-output tool. It refuses, and writes nothing, on a bad slug, a missing or
    empty file, or a slug that already holds other html. Never edit the live page's own code.
 4. Add `designs: [{slug, label, file}]` to the item, one per option, and set `design: "<slug>"` on each option.
