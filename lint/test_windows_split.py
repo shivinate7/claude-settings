@@ -94,7 +94,7 @@ LINUX_SUITES = {
     "python3 hooks/test_cc_version_check.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_handoff_wave2.py": (None, None),
     "python3 hooks/test_decision_watch.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_reply_judge.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_reply_judge.py": (None, None),
     "python3 hooks/test_prose_judge.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_sendmessage_state.py": (None, None),
     "python3 hooks/test_refusal_note.py": (NO_MD_SCOPE_CONDITION, None),

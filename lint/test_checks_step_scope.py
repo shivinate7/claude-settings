@@ -7,7 +7,7 @@ step that reads a .md file stays unscoped. The step lists are the audit of main'
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the scope condition, exactly.
   2. each MUST-STAY-UNSCOPED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
-  3. the checks job's step names equal MAIN_STEPS: no rename, add or drop.
+  3. each MAIN_STEPS name is a step of the checks job (no rename or drop), and a step outside MAIN_STEPS reads no scope output.
   4. a docs-only pull request leaves `code` false, skips each scoped step, and leaves STE lint running.
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
      Scope.test_unreadable_diff_runs_everything, and Scope.test_merge_change_turns_the_merge_job_on (a .py change sets code).
@@ -49,7 +49,6 @@ NO_MD = [
     'Config watch fast-exit suite',
     'Claude Code compaction check fixture suite',
     'Decision watch fixture suite',
-    'Reply judge fixture suite',
     'Prose judge fixture suite',
     'Refusal note fixture suite',
     'Refusal note agent row suite',
@@ -141,7 +140,7 @@ NAMES_ONLY = [
     'Hook stub check',
 ]
 
-# The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, so each stays unscoped.
+# The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
 MUST_STAY_UNSCOPED = [
     'STE lint',
     'Rule mechanization audit',
@@ -196,6 +195,10 @@ MUST_STAY_UNSCOPED = [
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
+    'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
+    'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
+    'Stable workflow move job suite',  # not audited yet, so it stays unscoped (fail safe)
 ]
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
@@ -253,6 +256,7 @@ MAIN_STEPS = [
     'Auto-mode allow entry suite',
     'Stall watch fixture suite',
     'Stall watch stop suite',
+    'Proc env read suite',
     'Simulator boot-record fixture suite',
     'Guard wrappers fixture suite',
     'Deny checks never raise suite',
@@ -294,6 +298,7 @@ MAIN_STEPS = [
     'all-jobs-passed needs every pull-request job',
     'Scope detector fixture suite',
     'Touched-test selector fixture suite',
+    'Nightly skip fixture suite',
     'rm shim fixture suite',
     'Mutation verdict fixture suite',
     'Mutation report-mode fixture suite',
@@ -374,6 +379,7 @@ MAIN_STEPS = [
     'Record stamp engine fixture suite',
     'Scanner trap lint',
     'Record stamp action fixture suite',
+    'Stable workflow move job suite',
     'Opt-in CI template fixture suites',
     'Mod and map-skill tests',
     'Checks step scope suite',
@@ -660,9 +666,20 @@ class UnscopedAndPrOnlySteps(ChecksStepBase):
 
 
 class StepNames(ChecksStepBase):
-    def test_the_checks_job_has_main_step_names(self):
-        got = sorted(identity(st) for st in self.steps())
-        self.assertEqual(got, sorted(MAIN_STEPS), "the checks job's step names differ from main's")
+    def test_each_main_step_name_is_in_the_checks_job(self):
+        got = [identity(st) for st in self.steps()]
+        for name in MAIN_STEPS:
+            with self.subTest(step=name):
+                self.assertIn(name, got, "pinned step %r is missing or renamed in the checks job" % name)
+
+    def test_each_step_outside_main_steps_reads_no_scope_output(self):
+        for st in self.steps():
+            name = identity(st)
+            if name in MAIN_STEPS:
+                continue
+            with self.subTest(step=name):
+                expr = if_of(st) or ""
+                self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
 
     def test_each_hard_coded_list_names_a_main_step(self):
         for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY:
