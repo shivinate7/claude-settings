@@ -16258,7 +16258,7 @@ class ReviewedList(CloudSession, ReviewEnv):
                     self.assertEqual(host.sends, [], "a PR with no session in its footer was sent mail: %s" % out)
 
     def test_a_done_line_names_no_lane_and_sends_nothing(self):
-        # control, green on main: a done PR is no lane's to answer, so its line names none and no message goes
+        # control: a done PR is no lane's to answer, so its line names none and no message goes
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], comments)
         self.assertEqual(rc, 0, out + err)
