@@ -4532,7 +4532,7 @@ def batch_candidates(h, done, pulls, base, ignore_ref=None):
     nums = sorted(n for n, b, _kind in done if b == base)
     if not nums:
         return [], []
-    busy = h.ready_busy(pulls, base) if hasattr(h, "ready_busy") else []  # bandaid: LeftOutHost (test_merge.py) has no ready_busy; every real Host has one
+    busy = h.ready_busy(pulls, base)
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base and d["head"]["ref"] != ignore_ref}
     return [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
             and not h.holds_head(heads[n], base)], busy
