@@ -388,6 +388,22 @@ bash_post("review-record: a body in a JSON file read by --input is allowed, a na
 bash_post("review-record: a full-URL gh api post with a malformed record is allowed, a named limit, gh api https://...",
           "gh api https://api.github.com/repos/y/x/issues/%d/comments -f 'body=%s'" % (REVIEW_PR, REVIEW_TRAILING), "allow")
 
+# A marked body in a heredoc is judged as a quoted body is: the text between the `<<'EOF'` line and the `EOF` line. A `#` inside a
+# quoted body is text, not a shell comment, so the judge reads on past it.
+bash_post("review-record: prose after the CI line is refused, a heredoc body, gh pr comment --body-file -",
+          "%s --body-file - <<'EOF'\n%sEOF\n" % (PR_CMD, REVIEW_TRAILING), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+# The `#` opens a line of prose after the CI line. A reader that cuts a quoted body at a `#` sees a bare record, and allows it.
+HASH_TRAILING = REVIEW_TRAILING.replace("Lane note after the record.\n", "# Lane note after the record.\n")
+bash_post("review-record: prose after the CI line is refused, a # at a line start in a quoted body, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, HASH_TRAILING), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+# The Grant line holds `#12` at a word start. A reader that cuts at that `#` leaves `Grant: ` with no round line after it, and refuses.
+GRANT_TEXT = "#%d, item 219 a, owner, 2026-11-04 17:44 CST" % REVIEW_PR
+GRANT_ROUNDS = [(1, "reviewer", "claude-sonnet-5-5", "FAIL"), (2, "reviewer", "claude-sonnet-5-5", "PASS"),
+                (3, "reviewer", "claude-sonnet-5-5", "PASS"), (4, "reviewer", "claude-sonnet-5-5", "PASS")]
+GRANT_BODY = review_form().review_body(REVIEW_PR, REVIEW_LIVE, "normal", "yes", GRANT_ROUNDS, "not owed", grant=GRANT_TEXT)
+bash_post("review-record: a granted record with a # in its Grant line is allowed, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, GRANT_BODY), "allow")
+
 
 def review_counted_fake():
     """The counted pull request tool, with its log emptied. Each call it answers is logged."""
