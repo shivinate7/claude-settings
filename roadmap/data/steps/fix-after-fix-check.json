@@ -1,0 +1,14 @@
+{
+ "id": "fix-after-fix-check",
+ "title": "A fix after a passed fix check is recordable without a new chain or an owner grant",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "After #2992's fix check passed (8c837aa36), batch 115 found a 6-line test-only defect (fix f30500427, red then green). `merge --review-record --fix-check` refuses a second fix check, so the lane needs an owner round-4 grant or a fresh full chain.",
+ "source": "lane ruled-store-one-home 21:20 CST and coordinator 21:21 CST Nov 12",
+ "note": "Owner pick a on item fix-check-chain-cap (10:19 CST Nov 8): \"a chain may hold two fix checks, then a fresh chain\". Decision pr-review-record on main says \"One fix verifier per record\" (exception: a conflicted main merge after a PASS). Possible stale decision: the decision does not carry the Nov 8 pick, or a later ruling narrowed it. Lane reads the history first (rule outcomes-stale-decision-protocol), then either aligns the merge tool with the pick (red then green) or brings the gap. Meanwhile: owner item 675 grant-round4-2992.",
+ "updatedAt": "2026-11-12T21:23:14-06:00"
+}
