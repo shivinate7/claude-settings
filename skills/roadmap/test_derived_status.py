@@ -21,6 +21,7 @@ import test_build  # noqa: E402  the one home of the upkeep fixture (make_repo, 
 DRIFT_ROW = "status drift"
 DRIFT_PRINTED = re.compile(r"^status drift: (\S+) \(hand (\w+), derived (\w+)\)$", re.M)
 DRIFT_ENTRY = re.compile(r"([^,()\s]+) \(hand (\w+), derived (\w+)\)")
+NO_LIVE_WHY = "no --live file: the publisher writes it from the project threads and GitHub"
 
 
 def setUpModule():
@@ -52,6 +53,17 @@ class DriftFixture(test_build.UpkeepFixture):
         entries = sorted(DRIFT_ENTRY.findall(detail))
         self.assertEqual(count, len(entries), "the status drift count must equal its entries: %r" % detail)
         return entries
+
+    def drift_row_unknown(self, out, why=None):
+        """The status drift row reads one entry, "unknown (<why>)", as the sibling rows do. With no why, only the
+        unknown form is checked."""
+        count, detail = self.row(out, DRIFT_ROW)
+        if why is None:
+            self.assertTrue(count == 1 and detail.startswith("unknown (") and detail.endswith(")"),
+                            "the status drift row must read unknown, never a count: %r" % detail)
+        else:
+            self.assertEqual((count, detail), (1, "unknown (%s)" % why),
+                             "the status drift row must read unknown, never a count")
 
     def assert_drift(self, out, expected, why):
         """The printed lines and the status drift row each list exactly `expected`, (id, hand, derived) tuples."""
@@ -135,25 +147,28 @@ class DerivedStatus(DriftFixture):
         out = self.out_with_live(expect=(1,))
         self.assert_drift(out, [("p2", "doing", "done")], "a live cs-step session on c7 derives nothing for c7")
 
-    def test_no_live_file_or_no_pulls_list_flags_no_pull_drift(self):
+    def test_no_live_file_or_no_pulls_list_reads_the_row_unknown(self):
         self.commit_step("c8", status="doing", order=8)  # hand doing, nothing proves it: must not flag
         self.commit_step("c9", status="ready", order=9)  # hand ready, nothing proves it: must not flag
         self.land("p3", 71, status="doing", order=10)  # control: a Step trailer still derives done with no pulls
         # With the live read unknown, the landed step's stall reads unknown too, so the build exits 0 today.
         with self.subTest(live="no --live file"):
             _, out = self.build_from_main(expect=(0,))
-            self.assert_drift(out, [("p3", "doing", "done")], "with no --live file, unknown pulls flag nothing")
+            self.assertEqual(self.printed(out), [("p3", "doing", "done")],
+                             "a Step trailer still derives done with no --live file")
+            self.drift_row_unknown(out, NO_LIVE_WHY)
         with self.subTest(live="live file with no pulls list"):
             self.write_live({"readAt": test_build.iso_ago(5), "sessions": [], "items": []})
             out = self.out_with_live(expect=(0,))
-            self.assert_drift(out, [("p3", "doing", "done")], "a live file with no pulls list flags no pull drift")
+            self.assertEqual(self.printed(out), [("p3", "doing", "done")],
+                             "a Step trailer still derives done with no pulls list")
+            self.drift_row_unknown(out, "the live file has no pulls list")
 
-    def test_no_live_file_and_no_proof_leaves_the_drift_row_empty(self):
+    def test_no_live_file_and_no_proof_reads_the_drift_row_unknown(self):
         self.commit_step("c8", status="doing", order=8)  # hand doing, nothing proves it
         self.commit_step("c9", status="ready", order=9)  # hand ready, nothing proves it
         _, out = self.build_from_main(expect=(0,))
-        self.assertEqual(self.row(out, DRIFT_ROW), (0, ""),
-                         "with no --live file and no proof, the status drift row reads no entries")
+        self.drift_row_unknown(out, NO_LIVE_WHY)
 
     def test_no_live_file_and_no_proof_prints_no_drift_line(self):
         # Green on the old code: no drift is derived from pulls, so none is printed. It must stay green.
@@ -161,6 +176,82 @@ class DerivedStatus(DriftFixture):
         self.commit_step("c9", status="ready", order=9)  # hand ready, nothing proves it
         _, out = self.build_from_main(expect=(0,))
         self.assertEqual(self.printed(out), [], "no drift line is printed with no --live file and no proof")
+
+
+class UnknownReads(DriftFixture):
+    """An unknown read prints the status drift row as unknown, never as 0 or as a clear list. A known-good live
+    file with no drift still reads the row as 0."""
+
+    def test_skipped_pull_row_reads_the_row_unknown(self):
+        self.commit_step("c2", status="done", order=2)  # hand done, an open lane pull names it
+        self.no_trailer_on_main()
+        bad = {"title": "a pull with no number", "branch": "lane/c2"}  # skipped: its number is missing
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2"), bad], landed=[])
+        out = self.out_with_live(expect=(0,))
+        self.assertEqual(self.printed(out), [], "unknown pulls derive no open-pull drift")
+        self.drift_row_unknown(out, "1 pull rows skipped")
+
+    def test_skipped_landed_row_reads_the_row_unknown(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        bad = {"number": "13", "branch": "lane/c3", "merged": True}  # skipped: its number is text
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", merged=True), bad])
+        out = self.out_with_live(expect=(0,))
+        self.drift_row_unknown(out, "1 landedPulls rows skipped")
+
+    def test_landed_pulls_key_absent_reads_the_row_unknown(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2")])  # no landedPulls key
+        out = self.out_with_live(expect=(0,))
+        self.drift_row_unknown(out)
+
+    def test_stale_live_read_reads_the_row_unknown(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2")], landed=[],
+                     read_at=test_build.iso_ago(120))
+        out = self.out_with_live(expect=(0,))
+        self.drift_row_unknown(out)
+
+    def test_main_branch_that_cannot_be_read_reads_the_row_unknown(self):
+        self.commit_step("c2", status="done", order=2)
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c2")], landed=[])
+        _, out = self.build_from_main("--live", str(self.live), "--main-branch", "nope", expect=(0,))
+        self.drift_row_unknown(out, "no nope branch in this checkout")
+
+    def test_known_good_live_file_with_no_drift_reads_the_row_zero(self):
+        self.commit_step("c8", status="doing", order=8)  # hand doing, an open lane pull agrees
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(44, "lane/c8")], landed=[])
+        out = self.out_with_live(expect=(0,))
+        self.assertEqual(self.row(out, DRIFT_ROW), (0, ""), "a known-good live file with no drift reads the row as 0")
+
+
+class OffMainAndStatuses(DriftFixture):
+
+    def test_closed_unmerged_row_with_head_off_main_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)  # its only row is closed, unmerged, head off main
+        self.commit_step("c3", status="doing", order=3)  # control: a merged row, flagged
+        off = self.off_main()
+        self.assertFalse(self.is_ancestor(off, "main"), "scope: the row's head must be off main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", head=off, merged=False),
+                                                    self.pull_row(13, "lane/c3", merged=True)])
+        out = self.out_with_live(expect=(1,))
+        self.assert_drift(out, [("c3", "doing", "done")],
+                          "a closed unmerged row whose head is off main marks nothing")
+
+    def test_blocked_queued_and_folded_with_an_open_lane_pull_are_flagged(self):
+        self.commit_step("b1", status="blocked", order=2)
+        self.commit_step("q1", status="queued", order=3)
+        self.commit_step("f1", status="folded", order=4)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(61, "lane/b1"), self.open_pull(62, "lane/q1"),
+                                                   self.open_pull(63, "lane/f1")])
+        out = self.out_with_live(expect=(0,))
+        self.assert_drift(out, [("b1", "blocked", "doing"), ("f1", "folded", "doing"), ("q1", "queued", "doing")],
+                          "every disagreement flags: blocked, queued and folded with an open lane pull derive doing")
 
 
 if __name__ == "__main__":
