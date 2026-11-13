@@ -426,7 +426,7 @@ It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` la
 `added`. A relay sends the receiver only the page URL, the item id and the act. The routing session drops `lane` and deletes
 `answers/<id>` only when the receiver reports the act done. An older open item with a `lane` whose lane is gone (no open pull on
 that branch, no live session tagged `cs-step:`, `cs-topic:` or, for a tier, `cs-build:`) shows stalled on the Status
-tab, and the roadmap build exits 1 on it, until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
+tab. The roadmap build exits 1 on it until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
 exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
 report (see the park branch below). A `none` answer on this path gets no new options.
 

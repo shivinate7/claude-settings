@@ -6,4 +6,4 @@
 
 **Decision.** relayed-grant-read-from-page (a relayed act counts only from the owner's saved answer; its gaps hold the routed-answer behaviour). Ruling own-748-b-rule-4 (owner 13:20 CST Nov 13, page item 748 b: a closed routed answer keeps a counted grant route), step answered-leaves-page.
 
-**Retire.** A routed closed item whose receiver has ended with no done report shows as a stalled row on its home step, and the roadmap build exits 1 on it until the session confirms or re-routes the act. A case in `skills/roadmap/test_build.py` shows it: a closed item with `lane`, `home` and `lastAnswer`, and no live session or open pull for the lane.
+**Retire.** A routed closed item whose receiver has ended with no done report shows as a stalled row on its home step. The roadmap build exits 1 on it until the session confirms or re-routes the act. A case in `skills/roadmap/test_build.py` shows it: a closed item with `lane`, `home` and `lastAnswer`, and no live session or open pull for the lane.
