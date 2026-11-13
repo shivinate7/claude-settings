@@ -1,0 +1,16 @@
+{
+ "id": "page-writer-key-follows-tag",
+ "title": "The page-writer check finds the writer by its triage tag, not by a fixed session id",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#3093"
+ ],
+ "why": "The pick guard (#3093) keys the page writer to a fixed session id. A new triage session gets a new id, so the key goes stale and the guard refuses the real writer. hooks/feedback_guard.py is_writer ignores the key, so the two checks can disagree on who the writer is.",
+ "source": "lane pick-guard-cloud-writer notes 2 and 3, via coordinator 00:13 CST Nov 13",
+ "note": "One home for \"who writes the page\": read the session tagged cs-build:triage and cs-repo:<repo> (get_session or list_sessions), and have is_writer and the pick guard call it. Red tests first: (a) a new triage session id passes, (b) is_writer and the pick guard agree. Unmeasured: whether a container restart (same session id, new worker) also stales the key; triage restarted three times tonight with the same id.",
+ "updatedAt": "2026-11-13T00:12:57-06:00"
+}
