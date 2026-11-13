@@ -253,7 +253,7 @@ PR	verdict	kind	step	head	reason
 2815	keep	code	glossary-renames-in-code	25c28d5767f9	WAVE (reopened): 41 commits, conflicts in 6 files; round 3 PASS; builds same lone-lane path as 2701 (2701 looks replaced)
 2818	keep	code	merge-flow-after-anthropic	464ed817a1d9	merge-reads-ruleset step; one adjacent-line conflict pr-review-record.md; hand-merge keeps both
 2819	keep	code	merge-flow-after-anthropic	af7c78e18ef3	WAVE (reopened): 22 commits; HELD: must not merge before act 1 (stable branch, sweep fix, ruleset on stable); round 3 PASS | needs-home: docs/plans/r42-part2-design.md (commit 402613631)
-2820	fresh	-	batch-build-log-kept	c730fe6febfd	fresh: runner 10 (under 48 h, not reviewed)
+2820	close	code	batch-build-log-kept	c730fe6febfd	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, batch_build_run, batch_log_note (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 2821	keep	prose	no-undo-brief-rule-sentence	592bf895f51d	WAVE (reopened): one CLAUDE.md sentence on top of 2812; merge stack in order 2734 2812 2821; owner sees the CLAUDE.md edit at merge | flag: owner-pick attribution unverified
 2822	close	prose	notes-204-ponytail-drop	9b516c2dc47e	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3198 is open (read on GitHub, head f294d8878); body of #3198 says "Rebuild of #2822"; close it, keep the branch; reopen if the replacer is dropped; old reason: WAVE (reopened): carry the ponytail drop (note line plus two settings.json hunks); drop the two notes that cite 2801 files
 2823	fresh	-	outbox-notes-land	9985719e87b0	fresh: runner 10 (under 48 h, not reviewed)
@@ -266,8 +266,8 @@ PR	verdict	kind	step	head	reason
 2832	fresh	-	lint-config-guard-paths	4463f44c4266	fresh: runner 10 (under 48 h, not reviewed)
 2833	close	code	fan-prose-unmapped-5	a80ddb7f5a91	inside 2913
 2836	close	code	stop-checks-one-message	f0a531b7411a	contained in 2864
-2837	fresh	-	batch-build-stop-group	1fdc86c5af35	fresh: runner 10 (under 48 h, not reviewed)
-2838	fresh	-	blame-on-finished-red-job	555956875967	fresh: runner 10 (under 48 h, not reviewed)
+2837	close	code	batch-build-stop-group	1fdc86c5af35	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: build_integration_branch, run_links, BUILD_LINKS (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2838	close	code	blame-on-finished-red-job	555956875967	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_blame, stacked_remedy, blame_lines (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 2839	fresh	-	ci-wait-cap-55	8fb862ce2618	fresh: runner 10 (under 48 h, not reviewed)
 2841	keep	code	model-call-auth-check	42c5f40d52a4	WAVE (reopened): stacked on 2728: merge 2728 first then retarget 2841 to main; round 3 PASS | needs-home: both (lands on merge; pick b also in triage outbox)
 2842	keep	code	fixed-number-limits-census	2c98b332e22e	WAVE (reopened): 10 commits; clean; round 3 PASS net zero
@@ -317,7 +317,7 @@ PR	verdict	kind	step	head	reason
 2895	fresh	-	repo-typecheck-hook	99d725594ae7	fresh: runner 10 (under 48 h, not reviewed)
 2900	keep	prose	express-pass-owner-quotes	850d8e2b3ed4	decision docs-only-prs-skip-review Express pass owner-quote text (part 1); merges clean; files owner-quote wording so needs reviewer read
 2901	keep	prose	express-pass-owner-quotes	7988d652e726	WAVE (reopened): 1 sentence at agents/reviewer.md:78; depends on open 2900 (part 1): merge 2900 first; needs review record (agent-file edit) | needs-home: item 624 b (lands with 2900)
-2902	fresh	-	merge-batch-split-and-pipeline	ac55fdeba755	fresh: runner 10 (under 48 h, not reviewed)
+2902	close	code	merge-batch-split-and-pipeline	ac55fdeba755	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, running_batch, heads_busy (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 2904	fresh	-	owner-health-tab	f1d8622c725c	fresh: runner 10 (under 48 h, not reviewed)
 2905	fresh	-	records-page-before-ready	e96dda0682fd	fresh: runner 10 (under 48 h, not reviewed)
 2906	fresh	-	answered-sections-by-repo	bd7f9b88f3af	fresh: runner 10 (under 48 h, not reviewed)
@@ -344,7 +344,7 @@ PR	verdict	kind	step	head	reason
 2933	keep	code	convert-time-pinned-tests	8597d3eba7e9	fake clock for sleep; merges clean
 2937	fresh	-	lane-sim-hold-path	05326e10b405	fresh: runner 10 (under 48 h, not reviewed)
 2938	close	code	challenger-page-against	33dca4c3e5bb	inside 2987
-2939	fresh	-	batch-order-by-pr-number	ddb1d8b8b945	fresh: runner 10 (under 48 h, not reviewed)
+2939	close	code	batch-order-by-pr-number	ddb1d8b8b945	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: restack, sync_batch, batch_build, batch_drop, stacked_without_base (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 2940	keep	code	review-record-fix-check-reads	664aafccd233	needs main merged plus hand-resolve merge.py; overlaps 3072 (fold into one home)
 2941	keep	code	guard-false-alarm-cull	f932b3627115	page item 630 closed as option b: this PR is the fix lane (round 3 PASS, lane-lint PASS on f932b3627); carries old branch work; 3036 closes (coordinator 11:36 CST Nov 13)
 2942	fresh	-	ci-merge-install-split	91e051e4f081	fresh: runner 10 (under 48 h, not reviewed)
@@ -368,7 +368,7 @@ PR	verdict	kind	step	head	reason
 2968	fresh	-	run-dir-unclosed-tail	88f9b52c2307	fresh: runner 10 (under 48 h, not reviewed)
 2970	fresh	-	ci-batch-mac-runner	92e4c76e22b3	fresh: runner 10 (under 48 h, not reviewed)
 2971	fresh	-	answers-session-write-guard	1d7e54cdf12f	fresh: runner 10 (under 48 h, not reviewed)
-2972	fresh	-	busy-file-stacked-batches	193e8906a5fa	fresh: runner 10 (under 48 h, not reviewed)
+2972	close	code	busy-file-stacked-batches	193e8906a5fa	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, stacked_without_base, busyFiles (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 2973	fresh	-	brief-says-owner-unread	ecaa92e6f248	fresh: runner 10 (under 48 h, not reviewed)
 2975	keep	code	convert-time-pinned-tests	264cae524616	time-pinned-ok marker; merges clean
 2976	fresh	-	filing-check-reads-page	3a5ddf4d2e5b	fresh: runner 10 (under 48 h, not reviewed)
@@ -391,7 +391,7 @@ PR	verdict	kind	step	head	reason
 3005	fresh	-	unknown-reads-lint-linux-only	8b950b6aa13d	fresh: runner 10 (under 48 h, not reviewed)
 3006	rebuild	code	page-wakes-and-relays	cb9376c59885	R18 item 3 vs R60 conflict (chat reply form); blocked on owner/coordinator pick: "on the page, item N" only (R18) or "Page item: <id>" + option lines (R60/main)
 3007	fresh	-	review-record-merge-main-line	eeceb7c9ceef	fresh: runner 10 (under 48 h, not reviewed)
-3008	fresh	-	batch-ci-merge-guard	d82fba8d5bf0	fresh: runner 10 (under 48 h, not reviewed)
+3008	close	code	batch-ci-merge-guard	d82fba8d5bf0	close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_running, busy_parts (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
 3011	fresh	-	sim-tool-lease-check	32b283e0d512	fresh: runner 10 (under 48 h, not reviewed)
 3012	fresh	-	stall-watch-clock-pins	9e3693ea1fdc	fresh: runner 10 (under 48 h, not reviewed)
 3014	keep	code	merge-path-same-everywhere	f8e7d7e5390d	needs main merged (4 hunks by hand); guard verdict change owes round 3 net-value test
