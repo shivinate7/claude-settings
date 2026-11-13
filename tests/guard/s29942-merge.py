@@ -91,6 +91,28 @@ repo_case("a single-quoted --base-red-ok reason with < beside -C another checkou
 # A -C after a quoted reason is still read: a fix that cut the command at the first quote would allow this one.
 repo_case("a -C after a quoted reason with -> names another checkout and is denied", "deny",
           f'{MERGE_SHIM} --base-red-ok "a -> b" -C \'{REPO_B}\' 185 --confirm', REPO_A, TX_A)
+# A `)` inside quotes in a `$( )` span is text: it closes nothing, so the words after the span (here --confirm) are still read. A cut at that
+# `)` drops --confirm and the merge, with -C naming another checkout, is never judged. The plain `$(echo 5)` case is the green control.
+repo_case("a plain $( ) value before --confirm beside -C another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C '{REPO_B}' $(echo 5) --confirm", REPO_A, TX_A)
+repo_case("a single-quoted ) in a $( ) value before --confirm beside -C another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C '{REPO_B}' $(echo ')') --confirm", REPO_A, TX_A)
+repo_case("a double-quoted ) in a $( ) value before --confirm beside -C another checkout is denied", "deny",
+          f'{MERGE_SHIM} -C \'{REPO_B}\' $(echo ")") 5 --confirm', REPO_A, TX_A)
+repo_case("a $( ) with a quoted ) inside double quotes before --confirm beside -C another checkout is denied", "deny",
+          f"""{MERGE_SHIM} -C '{REPO_B}' "$(echo ")")" 5 --confirm""", REPO_A, TX_A)
+repo_case("a $(( )) value beside --confirm in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $((1+1))", REPO_A, TX_A)
+repo_case("a nested ( ) in a $( ) value beside --confirm in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $( (echo a) )", REPO_A, TX_A)
+repo_case("an apostrophe inside a double-quoted $( ) value beside -C another checkout is denied", "deny",
+          f"""{MERGE_SHIM} -C '{REPO_B}' "$(echo "it's")" 5 --confirm""", REPO_A, TX_A)
+repo_case("a $( ) glued to --base-red-ok= beside --confirm in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok=$(cat r)", REPO_A, TX_A)
+repo_case("a $( ) glued to a word of the reason in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok fix-$(date)", REPO_A, TX_A)
+repo_case("a quoted ( in a $( ) value before --confirm beside -C another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C '{REPO_B}' $(echo '(') 5 --confirm", REPO_A, TX_A)
 repo_case("an unquoted reason with a > file and 2>&1 is allowed", "allow",
           f"{MERGE_SHIM} 185 --confirm --base-red-ok fixlane > run.log 2>&1", REPO_A, TX_A)
 repo_case("an unquoted reason with a > file and 2>&1 beside -C another checkout is denied", "deny",

@@ -1243,12 +1243,13 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
                 if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
-        if merge_tool_args(segment) is None:
+        flat = _flat_command(segment)   # the raw text: shlex refuses a segment with a lone quote inside a `$( )`, which `flat` has flattened
+        if merge_tool_args(flat) is None:
             continue
         try:
-            rest = _command_words(merge_tool_args(segment))
-            bare = merge_tool_args(strip_redirections(segment))
-            bare = None if bare is None else _command_words(bare)
+            rest = _amp_cut(merge_tool_args(flat))
+            bare = merge_tool_args(strip_redirections(flat))
+            bare = None if bare is None else _amp_cut(bare)
             if "--confirm" not in (rest if bare is None else bare):
                 continue
             if bare is None:
@@ -1306,6 +1307,53 @@ def _open_substitutions(text: str) -> int:
             depth += 1 if text[index] == "(" else -1
         index += 1
     return depth
+
+
+def _flat_command(text: str) -> str:
+    """The raw `text` of a merge segment up to the end of its command, each `$( )` span as one word `SUBST`.
+    The shell's own reading, on the raw text because the tokenizer drops quotes: a `)` in quotes or after a backslash is text,
+    a `)` that closes a `$(` ends that span, and an unquoted `)` outside any span closes the subshell the command sits in, so
+    the command ends there. An unterminated span runs to the end."""
+    out, depth, quote, outer, index = [], 0, "", [], 0
+    while index < len(text):
+        char = text[index]
+        step = 2 if char == "\\" and quote != "'" else 1
+        keep = not depth   # text inside a span is dropped
+        if char == "\\":
+            pass
+        elif quote != "'" and text.startswith("$(", index):   # a `$(` opens a span in double quotes too, with a quote state of its own
+            if not depth:
+                out.append("SUBST")
+            outer.append(quote)
+            depth, quote, step, keep = depth + 1, "", 2, False
+        elif quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "(" and depth:
+            outer.append(quote)
+            depth += 1
+        elif char == ")":
+            if not depth:
+                break
+            depth, keep = depth - 1, False
+            quote = outer.pop()
+        if keep:
+            out.append(text[index:index + step])
+        index += step
+    return "".join(out)
+
+
+def _amp_cut(args):
+    """`args` up to a word with a glued `&`, which sends the command to the background and ends it."""
+    words = []
+    for arg in args:
+        word = arg.rstrip("&")
+        if word:
+            words.append(word)
+        if word != arg:
+            break
+    return words
 
 
 def _command_words(args):
