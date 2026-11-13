@@ -1,6 +1,6 @@
 # section 23302
 # A builder's merge that resolves a conflict in a test file, where one parent alone changed a same-named case (owner
-# ruling 2026-11-11 11:02 CST; decision builders-cannot-edit-tests; plan R31: a lost test is a silent accuracy hole).
+# ruling; decision builders-cannot-edit-tests; plan R31: a lost test is a silent accuracy hole).
 # The result must keep the changed parent's body of the case. A result that keeps the unchanged parent's body drops
 # that parent's edit, so it is refused as lost. Both directions are pinned. The controls pin what stays allowed: the
 # result keeps the changed body, and both parents leave the case at base. The lane-changed direction that keeps the

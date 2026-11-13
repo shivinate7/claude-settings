@@ -324,7 +324,7 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: control, a test-author's merge commit 
 
 
 # ---- a builder's write tool on a test path its merge conflicts (builder_merge_write_ok). The path is allowed mid-merge,
-# since the content is judged at commit, push and stop. Red on main, where every builder write to a test path is denied.
+# since the content is judged at commit, push and stop. Without this route, every builder write to a test path is denied.
 MT_WRITE_OPEN = _mt_case("mt-write-conflicted", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A])
 add("builder-refuse: a builder's Write of a test path its merge conflicts is allowed mid-merge", "allow", tool="Write",
     cwd=MT_WRITE_OPEN, file_path=os.path.join(MT_WRITE_OPEN, TEST_A), content=MT_BOTH, agent_id="bld1",
@@ -346,7 +346,7 @@ add("builder-refuse: control, a builder's Edit of a conflicted mutation test is 
 
 # ---- the merge route run from a subfolder. merge_tree names a conflicted path relative to the folder git runs in
 # (`../tests/test_a.py`), and the guard puts it back to the checkout's top. Each fixture first checks that git names it
-# so. Red on main, where the merge route is absent; red on the mutant that drops the prefix, where the deny names no class.
+# so. Without the merge route, the allow rows here are denied, and the refusal rows name no class.
 MT_SUB_KEEP = _mt_case("mt-sub-keep-both", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A], resolve=[(TEST_A, MT_BOTH)],
                        stage=True, folder="src")
 _mt_allow("builder-refuse: a builder's open merge that keeps both sides' test cases, run from a subfolder, is allowed",
@@ -359,8 +359,8 @@ _mt_refuse("builder-refuse: a merge that drops main's test case, run from a subf
 
 # ---- top-level call statements of a test file (merge_test_issue, `calls`). A call a parent holds stays as many times as
 # that parent holds it; a call neither parent holds is new, and a skip call is a skip. The base holds one call twice, so
-# counting a call's copies as a sum instead of a maximum refuses the keep-both row. Red on main, where the merge route is
-# absent.
+# counting a call's copies as a sum instead of a maximum refuses the keep-both row. Without the merge route, the allow
+# rows here are denied.
 MT_DUP = "register_case('dup')\n"
 MT_CALL_BASE = MT_BASE + MT_DUP * 2
 MT_CALL_FILES = {**BASE_FILES, TEST_A: MT_CALL_BASE}
