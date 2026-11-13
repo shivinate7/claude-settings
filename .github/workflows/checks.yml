@@ -141,6 +141,9 @@ jobs:
       - name: Config watch fast-exit suite
         run: python3 hooks/test_config_watch_fast_exit.py
 
+      - name: Stale install suite
+        run: python3 hooks/test_reinstall_stale.py
+
       - name: Shared names suite
         run: python3 hooks/test_shared_names.py
 

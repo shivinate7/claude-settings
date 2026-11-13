@@ -89,6 +89,31 @@ checkout_at() {
   printf '%s' "$top"
 }
 
+# True when DIR sits under a temp folder, or has a "scratchpad" component, by its physical path. A clone
+# there is a session's scratch copy: taking it as the source would point ~/.claude at a folder that is
+# swept away. CLAUDE_SETTINGS_TEMP_ROOTS (space-separated) replaces the production list when set; the
+# scratchpad rule holds either way. Each root is tried as written and by its physical path (macOS /tmp is
+# a link to /private/tmp).
+under_temp() {
+  ut_p=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  case "/$ut_p/" in */scratchpad/*) return 0 ;; esac
+  if [ -n "${CLAUDE_SETTINGS_TEMP_ROOTS:-}" ]; then
+    ut_roots="$CLAUDE_SETTINGS_TEMP_ROOTS"
+  else
+    ut_roots="${TMPDIR:-} /tmp /var/tmp /private/tmp /private/var/folders"
+  fi
+  for ut_r in $ut_roots; do
+    ut_r="${ut_r%/}"
+    [ -n "$ut_r" ] || continue
+    ut_c=$(cd "$ut_r" 2>/dev/null && pwd -P) || ut_c=""
+    case "$ut_p" in "$ut_r"/*) return 0 ;; esac
+    if [ -n "$ut_c" ]; then
+      case "$ut_p" in "$ut_c"/*) return 0 ;; esac
+    fi
+  done
+  return 1
+}
+
 # The directory an existing ~/.claude/CLAUDE.md already points at, if any: parsed the
 # same way settings.json's refresh hook and hooks/session_start.sh's divergence check
 # read it (the "@<path>/CLAUDE.md" line, "~/" expanded against $HOME). A person's clone
@@ -149,7 +174,9 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ]; then
+# Cloud: a clone under a temp folder is a scratch copy, so it is not the source; the search below goes on.
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ] \
+   && { [ "$CLOUD" != 1 ] || ! under_temp "$SCRIPT_DIR"; }; then
   SRC="$SCRIPT_DIR"
 else
   # No file to locate ourselves by (e.g. piped: curl | bash). Look for an existing git
@@ -167,9 +194,11 @@ else
   PTR_DIR=$(pointer_dir) || PTR_DIR=""
   for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
+    under_temp "$cand" && continue
     t=$(checkout_at "$cand") || continue
     # Cloud: the live pin is never the source and never moved; its clone is the source instead.
     if [ "$CLOUD" = 1 ] && pin_clone=$(live_pin_clone "$t"); then
+      under_temp "$pin_clone" && continue
       t=$(checkout_at "$pin_clone") || continue
     fi
     SRC="$t"; break
@@ -187,12 +216,13 @@ else
       [ -d "$root" ] || continue
       for child in "$root"/*; do
         [ -d "$child/.git" ] || continue
+        under_temp "$child" && continue
         t=$(checkout_at "$child") && { SRC="$t"; break 2; }
       done
     done
   fi
   if [ -z "$SRC" ]; then
-    t=$(checkout_at "$HOME/claude-settings") && SRC="$t"
+    under_temp "$HOME/claude-settings" || { t=$(checkout_at "$HOME/claude-settings") && SRC="$t"; }
   fi
 
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
@@ -1158,6 +1188,30 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
     START_I=$((START_I + 1))
   done
 fi
+
+# Cloud, a whole install: record what this run installed, for hooks/stale_install.py. ref is $REF as this run
+# resolved it, sha is the source clone's HEAD, the commit the files came from (after a failed refresh, or a clone
+# the refresh left on a local commit, it is that commit, not origin's tip, which is the truth), source and installer
+# say where to run it again. No HEAD, no record: the hook then reports the freshness as unknown instead of reading a
+# guess. A failed write is a WARN, never a failed install. The file is built beside its place and renamed over it.
+record_install() {
+  ri_sha=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
+  if [ -z "$ri_sha" ] || [ ! -f "$SRC/install.sh" ]; then
+    log "WARN: no install record written: $SRC has no readable HEAD or no install.sh"
+    return 0
+  fi
+  ri_file="$CLAUDE_DIR/.claude-settings-install.json"
+  ri_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  if printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s"}\n' \
+       "$(ri_esc "$REF")" "$ri_sha" "$(ri_esc "$SRC")" "$(ri_esc "$SRC/install.sh")" > "$ri_file.cs-new" \
+     && mv -f "$ri_file.cs-new" "$ri_file"; then
+    :
+  else
+    rm -f "$ri_file.cs-new"
+    log "WARN: could not write the install record $ri_file"
+  fi
+}
+[ "$CLOUD" = 1 ] && [ "$INSTALL_FAILED" = 0 ] && [ -n "$SRC" ] && record_install
 
 # Marks a local install has landed here, so the NEXT local run treats a real file/dir at a
 # landed name as its own earlier copy rather than a person's. See the comment above its
