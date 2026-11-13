@@ -69,8 +69,11 @@ Stop: stall_watch.py --stop
   --undo; or MCP update_pull_request with draft false) opens a wait. A later user or queued message with a
   `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
-  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). A bare gh pr merge or
-  close, with no number, closes any open wait; an MCP merge with no pullNumber closes none. A
+  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The number is the call's
+  first all-digit word or the N of a /pull/N URL, so flag values such as -R o/r, -C /repo, --body "x" or
+  --session lane are skipped. A gh pr merge or close with no number closes any open wait; an MCP merge with
+  no pullNumber closes none. A wait whose ready call named no number (bare gh pr ready) closes on a merge or
+  close of any PR. A
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
   CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
   {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
@@ -523,9 +526,11 @@ def stopped_ids(content):
 
 CI_VERDICT = re.compile(r"^CI (green|red|cancelled|unknown) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
-           b"ScheduleWakeup", b"CI ", b"pr close", b'"is_error":true', b'"is_error": true')
+           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
 CI_SEGMENT = re.compile(r"[;&|\n]+")
+PR_NUMBER = re.compile(r"[0-9]+\Z")
+PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
              "Set the next one after each red CI verdict, wider apart.")
 
@@ -563,12 +568,25 @@ def shell_calls(command):
     return [seg.split() for seg in CI_SEGMENT.split(unquoted(command)) if seg.strip()]
 
 
+def pr_number(words):
+    """The PR a merge or close call names: its first all-digit word, or the number in a /pull/<N> URL, so a
+    flag value before it (-R o/r, -C /repo, --body "x", --session lane) is skipped. '' when it names none."""
+    for w in words:
+        if PR_NUMBER.match(w):
+            return w
+        m = PR_URL.search(w)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def ci_events(rec):
     """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
     ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
     is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
-    pr; ('mergeany',) is a bare gh pr merge or close, which aims at the current branch's PR."""
+    pr (pr_number); ('mergeany',) is a gh pr merge or close that names no number, which aims at the current
+    branch's PR."""
     kind = rec.get("type")
     if kind == "attachment":
         att = rec.get("attachment")
@@ -603,20 +621,21 @@ def ci_events(rec):
                     refs = [w for w in words[3:] if not w.startswith("-")]
                     events.append(("ready", refs[0] if refs else ""))
                 elif words[:3] in (["gh", "pr", "merge"], ["gh", "pr", "close"]):
-                    refs = [w for w in words[3:] if not w.startswith("-")]
-                    events.append(("merge", refs[0]) if refs else ("mergeany",))
+                    pr = pr_number(words[3:])
+                    events.append(("merge", pr) if pr else ("mergeany",))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
-                    refs = [w for w in words[1:] if not w.startswith("-")]
-                    if refs:
-                        events.append(("merge", refs[0]))
+                    pr = pr_number(words[1:])
+                    if pr:
+                        events.append(("merge", pr))
     return events
 
 
 def open_ci_wait(transcript):
     """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
     None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
-    leaves it open. A merge or close closes it only when it names the waited PR, or is a bare gh pr merge
-    or close. A red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
+    leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
+    or close with no number; it closes a wait whose ready call named no PR when it names any PR or none. A
+    red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
     covers it, unless its result was an error. One streamed read, records in file order."""
     wait = None  # [pr, ids of the check-ins since the anchor]
     with open(transcript, "rb") as f:
@@ -636,7 +655,7 @@ def open_ci_wait(transcript):
                     wait[1].add(ev[1])
                 elif ev[0] == "failed":
                     wait[1].discard(ev[1])
-                elif ev[0] == "mergeany" or (ev[0] == "merge" and ev[1] == wait[0]):
+                elif ev[0] == "mergeany" or (ev[0] == "merge" and wait[0] in ("", ev[1])):
                     wait = None
                 elif ev[0] == "verdict":
                     if ev[1] == "red":
