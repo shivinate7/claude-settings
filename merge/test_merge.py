@@ -2187,6 +2187,16 @@ class CutLanes(Env):
             self.assertTrue(any(w in lines[0] for w in words), lines[0])
         self.assertNotIn("Traceback", out)
 
+    def test_a_lane_whose_tip_the_pr_head_merged_is_kept_and_only_the_pr_branch_is_cut(self):
+        # The ruling (Nov 12 2026, per-lane merge): cut_lanes deletes the PR's own branch only. A branch the PR head merged under its own name is
+        # another branch, so it stays on origin, whatever its tip.
+        lane_batch(self, "agent/lane1", "lane2")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.head("feat"), "", "the PR's own branch is still on origin: %s" % out)  # scope first: the PR's own branch goes
+        self.assertNotEqual(self.head("agent/lane1"), "", "agent/lane1, a branch the PR head merged, was deleted: %s" % out)
+        self.assertNotEqual(self.head("lane2"), "", "lane2, a branch the PR head merged, was deleted: %s" % out)
+
     def test_two_lanes_in_the_batch_are_deleted_after_the_merge(self):
         tips = lane_batch(self, "agent/lane1", "lane2")
         with self.spy() as calls:
