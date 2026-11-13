@@ -2255,12 +2255,13 @@ class SessionStartFastForwardTests(GitFixtureMixin, SessionStartAgentWorktreeNot
         self.assert_one_not_ff(lines, "uncommitted changes")
         self.assertEqual(self.checkout_state(self.primary), before, "a checkout that was not fast-forwarded changed")
 
-    def test_commits_ahead_of_origin_main_are_not_fast_forwarded_and_say_commits_ahead(self):
+    def test_commits_ahead_of_origin_main_move_nothing_and_print_no_fast_forward_line(self):
+        # Ahead only leaves nothing to move. The existing commits-ahead line already reports that state.
         self.commit("local work not pushed")
         self.assertEqual(self.origin_tip(), self.resolve("HEAD^"), "scope: origin's main is not the checkout's parent")
         before = self.checkout_state(self.primary)
         lines = self.run_startup()
-        self.assert_one_not_ff(lines, "commits ahead")
+        self.assertEqual(self.ff_lines(lines), [], "a checkout with commits ahead printed a fast-forward line: %r" % lines)
         self.assertEqual(self.checkout_state(self.primary), before, "a checkout with commits ahead changed")
 
     def test_a_diverged_checkout_is_not_fast_forwarded_and_says_diverged(self):
