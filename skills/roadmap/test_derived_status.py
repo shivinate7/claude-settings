@@ -63,7 +63,7 @@ class DriftFixture(test_build.UpkeepFixture):
 class DerivedStatus(DriftFixture):
 
     def test_landed_row_with_no_trailer_derives_done(self):
-        # Commit 625a87260 landed this step with no Step trailer, so only the landedPulls row proves it.
+        # This step landed with no Step trailer, so only the landedPulls row proves it.
         self.commit_step("mcp-merge-unguarded", status="ready", order=2)
         self.no_trailer_on_main()
         self.publish(sessions=[], items=[], landed=[self.pull_row(41, "lane/mcp-merge-unguarded", merged=True)])
