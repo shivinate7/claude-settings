@@ -1584,13 +1584,14 @@ CD_REFUSE_FORMS = (
 )
 
 
-def _other_checkout_problems(label, got, reason, paths):
-    """An other-checkout refusal names the rule and none of `paths`. Any other verdict is a problem."""
+def _other_checkout_problems(label, got, reason, paths, rule="other-checkout"):
+    """An other-checkout refusal names the rule and none of `paths`. `rule` names another rule that refuses
+    the same call, for a row re-pointed to it. Any other verdict is a problem."""
     if got != "deny":
         return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
     problems = []
-    if "other-checkout" not in reason:
-        problems.append("%s: the refusal does not name other-checkout: %s" % (label, reason[:160]))
+    if rule not in reason:
+        problems.append("%s: the refusal does not name %s: %s" % (label, rule, reason[:160]))
     for text in paths:
         if text in reason:
             problems.append("%s: the refusal names %r" % (label, text))
@@ -2123,13 +2124,20 @@ def _home_fixture(agent_id):
     return primary, worktree, problems
 
 
-def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=None):
-    """Run one call. A problem is recorded unless it gets `expect`, and a deny must name `rule`."""
-    got, reason = _decide_full(tool, cwd, agent_id=agent_id, command=command)
+def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=None, temp=None,
+                 any_of=(), unnamed=()):
+    """Run one call. A problem is recorded unless it gets `expect`, and a deny must name `rule`.
+    `temp` is the temp folder the guard run reads. `any_of` names rules, one of which a deny must name,
+    for a call an earlier rule may already refuse. A deny must also name none of `unnamed`."""
+    got, reason = _decide_full(tool, cwd, agent_id=agent_id, temp=temp, command=command)
     if got != expect:
         problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
     elif rule and rule not in reason:
         problems.append("%s: the deny does not name %s (%s)" % (label, rule, reason[:120]))
+    elif any_of and not any(name in reason for name in any_of):
+        problems.append("%s: the deny names none of %s (%s)" % (label, ", ".join(any_of), reason[:120]))
+    elif got == "deny" and any(text in reason for text in unnamed):
+        problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
 
 
 # (shell, command template): the lone command that moves into a directory.

@@ -1741,6 +1741,40 @@ MUTATIONS = [
      "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
+    ("worktree-home: a relative shell write that lands outside the agent's own checkout is judged as inside it",
+     '        return path_is_inside(target, own) is False and not _own_red_run(payload, primary, target)\n',
+     '        return path_is_inside(target, own) is None and not _own_red_run(payload, primary, target)\n',
+     "guard", "worktree-home relative escape: mkdir ../tmp from the home is refused"),
+    ("worktree-home: a parenthesis glued to the verb is left in the command text, so the write is not read",
+     '            if char in "()" and not quote and not (char == "(" and index',
+     '            if char in "" and not quote and not (char == "(" and index',
+     "guard", "worktree-home relative escape: (mkdir ../tmp) from the home is refused"),
+    # The relative-write allowance in `escapes` (relative_write_escape): a write into the system temp or the
+    # session scratchpad passes only with no `..`, outside the primary checkout, and in that temp or scratchpad.
+    # Each mutant drops one clause, then the whole allowance.
+    ("worktree-home: a relative write whose path climbs with .. is allowed through into the system temp",
+     r'".." not in re.split(r"[\\/]", word)',
+     "True",
+     "guard", "worktree-home relative escape: mkdir -p ../../../../tmp from the home, a folder outside"),
+    ("worktree-home: a relative write into the primary checkout is allowed through when it lands in the system temp",
+     "and not (primary and path_is_inside(target, primary) is True)",
+     "and True",
+     "guard", "worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
+     "primary checkout, is refused by worktree-home itself"),
+    ("worktree-home: the relative-write allowance is off, so a write after an absolute cd into the scratchpad is refused",
+     r'        if (".." not in re.split(r"[\\/]", word)',
+     r'        if (False and ".." not in re.split(r"[\\/]", word)',
+     "guard", "worktree-home relative escape: cd <session scratchpad> && mkdir probe"),
+    # The skip after an absolute cd (`skip_after_cd` in relative_write_escape) has two clauses: (a) the folder the
+    # last absolute cd landed in is outside the home, (b) the folder the segment runs in is outside the home.
+    ("worktree-home: the skip after an absolute cd ignores where that cd landed, so a climb out of the home after a cd into it is allowed",
+     "skip_after_cd=lambda anchor, at: (path_is_inside(anchor, own) is False",
+     "skip_after_cd=lambda anchor, at: (True",
+     "guard", "cd ../../../.. && mkdir ../x"),
+    ("worktree-home: the skip after an absolute cd ignores the folder the segment runs in, so a relative cd back into the home then a climb out is allowed",
+     "and path_is_inside(at, own) is False))",
+     "and True))",
+     "guard", "cd <home, relative from the scratch folder> && mkdir ../x"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
@@ -1933,8 +1967,8 @@ MUTATIONS = [
      'Remedy: open a new worktree first.',
      "guard", "session-home: a session whose worktree is gone is refused"),
     ("session-home: no override lifts the refusal",
-     '            or worktree_home_hit(payload, tool, tool_input, cwd)):\n        return True',
-     '            or worktree_home_hit(payload, tool, tool_input, cwd)\n            or session_home_hit(payload, tool, tool_input, cwd)):\n        return True',
+     '            or (home_seen[0] if home_seen else worktree_home_hit(payload, tool, tool_input, cwd))):\n        return True',
+     '            or (home_seen[0] if home_seen else worktree_home_hit(payload, tool, tool_input, cwd))\n            or session_home_hit(payload, tool, tool_input, cwd)):\n        return True',
      "guard", "session-home: an owner override lifts the refusal"),
     ("session-home: the primary is found with a clone read",
      '    return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)',

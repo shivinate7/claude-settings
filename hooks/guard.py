@@ -260,7 +260,8 @@ Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
-                       red-run folder passes.
+                       red-run folder passes. A relative shell write that lands outside the
+                       agent's own checkout is refused, with `mkdir` and `touch` counted as writes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -588,8 +589,9 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
+            CREATING_COMMAND, FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit,
+            interpreter_may_write, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
+            shell_write_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -5473,6 +5475,56 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
+def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
+    """The relative target a shell write names that lands outside OWN, the agent's own checkout, else ''.
+    A target resolves against the folder its segment runs in (`follow_cd`). An absolute, `~` or variable
+    target is not judged here, and an empty OWN is unknown, so both allow. Nor is a segment whose last absolute
+    or `~` `cd` landed outside OWN and which runs outside OWN (`skip_after_cd`): its absolute form is
+    judged by other rules. A relative `cd` after that `cd` keeps the skip until it leads back into OWN. A
+    variable, bare or `cd -` move, `popd`, and a `cd` into OWN set none. A target with no `..` that lands in
+    the system temp or the session's scratchpad, and not in the primary checkout, passes (a write after
+    `cd /tmp`). `mkdir` and `touch` count as
+    writes in this clause alone (CREATING_COMMAND). The agent's own red-run folder passes, its root
+    included: a delete of that root is other-checkout's to refuse. The clone's common git directory
+    passes, as it does there."""
+    if not own:
+        return ""
+    common = _git_common_dir(own)   # file reads only, no git
+    import tempfile   # lazy: only a call that reaches this clause needs it
+    session = session_id_of(payload)
+    # The temp the process reads, and POSIX /tmp, which `cd /tmp` names whatever TMPDIR says.
+    temps = {os.path.realpath(tempfile.gettempdir())} | ({os.path.realpath("/tmp")} if os.name != "nt" else set())
+
+    def escapes(word, at):
+        if "$" in word or "`" in word or shell_abs(word, None) is not None:
+            return False
+        try:
+            target = _resolved(word, at)
+        except Exception:
+            return False
+        if common and path_is_inside(target, common) is True:
+            return False
+        if (".." not in re.split(r"[\\/]", word)   # a climb is judged by where it lands in the clone, never excused
+                and not (primary and path_is_inside(target, primary) is True)
+                and (any(path_is_inside(target, temp) is True for temp in temps)
+                     or (session and under_session_scratchpad(target, session)))):
+            return False   # a landing place outside the clone: the system temp or the session scratchpad
+        return path_is_inside(target, own) is False and not _own_red_run(payload, primary, target)
+
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+    # A parenthesis glued to a word hides the verb from the command read: `(mkdir x)` names `(mkdir`. Each
+    # unquoted `(` and `)` (not `$(`, `<(`, `>(`) gets a space on both sides. The count and place of
+    # parentheses is unchanged, so the subshell scope of a `cd` still ends at its `)`.
+    pads = {index for index, char, quote in walk_quotes(command)
+            if char in "()" and not quote and not (char == "(" and index and command[index - 1] in "$<>")}
+    command = "".join(" " + char + " " if index in pads else char for index, char in enumerate(command))
+    return _shell_write_hit(command, cwd, escapes, follow_cd=True, command_position=True,
+                            extra_verbs=CREATING_COMMAND,
+                            skip_after_cd=lambda anchor, at: (path_is_inside(anchor, own) is False
+                                                              and path_is_inside(at, own) is False))
+
+
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule 0, worktree-home: return the log detail when an agent's call reaches outside its own
     worktree, else ''. `status` is "none" for the orchestrator (no `agent_id`) and for tools this
@@ -5493,6 +5545,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         if (path_is_inside(home_cwd, home) is False
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
             return "shell cwd outside recorded agent home"
+        escape = relative_write_escape(payload, tool, tool_input, home_cwd, home, home_primary)
+        if escape:
+            return "relative shell write outside recorded agent home: " + escape
     elif tool in WRITE_TOOLS:
         for write_target in (write_targets(tool_input) if home_primary else ()):
             # A relative `file_path` resolves against the CALLER's cwd, the payload's own
@@ -5796,7 +5851,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             owner = _owning_checkout(resolved, roots)
         except Exception:
             return False
-        # An agent shares its session's id, and worktree-home judges no shell target, so only a
+        # An agent shares its session's id, and worktree-home judges only a relative shell target, so only a
         # top-level call may write into the session's own scratchpad worktree.
         if not has_agent and under_session_scratchpad(resolved, session_id):
             return False
@@ -6679,16 +6734,17 @@ def readonly_write_hit(command: str, cwd: str, session: str, remote: bool = Fals
     return ""
 
 
-def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
+def never_lifted(payload, tool: str, tool_input: dict, cwd: str, home_seen=None) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
-    check."""
+    check. HOME_SEEN, when it holds judge()'s own worktree_home_hit answer, spares the second read
+    of the agent's home record, which spends four git reads."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
     if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
-            or worktree_home_hit(payload, tool, tool_input, cwd)):
+            or (home_seen[0] if home_seen else worktree_home_hit(payload, tool, tool_input, cwd))):
         return True
     if tool in SHELL_TOOLS:
         raw = tool_input.get("command", "") or ""
@@ -6755,7 +6811,8 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    home_seen = []
+    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd, home_seen))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
@@ -6768,6 +6825,7 @@ def judge(payload) -> None:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
+    home_seen.append(home_hit)
     if home_hit:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
