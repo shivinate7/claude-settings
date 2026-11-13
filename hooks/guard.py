@@ -573,7 +573,7 @@ while True:
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit,
         )
-        from guard_push_delete import REVIEW_LOG_FIX_REASON, push_destinations, review_log_hit
+        from guard_push_delete import REVIEW_LOG_FIX_REASON, push_destinations, push_sources, review_log_hit
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -4553,7 +4553,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
-                record_hit, record_reason = review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where)
+                record_hit, record_reason = review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where,
+                                                         lambda: push_sources(args, where, overrides))
                 if record_hit and record_reason == REVIEW_LOG_FIX_REASON:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)  # glossary-ok: the rule id, a literal
                 elif record_hit:

@@ -635,6 +635,38 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_sources(args, cwd: str, overrides=None):
+    """-> ({destination: source}, base refs) of a push that names its refs, else ({}, []): the revision each refspec sends to
+    each branch (`HEAD:b` sends HEAD, `x:b` x, a bare `b` b, a bare push or `HEAD` the checkout's HEAD), and the ref that stands for
+    main on the pushed remote (`origin` when none is named). A deletion, `--all`, `--mirror` and a destination this cannot
+    resolve send no source, so a caller that reads none refuses. The base list holds one full ref (`_push_main_refs`). Cost: the reads `push_destinations` and `_push_main_refs` make."""
+    named = push_refspecs(args)
+    if named is None:
+        return {}, []
+    remote, specs = named
+    remote = remote or "origin"
+    sources = {}
+    for spec, dest in zip(specs or [""], push_destinations(args, cwd, overrides)):
+        source = spec.lstrip("+").partition(":")[0]
+        if dest and "*" not in dest and not source.startswith("-"):
+            sources[dest] = source or "HEAD"
+    return sources, _push_main_refs(cwd, remote)
+
+
+def _push_main_refs(cwd: str, remote: str):
+    """The one full ref that stands for main in the clean-merge walk, as a list, else [] when git cannot answer.
+
+    `<remote>/HEAD`'s target when set, even a stale one (`read_default_base` trusts it), else `<remote>/main` only. Full
+    refs, so a local branch named `<remote>/main` cannot shadow it. Scoped to this walk: `_push_default_branches`, which
+    protects main and master from a force push, is unchanged. Cost: `read_default_base`'s reads."""
+    if not cwd or not os.path.isdir(cwd):
+        return []
+    _base, head = guard_core.read_default_base(cwd, remote)
+    if head is None:
+        return []
+    return ["refs/remotes/" + (head or remote + "/main")]
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
@@ -1577,8 +1609,8 @@ PUSH_ASK_REASON = (
 # A shell `git push` asks while the session's own transcript shows a PR known to the session and a
 # reviewer or design-reviewer report with no later posted review log that holds a line with that report's role,
 # verdict and round, and Head when the report names its reviewed head (decision push-needs-review-log).
-# A push to the head branch of a PR whose posted review log holds a `Fix check:` line is refused. Cost: one pass over the transcript per push, failing
-# open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
+# A push to the head branch of a PR whose posted review log holds a `Fix check:` line is refused, unless its new commits are only clean merges of
+# main (`_only_clean_merges`, which fails closed). Cost: one pass over the transcript per push, failing open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
 # (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
 # or a posted comment with a `Fix check:` line.
 REVIEW_LOG_REASON = (
@@ -1945,10 +1977,21 @@ def _record_of(merge, text: str, from_shell: bool):
     return merge.parse_review(text[start:end + len(merge.REVIEW_CI_LINE)]) if end >= 0 else None
 
 
-def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
+def _only_clean_merges(merge, pushed, branch, head, where):
+    """True when every refspec that writes `branch` sends a source whose new commits above `head` are only clean merges of main
+    (merge.clean_merges_pushed). False for no such source, and for any exception: the fix-branch refusal fails closed."""
+    try:
+        sources, bases = pushed()
+        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)
+    except Exception:
+        return False
+
+
+def review_log_hit(transcript: str, destinations=lambda: [], where: str = "", pushed=lambda: ({}, [])):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
     branch names the push writes; it runs only when a posted review log holds a `Fix check:` line. `where` is the
-    push's checkout, where a held report's sha is read against the PR's head.
+    push's checkout, where a held report's sha is read against the PR's head. `pushed()` gives push_sources' answer, read only
+    when step 2 would refuse.
     1. A PR known to the session and a reviewer report with no later posted review log holding a line with that
        report's role, verdict and round (a fix verifier: the `Fix check:` line's role and verdict), and, when a report
        read after the PR names its reviewed head, whose Head is that head (a fix verifier: that Head, or the
@@ -1959,7 +2002,10 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
        no candidate is dropped. A design-reviewer fix verifier is not read: a review log holds a `Fix check:` line for the
        reviewer only.
     2. A posted review log, accepted by parse_review, with a `Fix check:` line for PR n, and a push to n's head branch
-       (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes.
+       (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes. A push whose new
+       commits, walked on first parents from the pushed source down to that record's Head, are only clean merges of main
+       passes (decision pr-review-record: a clean merge of main keeps the record; `merge.clean_merges_pushed`). Any other
+       push, and any read that fails, is refused: that walk fails closed, though the rest of this function passes on an exception.
     An unreadable transcript, or an unloadable merge module, passes."""
     if not transcript:
         return "", ""
@@ -1972,6 +2018,7 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
         if merge is None:
             return "", ""
         known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose review log holds a `Fix check:` line
+        recorded = {}   # PR number -> the Head of its latest review log with a `Fix check:` line
         early = []   # reports read before any PR was known, each ending in its sha candidates
         for event in events:
             if event[0] == "pr":
@@ -2001,10 +2048,11 @@ def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
                 held = _RecordLines(record)
                 if record["fix"]:
                     fixed.append(record["n"])
+                    recorded[record["n"]] = record["head"]
                 pending = [report for report in pending if report not in held]
         for number in fixed:   # before the pending ask: a denied push stays denied while a report waits
             if number in heads:
-                if heads[number] in destinations():
+                if heads[number] in destinations() and not _only_clean_merges(merge, pushed, heads[number], recorded[number], where):
                     return "push to the head branch of PR %d, fix verifier recorded" % number, REVIEW_LOG_FIX_REASON
         if pending:
             return "%s %s %s report, no posted review log" % pending[0][:3], REVIEW_LOG_REASON
