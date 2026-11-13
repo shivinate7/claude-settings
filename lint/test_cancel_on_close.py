@@ -2,10 +2,11 @@
 """Guard for the PR-close cancel: .github/workflows/cancel-on-close.yml and .github/scripts/cancel_closed_pr_runs.py.
 
 WorkflowShape reads the workflow by line, as lint/test_windows_split.py does, with the step parser of lint/workflow_steps.py.
-ScriptSelects proves select_runs cancels only a queued, in-progress, waiting, pending or requested pull_request run of
-this PR from this repo, only one whose PR list names this PR and no other, and never the run whose id is own_run_id.
-ScriptPrClosed proves pr_is_closed reads only "closed". ScriptGhCalls and ScriptMain prove every run list is a GET,
-main counts the runs it skips for having no PR list, main reads the PR again before it cancels, main excludes the run
+ScriptSelects proves select_runs cancels only an unfinished pull_request run of this PR's head branch and head SHA, from
+this repo, whose pull_requests list is empty or names this PR. ScriptSharedHead proves other_open_pr_shares_head finds
+another open PR in this repo on the same head branch. ScriptPrClosed proves pr_is_closed reads only "closed".
+ScriptGhCalls and ScriptMain prove every list call is a GET, main cancels nothing when another open PR shares the head,
+main counts the runs it skips for naming only another PR, main reads the PR before it cancels, main excludes the run
 named by GITHUB_RUN_ID, and main cancels nothing when GITHUB_RUN_ID is not numeric. ParserControl and ScannerTraps test
 the readers in this file on text that exists on main, so a red WorkflowShape case points at the workflow, not at the
 reader.
@@ -34,8 +35,14 @@ SCRIPT = os.path.join(REPO, ".github", "scripts", "cancel_closed_pr_runs.py")
 CONTROL_WORKFLOW = os.path.join(REPO, ".github", "workflows", "lane-touched-tests.yml")
 SCRIPT_CALL = ".github/scripts/cancel_closed_pr_runs.py"
 PR = 7
+OTHER_PR = 8
 REPO_FULL = "owner/repo"
+OWNER = "owner"
 DEFAULT = "main"
+HEAD_REF = "feature"
+HEAD_SHA = "3f1c0a9d2b7e4c6f8a0b1d2e3f4a5b6c7d8e9f01"
+OLD_SHA = "9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a"
+ACTIVE = ("queued", "in_progress", "waiting", "pending", "requested")
 
 
 def read_text(path):
@@ -239,11 +246,11 @@ class WorkflowShape(unittest.TestCase):
         self.assertIsNotNone(value, "the job has no timeout-minutes")
         self.assertRegex(value, r"^\d+$", "the job's timeout-minutes is not a number of minutes")
 
-    def test_job_permissions_are_actions_write_and_pull_requests_read(self):
+    def test_job_permissions_are_actions_write_contents_read_and_pull_requests_read(self):
         perms = mapping_at(self.job().split("\n"), "permissions", 4)
         self.assertIsNotNone(perms, "the job has no permissions block")
-        self.assertEqual(perms, {"actions": "write", "pull-requests": "read"},
-                         "the job's permissions are not actions: write, pull-requests: read")
+        self.assertEqual(perms, {"actions": "write", "contents": "read", "pull-requests": "read"},
+                         "the job's permissions are not actions: write, contents: read, pull-requests: read")
 
     def test_checkout_never_takes_the_pr_head(self):
         # A checkout with no ref takes the PR merge commit, so each one must name a base ref.
@@ -297,10 +304,23 @@ class ScriptCase(unittest.TestCase):
         return mod
 
 
+def pr_dict(number=PR, state="closed", ref=HEAD_REF, sha=HEAD_SHA, head_repo=REPO_FULL):
+    """The PR as GET repos/R/pulls/N returns it, cut to the keys the script reads."""
+    return {"number": number, "state": state,
+            "head": {"ref": ref, "sha": sha, "repo": {"full_name": head_repo}},
+            "base": {"ref": DEFAULT, "repo": {"full_name": REPO_FULL, "default_branch": DEFAULT}}}
+
+
+def open_pr(number=OTHER_PR, ref=HEAD_REF, head_repo=REPO_FULL):
+    """An entry of GET repos/R/pulls?state=open&head=OWNER:BRANCH. A null head_repo is a deleted fork, as the API gives it."""
+    repo = None if head_repo is None else {"full_name": head_repo}
+    return {"number": number, "state": "open", "head": {"ref": ref, "sha": HEAD_SHA, "repo": repo}}
+
+
 def run_of(**changes):
-    """A run that this PR's close would cancel, with each field replaced by `changes`."""
-    run = {"id": 101, "event": "pull_request", "status": "queued", "head_branch": "feature",
-           "pull_requests": [{"number": PR}], "head_repository": {"full_name": REPO_FULL}, "name": "checks"}
+    """An unfinished run of this PR's head. GitHub lists no PR for a run of a closed PR, so pull_requests is empty by default."""
+    run = {"id": 101, "event": "pull_request", "status": "queued", "head_branch": HEAD_REF, "head_sha": HEAD_SHA,
+           "head_repository": {"full_name": REPO_FULL}, "pull_requests": [], "name": "checks"}
     run.update(changes)
     return run
 
@@ -310,43 +330,104 @@ def without(run, key):
 
 
 PULLS_ROUTE = f"repos/{REPO_FULL}/pulls/{PR}"
+PULLS_LIST_ROUTE = f"repos/{REPO_FULL}/pulls"
 REPO_ROUTE = f"repos/{REPO_FULL}"
 RUNS_ROUTE = f"repos/{REPO_FULL}/actions/runs"
 CANCEL_RE = re.compile(rf"repos/{re.escape(REPO_FULL)}/actions/runs/(\d+)/cancel")
+QUERY_KEYS = ("state", "head", "status", "per_page")
 
 
 def done(argv, code, out, err=""):
     return subprocess.CompletedProcess(argv, code, stdout=out, stderr=err)
 
 
-class FakeGh:
-    """Stands in for subprocess.run under the script's gh calls. It records each argv and answers by the exact endpoint
-    token. An endpoint no case names returns rc 1, so a broken fixture reads as a failure. It does not enforce GET: a
-    POST list would then cancel nothing, and a case would fail for a cause other than its own."""
+def split_argv(argv):
+    """(endpoint path, query params, jq filter) of a gh api argv. The query may sit on the endpoint or come as -f pairs."""
+    path, params, jq = None, {}, None
+    for i, tok in enumerate(argv):
+        if tok == "--jq" and i + 1 < len(argv):
+            jq = argv[i + 1]
+        elif tok.startswith("repos/"):
+            base, _, query = tok.partition("?")
+            path = base
+            params.update(dict(part.split("=", 1) for part in query.split("&") if "=" in part))
+        elif "=" in tok and tok.split("=", 1)[0] in QUERY_KEYS:
+            key, value = tok.split("=", 1)
+            params[key] = value
+    return path, params, jq
 
-    def __init__(self, runs=(), states=("closed",)):
+
+def jq_apply(body, expr):
+    """What gh prints for a jq filter of the form ., .a.b, .a[] or .[]. Any other filter is refused."""
+    each = expr.endswith("[]")
+    core = expr[:-2] if each else expr
+    if not re.fullmatch(r"\.(?:[\w-]+(?:\.[\w-]+)*)?", core):
+        raise ValueError(f"the fixture serves no filter {expr!r}")
+    for key in [k for k in core.split(".") if k]:
+        body = body[key]
+    if each:
+        return "".join(json.dumps(item) + "\n" for item in body)
+    if isinstance(body, str):
+        return body + "\n"
+    return json.dumps(body) + "\n"
+
+
+def served(argv, body, jq):
+    """The stdout gh gives for a body, with the --jq filter applied when one is given."""
+    if jq is None:
+        return done(argv, 0, json.dumps(body) + "\n")
+    try:
+        return done(argv, 0, jq_apply(body, jq))
+    except (KeyError, TypeError, ValueError) as e:
+        return done(argv, 1, "", f"fake gh: the --jq filter does not fit the fixture: {e}")
+
+
+class FakeGh:
+    """Stands in for subprocess.run under the script's gh calls. It records each argv and answers by the endpoint path, the
+    part before any query. It applies a --jq filter the way gh does, so a read may take the whole JSON or one field. An
+    endpoint no case names returns rc 1, so a broken fixture reads as a failure. It does not enforce GET: a POST list
+    would then cancel nothing, and a case would fail for a cause other than its own."""
+
+    def __init__(self, runs=(), states=("closed",), pr=None, open_prs=(), pr_read_fails=False, open_read_fails=False):
         self.runs, self.states = list(runs), list(states)
+        self.pr = pr_dict() if pr is None else pr
+        self.open_prs = list(open_prs)
+        self.pr_read_fails, self.open_read_fails = pr_read_fails, open_read_fails
         self.reads, self.calls = 0, []
 
     def __call__(self, argv, *args, **kwargs):
         self.calls.append(list(argv))
-        if PULLS_ROUTE in argv:
+        path, params, jq = split_argv(argv)
+        if path == PULLS_ROUTE:
+            if self.pr_read_fails:
+                return done(argv, 1, "", "fake gh: the PR read failed")
             state = self.states[min(self.reads, len(self.states) - 1)]
             self.reads += 1
-            return done(argv, 0, state + "\n")
-        if REPO_ROUTE in argv:
-            return done(argv, 0, DEFAULT + "\n")
-        if RUNS_ROUTE in argv:
-            status = [tok.split("=", 1)[1] for tok in argv if tok.startswith("status=")]
-            lines = [json.dumps(run) + "\n" for run in self.runs if status and run.get("status") == status[0]]
-            return done(argv, 0, "".join(lines))
-        if any(CANCEL_RE.fullmatch(tok) for tok in argv):
+            return served(argv, dict(self.pr, state=state), jq)
+        if path == PULLS_LIST_ROUTE:
+            if self.open_read_fails:
+                return done(argv, 1, "", "fake gh: the open PR list failed")
+            return served(argv, self.open_prs, jq)
+        if path == REPO_ROUTE:
+            return served(argv, {"default_branch": DEFAULT}, jq)
+        if path == RUNS_ROUTE:
+            status = params.get("status")
+            return served(argv, {"workflow_runs": [run for run in self.runs if status is None or run.get("status") == status]}, jq)
+        if path and CANCEL_RE.fullmatch(path):
             return done(argv, 0, "")
         return done(argv, 1, "", "fake gh: no case names this endpoint: " + " ".join(argv))
 
 
+def path_of(argv):
+    return split_argv(argv)[0]
+
+
 def list_calls(calls):
-    return [argv for argv in calls if RUNS_ROUTE in argv]
+    return [argv for argv in calls if path_of(argv) == RUNS_ROUTE]
+
+
+def open_list_calls(calls):
+    return [argv for argv in calls if path_of(argv) == PULLS_LIST_ROUTE]
 
 
 def cancelled_ids(calls):
@@ -358,16 +439,23 @@ def has_get(argv):
 
 
 class ScriptSelects(ScriptCase):
-    """select_runs(runs, pr_number, repo, default_branch) -> the run ids to cancel."""
+    """select_runs(runs, pr, repo, default_branch, own_run_id) -> the run ids to cancel. pr is the dict GET repos/R/pulls/N returns."""
 
-    def select(self, runs, pr=PR, repo=REPO_FULL, default=DEFAULT, own_run_id=None):
+    def select(self, runs, pr=None, repo=REPO_FULL, default=DEFAULT, own_run_id=None):
         fn = getattr(self.module(), "select_runs", None)
         self.assertTrue(callable(fn), "select_runs is not defined in .github/scripts/cancel_closed_pr_runs.py")
+        pr = pr_dict() if pr is None else pr
         args = (runs, pr, repo, default) if own_run_id is None else (runs, pr, repo, default, own_run_id)
         try:
             return fn(*args)
         except Exception as e:
             self.fail(f"select_runs raised {type(e).__name__}: {e}")
+
+    def test_takes_the_pr_dict_as_its_second_argument(self):
+        fn = getattr(self.module(), "select_runs", None)
+        self.assertTrue(callable(fn), "select_runs is not defined in .github/scripts/cancel_closed_pr_runs.py")
+        self.assertEqual(list(inspect.signature(fn).parameters), ["runs", "pr", "repo", "default_branch", "own_run_id"],
+                         "select_runs does not take (runs, pr, repo, default_branch, own_run_id) with pr as the PR dict")
 
     def test_cancels_a_queued_run_of_this_pr(self):
         self.assertEqual(self.select([run_of(status="queued")]), [101])
@@ -385,44 +473,72 @@ class ScriptSelects(ScriptCase):
         self.assertEqual(self.select([run_of(status="requested")]), [101],
                          "a requested run of this PR was not selected")
 
-    def test_never_cancels_a_run_listing_several_prs(self):
-        for prs in ([{"number": 5}, {"number": PR}], [{"number": PR}, {"number": 8}]):
+    def test_cancels_each_active_status_of_a_run_listing_this_pr(self):
+        for status in ACTIVE:
+            with self.subTest(status=status):
+                self.assertEqual(self.select([run_of(status=status, pull_requests=[{"number": PR}])]), [101],
+                                 f"a {status} run listing this PR was not selected")
+
+    def test_cancels_a_run_whose_pull_list_is_empty(self):
+        # GitHub lists no PR for a run of a closed PR, so an empty list is the usual shape of the run to cancel.
+        self.assertEqual(self.select([run_of(pull_requests=[])]), [101],
+                         "a run with an empty PR list was not selected")
+
+    def test_cancels_a_run_listing_this_pr_among_others(self):
+        # main stops the cancel when another open PR shares the head, so select_runs takes any list that names this PR.
+        for prs in ([{"number": 5}, {"number": PR}], [{"number": PR}, {"number": OTHER_PR}]):
             with self.subTest(pull_requests=prs):
-                self.assertEqual(self.select([run_of(pull_requests=prs)]), [],
-                                 f"a run listing several PRs was selected: closing PR {PR} would cancel "
-                                 "another open PR's run")
+                self.assertEqual(self.select([run_of(pull_requests=prs)]), [101],
+                                 "a run listing this PR among others was not selected")
 
     def test_never_cancels_a_push_run_on_main(self):
-        self.assertEqual(self.select([run_of(event="push", head_branch="main", pull_requests=[])]), [])
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, event="push", head_branch=DEFAULT)]), [101])
 
     def test_never_cancels_a_push_run_on_this_prs_branch(self):
-        self.assertEqual(self.select([run_of(event="push", head_branch="feature")]), [])
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, event="push")]), [101])
 
     def test_never_cancels_a_completed_run(self):
-        self.assertEqual(self.select([run_of(status="completed")]), [])
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, status="completed")]), [101])
 
     def test_never_cancels_a_run_of_another_pr(self):
-        self.assertEqual(self.select([run_of(pull_requests=[{"number": 8}])]), [])
-
-    def test_never_cancels_a_run_with_no_pull_request(self):
-        self.assertEqual(self.select([run_of(pull_requests=[])]), [])
+        for prs in ([{"number": OTHER_PR}], [{"number": 5}, {"number": OTHER_PR}]):
+            with self.subTest(pull_requests=prs):
+                self.assertEqual(self.select([run_of(id=101), run_of(id=102, pull_requests=prs)]), [101],
+                                 "a run naming only other PRs was selected")
 
     def test_never_cancels_a_run_on_the_default_branch(self):
-        self.assertEqual(self.select([run_of(head_branch=DEFAULT)]), [])
+        pr = pr_dict(ref=DEFAULT)
+        runs = [run_of(id=101, head_branch=DEFAULT)]
+        self.assertEqual(self.select(runs, pr=pr, default="trunk"), [101],
+                         "scope: a run on main is not the default branch when the default is trunk")
+        self.assertEqual(self.select(runs, pr=pr, default=DEFAULT), [],
+                         "a run on the default branch was selected")
 
     def test_default_branch_is_the_argument_not_a_constant(self):
         runs = [run_of(id=101, head_branch="main"), run_of(id=102, head_branch="trunk")]
-        self.assertEqual(self.select(runs, default="trunk"), [101])
+        self.assertEqual(self.select(runs, pr=pr_dict(ref="main"), default="trunk"), [101])
 
     def test_never_cancels_a_fork_run(self):
-        self.assertEqual(self.select([run_of(head_repository={"full_name": "someone/fork"})]), [])
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_repository={"full_name": "someone/fork"})]), [101])
+
+    def test_never_cancels_any_run_when_the_pr_head_is_a_fork(self):
+        self.assertEqual(self.select([run_of(id=101)]), [101], "scope: this PR's run is not selected with a same-repo head")
+        self.assertEqual(self.select([run_of(id=101)], pr=pr_dict(head_repo="someone/fork")), [],
+                         "a run was selected for a PR whose head is a fork")
+
+    def test_never_cancels_a_run_of_another_head_sha(self):
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_sha=OLD_SHA)]), [101])
+
+    def test_never_cancels_a_run_of_another_branch(self):
+        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_branch="other")]), [101])
 
     def test_skips_a_run_missing_a_key(self):
-        for key in ("id", "event", "status", "head_branch", "pull_requests", "head_repository"):
+        for key in ("id", "event", "status", "head_branch", "head_sha", "pull_requests", "head_repository"):
             with self.subTest(missing=key):
-                self.assertEqual(self.select([without(run_of(), key)]), [], f"a run missing {key} was selected")
+                self.assertEqual(self.select([without(run_of(), key), run_of(id=101)]), [101],
+                                 f"a run missing {key} was selected")
         with self.subTest(missing="head_repository.full_name"):
-            self.assertEqual(self.select([run_of(head_repository={})]), [],
+            self.assertEqual(self.select([run_of(head_repository={}), run_of(id=101)]), [101],
                              "a run with no head_repository.full_name was selected")
 
     def test_skips_malformed_runs_and_keeps_the_valid_one(self):
@@ -436,8 +552,8 @@ class ScriptSelects(ScriptCase):
     def test_full_size_list_selects_only_the_matching_runs(self):
         # 300 runs, past one page of the runs API. Every seventh run matches; each other run fails one rule.
         other_rules = [dict(status="completed"), dict(event="push", head_branch="main", pull_requests=[]),
-                       dict(pull_requests=[{"number": 8}]), dict(pull_requests=[]), dict(head_branch=DEFAULT),
-                       dict(head_repository={"full_name": "someone/fork"})]
+                       dict(pull_requests=[{"number": OTHER_PR}]), dict(head_sha=OLD_SHA), dict(head_branch="other"),
+                       dict(head_repository={"full_name": "someone/fork"}), dict(head_branch=DEFAULT)]
         runs, want = [], []
         for i in range(300):
             run = run_of(id=1000 + i)
@@ -477,6 +593,50 @@ class ScriptPrClosed(ScriptCase):
         self.assertIs(self.closed(""), False, "a failed read reads as closed")
 
 
+class ScriptSharedHead(ScriptCase):
+    """other_open_pr_shares_head(open_prs, pr) is True only for another open PR in this repo on the PR's head branch."""
+
+    def shares(self, open_prs, pr=None):
+        fn = getattr(self.module(), "other_open_pr_shares_head", None)
+        self.assertTrue(callable(fn), "other_open_pr_shares_head is not defined in .github/scripts/cancel_closed_pr_runs.py")
+        try:
+            return fn(open_prs, pr_dict() if pr is None else pr)
+        except Exception as e:
+            self.fail(f"other_open_pr_shares_head raised {type(e).__name__}: {e}")
+
+    def test_empty_list_shares_nothing(self):
+        self.assertIs(self.shares([]), False)
+
+    def test_this_pr_alone_shares_nothing(self):
+        self.assertIs(self.shares([pr_dict(state="open")]), False, "this PR was counted as another PR on its head")
+
+    def test_another_open_pr_on_the_same_branch_shares_the_head(self):
+        self.assertIs(self.shares([open_pr(number=OTHER_PR)]), True,
+                      "another open PR on the same head branch was not found")
+
+    def test_an_open_pr_on_another_branch_shares_nothing(self):
+        self.assertIs(self.shares([open_pr(number=OTHER_PR)]), True, "scope: the same-branch PR was not found")
+        self.assertIs(self.shares([open_pr(ref="other")]), False, "a PR on another branch was counted as sharing the head")
+
+    def test_a_fork_pr_with_the_same_branch_name_shares_nothing(self):
+        self.assertIs(self.shares([open_pr(number=OTHER_PR)]), True, "scope: the same-branch PR was not found")
+        self.assertIs(self.shares([open_pr(number=OTHER_PR, head_repo="someone/fork")]), False,
+                      "a fork PR with the same branch name was counted as sharing the head")
+
+    def test_a_full_size_list_finds_its_one_match_at_the_end(self):
+        others = [open_pr(number=100 + i, ref=f"branch-{i}") for i in range(250)]
+        self.assertIs(self.shares(others), False, "scope: a list with no same-branch PR shared the head")
+        self.assertIs(self.shares(others + [open_pr(number=OTHER_PR)]), True,
+                      "the same-branch PR at the end of the list was not found")
+
+    def test_malformed_entries_do_not_hide_a_valid_match(self):
+        self.assertIs(self.shares([{"number": 9}, open_pr()]), True, "a valid same-branch PR was hidden by a malformed entry")
+
+    def test_a_null_head_repo_does_not_raise(self):
+        # shares() fails the test on a raise, so this case only needs a bool back, not a value to pin.
+        self.assertIsInstance(self.shares([open_pr(head_repo=None)]), bool, "a null head repo gave no bool")
+
+
 class ScriptGhCalls(ScriptCase):
     """list_active_runs makes each run list call a GET."""
 
@@ -492,52 +652,138 @@ class ScriptGhCalls(ScriptCase):
 
 
 class ScriptMain(ScriptCase):
-    """main(argv) reads the PR, cancels what select_runs picks, and reports the runs it skips for having no PR list."""
+    """main(argv) reads the PR, cancels what select_runs picks, cancels nothing when another open PR shares the head, and
+    reports the runs it skips for naming only another PR."""
 
-    def run_main(self, runs, states=("closed",), github_run_id=None):
+    def run_main(self, runs, states=("closed",), github_run_id=None, open_prs=(), pr=None, pr_read_fails=False,
+                 open_read_fails=False):
         # The env is set per case, so a GITHUB_RUN_ID from the CI runner never reaches a case that does not name one.
         mod = self.module()
-        fake = FakeGh(runs, states)
+        fake = FakeGh(runs, states, pr=pr, open_prs=open_prs, pr_read_fails=pr_read_fails, open_read_fails=open_read_fails)
         err = io.StringIO()
         with mock.patch.dict(os.environ), mock.patch.object(mod.subprocess, "run", fake), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             os.environ.pop("GITHUB_RUN_ID", None)
             if github_run_id is not None:
                 os.environ["GITHUB_RUN_ID"] = github_run_id
-            rc = mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
+            try:
+                rc = mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
+            except Exception as e:
+                self.fail(f"main raised {type(e).__name__}: {e}")
         return err.getvalue(), fake, rc
 
-    def test_prints_the_count_of_runs_with_no_pr_list(self):
-        no_list = [run_of(id=201, pull_requests=[]), run_of(id=202, pull_requests=[])]
-        not_counted = [run_of(id=203, event="push", pull_requests=[]),
-                       run_of(id=204, head_repository={"full_name": "someone/fork"}, pull_requests=[]),
-                       run_of(id=205, head_branch=DEFAULT, pull_requests=[]),
-                       run_of(id=206, pull_requests=[{"number": 8}])]
-        err, fake, _ = self.run_main(no_list + not_counted + [run_of(id=101)])
-        self.assertEqual(cancelled_ids(fake.calls), [101], "scope: the PR's own run was not the one cancelled")
-        self.assertIn("2 run(s) skipped: no PR list", err, "main printed no count of the runs with no PR list")
+    def test_prints_the_count_of_runs_skipped_for_naming_another_pr(self):
+        skipped = [run_of(id=201, pull_requests=[{"number": OTHER_PR}]), run_of(id=202, pull_requests=[{"number": OTHER_PR}]),
+                   run_of(id=203, pull_requests=[{"number": OTHER_PR}])]
+        not_counted = [run_of(id=204, event="push", pull_requests=[{"number": OTHER_PR}]),
+                       run_of(id=205, head_branch="other", pull_requests=[{"number": OTHER_PR}])]
+        err, fake, _ = self.run_main(skipped + not_counted + [run_of(id=101), run_of(id=102)])
+        self.assertEqual(sorted(cancelled_ids(fake.calls)), [101, 102], "scope: the runs with an empty PR list were not cancelled")
+        m = re.search(r"(\d+) run\(s\) skipped", err)
+        self.assertIsNotNone(m, "main printed no 'run(s) skipped' count")
+        self.assertEqual(int(m.group(1)), 3, "the skipped count is not the 3 runs of this branch that name only another PR")
 
     def test_cancels_nothing_when_the_pr_is_open_at_the_reread(self):
-        err, fake, _ = self.run_main([run_of(id=101)], states=("closed", "open"))
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], states=("closed", "open"))
         self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs")
         self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled run 101 after the PR read as open")
 
     def test_cancels_the_run_when_the_pr_stays_closed_at_the_reread(self):
         err, fake, _ = self.run_main([run_of(id=101)], states=("closed", "closed"))
-        self.assertEqual(cancelled_ids(fake.calls), [101])
+        self.assertEqual(cancelled_ids(fake.calls), [101], "a closed PR's run with an empty PR list was not cancelled")
+
+    def test_cancels_a_run_listing_this_pr_among_others_when_no_open_pr_shares_the_head(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": 5}, {"number": PR}])])
+        self.assertEqual(cancelled_ids(fake.calls), [101], "a run listing this PR among others was not cancelled")
+
+    def test_cancels_nothing_when_an_open_pr_on_the_head_lists_the_run(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": 5}, {"number": PR}])], open_prs=[open_pr(number=5)])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled a run while another open PR shares the head")
+
+    def test_cancels_nothing_when_another_open_pr_shares_the_head(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}]), run_of(id=102)], open_prs=[open_pr()])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs while another open PR shares the head")
+
+    def test_exits_zero_with_a_message_when_another_open_pr_shares_the_head(self):
+        err, fake, rc = self.run_main([run_of(id=101)], open_prs=[open_pr()])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        self.assertEqual(rc, 0, f"main returned {rc} when another open PR shares the head, want 0")
+        self.assertTrue(err.strip(), "main printed no message for the cancel it skipped")
+
+    def test_an_open_pr_on_another_branch_does_not_block_the_cancel(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], open_prs=[open_pr(ref="other")])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        self.assertEqual(cancelled_ids(fake.calls), [101], "an open PR on another branch blocked the cancel")
+
+    def test_an_open_pr_from_a_fork_with_the_same_branch_name_does_not_block_the_cancel(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])],
+                                     open_prs=[open_pr(head_repo="someone/fork")])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        self.assertEqual(cancelled_ids(fake.calls), [101], "a fork PR with the same branch name blocked the cancel")
+
+    def test_cancels_nothing_when_the_open_pr_list_cannot_be_read(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}]), run_of(id=102, pull_requests=[{"number": PR}])],
+                                     open_read_fails=True)
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never asked for the open PRs")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs although the open PR list could not be read")
+
+    def test_exits_one_when_the_open_pr_list_cannot_be_read(self):
+        err, fake, rc = self.run_main([run_of(id=101)], open_read_fails=True)
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never asked for the open PRs")
+        self.assertEqual(rc, 1, f"main returned {rc} when the open PR list could not be read, want 1")
+
+    def test_fails_safe_when_the_pr_cannot_be_read(self):
+        err, fake, rc = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], pr_read_fails=True)
+        self.assertEqual(rc, 1, f"main returned {rc} when the PR could not be read, want 1")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs although the PR could not be read")
+
+    def test_a_run_of_an_older_head_sha_is_not_cancelled(self):
+        err, fake, _ = self.run_main([run_of(id=101, head_sha=OLD_SHA, pull_requests=[{"number": PR}]),
+                                      run_of(id=102, pull_requests=[{"number": PR}])])
+        self.assertIn(102, cancelled_ids(fake.calls), "scope: the run at the PR's head SHA was not cancelled")
+        self.assertNotIn(101, cancelled_ids(fake.calls), "a run of an older head SHA was cancelled")
+
+    def test_a_run_of_another_branch_is_not_cancelled(self):
+        err, fake, _ = self.run_main([run_of(id=101, head_branch="other", pull_requests=[{"number": PR}]),
+                                      run_of(id=102, pull_requests=[{"number": PR}])])
+        self.assertIn(102, cancelled_ids(fake.calls), "scope: the run on the PR's branch was not cancelled")
+        self.assertNotIn(101, cancelled_ids(fake.calls), "a run of another branch was cancelled")
+
+    def test_no_active_runs_cancels_nothing_and_exits_zero(self):
+        err, fake, rc = self.run_main([])
+        self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs when there were none to cancel")
+        self.assertEqual(rc, 0, f"main returned {rc} with no active runs, want 0")
 
     def test_the_run_named_by_github_run_id_is_not_cancelled(self):
         err, fake, _ = self.run_main([run_of(id=101), run_of(id=102)], github_run_id="101")
-        self.assertIn(102, cancelled_ids(fake.calls), "scope: the other run 102 was not cancelled")
+        self.assertIn(102, cancelled_ids(fake.calls), "the other run 102 (empty PR list) was not cancelled")
         self.assertNotIn(101, cancelled_ids(fake.calls), "the own run 101 named by GITHUB_RUN_ID was cancelled")
 
     def test_a_non_numeric_github_run_id_cancels_nothing(self):
         err, fake, _ = self.run_main([run_of(id=101), run_of(id=102)], github_run_id="abc")
         self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs although GITHUB_RUN_ID is not numeric")
 
-    def test_a_non_numeric_github_run_id_exits_one(self):
+    def test_a_non_numeric_github_run_id_exits_one_before_any_gh_call(self):
         err, fake, rc = self.run_main([run_of(id=101)], github_run_id="abc")
         self.assertEqual(rc, 1, f"main returned {rc} for a GITHUB_RUN_ID that is not numeric, want 1")
+        self.assertEqual(fake.calls, [], "main called gh before it refused the GITHUB_RUN_ID")
+
+    def test_every_list_call_is_a_get_including_the_open_pr_list(self):
+        err, fake, _ = self.run_main([run_of(id=101)], open_prs=[open_pr()])
+        self.assertTrue(open_list_calls(fake.calls), "scope: main never listed the open PRs for the head")
+        posts = [argv for argv in list_calls(fake.calls) + open_list_calls(fake.calls) if not has_get(argv)]
+        self.assertEqual(posts, [], "a list call has no -X GET, so gh sends a POST and the list fails")
+
+    def test_the_open_pr_list_asks_for_open_prs_on_the_owner_and_head_branch(self):
+        err, fake, _ = self.run_main([run_of(id=101)])
+        calls = open_list_calls(fake.calls)
+        self.assertTrue(calls, "scope: main never listed the open PRs for the head")
+        params = split_argv(calls[0])[1]
+        self.assertEqual(params.get("state"), "open", "the open PR list does not ask for state=open")
+        self.assertEqual(params.get("head"), f"{OWNER}:{HEAD_REF}", "the open PR list does not ask for head=OWNER:BRANCH")
 
 
 class ParserControl(unittest.TestCase):
