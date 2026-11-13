@@ -8759,14 +8759,14 @@ class RecordsEnv(Env):
                "done\nexit $status\n")
         os.chmod(os.path.join(self.bare, "hooks", "pre-receive"), 0o755)
 
+def claim_pushed_line(out):
+    """The stop line of a two-step confirm: the one line that says the claim is pushed and to confirm again. '' when there is none."""
+    return next((l for l in out.splitlines() if "claim" in l and "pushed" in l and "confirm" in l), "")
+
 class TwoStepConfirm(RecordsEnv):
     """Two-step confirm (the owner's ruling, Nov 12 2026: the claim stays a commit). A confirm that must push its claim commit pushes it and
     stops: no merge call, no wait, and one stop line that says the claim is pushed and to confirm again. The next confirm, on the claim head,
     merges it. A confirm that needs no claim merges in one run. Each case names its cause in its first assert."""
-
-    def claim_pushed_line(self, out):
-        """The stop line: the one line that says the claim is pushed and to confirm again. '' when there is none."""
-        return next((l for l in out.splitlines() if "claim" in l and "pushed" in l and "confirm" in l), "")
 
     def test_the_first_confirm_calls_no_merge_put(self):
         asked = []
@@ -8781,7 +8781,7 @@ class TwoStepConfirm(RecordsEnv):
     def test_the_first_confirm_stops_with_a_line_that_says_the_claim_is_pushed(self):
         rc, out = self.run_merge_once("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertTrue(self.claim_pushed_line(out), "no stop line says the claim is pushed and to confirm again: %s" % out)
+        self.assertTrue(claim_pushed_line(out), "no stop line says the claim is pushed and to confirm again: %s" % out)
 
     def test_the_first_confirm_leaves_its_claim_commit_on_the_lane_head(self):
         before = self.head("feat")
@@ -8831,7 +8831,7 @@ class TwoStepConfirm(RecordsEnv):
         relayed = self.head("feat")
         rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
         self.assertFalse(getattr(self.host, "merged", False), "the first confirm merged instead of stopping at the claim: %s" % out)
-        self.assertTrue(self.claim_pushed_line(out), "no stop line after the claim push: %s" % out)
+        self.assertTrue(claim_pushed_line(out), "no stop line after the claim push: %s" % out)
         rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)  # the relayed head is the parent of the claim commit
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), "the relayed yes did not carry over the claim commit: %s" % out)
