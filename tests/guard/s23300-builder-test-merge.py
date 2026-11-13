@@ -1,6 +1,6 @@
 # section 23300
-# A builder's merge that resolves a conflict in a test file (decision builders-cannot-edit-tests). The resolution is allowed when every test case of both parents survives. Each
-# refusal names its class of loss in the reason: each refused case carries one class's words, and lacks the
+# A builder's merge that resolves a conflict in a test file (decision builders-cannot-edit-tests).
+# The resolution is allowed when every test case of both parents survives. Each refusal names its class of loss in the reason: each refused case carries one class's words, and lacks the
 # other classes' words and any path, so one generic reason listing every class fails.
 # The conflict steps are the builder-refuse section's (s23264): _test_author_lane, _put_commit, _must,
 # _require_conflict, clean_builder_case and author_silent_case. Log checks join at section 40805, so this
