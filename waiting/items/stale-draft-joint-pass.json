@@ -33,6 +33,7 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective 09:07 CST Nov 13",
+  "reply": "Closed 09:15 CST Nov 13 by triage, settled by your past ruling: decision stalled-steps (owner 2026-11-11 16:44 CST) says triage closes the stale drafts on the build's list once, then again at each batch. So the standing close-and-archive line in the idle-lanes pass is built under that ruling as a stood pick (your 09:12 CST ask for a mechanical fix, relayed by the retrospective): step stale-draft-joint-pass. Undo: say so and the lane drops it.",
   "repo": "shivinate7/claude-settings",
   "short": "Clear the stale draft backlog",
   "shown": [
@@ -53,7 +54,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "Should one pass close a stale draft and archive its idle lane together?",
   "why": "It changes how open PRs and lanes are closed, which two passes set today."
 }

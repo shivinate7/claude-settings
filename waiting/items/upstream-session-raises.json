@@ -25,6 +25,7 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective 09:04 CST Nov 13",
+  "reply": "Closed 09:14 CST Nov 13 by triage: you dropped it at 09:12 CST (relayed by the retrospective): build our own portable features rather than depend on upstream fixes. Step upstream-session-raises is dropped; the queue workaround stays on step refused-start-queues-turn; ruling portable-own-features is in the rulings store.",
   "repo": "shivinate7/claude-settings",
   "short": "Report the Remote Control start refusal to Anthropic",
   "shown": [
@@ -40,7 +41,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "May the Remote Control start refusal be reported to Anthropic as drafted?",
   "why": "A report to Anthropic leaves the org and cannot be taken back, so you send it."
 }
