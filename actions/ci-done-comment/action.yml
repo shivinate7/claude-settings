@@ -2,13 +2,22 @@ name: CI done comment
 description: >
   Posts one PR comment when a run ends with a failed or cancelled job. A watched PR wakes its
   session on a new comment, and a run with a red job sends no "all checks done" wake. A green run
-  posts nothing. The caller job MUST set `needs: [...]` (every other job) and
+  posts nothing. The run-end caller job MUST set `needs: [...]` (every other job) and
   an `if:` of `!cancelled()` on a pull_request event, with
   `permissions: {pull-requests: write}`. A cancelled run is superseded, so it posts nothing.
 inputs:
   needs:
     description: "Pass toJSON(needs) from the calling job, written as an expression in its with: block."
-    required: true
+    required: false
+    default: "{}"
+  job:
+    description: >
+      Set by a job's own last step (`if: failure()`): names that job in a comment at once, so a
+      watching session wakes while other jobs run. That step needs only
+      `permissions: {pull-requests: write}`. Leave empty in the run-end job, which then names only
+      red jobs not already announced for this run attempt.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -17,6 +26,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         NEEDS: ${{ inputs.needs }}
+        JOB: ${{ inputs.job }}
         PR: ${{ github.event.pull_request.number }}
         REPO: ${{ github.repository }}
         SHA: ${{ github.event.pull_request.head.sha }}
