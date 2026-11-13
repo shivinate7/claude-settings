@@ -15722,8 +15722,8 @@ class ReviewRoundModel(ReviewEnv):
 class ReviewNoRestart(ReviewEnv):
     """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
     rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
-    record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it while
-    that earlier record has a Fix check line and the new record has no --fix-check. A comment that does not parse is skipped. A refusal exits 2
+    record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it
+    below REVIEW_LAST_ROUND without a --fix-check. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2
     and prints nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
@@ -15808,6 +15808,35 @@ class ReviewNoRestart(ReviewEnv):
     def test_a_granted_round_four_after_an_earlier_round_three_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
         rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_an_equal_top_below_round_three_with_no_fix_verifier_is_refused(self):
+        # Control: the same one-round record after the same earlier record is accepted with a fix verifier that starts at the earlier head,
+        # so the refusal below comes from the missing fix verifier alone (decision pr-review-record).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), guard="yes")
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", fix=fix), host=self.host_with(earlier))
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+
+    def test_a_record_for_another_pr_on_this_pr_is_not_an_earlier_record(self):
+        # Control: this pull request's own record with rounds 1 to 3 refuses a fresh round one. The record for pull request 9, posted as a
+        # comment here, must parse, so its acceptance below comes from the other-pull-request skip and from nothing else.
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(record_text(rounds=REVIEW_FAILED_THREE)))
+        self.assert_refused(rc, out, err)
+        other = record_text(n=9, rounds=REVIEW_FAILED_THREE)
+        parse_text(self, other)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(other))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fresh_full_review_at_an_equal_top_of_three_is_accepted(self):
+        # Control: a one-round record after the same earlier record is refused, so the acceptance below is the equal-top exception at the
+        # last allowed round. A head that moved after the last round owes a fresh full review, which repeats the earlier rounds (decision pr-review-record).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=self.host_with(earlier))
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
 class ReviewedList(ReviewEnv):
