@@ -2159,10 +2159,10 @@ cloud_startup_local1() {
 snap_fires='def fires: (.matcher // "") as $m | if ($m == "" or $m == "*") then true else ("startup" | test("^(" + $m + ")$")) end;'
 # The old form of the refresh hook (no tree holds that line now), so it is written out here.
 snap_old_line='HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"'
-# snap_eval_hook LINE: the HOOK_CMD that LINE assigns, with the REPO, REF and RAW that install.sh sets (CLAUDE_SETTINGS_REF unset).
+# snap_eval_hook LINE: the HOOK_CMD that LINE assigns, with the REPO, REF and RAW that install.sh sets (CLAUDE_SETTINGS_REF=main, as hk_envrun runs it).
 snap_eval_hook() {
   (
-    unset CLAUDE_SETTINGS_REF
+    CLAUDE_SETTINGS_REF=main
     eval "$(grep -E '^(REPO|REF|RAW)=' "$INSTALL_SH")"
     eval "$1"
     printf '%s' "$HOOK_CMD"
