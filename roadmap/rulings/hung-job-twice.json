@@ -1,0 +1,10 @@
+{
+ "id": "hung-job-twice",
+ "at": "2026-11-12T11:51:00-06:00",
+ "title": "A second hang turns all-jobs-passed red",
+ "ruling": "Owner 11:51 CST Nov 12, page item 557 a (hung-job-twice): a second hang turns all-jobs-passed red, labelled \"hung\". The lane writes it into its decision.",
+ "quote": "a",
+ "source": "page item 557 answer; step time-limits-end-hangs-only note; coordinator handoff audit, relayed to triage 09:59 CST Nov 13",
+ "status": "open",
+ "step": "time-limits-end-hangs-only"
+}

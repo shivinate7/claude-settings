@@ -1,0 +1,10 @@
+{
+ "id": "haiku-round-1-counts",
+ "at": "2026-11-12T22:00:00-06:00",
+ "title": "A Haiku round-1 review counts (PR #3071)",
+ "ruling": "Owner 22:00 CST Nov 12, pick b on #3071 (SessionStart logs each skip of the live pin update): a Haiku round 1 counts as round 1, per the model table row \"reviewer\". Clash: the merge tool records a fix check as Sonnet only; step review-record-usage-line says where a Haiku round 1 is recorded.",
+ "quote": "b",
+ "source": "coordinator handoff audit, relayed to triage 09:59 CST Nov 13",
+ "status": "open",
+ "step": "review-record-usage-line"
+}

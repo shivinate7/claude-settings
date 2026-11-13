@@ -1,0 +1,10 @@
+{
+ "id": "merge-3097-as-is",
+ "at": "2026-11-12T23:42:00-06:00",
+ "title": "Merge #3097 as it is, once green",
+ "ruling": "Owner 23:42 CST Nov 12: merge #3097 (allow the merge tool with --confirm, --head and --base-red-ok) as it is, once its CI is green. Item 685 (red-main merge allow) closed 00:17 CST Nov 13 under decision ask-commands-run-alone and did not change this.",
+ "quote": "merge #3097 as is",
+ "source": "coordinator handoff audit, relayed to triage 09:59 CST Nov 13",
+ "status": "open",
+ "step": "red-main-merge-allow"
+}

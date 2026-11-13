@@ -1,0 +1,10 @@
+{
+ "id": "r44-child-fix-lanes-scope",
+ "at": "2026-11-11T14:05:00-06:00",
+ "title": "R44 child fix lanes skip degen and home",
+ "ruling": "R44 (child repos follow claude-settings; ruling r44): child fix lanes run in every child repo except degen and home. The owner's words for the exception are not on record; this is the coordinator's relay.",
+ "quote": "not recorded (coordinator relay)",
+ "source": "coordinator handoff audit, relayed to triage 09:59 CST Nov 13",
+ "status": "open",
+ "step": "child-repo-gap"
+}
