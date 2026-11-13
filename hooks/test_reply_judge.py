@@ -1356,8 +1356,9 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt still judges against eight rules",
-          has_pin(sentences, ("against eight rules",)), sentences[:2])
+    word = COUNT_WORDS[len(judged_rules()) - 1]  # the count word JUDGED_RULES implies, so a new rule moves it with the list
+    check("prompt: the prompt still judges against the count JUDGED_RULES holds",
+          has_pin(sentences, ("against %s rules" % word,)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1675,6 +1676,46 @@ def case_cap_keeps_a_works_row_behind_thirty_one_refused_rows():
           "%d route rows in the prompt" % carried)
 
 
+# --------------------------------------------------------------------------- R39 deference
+# R39 in docs/plans/restart-plan.md: the judge flags a reply that cites a ruling as law against a measured harm, with no
+# challenge offered. It flags, like its other items, and never refuses (decision reply-judge-samples-never-refuses). The
+# rule id is outcomes-stale-decision-protocol, R39's home. The reply is an Input Needed reply, so Stop 2 is judged too.
+
+DEFERENCE_RULE = "outcomes-stale-decision-protocol"
+DEFERENCE_REPLY = (
+    "Done: read the ruling on the apps.\n"
+    "Input Needed: nothing new; keep the apps as the ruling says, because the ruling stands.\n")
+DEFERENCE_REASON = DEFERENCE_RULE + ": the ruling is cited as law against a measured harm, with no challenge offered."
+
+
+def case_prompt_flags_a_deference_to_a_ruling():
+    run = run_hook(DEFERENCE_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, DEFERENCE_REPLY)
+    check("deference prompt: a sentence flags a reply that cites a ruling as law",
+          has_pin(sentences, ("flag",), ("ruling",), ("law", "authority", "absolute")), sentences)
+    check("deference prompt: a sentence flags it against a measured harm or flaw",
+          has_pin(sentences, ("flag",), ("ruling",), ("measur", "harm", "flaw")), sentences)
+    check("deference prompt: a sentence spares a reply that offers a challenge",
+          has_pin(sentences, ("never flag",), ("challenge",)), sentences)
+
+
+def case_judged_rules_hold_the_deference_rule():
+    rules = judged_rules()
+    check("deference rule: JUDGED_RULES holds %s" % DEFERENCE_RULE, DEFERENCE_RULE in rules, rules)
+
+
+def case_deference_finding_logs_its_rule_and_never_blocks():
+    finding = {"ok": False, "reason": DEFERENCE_REASON}
+    run, config = second_stop(DEFERENCE_REPLY, answer=json.dumps(finding), label="r39-log", session="r39-log")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    check("deference finding: guard.log rule is %s" % DEFERENCE_RULE,
+          len(parts) == 6 and parts[3] == DEFERENCE_RULE, parts)
+    out = parse_stdout(run)
+    check("deference finding: a note, never a block, exit 0",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == DEFERENCE_REASON, (run.code, run.out))
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1743,6 +1784,9 @@ CASES = (
     case_route_block_flags_only_on_a_works_row_on_this_surface,
     case_shared_route_id_carries_only_its_surface_rows,
     case_cap_keeps_a_works_row_behind_thirty_one_refused_rows,
+    case_prompt_flags_a_deference_to_a_ruling,
+    case_judged_rules_hold_the_deference_rule,
+    case_deference_finding_logs_its_rule_and_never_blocks,
 )
 
 
