@@ -96,7 +96,6 @@ RULE_FILES = [
     os.path.join("skills", "fresh-prose", "SKILL.md"),
     os.path.join("skills", "design-review", "SKILL.md"),
     os.path.join(".claude", "rules", "hooks.md"),
-    os.path.join(".claude", "rules", "guards.md"),
 ]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "checks.yml")
