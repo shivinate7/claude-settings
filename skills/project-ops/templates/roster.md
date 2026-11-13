@@ -3,7 +3,7 @@
 This roster is the one record of who holds each standing session. The coordinator updates it in
 the same turn that it rotates a standing session, which happens only when one goes stale or breaks. A session reads it right before it messages a standing session.
 
-- Coordinator (starts every other session, holds lane state and any standing merge grant, talks with the owner): "<session title>",
+- Coordinator (starts every other session except the consultant, holds lane state and any standing merge grant, talks with the owner): "<session title>",
   <session id>, since <date and time>. It compacts in place and has no successor.
 - Triage (the repo's one page): "<session title>", <session id>, since
   <date and time>.

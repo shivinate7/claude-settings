@@ -7,12 +7,12 @@ This skill packages the way the claude-settings project on claude.ai works, so a
 adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's grant.
 
 The model assumes a claude.ai project: one coordinator session per repo starts every other
-session. It starts triage and the batch runner together, as a trio, before any lane.
+session except the consultant. It starts triage and the batch runner together, as a trio, before any lane.
 Without a project, each session holds one or more roles, and the owner acts as the coordinator.
 
 ## What it packages
 
-- **Session roles.** The coordinator, triage, the batch runner, the arbiter and lanes.
+- **Session roles.** The coordinator, triage, the batch runner, the arbiter, lanes and the consultant (the owner starts it, in claude-settings only; it talks and audits, and builds, merges and decides nothing).
   `templates/operating-model.md` says what each role owns. Triage, the batch runner and the arbiter
   compact in routine use and are not replaced. The coordinator rotates a standing session only when it
   goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
