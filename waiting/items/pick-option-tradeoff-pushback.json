@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T18:47:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: a question with a large trade-off reaches you with a better option on the table.\nProblem (goal): you asked on Nov 8 whether large trade-offs between a question's choices could trigger an option judge to push back. The lane measured it: a rule that counts ruling-and-open-gap losses as large catches item 416 (3 of 3), but sends back 10 of 163 past items you answered with a listed option (6.1%) and catches 1 of 33 otherwise answered. That is not near zero, so the judge was not built. The 416 kind may need the writer to add a third option, not a judge. The lane waits on your pick.\nBased on (measured): the lane's run, 11:41 CST Nov 8; #2173 keeps the rule as built (0 of 196).\nDeparts from: main has no option pushback at all \u2014 a adds a writing rule; b leaves main as it is.\nMeanwhile: the lane (prose-guard-2) waits for your pick.",
+  "home": "step option-tradeoff-pushback (ask-mw80xweioa)",
+  "id": "pick-option-tradeoff-pushback",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:21:56.527Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 743,
+  "options": [
+    {
+      "gain": "Catches the kind of question you asked about, without sending good questions back.",
+      "how": "The session that writes a question must offer a better-solution option when its first two options trade off heavily. No judge sends the question back.",
+      "id": "writer-third-option",
+      "key": "a",
+      "label": "The question writer adds a third option when the trade-offs are large (recommended)",
+      "lose": "The writing rule is on the writer to follow; nothing checks it."
+    },
+    {
+      "gain": "Nothing new to maintain.",
+      "how": "No pushback and no new writing rule. The lane stops.",
+      "id": "drop-judge",
+      "key": "b",
+      "label": "Drop the option judge idea",
+      "lose": "A question with a large trade-off still reaches you with no better option offered."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:47 CST Nov 13, 'my asks' audit",
+  "reply": "Filed 13:23 CST: your 743 a is ruling own-743-a-writer-third-option. The question writer adds a third option when trade-offs are large. No judge. The lane builds the writing rule.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Option judge, or the writer adds a third option?",
+  "shown": [
+    {
+      "id": "writer-third-option",
+      "key": "a",
+      "label": "The question writer adds a third option when the trade-offs are large (recommended)"
+    },
+    {
+      "id": "drop-judge",
+      "key": "b",
+      "label": "Drop the option judge idea"
+    }
+  ],
+  "status": "closed",
+  "title": "When a question's options trade off heavily, should a judge push back, or should the question writer add a better third option?",
+  "why": "The lane waits on your pick between the two designs."
+}

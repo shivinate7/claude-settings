@@ -3,7 +3,7 @@
   "at": "2026-11-07T18:09:09.185Z",
   "home": "premise P4 (your 17:31 CST Nov 6 note on item 316); step answered-leaves-page (PR #1383)",
   "id": "ask-mw6pwiq4n4",
-  "reply": "You are right. They were sent to their lanes when you answered; each reply names the lane. But earlier triage kept them open until their PR merged (\"closes when its PR merges\"). Your 17:31 CST Nov 6 ruling says an answered item closes as soon as it is routed. I never swept the older items. Fixed at 12:12 CST: I closed 10 answered decisions (203, 222, 234, 308-311, 313, 179, 182), each with its home. 331 is now a task for you. What stays: tasks only you can do (240, 264, 273, 324, 329), the parked 291-293, deferred 252, and 328, where you asked a question back. Guard: PR #1383 (answered-leaves-page) takes answered items off the page. Until it merges, I sweep at each wake.",
-  "status": "closed",
+  "reply": "Correction 12:48 CST Nov 13. The earlier reply said guard PR #1383 (answered-leaves-page) takes answered items off the page. That PR closed unmerged, so there is no guard. The true state: step answered-leaves-page is blocked, with no PR and no live lane; main's waiting-page text has no 'close at routing' rule. Answered items still stay on the page until a session closes them by hand. I sweep at each wake, and the retrospective's ledger row page-answered-not-closed (the items answered Nov 6 to 10 and never closed) is mine to clear. Lane owner-asks-express (session_013NEJKyqQmpj2FNxeZzDV7s, started 12:48 CST) now builds the real fix: answered items leave the questions area. Original reply, from Nov 7: they were sent to their lanes when you answered; each reply names the lane; I closed 10 answered decisions then (203, 222, 234, 308 to 311, 313, 179, 182), each with its home.",
+  "status": "open",
   "text": "im seeing a bunch of answered questions still juts remaining here in this artifact and it seems like they've not been delegated out to lanes -- why?"
 }

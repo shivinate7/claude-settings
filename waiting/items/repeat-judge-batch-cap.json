@@ -24,11 +24,9 @@
     }
   ],
   "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
-  "pick": "a",
   "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
   "repo": "shivinate7/claude-settings",
   "short": "Repeat checker: 20 per stop",
-  "stands": true,
   "status": "open",
   "title": "Should the repeat checker send at most 20 messages to the model per stop?",
   "why": "The lane took this pick; it stands unless you choose b."

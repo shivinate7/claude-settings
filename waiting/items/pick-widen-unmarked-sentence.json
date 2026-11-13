@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T18:46:00Z",
+  "context": "Goal: the widening check warns about an option that adds an exception for one repo, and does not warn about an option meant for every repo.\nProblem (rule): the check already flags an option that adds an exception for one repo (your item 278 rule). A second sentence in the code also flags an option unless it says it applies to every repo. That sentence has no words of yours behind it. It may be why the warning on item 729 showed up.\nBased on (read): your item 278 words cover only the one-repo rule; the extra sentence came in with commit eb351e2bbc.\nDeparts from: main \u2014 main has no extra sentence; PR #3201 adds it, and a drops it again.\nMeanwhile: lane wave-88-rebuilds holds #3201; nothing waits on this.",
+  "home": "PR #3201 (rebuild of #2705); item 278",
+  "id": "pick-widen-unmarked-sentence",
+  "kind": "decision",
+  "n": 742,
+  "options": [
+    {
+      "gain": "No false warning on an option meant for every repo.",
+      "how": "Only your item 278 rule stays.",
+      "id": "cut",
+      "key": "a",
+      "label": "Drop the extra sentence (recommended)",
+      "lose": "An option for one repo that does not say so is no longer flagged."
+    },
+    {
+      "gain": "An unlabeled one-repo option is still flagged.",
+      "how": "An option is flagged unless it says it applies to every repo.",
+      "id": "keep",
+      "key": "b",
+      "label": "Keep the extra sentence",
+      "lose": "More false warnings on options meant for every repo."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:47 CST Nov 13, lane wave-88-rebuilds",
+  "reply": "Reworded 13:23 CST in plain words, same two choices. Your 'none of these' was about the wording, so this stays open for your pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Widening check: drop one extra sentence?",
+  "shown": [
+    {
+      "id": "cut",
+      "key": "a",
+      "label": "Drop the extra sentence (recommended)"
+    },
+    {
+      "id": "keep",
+      "key": "b",
+      "label": "Keep the extra sentence"
+    }
+  ],
+  "status": "open",
+  "title": "Should the widening check drop one extra sentence that flags some options?",
+  "why": "A sentence in two guards claims your ruling that your words do not cover."
+}

@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T18:39:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: reviews end as soon as a change is proven safe.\nProblem (rule): R9 says a guard or check change that passes round 1 is done, and only one fixed under a fix check waits for round 3. On #3185, round 1 passed, then lint-only edits (no finding fixed) went under a fix verifier, and `merge --reviewed` now says it owes the final round. The coordinator first told the lane it was done, then corrected to the tool's reading: round 3 runs. R9 does not say whether a lint-only fix counts as 'fixed under a fix check'. It needs your word.\nBased on (ruling): R9 (your 15:44 CST Nov 10, pick 471 a); your 11:40 CST Nov 13 words 'do we still force round 3 reviews on certain items? ... that shouldnt be teh case anymore'.\nBased on (read): the coordinator's report on #3185.\nDeparts from: main \u2014 the tool counts any fix check as a fixed change; a counts a lint-only fix as not fixed.\nMeanwhile: lanes follow the tool's reading (round 3 runs). Not blocking.",
+  "home": "ruling R9 (pick 471 a); steps rounds-rules-one-record, merge-reviewed-cursor",
+  "id": "pick-lint-fix-skips-round-3",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:21:56.527Z",
+    "choice": "a",
+    "note": "pretty sure all skip after the round that passes them? message retrospective"
+  },
+  "n": 741,
+  "options": [
+    {
+      "gain": "No third round for a lint-only edit.",
+      "how": "If round 1 passed and the only later edits fix lint (no finding was fixed), the change is done at the passing fix check. `merge --reviewed` stops saying it owes the final round.",
+      "id": "lint-skips-r3",
+      "key": "a",
+      "label": "Lint-only fixes after a round-1 PASS skip round 3",
+      "lose": "The tool must tell a lint-only edit from a finding fix, and a wrong call merges a guard change without round 3."
+    },
+    {
+      "gain": "One rule, nothing to judge.",
+      "how": "R9 as the tool reads it: a change with a fix verifier waits for round 3, whatever the fix was.",
+      "id": "keep-r3",
+      "key": "b",
+      "label": "Keep round 3 for any fix check, as the tool reads it today",
+      "lose": "A lint-only edit costs a full extra Sonnet round."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:39 CST Nov 13, #3185",
+  "reply": "Filed 13:23 CST: your 741 a is ruling own-741-a-lint-fix-no-r3. A lint-only fix after a round-1 pass skips round 3. Your question, whether every change skips round 3 once a round passes it, went to the retrospective; I bring its answer.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lint-only fix after round 1: round 3?",
+  "shown": [
+    {
+      "id": "lint-skips-r3",
+      "key": "a",
+      "label": "Lint-only fixes after a round-1 PASS skip round 3"
+    },
+    {
+      "id": "keep-r3",
+      "key": "b",
+      "label": "Keep round 3 for any fix check, as the tool reads it today"
+    }
+  ],
+  "status": "closed",
+  "title": "After a round-1 PASS, should a lint-only fix (no finding fixed) skip round 3?",
+  "why": "R9 is your ruling; the lint-only case is a gap it does not name."
+}

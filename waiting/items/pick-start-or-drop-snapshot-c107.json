@@ -1,0 +1,65 @@
+{
+  "added": "2026-11-13T18:48:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: new lanes stop printing old warnings, and an orchestrator starts its lanes without you clicking.\nProblem (goal): both steps are ready with no lane. cloud-snapshot-age-check: a stale snapshot makes every new lane print old warnings and run old hooks (31 lanes printed the old EXECPATH line); PR #1363 passed round 3 and was held, then went back to ready on Nov 12. c107: your Oct 26 gripe that the degen orchestrator on the Mac needed you to accept each started session; the cloud cannot reach the Mac, so a probe has to run there. A local lane start needs your click.\nBased on (read): the two step notes; ruling lanes-start-as-agents (item 168 a) keeps one press per Mac lane start.\nDeparts from: main \u2014 neither step has a lane; a starts one, b starts two, c closes both.\nMeanwhile: nothing else waits on this.",
+  "home": "steps cloud-snapshot-age-check and c107",
+  "id": "pick-start-or-drop-snapshot-c107",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:20:18.859Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 744,
+  "options": [
+    {
+      "gain": "Lanes stop printing stale warnings; nothing waits on a click.",
+      "how": "A lane builds step cloud-snapshot-age-check (warn once on a cloud start when the snapshot still holds an old startup entry). c107 is dropped for now: a local lane start needs your click.",
+      "id": "start-snapshot-only",
+      "key": "a",
+      "label": "Start the snapshot check now; drop c107 until you can press on the Mac (recommended)",
+      "lose": "An orchestrator on your Mac still needs one press per lane start."
+    },
+    {
+      "gain": "Both gaps get worked.",
+      "how": "A lane builds the snapshot check, and a second lane writes the Mac probe as one paste-ready prompt for you.",
+      "id": "start-both",
+      "key": "b",
+      "label": "Start both",
+      "lose": "c107 needs you to run a probe on the Mac, and the cloud cannot reach it."
+    },
+    {
+      "gain": "Two fewer things in the queue.",
+      "how": "Both steps are closed as not worth building now.",
+      "id": "drop-both",
+      "key": "c",
+      "label": "Drop both",
+      "lose": "Stale warnings in every new lane, and the click per lane start, stay."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:48 CST Nov 13, retrospective 'my asks' audit",
+  "reply": "Filed 13:21 CST: your 744 b is ruling own-744-b-start-both. Both steps are marked ready; the coordinator starts a lane for each.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Start or drop the snapshot check and c107?",
+  "shown": [
+    {
+      "id": "start-snapshot-only",
+      "key": "a",
+      "label": "Start the snapshot check now; drop c107 until you can press on the Mac (recommended)"
+    },
+    {
+      "id": "start-both",
+      "key": "b",
+      "label": "Start both"
+    },
+    {
+      "id": "drop-both",
+      "key": "c",
+      "label": "Drop both"
+    }
+  ],
+  "status": "closed",
+  "title": "Should a lane start step cloud-snapshot-age-check and step c107 (no click to start a lane on the Mac), or drop them?",
+  "why": "A lane start on your Mac needs your click, so the choice is yours."
+}

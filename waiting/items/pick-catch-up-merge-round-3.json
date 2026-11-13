@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T19:28:00Z",
+  "closed": "2026-11-13T19:33:00Z",
+  "context": "Goal: stale PRs catch up with main without re-reviewing code that did not change.\nProblem (rule): the merge tool counts a merge of main as a fix under a fix check. So every guard PR caught up today (#3111, #2783, #3023) owes round 3 and a net value, though each fix check found the PR's own diff byte-for-byte the same.\nBased on (ruling): R9 (your 15:44 CST Nov 10: only a change fixed under a fix check waits for round 3); item 613 (your note: round 3 after an earlier pass was 'long since already established' as not wanted); item 741 a (13:21 CST: a lint-only fix after a round-1 pass skips round 3). None names a merge of main, so this is a different act and needs your word.\nBased on (read): `merge --help`: 'a fix after a merge of main also qualifies'.\nDeparts from: main \u2014 any fix check after round 1 on a guard change owes round 3; a exempts a catch-up merge whose own diff is identical.\nMeanwhile: runner 10's three round-3 reviewers run, and it follows the tool.",
+  "home": "step merge-lint-fix-no-round-3; ruling R9; decision hold-unsafe-after-round-3",
+  "id": "pick-catch-up-merge-round-3",
+  "kind": "decision",
+  "n": 750,
+  "options": [
+    {
+      "gain": "A catch-up costs one fix check.",
+      "how": "If the fix check finds the PR's own diff identical to the reviewed one, the merge of main does not owe round 3. Triage files one merge-tool step, joined to step merge-lint-fix-no-round-3.",
+      "id": "exempt-identical",
+      "key": "a",
+      "label": "Exempt a catch-up merge whose own diff is unchanged (recommended)",
+      "lose": "A merge that changes behaviour only through main's side gets only the fix check's read."
+    },
+    {
+      "gain": "Every moved guard head gets a full round 3.",
+      "how": "Main stays as it is: any fix check after round 1 on a guard change owes round 3 and a net value.",
+      "id": "keep-round-3",
+      "key": "b",
+      "label": "Keep round 3 for every moved guard head",
+      "lose": "Each catch-up costs a round-3 reviewer and its wait; three guard PRs (#3111, #2783, #3023) already owe one today."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "runner 10, 13:29 CST Nov 13, via coordinator 13:30 CST",
+  "reply": "Withdrawn 13:33 CST: you told runner 10 at 13:29 CST that round 3 no longer occurs, and to fix R9 if it still does. That covers this question, so no pick is needed. Ruling r9 carries your words; lane merge-tool-r9-no-round-3 builds the merge-tool change.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Catching a guard PR up with main: owe round 3?",
+  "shown": [
+    {
+      "id": "exempt-identical",
+      "key": "a",
+      "label": "Exempt a catch-up merge whose own diff is unchanged (recommended)"
+    },
+    {
+      "id": "keep-round-3",
+      "key": "b",
+      "label": "Keep round 3 for every moved guard head"
+    }
+  ],
+  "status": "closed",
+  "title": "When a guard PR only merges main in to catch up and its own diff is unchanged, should it owe round 3?",
+  "why": "Your rulings cover a lint-only fix, not a merge of main; a merge-tool check changes if a wins."
+}

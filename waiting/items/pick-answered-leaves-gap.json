@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-13T19:00:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: answered items leave the page.\nProblem (rule): R18's relay check (`covers`) is unbuilt until stage 4, so closing a routed answer at routing leaves it with no counted grant route until then.\nBased on (read): restart-plan R18 point 5; your reply on item answered-leaves-page: 'relayed grants can just stay running'.\nDeparts from: main \u2014 page_grant refuses every closed item; the lane closes at routing and adds no rule 4.\nMeanwhile: the lane builds a. Undo: land rule 4 later.",
+  "home": "steps answered-leaves-page, roadmap-push-refusal-says-fetch; restart-plan R18 point 5",
+  "id": "pick-answered-leaves-gap",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:20:18.859Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 748,
+  "options": [
+    {
+      "gain": "No shared tool widens; answered items leave the page now.",
+      "how": "The lane closes an answered item when it routes it and adds no page_grant rule 4. The gap is noted in docs/debts/notes.md.",
+      "id": "accept-gap",
+      "key": "a",
+      "label": "Close at routing; accept the gap until stage 4 (triage's pick, stands)",
+      "lose": "Until stage 4 builds the relay check, a closed routed answer has no counted grant route."
+    },
+    {
+      "gain": "A grant route exists today.",
+      "how": "page_grant accepts a closed item that was routed.",
+      "id": "rule-4",
+      "key": "b",
+      "label": "Land page_grant rule 4, as in closed PR #1383",
+      "lose": "Widens a shared tool, which goes against your ruling.",
+      "widens": true
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane owner-asks-express, 12:56 CST Nov 13",
+  "reply": "Filed 13:21 CST: your 748 b is ruling own-748-b-rule-4. The lane lands page_grant rule 4 as in closed PR #1383, instead of accepting the gap. Told the lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Answered items leave the page: accept the gap until stage 4?",
+  "shown": [
+    {
+      "id": "accept-gap",
+      "key": "a",
+      "label": "Close at routing; accept the gap until stage 4 (triage's pick, stands)"
+    },
+    {
+      "id": "rule-4",
+      "key": "b",
+      "label": "Land page_grant rule 4, as in closed PR #1383"
+    }
+  ],
+  "status": "closed",
+  "title": "Close an answered item at routing and accept that its grant route is uncounted until the relay check exists?",
+  "why": "Triage took this pick (undoable); it stands unless you choose b."
+}

@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-13T18:57:00Z",
+  "context": "Goal: every role has a chosen model, effort and reason (R33, restart-plan.md:332), and speed counts over dollars (restart-plan.md:625).\nProblem (rule): R33 asks for an effort per role; the coordinator and triage rows read 'not ruled; model default'. Pinning one changes a ruled table, so it needs your word.\nBased on (ruling): R33 moves a row only on a measured pass rate (restart-plan.md:340).\nBased on (measured): spend since Nov 3: coordinator $1,839, triage $1,567 (restart-plan.md:634). The effect of effort is unmeasured: the ruled trial is Sonnet only, and trial-results.md has no coordinator or triage run.\nDeparts from: agent-model-cap.md:135 \u2014 other tiers keep the model default; this pins an effort per role.\nBased on (read): the retrospective's blind Opus ranking of how much reasoning each role needs, 13:32 CST: coordinator 1st, arbiter, consultant, triage 4th, guard-or-check lane, product or design lane, batch runner 7th, docs-only lane 8th. It is a ranking, not a measured pass rate, so R33 does not move a row on it.\nMeanwhile: both roles keep the model default; nothing else waits on this.",
+  "home": "PR #3023; restart-plan R33; agent-model-cap.md:135",
+  "id": "pick-coordinator-triage-effort",
+  "kind": "decision",
+  "n": 747,
+  "options": [
+    {
+      "gain": "No guess about effort is written into a ruled table.",
+      "how": "Nothing changes; a trial for both roles is queued.",
+      "id": "keep-default",
+      "key": "a",
+      "label": "Keep the model default until a trial measures it (recommended)",
+      "lose": "Both roles may run at an effort that is wrong for them, unknown until measured."
+    },
+    {
+      "gain": "Spend on both roles likely falls.",
+      "how": "The table row for both roles reads medium.",
+      "id": "pin-medium",
+      "key": "b",
+      "label": "Pin medium, as the lanes run",
+      "lose": "Weaker arbitration on hard calls, unmeasured."
+    },
+    {
+      "gain": "Hard calls get the most thought.",
+      "how": "The table row for both roles reads high.",
+      "id": "pin-high",
+      "key": "c",
+      "label": "Pin high, as the arbiter runs",
+      "lose": "Spend on both roles likely rises, unmeasured."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:49 CST Nov 13, via coordinator 12:56 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Reasoning effort for the coordinator and triage sessions",
+  "shown": [
+    {
+      "id": "keep-default",
+      "key": "a",
+      "label": "Keep the model default until a trial measures it (recommended)"
+    },
+    {
+      "id": "pin-medium",
+      "key": "b",
+      "label": "Pin medium, as the lanes run"
+    },
+    {
+      "id": "pin-high",
+      "key": "c",
+      "label": "Pin high, as the arbiter runs"
+    }
+  ],
+  "status": "open",
+  "title": "Should the coordinator and triage sessions get a pinned reasoning effort, or keep the model default?",
+  "why": "R33 moves a row only on a measured pass rate, and none exists for these two roles. Recommended a."
+}

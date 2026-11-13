@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T18:57:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: main stays stable while 70 or more asks run at once, at the most outcome speed (restart-plan.md:766-767).\nProblem (rule): merging onto a red main is what decision no-merge-onto-red-main stops; letting some lanes merge changes it, so it needs your word.\nBased on (ruling): no-merge-onto-red-main.md:5 refuses a merge while main's newest completed run is red; line 23 records Oct 13-14, 14 red runs in a row.\nBased on (read): bisect and revert land in #3152's act 3 (its design, line 7), so the blamed path is not known today.\nBased on (measured): a full CI run takes 33 to 38 min (restart-plan.md:268).\nDeparts from: main \u2014 every merge halts while main is red; this lets lanes off the blamed paths merge.\nMeanwhile: main keeps the halt; #3152 builds the blame step either way. Item 745 asks the separate question of when merges resume.",
+  "home": "decision no-merge-onto-red-main; PR #3152 (R42 part 2)",
+  "id": "pick-red-main-blamed-paths",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:20:18.859Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 746,
+  "options": [
+    {
+      "gain": "No defect can hide under a new merge.",
+      "how": "Main keeps what it does today.",
+      "id": "halt-all",
+      "key": "a",
+      "label": "Halt all merges while main is red (recommended)",
+      "lose": "Every lane waits a full CI run, 33 to 38 min, even when its files are unrelated."
+    },
+    {
+      "gain": "Unrelated work keeps moving.",
+      "how": "The merge tool lets a lane merge when none of its files are on the blamed paths. Decision no-merge-onto-red-main changes.",
+      "id": "off-blamed-paths",
+      "key": "b",
+      "label": "Let lanes off the blamed paths merge",
+      "lose": "Until the bisect exists the blame is a guess, so a bad merge can slip through."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:49 CST Nov 13, via coordinator 12:56 CST",
+  "reply": "Filed 13:21 CST: your 746 b is ruling own-746-b-off-blamed-paths. While main is red, a lane that touches none of the blamed paths may merge. It waits on the blame step (#3152 act 3), which is not built yet; step red-main-owner-two-picks carries both.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red main: halt all merges, or let lanes off the blamed paths merge?",
+  "shown": [
+    {
+      "id": "halt-all",
+      "key": "a",
+      "label": "Halt all merges while main is red (recommended)"
+    },
+    {
+      "id": "off-blamed-paths",
+      "key": "b",
+      "label": "Let lanes off the blamed paths merge"
+    }
+  ],
+  "status": "closed",
+  "title": "While main is red, should every merge wait, or may lanes that touch none of the blamed paths merge?",
+  "why": "A merge check changes if b wins; the blame step is not built yet. Recommended a: measure red-main waits first, then revisit b."
+}

@@ -22,12 +22,10 @@
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
-  "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:17 CST",
   "reply": "You said the tradeoff was not well written; the item now says in plain words what overage does and what the cap is. In short: a leaves the wait cap alone and records the gap (no way to detect overage yet, cost unmeasured); b adds a second 300 s cap that is used only while overage shows, which needs a reader for overage first. Say b in the thread or on the page to overrule.",
   "repo": "shivinate7/claude-settings",
   "short": "CI wait cap: leave the 5-minute overage cache as a known gap",
-  "stands": true,
   "status": "open",
   "title": "CI wait cap: leave the 5-minute overage cache as a known gap",
   "why": "A coordinator pick you could not see before."

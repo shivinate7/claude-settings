@@ -2,7 +2,7 @@
   "at": "2026-11-08T12:14:01.621Z",
   "id": "ask-mw7sno2d2l",
   "re": "ask-mw7a4sixks",
-  "reply": "Built and reviewed, but in no batch yet. Runner 8 found no review record posted for #1777's head (26869a9fc), so the merge tool lists it under \"no record\". I told its lane to post the tool-printed record, run the lane lint, and hand it to runner 8 again. Then it goes in batch 65, which starts after batch 64 (#1944) merges. Triage, 06:31 CST Nov 8.",
-  "status": "closed",
+  "reply": "Correction 12:48 CST Nov 13. This one fix was asked three times (the asks 'Deviations...' on Nov 8, 'fixed?' and 'status?'). The Nov 8 status below is stale: #1777 closed unmerged, and step roadmap-push-refusal-says-fetch was folded into batch-ci-merge-guard at 13:50 CST Nov 12 (coordinator). The first lane is archived, its red test kept on branch archive/roadmap-push-refusal-says-fetch-r2 (019d6eb0a), and no fresh lane has started yet. When the coordinator starts it, I reply here with the lane. Old reply, Nov 8: built and reviewed, in no batch yet; runner 8 found no review record for #1777's head (26869a9fc).",
+  "status": "open",
   "text": "status?"
 }

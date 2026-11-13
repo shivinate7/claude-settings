@@ -24,7 +24,6 @@
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
-  "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:01 CST",
   "reply": "You said this does not make sense. It did not: the pick used a fixed 72 h limit, which you have said you do not approve. I rewrote it: a drops the number and keeps the ownership part; b overrules everything. Please answer again.",
   "repo": "shivinate7/claude-settings",
@@ -41,7 +40,6 @@
       "label": "Overrule the whole pick"
     }
   ],
-  "stands": true,
   "status": "open",
   "title": "PR ledger: a 72 h limit for fix checks and later rounds",
   "why": "A coordinator pick you could not see before."

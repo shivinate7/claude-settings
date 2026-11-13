@@ -34,12 +34,10 @@
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
-  "pick": "a",
   "ref": "coordinator pick, Nov 12, 11:38 CST",
   "reply": "Kept in part 13:19 CST Nov 12 after the retrospective's audit (blocked step with an empty or finished blocker list is listed, not only counted). Your 12:11 CST Nov 13 note 'ensure this is above board how we operate our glossary': checked. GLOSSARY.md on main has no row for step statuses; the three new ones (blocked, queued, folded) have no glossary entry, and 'queued' is listed like todo, which is two names for one thing (the glossary gives each thing one name). A follow-up adds rows for blocked and folded and drops 'queued' as an alias of todo; step glossary-step-statuses (todo) holds it.",
   "repo": "shivinate7/claude-settings",
   "short": "Roadmap build: three more step statuses it knows",
-  "stands": true,
   "status": "open",
   "title": "Roadmap build: three more step statuses it knows",
   "why": "A coordinator pick you could not see before."

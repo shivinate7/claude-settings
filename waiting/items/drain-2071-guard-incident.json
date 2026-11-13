@@ -1,9 +1,10 @@
 {
   "added": "2026-11-13T17:31:00Z",
-  "context": "Goal: guards stop mistakes Claude is likely to make, and cost less than the harm they stop.\nProblem (rule): no record shows a runner dropping `--root`. You said building-guard-needs-incident is a judge of lift, not a hard rule, and asked whether keeping the guard loses nothing. Not quite nothing: (1) main has none of merge_calls, _call_pieces or merge_args_of, so keeping means building them, size unmeasured; (2) a guard that wrongly refuses a valid command costs a runner time, and this one's false-refusal rate is unmeasured. If both are small, keeping loses little and gains a catch for the dropped-root case. The `$( )` splitting fix in #2071 stands alone either way.\nBased on (ruling): your words 11:53 CST Nov 13 (that rule is a lift judge); decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main has no such guard; b or c adds it.",
+  "context": "Goal: guards stop mistakes Claude is likely to make, and cost less than the harm they stop.\nProblem (rule): no record shows a runner dropping `--root`. You said building-guard-needs-incident is a judge of lift, not a hard rule, and asked whether keeping the guard loses nothing. Not quite nothing: (1) main has none of merge_calls, _call_pieces or merge_args_of, so keeping means building them: measured by the lane at 13:2x CST, about 275 added lines of hook code (guard_merge.py +246/-15, guard.py +24/-2, guard_core.py +4/-2) plus 755 test lines; the splitting fix alone is about 50 lines; (2) a guard that wrongly refuses a valid command costs a runner time, and this one's false-refusal rate is still unmeasured: the cloud session has no past runner commands, the real ones are on your computer (guard.log, transcripts). The guard's own 16 allow/refuse test cases are green, which is fixtures, not history. If both are small, keeping loses little and gains a catch for the dropped-root case. The `$( )` splitting fix in #2071 stands alone either way.\nBased on (ruling): your words 11:53 CST Nov 13 (that rule is a lift judge); decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main has no such guard; b or c adds it.",
   "home": "rule building-guard-needs-incident",
   "id": "drain-2071-guard-incident",
   "kind": "decision",
+  "lane": "session_013NEJL4RgQWEJ7kqZC5AfMD",
   "n": 715,
   "options": [
     {
@@ -24,15 +25,17 @@
     },
     {
       "gain": "The choice rests on a measure, not a guess.",
-      "how": "The lane replays past runner commands through the guard first and reports the false refusals and the build size; small and clean means keep, else drop.",
+      "how": "A session on your computer replays past runner merge commands (guard.log, transcripts) through the #2071 head (ref split-and-in-subst) and reports the false refusals; the build is already measured at about 275 lines. No false refusals means keep, else drop.",
       "id": "measure",
       "key": "c",
       "label": "Keep it only if a replay shows no false refusals and the build is small (recommended)",
-      "lose": "One extra step before #2071 closes or merges."
+      "lose": "One extra step on your computer before #2071 closes or merges; the cloud cannot run it."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154",
+  "replied": "2026-11-13T19:30:00Z",
+  "reply": "13:30 CST. Your 11:53 CST note on 715 was a question, not a pick: if we keep the guard, do we lose nothing? Answer: almost nothing. The build is about 275 hook lines, and the guard's own 16 test cases pass. Still unmeasured: whether it wrongly refuses a real command. Only your computer holds those past commands, and no session on it is reachable from here. So I need your pick: a (drop it), b (keep it), or c (keep it if a replay shows no false refusals). Lane runner-repos-in-parallel is waiting on this item.",
   "repo": "shivinate7/claude-settings",
   "short": "#2071: no incident behind the guard",
   "shown": [

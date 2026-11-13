@@ -24,11 +24,9 @@
     }
   ],
   "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
-  "pick": "a",
   "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
   "repo": "shivinate7/claude-settings",
   "short": "Repeat checker: retry on no answer",
-  "stands": true,
   "status": "open",
   "title": "When the repeat checker gets no answer about a message, does it try again at the next stop?",
   "why": "The lane took this pick; it stands unless you choose b."

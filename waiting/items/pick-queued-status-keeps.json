@@ -24,8 +24,8 @@
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
-  "pick": "a",
   "ref": "lane glossary-step-statuses, 12:17 CST Nov 13",
+  "reply": "Your 13:20 CST note on 735, answered 13:22 CST. Nothing is overruled. (1) Deferred work already has a glossary home on main: a debt (GLOSSARY.md line 33, 'a known gap, or deferred work') and a note (line 34). (2) Step statuses are the open part. Step glossary-step-statuses (doing) adds rows for blocked and folded. The lane's PR #3195 also adds queued. Main's glossary has no step-status rows yet. (3) 'deferred' is not a step status. It only appears in the roadmap build as a count of steps waiting on you (those need an Asked: or Due after: line). So the question left is only queued: keep it as its own status, or fold it into todo. Which do you want? Until you say, the lane keeps queued.",
   "repo": "shivinate7/claude-settings",
   "short": "Keep 'queued' as its own step status?",
   "shown": [
@@ -40,7 +40,6 @@
       "label": "Retire 'queued'"
     }
   ],
-  "stands": true,
   "status": "open",
   "title": "In the glossary, should 'queued' stay as its own step status, or be retired into 'todo'?",
   "why": "Triage took this pick (undoable: a later lane can retire the name); it stands unless you choose b."

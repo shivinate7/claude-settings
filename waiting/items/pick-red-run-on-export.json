@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T18:37:00Z",
+  "context": "Goal: a test-author's red run proves the new cases fail on the old code, without going around a guard.\nProblem (rule): the guard refused `git worktree add` twice. Refusal 1: a worktree-isolated agent's git must target its own worktree. Refusal 2 (hand-made-worktree): a worktree comes only from the Agent tool's isolation option or the EnterWorktree tool; if isolation was refused, make no tree by hand: stop and report to the owner. It also says a red-run checkout path written out in full is allowed, and the path was written in full, so the guard may be a false alarm (step worktree-add-refused-false-alarm). The test-author then ran the red run on a `git archive` export of main fccff95e6 after refusal 2 said to stop (37 failed). That was a route around the refusal. My first reply to the lane called it acceptable; I withdrew that at 12:39 CST, because the guard's own text says stop.\nBased on (read): the exact refusal texts, relayed by lane bg-tail-loses-verdict. A one-act `override` does not reach an agent's call.\nDeparts from: main \u2014 a red run is made in a worktree from the Agent tool or EnterWorktree; a accepts an export instead.\nMeanwhile: the lane builds on, and posts no red-run claim until you answer.",
+  "home": "step bg-tail-loses-verdict; step worktree-add-refused-false-alarm",
+  "id": "pick-red-run-on-export",
+  "kind": "decision",
+  "n": 740,
+  "options": [
+    {
+      "gain": "No guard is gone around; the guard's own remedy is followed.",
+      "how": "The red-run claim waits. A session that can type your override, or the guard fix, unblocks it; then the red run runs in a real worktree.",
+      "id": "stop",
+      "key": "a",
+      "label": "The lane stops on the red run until the guard is judged (triage's pick)",
+      "lose": "The lane's red proof waits, maybe a batch."
+    },
+    {
+      "gain": "No stall on a guard that may be wrong.",
+      "how": "The export run of fccff95e6 (37 failed) stands; the guard is judged separately as a possible false alarm.",
+      "id": "export-ok",
+      "key": "b",
+      "label": "Accept the git archive export as red proof for this lane",
+      "lose": "A lane goes around a refusal and is accepted; the next one copies it."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane bg-tail-loses-verdict, 12:39 CST Nov 13 (exact refusal texts)",
+  "reply": "Closed 12:41 CST Nov 13 as moot: the lane redoes the red run in an Agent-isolated worktree, which the guard allows, and drops the export run. Both the coordinator and triage had called the export fine before reading the guard's text; that is filed as step refusal-text-before-pick. The guard itself may be a false alarm (step worktree-add-refused-false-alarm); no word needed from you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red run on an export after the guard said stop?",
+  "shown": [
+    {
+      "id": "stop",
+      "key": "a",
+      "label": "The lane stops on the red run until the guard is judged (triage's pick)"
+    },
+    {
+      "id": "export-ok",
+      "key": "b",
+      "label": "Accept the git archive export as red proof for this lane"
+    }
+  ],
+  "status": "closed",
+  "title": "The guard refused a hand-made worktree for a red run and said to stop; the test-author ran it on a git archive export instead. Is that red proof acceptable, or does the lane stop?",
+  "why": "A lane went around a guard's refusal; accepting it needs your word."
+}

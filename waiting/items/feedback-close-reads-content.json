@@ -29,12 +29,10 @@
     }
   ],
   "owner": "lane prose-tending-contract (session_013NEJL3ebkkPacdNS1qZVrk)",
-  "pick": "a",
   "ref": "lane prose-tending-contract 15:48 CST Nov 12; PR #2915, PR #2996; debt feedback-close-reads-file-only",
   "reply": "00:54 CST Nov 13, triage: the retrospective's read, as you asked: b, in a cheap form. A ruling closes when its home file is on main and that file carries the ruling's own stamp (your time or the item number, plus at least one quoted word of yours). That is one read of one file, with no wording match. Evidence that a closes too early: tonight two feedback items passed the check on an unrelated file that only existed (fb-2325-2 on step fix-check-chain, fb-2159-7), and two live home files kept text your later ruling reversed (Degen's shared-sim-lease rule; plan R61 part 3 said skip nightly for 3 h after you said drop it). Limit: b proves the ruling is written down, not that anything enforces it. Your a stands until you pick again; the lane holds.",
   "repo": "shivinate7/claude-settings",
   "short": "Close on file, not on its text",
-  "stands": true,
   "status": "open",
   "title": "A ruling closes once its home file is on main, before its edit lands",
   "why": "The lane took this pick; it stands unless you choose b."

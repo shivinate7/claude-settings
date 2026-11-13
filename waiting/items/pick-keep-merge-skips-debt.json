@@ -24,7 +24,6 @@
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
-  "pick": "a",
   "ref": "coordinator 11:50 CST Nov 13, built 12:10 CST",
   "repo": "shivinate7/claude-settings",
   "short": "Keep debt merge-commit-skips-review",
@@ -40,7 +39,6 @@
       "label": "Delete the debt as closed"
     }
   ],
-  "stands": true,
   "status": "open",
   "title": "Keep the debt merge-commit-skips-review as true, with its Retire line naming the real gap?",
   "why": "The coordinator took this pick; it stands unless you choose b."

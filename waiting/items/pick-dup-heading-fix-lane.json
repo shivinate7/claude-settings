@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T19:09:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: the feedback guard counts a repeated heading with the same time and quote as one message, and still blocks a missed owner send.\nProblem (rule): round 3 judged PR #3218's net safety value negative. It closes a false alarm but a [page], [repo] or grant [page] item under the second copy skips the owner-send check, which main blocked once. A negative-net change is parked with no fix lane until you decide.\nBased on (probe): reviewer probes on scratch copies of main and head with one owner record and no send; the gap is in hooks/feedback_guard.py:969, 989, 993.\nBased on (ruling): decision hold-unsafe-after-round-3; R9 keeps the net-value test only for an unclear case that cannot finish.\nDeparts from: main \u2014 a held change gets no fix lane; this lets one fix lane run.\nMeanwhile: the PR stays parked, not handed in; the lane works its other steps.",
+  "home": "decision hold-unsafe-after-round-3; step inbox-dup-heading-merge",
+  "id": "pick-dup-heading-fix-lane",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:20:18.859Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 749,
+  "options": [
+    {
+      "gain": "The false alarm closes and the missed owner-send check does not open.",
+      "how": "One lane makes seen[text] count only the first copy and gives every copy its k, with red cases for a [page], [repo] and grant [page] item under the second copy. A round-3 fix check follows.",
+      "id": "one-fix-lane",
+      "key": "a",
+      "label": "Allow one fix lane for the small fix, then a round-3 fix check (recommended)",
+      "lose": "A parked change gets a fix lane before you decide, which the net-value hold normally forbids."
+    },
+    {
+      "gain": "The hold works as written; nothing changes.",
+      "how": "The change stays parked with no more work until you rule on it.",
+      "id": "leave-parked",
+      "key": "b",
+      "label": "Leave PR #3218 parked",
+      "lose": "The false alarm stays: a repeated heading with the same time and quote can still make the Stop hook refuse twice."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane feedback-guard-findings (R67 express), 13:10 CST Nov 13",
+  "reply": "Filed 13:21 CST: your 749 a is ruling own-749-a-one-fix-lane. One fix lane may repair PR #3218, then a round-3 fix check. Told the lane and the coordinator.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR #3218: allow one fix lane on a parked, net-negative change?",
+  "shown": [
+    {
+      "id": "one-fix-lane",
+      "key": "a",
+      "label": "Allow one fix lane for the small fix, then a round-3 fix check (recommended)"
+    },
+    {
+      "id": "leave-parked",
+      "key": "b",
+      "label": "Leave PR #3218 parked"
+    }
+  ],
+  "status": "closed",
+  "title": "The held feedback-guard change (PR #3218) closes a false alarm but opens a missed send. May one fix lane repair it?",
+  "why": "The hold on a negative-net change ends only on your word."
+}

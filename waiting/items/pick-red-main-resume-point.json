@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T18:50:00Z",
+  "closed": "2026-11-13T19:26:08Z",
+  "context": "Goal: a red main never ships to sessions, and merges resume fast after a revert.\nProblem (rule): two of your words differ. (1) Nov 4, 15:21 and 15:27 CST, in chat to the coordinator, recorded in decision no-merge-onto-red-main: the merge tool refuses `merge --confirm` while main's newest completed run is red; only a newer completed green run clears it. (2) Nov 12, 09:46 CST you typed 'q3: is fine' and, confirmed 09:48 CST, 'q3 correct', choosing option i of Q3. The record (plans/owner-rulings-2026-11-12.md, r42) reads that as the third option: 'a red main stops merges only until the revert merges'. You did not type those words, and #3049's body words the same option 'until the revert's run on main is green'. At 14:13 CST Nov 12 you told the retrospective to decide item 622 (your page note: 'ask retrospective session to decide this since i spoke it on there though'); it picked b, which follows your 09:46 answer. #3049's body says merges resume 'until the revert's run on main is green'. Main does the green-run rule today. Changing it either way needs your word.\nBased on (ruling): decision no-merge-onto-red-main (Nov 4); your 09:46 CST Nov 12 answer (item 622 context); R26 (Nov 11, as the coordinator reports it): a red main is fixed before the next merge.\nDeparts from: main \u2014 main does the green-run rule today; b changes it.\nMeanwhile: main keeps the green-run rule; the lane that would have built b is archived and builds nothing until you answer.",
+  "home": "decision no-merge-onto-red-main; ruling ow-29-q-max-past-rates-a (item 622 b)",
+  "id": "pick-red-main-resume-point",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T19:20:18.859Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 745,
+  "options": [
+    {
+      "gain": "A broken revert cannot reopen merges.",
+      "how": "Main keeps what it does today: the merge tool refuses `merge --confirm` until a newer completed run on main is green. Ruling ow-29 is rewritten to match.",
+      "id": "green-run",
+      "key": "a",
+      "label": "Merges resume when the revert's own run on main is green (recommended)",
+      "lose": "Merges wait for the revert's run to finish after the revert merges."
+    },
+    {
+      "gain": "Merges resume as soon as the revert lands.",
+      "how": "The record's reading of your 09:46 CST answer: the refusal lifts at once when the revert merges, with its run still going. The merge tool and the decision change.",
+      "id": "revert-merges",
+      "key": "b",
+      "label": "Merges resume when the revert merges",
+      "lose": "A revert that itself breaks main would reopen merges onto a red main."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:51 CST Nov 13",
+  "reply": "Filed 13:21 CST: your 745 b is ruling own-745-b-resume-at-revert. Merges resume when the revert merges. The decision and the merge tool change; step red-main-owner-two-picks carries it. The coordinator starts the lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red main: resume at the revert's merge or its green run?",
+  "shown": [
+    {
+      "id": "green-run",
+      "key": "a",
+      "label": "Merges resume when the revert's own run on main is green (recommended)"
+    },
+    {
+      "id": "revert-merges",
+      "key": "b",
+      "label": "Merges resume when the revert merges"
+    }
+  ],
+  "status": "closed",
+  "title": "After a red main, should merges resume when the revert merges, or when the revert's own run on main is green?",
+  "why": "Two of your own answers differ; a merge check changes either way."
+}

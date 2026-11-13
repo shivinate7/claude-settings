@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T18:29:00Z",
+  "context": "Goal: reviews end as soon as a change is proven safe.\nProblem (rule): R9 keeps round 3 for a guard or check change that failed a round and was fixed under a fix check. At 11:40 CST you asked 'do we still force round 3 reviews on certain items? ... that shouldnt be teh case anymore', which may mean you want this case dropped too. It needs your word.\nBased on (ruling): R9 (your 15:44 CST Nov 10, pick 471 a); decision hold-unsafe-after-round-3.\nBased on (measured): round 3 found a failure 0 of 14+ times after a clean round 2; the net-value hold caught 6 real holes (plan R9).\nDeparts from: main \u2014 a fixed guard change waits for round 3; b ends it at the passing fix check.\nMeanwhile: lanes follow R9 as written; the coordinator tells every active lane that a clean round 1 is done.",
+  "home": "ruling R9 (pick 471 a); decision hold-unsafe-after-round-3; step role-texts-match-rulings",
+  "id": "pick-round-3-after-fix-check",
+  "kind": "decision",
+  "n": 739,
+  "options": [
+    {
+      "gain": "The net-value test still runs on the one case that changed after a failure.",
+      "how": "A guard or check change that failed once and passed its fix check still gets round 3 with the net-value test.",
+      "id": "keep-round-3",
+      "key": "a",
+      "label": "Keep round 3 for a guard change that failed a round and was fixed (retrospective's pick)",
+      "lose": "One more Sonnet round on those lanes."
+    },
+    {
+      "gain": "No round 3 on any lane.",
+      "how": "No round 3 anywhere; the change merges on green after its fix check.",
+      "id": "fix-check-ends",
+      "key": "b",
+      "label": "A passing fix check ends the review",
+      "lose": "A guard change that failed once merges with no net-value test."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:30 CST Nov 13",
+  "reply": "Closed 12:32 CST Nov 13: the retrospective withdrew it. R9 (your 15:44 CST Nov 10, pick 471 a) already rules it: a guard or check change that passes round 1 is done; only one fixed under a fix check waits for round 3. Your 11:40 CST words are covered by that: the coordinator told every lane a clean round 1 is done. Reopen if you want round 3 dropped for the fixed case too.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 3 after a passing fix check?",
+  "shown": [
+    {
+      "id": "keep-round-3",
+      "key": "a",
+      "label": "Keep round 3 for a guard change that failed a round and was fixed (retrospective's pick)"
+    },
+    {
+      "id": "fix-check-ends",
+      "key": "b",
+      "label": "A passing fix check ends the review"
+    }
+  ],
+  "status": "closed",
+  "title": "After a guard change fails a round and then passes its fix check, should it still get round 3?",
+  "why": "R9 is your ruling; changing it needs your word."
+}
