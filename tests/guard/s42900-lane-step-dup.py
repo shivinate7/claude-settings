@@ -81,6 +81,7 @@ STEPDUP_LINES = {
     "stepdup-send-empty": role_target_call("t0", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True)
                           + stepdup_list("l1", []),
     "stepdup-send-no-read": role_target_call("t0", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True),
+    "stepdup-send-target-only": role_target_call("t0", STEPDUP_CARRIER_TAGS, target=STEPDUP_CARRIER, wrapped=True),
 }
 
 
@@ -155,6 +156,9 @@ stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the s
 # Allowed: each shape changes one fact of a refused case. These keep the rule narrow.
 stepdup_send("a brief to the live carrier itself is allowed: the target already carries the step",
              "allow", role_path("stepdup-send-self"), STEPDUP_BRIEF, target=STEPDUP_CARRIER)
+# Allowed: the target's own record carries the step, and the transcript holds no list read. The brief goes to the carrier.
+stepdup_send("a brief to a target that carries the step is allowed with no list_sessions read in the transcript",
+             "allow", role_path("stepdup-send-target-only"), STEPDUP_BRIEF, target=STEPDUP_CARRIER)
 stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the carrier is archived",
                "allow", role_path("stepdup-create-archived"), STEP_CREATE_TAGS)
 stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when a whole read finds no live session on it",
