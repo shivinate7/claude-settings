@@ -1711,6 +1711,7 @@ class StatusCommand(MailCase):
                       % (status.returncode, combined(status)))
         self.assertEqual(status.returncode, 2, "status of an unsafe id exited %d, expected 2" % status.returncode)
 
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_unreadable_remote_prints_mail_unknown_never_open_or_taken(self):
         store = self.store()
         store.seed("cloud/sess-b", "0a1b2c3d4ea2", "request", "cloud/sess-a", "Body marker: fault\n")
@@ -1727,6 +1728,7 @@ class StatusCommand(MailCase):
         self.assertIn("ls-remote", self.git_calls(log), "status never asked the remote for its tip: git calls %r"
                       % self.git_calls(log))
 
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_show_failure_on_a_taken_message_prints_mail_unknown_never_taken(self):
         store = self.store()
         sender = self.machine("a", store, session="sess-a", stub=True)
@@ -1742,6 +1744,7 @@ class StatusCommand(MailCase):
         self.assertIn("show", self.git_calls(log), "status never ran git show on the taken message: git calls %r"
                       % self.git_calls(log))
 
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_open_status_reads_the_remote_once_and_writes_nothing(self):
         store = self.store()
         mid = "0a1b2c3d4eb1"
@@ -1762,6 +1765,7 @@ class StatusCommand(MailCase):
                          "status of an open message ran a write git call: %r" % calls)
         self.assertEqual(store.tip(), before, "status of an open message moved the mail ref")
 
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_taken_status_reads_the_remote_once_and_adds_one_show(self):
         store = self.store()
         sender = self.machine("a", store, session="sess-a", stub=True)
