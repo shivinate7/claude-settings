@@ -4568,22 +4568,6 @@ class GhHalf(Env):
         self.set(open_prs=[["feat2", other, "main", 8]], other_rows={other: list(rows)}, other_runs={other: list(runs)})
         return self.gh_host(ignore=ignore)
 
-    def test_confirm_refuses_while_a_workflow_runs_before_its_required_check_reports(self):
-        # scope runs first, so checks has no row yet: the workflow run in progress must still hold the merge
-        before = self.refs()
-        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "in_progress", None)], rows=[("scope", "pending", "")]))
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#8", out)
-        self.assertIn("ci-checks", out)
-        self.assertNotIn("PUT pulls/7/merge", self.calls())
-        self.assertEqual(self.refs(), before)
-
-    def test_confirm_refuses_a_queued_workflow_with_no_check_rows_on_another_ready_pr(self):
-        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "queued", None)]))
-        self.assertEqual(rc, 1, out)
-        self.assertIn("ci-checks", out)
-        self.assertNotIn("PUT pulls/7/merge", self.calls())
-
     def test_confirm_merges_when_the_other_pr_workflows_have_finished(self):
         rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "completed", "success")], rows=[("checks", "pass", "")]))
         self.assertEqual(rc, 0, out)
@@ -4653,13 +4637,12 @@ class GhHalf(Env):
         self.assertIn("resumed", out)
         self.assertEqual(self.claims("main"), 1)
 
-    def test_a_real_refusal_in_the_wait_reverts_the_claim_and_is_not_retried(self):
-        self.set(view_fail={"n": 1, "msg": PLAIN_403_API, "after": self.head()})
+    def test_a_real_refusal_of_the_merge_reverts_the_claim_and_is_not_retried(self):
+        self.set(merge_replies=[[PLAIN_403_API, False]])  # the merge call, after the claim push, answers a plain 403: refused, not a network stop
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.gh_state("view_failed"), 1, out)  # tried once
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, out)  # tried once
         self.assertIn("reverted on feat", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
@@ -4813,21 +4796,21 @@ class GhHalf(Env):
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def required_read_fails_after_the_claim(self, msg, rate=False):
-        """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert.
+    def required_read_fails_before_the_claim(self, msg, rate=False):
+        """The required-checks read fails with `msg` at its one read under the lock, before the claim. Retried 3 times, then a stop: nothing claimed.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
-        self.set(contexts=["checks"], api_fail={"msg": msg, "after_checks": 1})
+        self.set(contexts=["checks"], api_fail={"msg": msg, "after_checks": 0})
         rc, out = self.go(required="protection")
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("api_failed"), 4, out)  # one try and three retries
         if rate:
             self.rate_waits_the_whole_ladder(out)
-        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertNotIn("Claim record numbers", self.feat_subjects())  # nothing claimed: the required names are read before the claim
         self.assertFalse(self.lock_ref())
 
-    def test_a_required_check_read_with_gh_server_error_502_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
+    def test_a_required_check_read_with_gh_server_error_502_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim("gh: Server Error (HTTP 502)")
 
     def merge_reply_is_retried_then_stops(self, msg, rate=False):
         """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert.
@@ -4888,12 +4871,16 @@ class GhHalf(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
         self.assertNotIn(MERGE_CALL, self.calls())
 
-    def test_a_pr_read_with_a_non_network_error_in_the_wait_stops_unknown_and_keeps_the_claim(self):
-        def cut_short(args):
-            return (1, "gh: could not read the pull request: the reply was cut short") if route_of(args).endswith("/pulls/7") else None
-        rc, out, claim = self.after_the_claim(gh=cut_short)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+    def test_a_pr_read_with_a_non_network_error_before_the_claim_stops_and_claims_nothing(self):
+        self.set(view_fail={"n": 1, "msg": "gh: could not read the pull request: the reply was cut short", "after": "0" * 40})  # the first read fails
+        before = self.head()
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("view_failed"), 1, out)
+        self.assertIn("cut short", out)
+        self.assertEqual(self.head(), before, out)  # nothing claimed or pushed
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertFalse(self.lock_ref())
 
     def test_a_pr_read_with_a_json_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         def unparsable(args):
@@ -4916,22 +4903,6 @@ class GhHalf(Env):
             return None
         rc, out, claim = self.after_the_claim(git_call=fetch_of_main)
         assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_checks_wait_past_its_deadline_with_a_required_check_pending_stops_unknown_and_keeps_the_claim(self):
-        # A busy Mac: each poll of the wait is ten minutes of the fake clock, past the five-minute deadline. The head's wait is green; the claim's wait is pending.
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "pending", "")]])
-        rc, out, claim = self.after_the_claim(minute=600)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertIn("Still pending: checks", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_wait_deadline_while_github_still_shows_the_prior_head_stops_unknown_and_keeps_the_claim(self):
-        # GitHub still shows the head from before the push. Each poll is ten minutes of the fake clock, so the second read is past the deadline.
-        self.set(lag={"n": 1000, "prior": self.head()})
-        rc, out, claim = self.after_the_claim(minute=600)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertIn("still shows the head before the push", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
@@ -5029,12 +5000,13 @@ class GhHalf(Env):
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
     def checks_read_fails(self, msg, n=99, rate=False):
-        """Every check is green and the checks read fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed.
+        """Every check is green and the head's one checks read fails n times with `msg`. A network-class text: retried 3 times, then a stop.
+        The read is the head's, before any claim, so the stop says the head's checks are unknown, never green. Nothing is claimed.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
         self.set(checks_fail={"n": n, "msg": msg})
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        self.assertIn("the read of the head's checks is unknown", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("checks_failed"), 4, out)  # one try and three retries
         if rate:
@@ -5061,11 +5033,11 @@ class GhHalf(Env):
         self.assertEqual(self.gh_state("checks_failed"), 1)
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
-    def test_a_required_check_read_with_a_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_403, rate=True)  # `gh api` form: the claim stays, 4 tries over the whole ladder, then the network stop
+    def test_a_required_check_read_with_a_rate_limit_403_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim(RATE_API_403, rate=True)  # `gh api` form: nothing claimed, 4 tries over the whole ladder, then the network stop
 
-    def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403, rate=True)
+    def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
@@ -5098,14 +5070,13 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         self.assertFalse(self.lock_ref())
 
-    def test_a_plain_403_on_the_required_check_read_reverts_the_claim_and_is_not_retried(self):  # (d): a guard
-        self.set(contexts=["checks"], api_fail={"msg": PLAIN_403_API, "after_checks": 1})
+    def test_a_plain_403_on_the_required_check_read_stops_before_the_claim_and_is_not_retried(self):  # (d): a guard
+        self.set(contexts=["checks"], api_fail={"msg": PLAIN_403_API, "after_checks": 0})
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("api_failed"), 1, out)  # tried once
-        self.assertIn("reverted on feat", out)
         self.assertNotIn("network", out.lower())
-        self.assertTrue(self.reverted())
+        self.assertNotIn("Claim record numbers", self.feat_subjects())  # refused at the required names' read, before any claim
         self.assertFalse(self.lock_ref())
 
     def test_a_merge_lock_read_that_fails_once_with_a_json_error_is_retried_and_the_run_goes_on(self):
@@ -5136,27 +5107,28 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_a_red_check_named_http_500_is_a_refusal_that_reverts_and_is_not_retried(self):
-        # the wait after the claim push reads the red check; its name carries "HTTP 500"
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")],
-                             [("checks", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
+    def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
+        # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
+        before = self.head()
+        self.set(checks_seq=[[("checks", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
         rc, out = self.go()
         self.assertIn("a check is red: build: HTTP 500 guard: fail", out)
-        self.assertIn("reverted on feat", out)
+        self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
         self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
         self.assertNotIn("network", out.lower())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_green_run_waits_without_a_watch_and_merges_pinned_to_the_claim_head(self):
-        self.set(checks_seq=[[("checks", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("checks", "pass", "")]])
+    def test_green_run_merges_pinned_to_the_head_with_no_wait_and_no_watch(self):
+        self.set(checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         log = self.calls()
         self.assertNotIn("run watch", log)  # decision ci-wait-reads-run-status
-        self.assertIn(30, self.paused)  # the wait between two reads of the checks
+        self.assertNotIn(30, self.paused)  # one read of the checks, and no wait between reads
         self.assertIn(MERGE_CALL + " merge_method=merge sha=" + sh(self.co, "git", "rev-parse", "origin/main^2"), log)
         self.assertEqual(log.count("PUT "), 1)  # the one write is the merge
         self.assertNotIn("DELETE", log)  # the branch is cut through git (cut_branch), never by the merge call
@@ -5203,20 +5175,7 @@ class GhHalf(Env):
         self.set(checks_seq=[[("checks", "pending", ""), ("checks", "pass", "")]])  # pending then pass: never green
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("Still pending: checks", out)
-
-    def test_a_lagging_head_is_waited_out_not_called_moved(self):
-        self.set(lag={"n": 2, "prior": self.head()})
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(len(self.paused), 2)
-
-    def test_a_head_that_never_leaves_the_prior_sha_stops_at_the_deadline(self):
-        self.set(lag={"n": 1000, "prior": self.head()})
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("still shows the head before the push", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertIn("a check is pending: checks", out)
 
     def test_a_pull_request_gh_reads_blocked_gets_no_merge_call(self):
         self.set(pr_raw={"mergeable_state": "blocked"})
@@ -5260,25 +5219,6 @@ class GhHalf(Env):
         self.assertNotIn("run watch", self.calls())
         self.assertEqual(self.calls(), "")  # block only pauses; the wait loop reads the checks and the runs
 
-    def test_dirty_in_the_wait_reverts_the_claim(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]], dirty_after_checks=1)
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("went DIRTY", out)
-        assert_cites(self, "wait-base-changed", printed(out, "went DIRTY"))
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertTrue(self.reverted())
-
-    def test_force_push_in_the_wait_reverts_nothing_and_merges_nothing(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
-        rival = []
-        rc, out = self.go(pause=lambda: rival.append(self.competitor_push()))
-        self.assertEqual(rc, 1)
-        self.assertIn("head moved", out)
-        self.assertEqual(self.head(), rival[0])  # the rival's head stands: no revert on top of it
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertFalse(self.lock_ref())
-
     def test_the_merge_sha_refuses_a_moved_head(self):
         old = self.head()
         self.competitor_push()
@@ -5297,12 +5237,13 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
-    def test_protection_names_come_from_the_api_and_an_absent_one_stops_the_wait(self):  # c189: re-pointed from the deadline; the absent name ends the wait at once
+    def test_protection_names_come_from_the_api_and_an_absent_one_stops_before_the_claim(self):
         self.set(contexts=["checks", "needed"], checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("no run reports the required check needed", out)
-        self.assertTrue(self.reverted())
+        self.assertIn("a check is pending: needed", out)  # a required name with no row reads pending at the head's one read
+        self.assertNotIn("Claim record numbers", self.feat_subjects())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_no_protection_and_no_list_stops_with_the_remedy(self):
         before = self.head()
@@ -5339,12 +5280,15 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         self.assertNotIn(MERGE_CALL, self.calls())
 
-    def test_head_pending_then_green_claims_and_waits_again(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
+    def test_head_pending_claims_nothing_and_merges_nothing(self):
+        self.set(checks_seq=[[("checks", "pending", "")]])  # the head's one read is pending: refused before any claim, with the check named
+        before = self.head()
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims("main"), 1)
-        self.assertGreaterEqual(self.paused.count(60), 1)  # the head's own pending check was waited on
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: checks", out)
+        self.assertEqual(self.claims("main"), 0)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_the_preview_names_the_head_state(self):
         for seq, want in (([("checks", "pass", "")], "head checks: green"), ([("checks", "pending", "")], "head checks: pending: checks"),
@@ -5355,34 +5299,23 @@ class GhHalf(Env):
             self.assertIn(want, out)
 
     def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
-        """A pending check that is not required does not hold the wait, and its red still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
-        # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
-        # the red it turns into is seen on the settle re-read and refuses.
+        """A pending check that is not required does not hold the merge, and a red check that is not required still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
+        # The head reads `design` red, not required: every check on the head counts for red, so the one read refuses before any claim.
         before = self.head()
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
         self.assertNotIn(60, self.paused)  # no minute-long wait for `design`
-        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
+        self.assertEqual(self.head(), before)  # refused at the head's read: nothing claimed
         self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_banchi_604_same_in_the_wait_after_the_claim_push(self):
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pass", "")], [("checks", "pass", ""), ("design", "pending", "")],
-                             [("checks", "pass", ""), ("design", "fail", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("a check is red: design: fail", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertTrue(self.reverted())
 
     def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
-        """A pending check that is not required is not waited on, and one line names it. Ruling: step merge-waits-required-only, wait only on the required check."""
+        """A pending check that is not required does not hold the merge: the head's one read is green on the required check, and the merge goes on with no wait. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
-        self.assertTrue(any("design" in l for l in out.splitlines() if l.startswith("merge:")), out)  # the one line names what was not waited on
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
@@ -5412,11 +5345,11 @@ class GhHalf(Env):
         self.assertEqual((red, pending), ([], []))
 
     def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
-        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The wait holds for a pull_request run, then stops at the deadline with the check named.
+        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The head's one read holds it: refused before any claim, with the check named.
         self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
         rc, out = self.go(required=["all-jobs-passed"])
         self.assertEqual(rc, 1, out)
-        self.assertIn("Still pending: all-jobs-passed", out)
+        self.assertIn("a check is pending: all-jobs-passed", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
@@ -5595,16 +5528,20 @@ class GhHalf(Env):
             self.assertFalse(self.lock_ref())
 
     def test_an_ignored_red_check_is_reported_and_the_merge_goes_on(self):
+        ignore = {"design": "flaky upstream", "slow": "nightly"}
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "fail", ""), ("slow", "pending", "")]])
-        rc, out = self.go(ignore={"design": "flaky upstream", "slow": "nightly"})
+        rc, out = self.run_merge("7", host=self.gh_host(ignore=ignore))  # the preview names what merge.ignoreChecks left out
         self.assertEqual(rc, 0, out)
         self.assertIn("design (flaky upstream): fail", out)
+        rc, out = self.go(ignore=ignore)
+        self.assertEqual(rc, 0, out)  # confirm no longer prints the ignored checks: its one read holds only the required ones
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_the_preview_lists_a_pending_check_that_is_not_required(self):
+    def test_the_preview_says_green_beside_a_pending_check_that_is_not_required(self):
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.run_merge("7", host=self.gh_host())
-        self.assertIn("head checks: pending: design", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("head checks: green", out)  # the head's read holds only required checks; `design` is not named
 
     def test_a_required_check_is_never_ignored(self):
         before = self.head()
@@ -5670,22 +5607,6 @@ class GhHalf(Env):
         rc, out = self.go(ignore={"ci": "known"})
         self.assertEqual(rc, 0, out)
 
-    def test_a_check_that_appears_on_the_settle_reread_holds_the_wait(self):
-        before = self.head()
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", ""), ("late", "fail", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("late: fail", out)
-        self.assertIn(merge.SETTLE_SECONDS, self.paused)
-        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
-
-    def test_a_failed_read_in_the_wait_keeps_the_claim_and_says_unknown(self):
-        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not: a 404, not a proven refusal
-        self.set(checks_seq=[[("checks", "pass", "")]])
-        rc, out, claim = self.after_the_claim()
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")  # the stop names the read that failed
-
     # ---- no .github/stamp.json: the defaults
 
     def test_no_config_preview_uses_the_defaults_and_names_the_file_once(self):
@@ -5720,12 +5641,12 @@ class GhHalf(Env):
         self.assertEqual(len(named), 1, out)
         self.assertIn("default", named[0].lower())
 
-    def test_no_config_waits_the_default_45_minutes(self):
+    def test_no_config_pending_check_is_refused_before_the_claim(self):
         drop_config(self)
         self.set(contexts=["checks"], checks_seq=[[("checks", "pending", "")]])
-        rc, out = self.go(required="protection", minute=900)  # a poll every 15 minutes of the fake clock: 3 reads reach the deadline, not 45 (each read is a few process starts)
+        rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("the deadline of 45 minutes passed", out)
+        self.assertIn("a check is pending: checks", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_no_config_never_runs_stamp(self):
@@ -5771,10 +5692,10 @@ class GhHalf(Env):
 
     def assert_draft_stops(self, rc, out, before):
         """A draft confirm is the records step: it pushes at most the page, marks the pull request ready, and stops.
-        It never merges, claims a record number, or waits on a check. before: the head sha before the run."""
+        It never merges, claims a record number, or waits on a check. It may read the head's checks once (a red head never goes ready).
+        before: the head sha before the run."""
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ticks, 0, "waited on a draft")
-        self.assertNotIn(CHECKS_CALL, self.calls())
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
         sh(self.co, "git", "fetch", "-q", "origin")
