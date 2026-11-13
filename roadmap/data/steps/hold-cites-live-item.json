@@ -1,0 +1,14 @@
+{
+ "id": "hold-cites-live-item",
+ "title": "A hold that cites a page item must name an item that exists and is open",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A hold on a missing or closed item never lifts, so a lane waits for nothing.",
+ "source": "Retrospective 14:58 CST Nov 13: the #2889 hold on items 522-525 was copied from triage's step note; no such items exist.",
+ "note": "Filed 14:58 CST Nov 13. Fault: triage wrote item numbers into a step note (Nov 12) that were never posted; the coordinator and runner 10 copied them. Guard candidate: a check that a hold or note citing a page item finds it on the page, open. The guard that would have stopped it is this step. Triage fix now: the note is rewritten.",
+ "updatedAt": "2026-11-13T14:58:09-06:00"
+}

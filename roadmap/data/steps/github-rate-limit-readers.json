@@ -1,0 +1,14 @@
+{
+ "id": "github-rate-limit-readers",
+ "title": "Measure which sessions, watchers and hooks call the GitHub API most, before the next wave",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The shared account hit its API rate limit, which blocks every session's reads and PR writes until it resets.",
+ "source": "Coordinator 14:58 CST Nov 13: 403 on pull_request_read at 14:57, reset about 15:10 CST. Hot readers unmeasured.",
+ "note": "Filed 14:58 CST Nov 13. Measure calls per session (watchers, polling lanes, hooks that call the API) before the next wave; nothing measured yet. Past rulings not checked. A read tool, no guard change.",
+ "updatedAt": "2026-11-13T14:58:09-06:00"
+}
