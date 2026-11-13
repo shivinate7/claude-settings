@@ -746,8 +746,9 @@ _W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or
 _MAIN = r"main(?![\w-])"
 # A branch-like use of main: the line end, a punctuation mark (a possessive 's included), or a function word that
 # continues the comparison comes next. A noun after it ("main window", "main menu") names a thing, not the branch.
-_MAIN_NEXT = (r"(?=\s*$|[^\w\s]|\s+(?:branch|in|on|at|for|with|and|or|but|so|because|since|while|which|that|is|was|did"
-              r"|does|had|as|by|from|to|per|too|now|today|yet)(?![\w-]))")
+_MAIN_NEXT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:branch|in|on|at|for|with|and|or|but|so|because|since|while|which|that|is|was|did"
+              r"|does|had|as|by|from|to|per|too|now|today|yet|already|after|before|until|when|if|where|overall|again|still"
+              r"|also|anyway|either|this|one)(?![\w-]))")
 _MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()" + _MAIN_NEXT
 _OWN = r"main['\u2019]s\s+own(?![\w-])"
 MAIN_CLAIM_RE = re.compile(
@@ -786,7 +787,7 @@ def main_claim_problem(text):
     bad = []
     for body in _prose_lines(text):
         plain = CANNOT_EMPHASIS_RE.sub(
-            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else " ", body))
+            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else "code", body))
         if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
             continue
         if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
