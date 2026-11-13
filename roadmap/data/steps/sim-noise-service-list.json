@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Step sim-boot-noise-off needs the exact list the Degen coordinator disabled on Duo 3553660D; the repo and the ledger give only the count and the two kept (chronod, AppIntentsLiveEntityService).",
  "source": "lane sim-noise-and-wallpaper (session_013NEJL1RLjiPPk24Jqci2wc) 21:09 CST Nov 12",
- "note": "A Mac session runs `xcrun simctl spawn 3553660D launchctl print-disabled user/foreground` and sends the list to the lane. The lane builds the mechanism meanwhile and leaves the list empty in its draft PR. Routed to the coordinator (Mac route via the retrospective). Triage 21:19 CST Nov 12: the Mac reply is mail 87baf506f544, sent to the lane. The lane cannot read it (auth). The retrospective was asked to read it and send the names to the lane.",
- "updatedAt": "2026-11-12T21:18:53-06:00"
+ "note": "A Mac session runs `xcrun simctl spawn 3553660D launchctl print-disabled user/foreground` and sends the list to the lane. The lane builds the mechanism meanwhile and leaves the list empty in its draft PR. Routed to the coordinator (Mac route via the retrospective). Triage 21:19 CST Nov 12: the Mac reply is mail 87baf506f544, sent to the lane. The lane cannot read it (auth). The retrospective was asked to read it and send the names to the lane. Retro 21:19 CST Nov 12: mail 87baf506f544 holds no list; the Duo was shut down, so the spawn failed (code 405). The retrospective asks the owner for a no-boot read of the disabled-service plist files and relays the names to the lane itself.",
+ "updatedAt": "2026-11-12T21:19:30-06:00"
 }
