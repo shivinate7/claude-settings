@@ -1163,6 +1163,40 @@ class CostTests(StaleCase):
         self.assertLessEqual(subs.count("cat-file"), 1, subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
+    def markdown_line_range(self, line):
+        """A Markdown-only range that writes NOTES as the title and `line`. The base holds ANCHOR_PY, with check_it on line 40."""
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n%s\n" % line)
+            commit(repo)
+        rng = self.make_range(base_files(extra={ANCHOR_PY: ANCHOR_TEXT}), change)
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        return rng
+
+    def test_a_markdown_only_range_whose_anchor_line_names_no_symbol_starts_exactly_three_git_processes(self):
+        rng = self.markdown_line_range("- See `hooks/anchor.py:40`.")
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # The docstring's cost (stale_cites.py, Cost): a line with no code-looking symbol starts no cat-file. AnchorReader.prepare
+        # gates on a backtick and `.py:N` only, so this line makes the run read the page through the one cat-file: 4, not 3.
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"],
+                         "an added anchor line that names no symbol must start 3 git processes, not the cat-file that reads its page")
+
+    def test_a_markdown_only_range_whose_py_anchor_has_no_backtick_starts_exactly_three_git_processes(self):
+        rng = self.markdown_line_range("- See hooks/anchor.py:40 for check_it.")
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"], out)
+
+    def test_a_markdown_only_range_whose_anchor_line_names_a_symbol_starts_exactly_four_git_processes_with_one_cat_file(self):
+        rng = self.markdown_line_range("- `check_it` holds at `hooks/anchor.py:40`.")
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], out)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
     def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
         ls-tree and cat-file), so this range starts no git process beyond the pinned five. The exact pin stays."""
@@ -2278,6 +2312,9 @@ LONG_PY = "hooks/long.py"  # full size: 400 lines, check_it is defined on line 3
 LONG_TEXT = def_at(300, "check_it") + "x = 1\n" * 100
 EMPTY_PY = "hooks/empty.py"  # a file that defines no name
 EMPTY_TEXT = "# no name is defined here\n"
+BROKEN_PY = "hooks/broken.py"  # a cited file that does not parse: a def with its parenthesis never closed
+BROKEN_TEXT = "def check_it(lane:\n    return lane\n"
+BROKEN_OK = def_at(1, "check_it")  # the same file before a range breaks it: check_it is on line 1
 
 
 def under_title(rows):
@@ -2288,6 +2325,11 @@ def under_title(rows):
 def expected_flags(rows):
     """The STALE011 findings for `rows`, which are placed by under_title."""
     return [(NOTES, n, "STALE011") for n in rows_text(under_title(rows))[1]]
+
+
+def unparsed_unknowns(out, path):
+    """The unknown lines that say the cited `path` does not parse, whichever reader printed them."""
+    return [line for line in unknown_lines(out) if ("%s does not parse" % path) in line]
 
 
 class AnchorSymbolTests(StaleCase):
@@ -2418,6 +2460,47 @@ class AnchorSymbolTests(StaleCase):
         ]
         self.assertEqual(binding_line(LONG_TEXT, "check_it"), 300, "scope: check_it is defined on line 300")
         self.assert_flags(self.anchor_range(rows, extra={LONG_PY: LONG_TEXT}), expected_flags(rows))
+
+    def unparsed_rows(self):
+        """A drifted anchor (a finding on line 3) and an anchor of the unparsed cited file (unknown, never a finding)."""
+        return [
+            ("- `check_it` holds at `hooks/anchor.py:10`.", True),
+            ("- `check_it` holds at `hooks/broken.py:1`.", False),  # line 1 is in the two-line file, so STALE004 stays silent
+        ]
+
+    def test_a_cited_py_that_does_not_parse_prints_one_unknown_line_beside_a_finding_in_range_mode(self):
+        self.assertRaises(SyntaxError, ast.parse, BROKEN_TEXT)  # scope: the cited file does not parse
+        rows = self.unparsed_rows()
+        rc, out = self.run_check(self.anchor_range(rows, extra={BROKEN_PY: BROKEN_TEXT}))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), expected_flags(rows), out)
+        self.assertEqual(len(unparsed_unknowns(out, BROKEN_PY)), 1, out)
+
+    def test_a_cited_py_that_does_not_parse_prints_one_unknown_line_beside_a_finding_in_tree_mode(self):
+        self.assertRaises(SyntaxError, ast.parse, BROKEN_TEXT)  # scope: the cited file does not parse
+        rows = self.unparsed_rows()
+        rc, out = self.run_tree(self.anchor_tree(rows, extra={BROKEN_PY: BROKEN_TEXT}))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), expected_flags(rows), out)
+        self.assertEqual(len(unparsed_unknowns(out, BROKEN_PY)), 1, out)
+
+    def test_a_cited_py_that_the_range_breaks_prints_one_unknown_line_beside_a_finding_in_range_mode(self):
+        self.assertRaises(SyntaxError, ast.parse, BROKEN_TEXT)  # scope: the cited file does not parse at head
+        self.assertIsNotNone(ast.parse(BROKEN_OK))  # scope: at base the cited file parses
+        self.assertEqual(binding_line(BROKEN_OK, "check_it"), 1, "scope: at base check_it is on line 1")
+        rows = self.unparsed_rows()
+        text = rows_text(under_title(rows))[0]
+
+        def change(repo):
+            write(repo, BROKEN_PY, BROKEN_TEXT)  # the range breaks the file the page cites
+            write(repo, NOTES, text)
+            commit(repo)
+        rng = self.make_range(base_files(extra={ANCHOR_PY: ANCHOR_TEXT, BROKEN_PY: BROKEN_OK}), change)
+        self.assertIn(BROKEN_PY, touched(rng), "scope: the range changes the cited file")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), expected_flags(rows), out)
+        self.assertEqual(len(unparsed_unknowns(out, BROKEN_PY)), 1, out)
 
     def test_comment_openers_and_a_lone_quote_do_not_hide_a_drifted_anchor_after_them(self):
         drifted = "`check_it` holds at `hooks/anchor.py:10`."
@@ -3601,6 +3684,38 @@ class ValueCiteTests(StaleCase):
         self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")], out)
         self.assertIn("no JSON literal", found[0][3], "a set cite that is no JSON literal must print that reason: %s" % found[0][3])
         self.assertEqual(rc, 1, out)
+
+
+class SharedPageTests(StaleCase):
+    """A page that two readers name, ValueReader for a value cite and AnchorReader for a line anchor, is read once:
+    each reader's message prints once, as it does for a page only one reader names."""
+
+    def page_range(self, lines):
+        """A Markdown-only range that writes NOTES as the title and `lines`. The base holds CONFIG (LIMIT is 4) and ANCHOR_PY."""
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n" + "".join(line + "\n" for line in lines))
+            commit(repo)
+        return self.make_range(base_files(extra={CONFIG: LIMIT_BASE, ANCHOR_PY: ANCHOR_TEXT}), change)
+
+    def test_a_page_with_a_value_cite_and_an_anchor_cite_prints_each_message_once(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(binding_line(ANCHOR_TEXT, "check_it"), 40, "scope: check_it is defined on line 40")
+        rng = self.page_range(["- the cap is `hooks/config.py: LIMIT = 9`.", "- `check_it` holds at `hooks/anchor.py:10`."])
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        found = parse(out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in found), [(NOTES, 3, "STALE008"), (NOTES, 4, "STALE011")], out)
+        texts = {code: text for _, _, code, text in found}
+        self.assertEqual(texts["STALE008"], "hooks/config.py says LIMIT = 9, and the file has 4", out)
+        self.assertEqual(texts["STALE011"],
+                         "check_it is defined at hooks/anchor.py:40, not within 3 lines of the cited hooks/anchor.py:10; update the anchor", out)
+
+    def test_a_page_with_only_a_value_cite_prints_its_message_once(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        rng = self.page_range(["- the cap is `hooks/config.py: LIMIT = 9`."])
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(parse(out), [(NOTES, 3, "STALE008", "hooks/config.py says LIMIT = 9, and the file has 4")], out)
 
 
 if __name__ == "__main__":
