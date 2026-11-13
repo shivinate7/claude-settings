@@ -359,6 +359,12 @@ class RoundRowDrift(unittest.TestCase):
         self.assertEqual(code, 1, "two review rows for one kind and Guard or check pass the check: %r" % out)
         self.assertTrue(names(out, "agent-model-cap.md", "normal", "no"), "the check does not name the duplicate key: %r" % out)
 
+    def test_a_docs_only_review_row_with_guard_or_check_yes_fails_the_check(self):
+        # Control: a docs-only row with Guard or check no passes the check, so the refusal below comes from the yes on the row alone.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row="| docs-only | no | 0 | 3 | no |"), (0, ""),
+                         "control: a docs-only row with Guard or check no fails the check")
+        self.assert_policy_row_fails("| docs-only | yes | 0 | 3 | no |", "a docs-only row with Guard or check yes")
+
 
 class RunFolder(unittest.TestCase):
     def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):

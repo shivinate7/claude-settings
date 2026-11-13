@@ -16298,6 +16298,38 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", kind="delete-only"), host=host)
         self.assert_refused(rc, out, err)
 
+    def test_round_three_alone_after_a_failed_round_one_and_a_passed_fix_verifier_is_refused(self):
+        # A passed fix verifier ends the review, so a third round after it is refused. The control is the same chain with a failed fix verifier,
+        # which test_round_three_after_round_one_and_a_failed_fix_verifier_is_accepted accepts.
+        round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_verifier))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("needs a failed round 2, or a failed fix check", err, "the refusal does not name the failed round 2 or fix check it needs")
+
+    def test_a_third_round_after_an_earlier_third_round_is_refused_as_a_second_round_three(self):
+        # Control: a third round after an earlier chain of a failed first and second round is accepted, so the refusal below comes from the
+        # third round the pull request already holds.
+        earlier_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier_two))
+        self.assert_accepted(rc, out, err)
+        earlier_three = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier_three))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("already holds a round 3", err, "the refusal does not name the third round the pull request already holds")
+
+    def test_round_three_alone_after_a_passed_first_round_is_refused(self):
+        # Control: a third round after a failed first round and a failed fix verifier is accepted, so the refusal below comes from the passed first
+        # round alone.
+        failed_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        failed_fix = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="FAIL"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(failed_one, failed_fix))
+        self.assert_accepted(rc, out, err)
+        passed_one = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(passed_one))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("needs a failed round 1", err, "the refusal does not name the failed first round it needs")
+
 class ReviewFixAfterRoundThree(ReviewEnv):
     """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
     zero), then a sonnet fix check that PASSes at a later head. A fix check after a passing last round is accepted, as a fix after a merge of main
@@ -16398,6 +16430,20 @@ class ReviewPastHead(ReviewEnv):
         self.assertNotEqual(rc, 0, "a record for a head the pull request never had was accepted:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed a record")
         self.assertIn("the pull request head is", err, "the refusal does not name the head mismatch:\n" + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_head_that_main_holds_is_refused_as_a_past_head(self):
+        # after_main is a commit on main's second commit, which main holds. The walk from the live head reaches main2 before any other commit, and
+        # main holds main2, so the walk stops there: main2 is no past head of the pull request.
+        fx = self.real_commits()
+        after_main = self.git_commit(fx.main2, {"g.txt": "g\n"})
+        host = PullsHost([batch_pull(7, after_main)], {}, commits={**fx.parents, after_main: [fx.main2]}, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.run_args(*self.record_argv(after_main), host=host)
+        self.assertEqual(rc, 0, "control: the live head's own record was refused:\n" + out + err)
+        rc, out, err = self.run_args(*self.record_argv(fx.main2), host=host)
+        self.assertNotEqual(rc, 0, "a record for a head main holds was accepted as a past head:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed a record")
+        self.assertIn("not the reviewed", err, "the refusal does not name the head mismatch:\n" + err)
         self.assertNotIn("Traceback", err)
 
 class ReviewedList(ReviewEnv):
