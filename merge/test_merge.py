@@ -22024,7 +22024,20 @@ class RefreshMail(Env):
     """A batch merge mails one refresh notice for the new main sha (decision merge-mail-refreshes-sessions): one file,
     mail/refresh/<owner>-<repo>/main.md on the mail ref, replaced in one commit after the merge lands. A failed send
     prints one line and never fails the merge. The store and the cloud receivers are hooks/test_mail.py's, so each case
-    reads the notice the way a session does."""
+    reads the notice the way a session does. Only a merge in claude-settings mails: the install pulls its main, so a
+    checkout whose origin is another repo mails nothing."""
+
+    CLAUDE_SETTINGS = "https://github.com/shivinate7/claude-settings.git"
+
+    def setUp(self):
+        super().setUp()
+        self.set_origin(self.CLAUDE_SETTINGS)
+
+    def set_origin(self, url):
+        """Name `url` as this clone's origin, as a clone of that repo does, and rewrite it to the local origin for git, so the
+        merge fetches and pushes here while repo_slug reads `url`."""
+        sh(self.co, "git", "remote", "set-url", "origin", url)
+        sh(self.co, "git", "config", "--replace-all", "url.%s.insteadOf" % self.bare, url)
 
     def mailbox(self):
         import test_mail  # hooks/ is on sys.path: appended at the top of this file
@@ -22132,6 +22145,20 @@ class RefreshMail(Env):
             for name, (_, log) in sessions.items():
                 self.assertEqual(len(mailbox.read_lines(log)), 1,
                                  "a turn start with no new merge ran the install again in session %s" % name)
+
+    def test_a_merge_in_another_repo_mails_no_notice_and_prints_no_refresh_line(self):
+        self.set_origin("https://github.com/acme/widgets.git")
+        store = self.new_store()
+        before = store.tip()
+        with unittest.mock.patch.dict(os.environ, self.mail_env(store)):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"), "control: the merge did not land")
+        self.assertEqual(store.files("mail/refresh/"), [], "a merge in acme/widgets mailed a refresh notice: %r"
+                         % store.files("mail/refresh/"))
+        self.assertEqual(store.tip(), before, "a merge in acme/widgets moved the mail ref")
+        refresh = [line for line in out.splitlines() if line.startswith("merge: refresh mail")]
+        self.assertEqual(refresh, [], "a merge in acme/widgets printed refresh lines: %r" % refresh)
 
 
 if __name__ == "__main__":
