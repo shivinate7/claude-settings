@@ -65,6 +65,8 @@ A definitive claim in prose carries one of these backings:
 
 A code span used as a claim's subject still counts as a claim. A claim with no backing is unbacked.
 
+A cite to a Python name in prose, "`file.py` `name`" or "(file.py name)", must name a name bound at head. STALE010 checks it when its top folder is tracked at head or in history (decision `record-cites-live-code`, claims about code cite live code names).
+
 ## STALE005: a capability stated without a backing
 
 STALE005 (the route-claim check) reports a sentence that states a capability by route with no backing. The unit it judges is a sentence in a paragraph the range touches, not a changed line. It is report-only until it measures 10% or fewer false alarms over 20 real hits. Then it refuses. Source for the threshold: coordinator pick Q3 (the threshold question), 2026-11-06 11:47 CST, process-only.
