@@ -439,6 +439,11 @@ MUTATIONS = [
     ("push-needs-review-record: a Base head line names the reviewed head",
      'if not _BASE_BEFORE.search(', 'if True or not _BASE_BEFORE.search(', "guard",
      'reads Base main head B, reviewed A, with its record at B only'),
+    # A transcript line that is valid JSON but not an object: the reader steps over it before any record read.
+    ("push-needs-review-record: a transcript line that is valid JSON but not an object is read as a record",
+     '            if not isinstance(record, dict):\n                continue\n            content = record["message"]',
+     '            if False:\n                continue\n            content = record["message"]', "guard",
+     'a transcript line that is a JSON list, then the push'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
