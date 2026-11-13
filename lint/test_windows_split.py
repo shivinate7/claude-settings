@@ -217,7 +217,7 @@ SCOPE_NEEDS = {NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB}  # scope's if reads each skip jo
 SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
 MAC_CODE = f"{MAC_OWN} && needs.scope.outputs.code == 'true'"
-MAC_SWEEP = f"{MAC_OWN} && needs.scope.outputs.sweep == 'true'"
+MAC_SWEEP = "!cancelled() && needs.scope.outputs.sweep == 'true'"  # the mutation step carries only its sweep flag (R62)
 MAC_MODS = f"{MAC_OWN} && needs.scope.outputs.mods == 'true'"
 MACOS_SUITES = {
     "python3 hooks/test_guard_load_os.py": (MAC_CODE, None),
@@ -401,11 +401,10 @@ SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_ac
 # pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
-          # The full merge suite runs on every event, a ready pull_request included (R62); the slice only on pull_request.
-          "python merge/test_merge.py":
-          "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
-          # The full guard suite runs on every event, a ready pull_request included (R62). Neither suite has a slice step.
-          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}"}
+          # The full merge suite runs on a ready pull_request whatever the flags say, and on push when code changed (R62).
+          "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}",
+          # The full guard suite: the same rule as the merge suite (R62). Neither suite has a slice step.
+          GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -567,6 +566,67 @@ def draft_guard_only(expr):
         return False
 
 
+# R62: the full Windows suite runs on a ready pull_request whatever the flags say. Its steps carry the draft guard, bare (checkout and
+# setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push gate, and never the job's own flag.
+DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
+SWEEP_STEP_CMDS = ("python3 janitor/mutate_sweep.py", "python janitor/mutate_sweep.py")
+SWEEP_JOBS = ("checks-macos", "checks-windows-sweep")
+
+
+def sweep_union(own):
+    """The condition a sweep job's checkout and setup carry: its own flag, the sweep flag, or an event other than pull_request (R62)."""
+    return f"needs.scope.outputs.{own} == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request'"
+
+
+def full_suite_problems(name, job):
+    """R62 for a full-suite job (full_suite_job). Every step carries the draft guard, bare or as `(draft guard) && E`. A suite
+    step keeps !cancelled(), and its E reads code at most (the push gate on the steps that have one). No step reads the job's
+    own flag: a ready pull_request runs the suite whatever the flags say."""
+    problems = []
+    for st in job["steps"]:
+        expr = step_if(st)
+        label = st.get("name") or st.get("uses") or st.get("run")
+        rest = scope_condition_rest(expr, DRAFT_GUARD)
+        if rest is None:
+            problems.append(f"{name}: step {label} lacks the draft guard: {expr}")
+            continue
+        if st.get("uses"):
+            continue  # checkout and setup carry the draft guard alone
+        if "!cancelled()" not in rest:
+            problems.append(f"{name}: step {label} lacks !cancelled(): {expr}")
+        flags = set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest))
+        if name in (GUARD_JOB, "checks-windows-merge") and "code" not in flags:
+            problems.append(f"{name}: step {label} does not read code, so a push runs the suite with no code change: {expr}")
+        if flags - {"code"}:
+            problems.append(f"{name}: step {label} reads scope flags {sorted(flags - {'code'})}, want only code: {expr}")
+    return problems
+
+
+def sweep_job_problems(name, job, flag=None):
+    """R62 for a job with the janitor sweep mutation step. Its suite steps carry one scope condition G, which reads the job's own
+    flag and keeps the property rules. The mutation step carries only `!cancelled() && sweep` (pinned by IF_PIN and MACOS_SUITES).
+    Checkout and setup carry the sweep union, so a PR that sets only the sweep flag still checks out."""
+    own = flag or name.replace("-", "_")
+    problems = []
+    suite = [st for st in job["steps"] if not st.get("uses") and key(st) not in SWEEP_STEP_CMDS]
+    setup = [st for st in job["steps"] if st.get("uses")]
+    conds = {paren_prefix(e) or e for e in map(step_if, suite) if e is not None}
+    if len(conds) != 1:
+        return problems + [f"{name}: its suite steps carry no one scope condition (none carries one, or they disagree)"]
+    scope_condition = conds.pop()
+    problems += scope_condition_property_problems(name, scope_condition, flag)
+    for st in suite:
+        if scope_condition_rest(step_if(st), scope_condition) is None:
+            problems.append(f"{name}: step {st.get('name') or st.get('run')} lacks the scope condition: {step_if(st)}")
+    for st in setup:
+        if step_if(st) != sweep_union(own):
+            problems.append(f"{name}: {st.get('uses')} carries {step_if(st)!r}, want {sweep_union(own)!r}")
+    for st in job["steps"]:
+        if key(st) in SWEEP_STEP_CMDS and "needs.scope.outputs.sweep == 'true'" not in (step_if(st) or ""):
+            problems.append(f"{name}: the sweep mutation step does not read the sweep flag: {step_if(st)}")
+    return problems
+
+
 def job_check_problems(name, job, flag=None):
     """`needs: scope`. A shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint jobs
     (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
@@ -584,6 +644,10 @@ def job_check_problems(name, job, flag=None):
     # R61 part 1: a macOS job may keep the push guard as its job-level if (a step-level skip still starts its runner).
     if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and push_guard_only(expr)):
         return problems + [f"{name}: scoped job keeps a job-level if, its scope condition belongs in its steps: {expr}"]
+    if full_suite_job(name):
+        return problems + full_suite_problems(name, job)
+    if name in SWEEP_JOBS:
+        return problems + sweep_job_problems(name, job, flag)
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
         return problems + [f"{name}: its steps carry no one scope condition (none carries one, or they disagree)"]
@@ -654,7 +718,8 @@ def hardening_problems(text):
                 continue
             if "!cancelled()" not in (step_if(st) or ""):
                 problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {step_if(st)}")
-            if cmd in IF_PIN and step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[cmd]):
+            own_if = step_if(st) if cmd in SWEEP_STEP_CMDS else step_rest(st, read_scope_condition(job))  # the sweep step has no scope condition
+            if cmd in IF_PIN and own_if != unwrap(IF_PIN[cmd]):
                 problems.append(f"{name}: {cmd!r} condition is not the pinned text: {step_if(st)}")
             if st.get("shell") != SHELL.get(cmd):
                 problems.append(f"{name}: {cmd!r} shell is {st.get('shell')}, want {SHELL.get(cmd)}")
@@ -662,8 +727,8 @@ def hardening_problems(text):
 
 
 def guard_problems(text):
-    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. It runs the full suite on every event, a ready
-    pull_request included, on the guard flag, and has no slice step (R62). No other Windows job runs the guard suite."""
+    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. It runs the full suite on a ready pull_request whatever
+    the flags say, and on push when code changed, and has no slice step (R62). No other Windows job runs the guard suite."""
     jobs = windows_jobs(text)
     if GUARD_JOB not in jobs:
         return [f"no windows-latest job named {GUARD_JOB}"]
@@ -1118,8 +1183,8 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(placement_problems(doc(REQUIRED[:8], REQUIRED[7:14], REQUIRED[14:])))
 
     def test_checker_sees_the_merge_slice_defects(self):
-        scope_condition = "needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request'"
-        full_e = "!cancelled() && needs.scope.outputs.code == 'true'"
+        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code gate rides in each step's own condition
+        full_e = unwrap(IF_PIN["python merge/test_merge.py"])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
         def doc(with_slice=False, env="windows-slice", full=full_e):
@@ -1139,10 +1204,11 @@ class WindowsSplit(unittest.TestCase):
                     "env:\n  MERGE_TESTS: windows-slice\n" + good,
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
-        self.assertTrue(hardening_problems(doc(full=full_e.replace(" && needs.scope.outputs.code == 'true'", ""))))
+        self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push gate dropped
+        self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows_merge")))))  # own flag read
 
     def test_checker_sees_the_shard_defects(self):
-        scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+        scope_condition = DRAFT_GUARD  # R62: the base job's steps carry the draft guard, and the code gate rides in the full step
         full_e = unwrap(IF_PIN[GUARD_CMD])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
@@ -1184,7 +1250,8 @@ class WindowsSplit(unittest.TestCase):
         for label, text in bad.items():
             self.assertTrue(place(text) or guard_problems(text), label)
         # A shard job that runs on pull_request, or runs the slice, takes the PR verdict out of the required check.
-        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": f"${{{{ {scope_condition} }}}}", "steps": []}))
+        flag_if = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"  # a shard's job-level if on a flag
+        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": flag_if, "steps": []}))
         self.assertTrue(guard_problems(doc(base, job("checks-windows-guard-2", "2/3", slice_=True),
                                            job("checks-windows-guard-3", "3/3"))))
         # A shard value set for the whole job or workflow would cut the PR slice too.
@@ -1204,7 +1271,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(bad)
 
     def test_checker_sees_the_guard_slice_and_mutate_defects(self):
-        scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code gate rides in the full step
         full_e = unwrap(IF_PIN[GUARD_CMD])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
@@ -1221,9 +1288,10 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(slice_env="windows-slice")))  # a slice step is left in the job
         self.assertTrue(guard_problems(doc(full=slice_e)))  # full suite runs on pull_request only
         self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
-        self.assertTrue(guard_problems(doc(job_if=scope_condition)))  # a job-level if on the scoped job
-        self.assertTrue(guard_problems(doc(scope_condition_=scope_condition.replace("guard", "checks_windows"))))  # wrong flag
-        self.assertTrue(guard_problems(doc(scope_condition_="needs.scope.outputs.guard == 'true'")))  # skips on push
+        self.assertTrue(guard_problems(doc(job_if="needs.scope.outputs.code == 'true'")))  # a job-level if on the scoped job
+        self.assertTrue(guard_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows"))))  # reads its own flag
+        self.assertTrue(guard_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # push gate dropped
+        self.assertTrue(guard_problems(doc(scope_condition_="needs.scope.outputs.guard == 'true'")))  # a step without the draft guard
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
