@@ -763,6 +763,56 @@ def case_n25_cse_label_with_the_remote_env_blocks():
     expect_block("N25", p, (SCRIPT,))
 
 
+# --------------------------------------------------------------------------- labelled writer: prefix, read, export
+LABEL_ID = "013LabelWriter"
+LABEL_ENV = {REMOTE_ENV: "cse_" + LABEL_ID}
+
+
+def case_n26_label_whose_id_only_starts_with_ours_passes():
+    """The label names session_<ours>X, another session whose id starts with this session's id. This session is
+    LABEL_ID by its remote env, so the label is no match. Control: the label naming LABEL_ID blocks the same write."""
+    writer = "Triage (session_%sX)" % LABEL_ID
+    check("N26 scope: the transcript names the prefixed label", writer_seen(writer) == writer, writer_seen(writer))
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N26", run_stop("n26", base_repo("n26"), records, writer=writer, extra_env=LABEL_ENV))
+    expect_block("N26 control", run_stop("n26c", base_repo("n26c"), records,
+                                         writer="Triage (session_%s)" % LABEL_ID, extra_env=LABEL_ENV), (SCRIPT,))
+
+
+def case_n27_labelled_writer_that_only_read_passes():
+    """The labelled writer read the page and wrote nothing, so nothing is unexported. Control: the same label after a
+    write blocks, so the label does name this session."""
+    writer = "Triage (session_%s)" % LABEL_ID
+    check("N27 scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    expect_pass("N27", run_stop("n27", base_repo("n27"), [owner(at(18, 50))], writer=writer, extra_env=LABEL_ENV))
+    expect_block("N27 control", run_stop("n27c", base_repo("n27c"), [owner(at(18, 50))] + page_write(at(19)),
+                                         writer=writer, extra_env=LABEL_ENV), (SCRIPT,))
+
+
+def case_n28_labelled_writer_that_exported_passes():
+    """The labelled writer wrote, then an export run said `same`: already exported. Control: the same write with no
+    export run blocks, so the `same` run is what clears it."""
+    writer = "Triage (session_%s)" % LABEL_ID
+    check("N28 scope: the transcript names the labelled writer", writer_seen(writer) == writer, writer_seen(writer))
+    wrote = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N28", run_stop("n28", base_repo("n28"), wrote + export_run(at(19, 5)), writer=writer,
+                                extra_env=LABEL_ENV))
+    expect_block("N28 control", run_stop("n28c", base_repo("n28c"), wrote, writer=writer, extra_env=LABEL_ENV),
+                 (SCRIPT,))
+
+
+def case_n29_multi_word_label_with_no_id_that_ran_an_export_passes():
+    """The writer is "Triage lead": a multi-word label with no session id. A named writer decides alone, so the export
+    run before the write does not make this session the writer. Control: the bare word "Triage" with the same run
+    blocks, as N22 does."""
+    writer = "Triage lead"
+    check("N29 scope: the transcript names the multi-word label", writer_seen(writer) == writer, writer_seen(writer))
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    expect_pass("N29", run_stop("n29", base_repo("n29"), records, writer=writer, extra_env=LABEL_ENV))
+    expect_block("N29 control", run_stop("n29c", base_repo("n29c"), records, writer="Triage", extra_env=LABEL_ENV),
+                 (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -860,6 +910,10 @@ CASES.extend((
     case_n24a_label_with_a_remote_id_and_a_trailing_period_blocks,
     case_n24b_comma_after_the_name_and_a_trailing_period_blocks,
     case_n25_cse_label_with_the_remote_env_blocks,
+    case_n26_label_whose_id_only_starts_with_ours_passes,
+    case_n27_labelled_writer_that_only_read_passes,
+    case_n28_labelled_writer_that_exported_passes,
+    case_n29_multi_word_label_with_no_id_that_ran_an_export_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
