@@ -90,6 +90,9 @@ MODEL_NAME = re.compile(r"sonnet|haiku|opus", re.I)
 # so no test reads that branch.
 R9_WORDS = ("passes round 1 is done", "fixed under a fix verifier waits for round 3", "15:44")
 SPAWN_HEAD = "Agent spawn brief head"  # the heading of the block a lane copies into a spawn brief
+PROVED = "proved at batch CI"  # the Done-check form for a check only batch CI can prove
+DONE_TEXT = "run the brief suite and its lint"  # a step's done_check text
+CI_ONLY_TEXT = "the full checks job on the batch branch"  # a step's done_check text when ci_only is true
 MARKER_FORMS = ("Guard or check: yes", "Fix check", "Round 2 of 3", "Round 3 of 3", "Audit:")
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.abspath(os.path.join(HERE, "..", "..", "..", "hooks", "guard.py"))
 # The real decision record the guard reads for the role table and the round rows.
@@ -494,6 +497,25 @@ class TemplateRules(unittest.TestCase):
                             for line in read_template().splitlines()),
                         "no line says each agent runs its role row in agent-model-cap")
 
+    def test_done_check_says_the_lane_can_run_its_check(self):
+        done = section(read_template(), "Done-check")
+        self.assertIsNotNone(done, "the template has no ## Done-check section")
+        self.assertTrue(has_sentence(sentences(done), r"\bcan run\b", r"\bcheck\b"),
+                        "the Done-check part does not say a done check is one the lane can run")
+
+    def test_done_check_names_the_batch_ci_form_and_does_not_fail_the_lane_on_it(self):
+        done = section(read_template(), "Done-check")
+        self.assertIsNotNone(done, "the template has no ## Done-check section")
+        self.assertTrue(has_sentence(sentences(done), r"\bproved at batch CI\b", r"\bfail", NEGATION),
+                        "the Done-check part does not say a check only batch CI proves is written 'proved at batch CI' "
+                        "and the lane is not failed on it")
+
+    def test_template_holds_no_ruling_id_or_measured_figure(self):
+        text = read_template()
+        found = re.search(r"\br\d+\b", text, re.I)
+        self.assertIsNone(found, "the template names a ruling by id: %s" % (found and found.group(0)))
+        self.assertNotIn("%", text, "the template holds a measured figure written as a percent")
+
 
 class RulingsAndSource(BriefCase):
 
@@ -571,6 +593,38 @@ class SpawnBriefHead(BriefCase):
         reason = guard_reason(self.config, spawn_brief(self.block()))
         self.assertTrue(reason.startswith("agent-role-model:"),
                         "the spawn with no marker was not refused by agent-role-model: %r" % reason[:200])
+
+
+class DoneCheckFields(BriefCase):
+    """The optional step fields done_check and ci_only fill the Done-check line; the note's prose never does."""
+
+    def done_check_body(self, out):
+        body = section(out, "Done-check")
+        self.assertIsNotNone(body, "the brief has no ## Done-check section")
+        return body
+
+    def test_done_check_field_prints_on_the_done_check_line(self):
+        out = self.build(self.make_repo(step=step_doc(done_check=DONE_TEXT)))
+        self.assertIn(DONE_TEXT, self.done_check_body(out), "the Done-check part does not print the step's done_check")
+        self.assertNotIn(PROVED, out, "a done_check without ci_only is written as proved at batch CI")
+        self.assertNotIn(CHECK_MARKER, out, "the marker stays though the step names its done check")
+
+    def test_ci_only_field_reads_proved_at_batch_ci_with_the_text(self):
+        out = self.build(self.make_repo(step=step_doc(done_check=CI_ONLY_TEXT, ci_only=True)))
+        lines = self.done_check_body(out).splitlines()
+        self.assertTrue(any(PROVED in line and CI_ONLY_TEXT in line for line in lines),
+                        "no Done-check line reads 'proved at batch CI' with the step's done_check text")
+
+    def test_no_field_keeps_the_done_check_marker(self):
+        out = self.build(self.make_repo(step=step_doc()))
+        self.assertIn(CHECK_MARKER, self.done_check_body(out), "the Done-check part lost the coordinator marker")
+        self.assertNotIn(PROVED, out, "a step with no field reads as proved at batch CI")
+
+    def test_note_prose_never_sets_the_done_check(self):
+        note = "Batch CI proves the rest of this step; see the CI run on the batch branch."
+        out = self.build(self.make_repo(step=step_doc(note=note)))
+        self.assertIn(CHECK_MARKER, self.done_check_body(out), "the note's prose replaced the Done-check marker")
+        self.assertNotIn(PROVED, out, "the note's prose set the proved at batch CI form")
 
 
 if __name__ == "__main__":
