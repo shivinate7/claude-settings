@@ -31,7 +31,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "hooks"))
 import test_ruled_store as fixture  # noqa: E402  the store and roadmap-ref fixtures (git plumbing, run folder)
 
-# A fixed clock: no case reads the real one. 2026-11-13 18:45 UTC is 12:45 CST.
+# A fixed clock, so no case reads the real one. NOW is 12:45 CST; LAST_FETCH is 11:05 CST.
 NOW = datetime.datetime(2026, 11, 13, 18, 45, tzinfo=datetime.timezone.utc).timestamp()
 LAST_FETCH = datetime.datetime(2026, 11, 13, 17, 5, tzinfo=datetime.timezone.utc).timestamp()  # 11:05 CST
 NOTE = "read as of 11:05 CST"

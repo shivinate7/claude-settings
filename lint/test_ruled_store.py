@@ -506,6 +506,7 @@ class SessionLinesTests(RepoCase):
         repo = self.make_repo("one", store=fixture.ruling_files({
             "r-1": fixture.entry("r-1", supersedes=[{"kind": "test", "ref": "lint/test_x.py::case_a"}]),
         }))
+        fixture.set_fetch_head(repo)
         lines = ruled_store.session_lines(repo)
         self.assertEqual(len(lines), 3, "want header, one entry, command; got %r" % lines)
         self.assertEqual(lines[0], HEADER % (1, 0), "header: %r" % lines[0])
@@ -540,6 +541,7 @@ class SessionLinesTests(RepoCase):
             for day in range(1, 13)
         }
         repo = self.make_repo("twelve", store=fixture.ruling_files(entries))
+        fixture.set_fetch_head(repo)
         lines = ruled_store.session_lines(repo)
         self.assertLessEqual(len(lines), 8, "session lines exceed 8: %d lines" % len(lines))
         self.assertEqual(lines[0], HEADER % (12, 0), "header: %r" % lines[0])
@@ -690,6 +692,7 @@ class CostAndCliTests(RepoCase):
     def test_reading_the_store_starts_one_ls_tree_and_one_cat_file(self):
         repo = self.make_repo("cost", store=fixture.ruling_files(
             {"r%d" % number: fixture.entry("r%d" % number) for number in range(6)}))
+        fixture.set_fetch_head(repo)
         trace = os.path.join(self.root, "git-trace.log")
         with mock.patch.dict(os.environ, {"GIT_TRACE": trace}):
             entries = ruled_store.ruled_entries(repo)

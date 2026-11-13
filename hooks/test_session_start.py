@@ -1392,15 +1392,18 @@ class SessionStartGrantsFromMainTests(GitFixtureMixin, SessionStartAgentWorktree
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_origin_main_differs(self):
         self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        fixture.set_fetch_head(self.primary)
         self.assert_grant_check_is_cheap()
 
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_only_origin_head_is_readable(self):
         self.point_origin_head_at(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        fixture.set_fetch_head(self.primary)
         self.assert_grant_check_is_cheap()
 
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_no_origin_ref_is_readable(self):
+        fixture.set_fetch_head(self.primary)
         self.assert_grant_check_is_cheap()
 
     def test_the_grant_check_writes_no_file_in_the_checkout_or_git_dir(self):
@@ -1691,6 +1694,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
         self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
+        fixture.set_fetch_head(self.primary)
         lines, starts = self.run_traced()
         self.assertEqual(self.fetch_starts(starts), [], "a fetch ran with no origin: %r" % starts)
         self.assertEqual([line for line in lines if REFRESH_FAILED.match(line)], [],
@@ -1719,6 +1723,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def test_a_failed_fetch_is_one_refresh_attempt(self):
         # The one attempt is the ls-remote that reads origin's default. Once it fails, no fetch starts.
         self.stage_a_lane_grant_against_a_missing_origin()
+        fixture.set_fetch_head(self.primary)
         lines, starts = self.run_traced()
         self.assertEqual(len(self.ls_remote_starts(starts)), 1,
                          "want one refresh attempt, an ls-remote, got %r" % starts)
@@ -2080,6 +2085,7 @@ class SessionStartRulingLinesTests(SessionStartAgentWorktreeNoticeTests):
         vcs(clone, "add", "-A")
         vcs(clone, "commit", "-q", "-m", "claude-settings clone")
         fixture.point_ref(clone, fixture.STORE_REF, store, self.root)
+        fixture.set_fetch_head(clone)
         if main is not None:
             fixture.point_ref(clone, fixture.MAIN_REF, main, self.root)
         with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:

@@ -215,6 +215,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the store fixtures, one home (lint/test_ruled_store.py)
 # settings.json env sets MAILBOX_REPO for every session; the hook under test would read the live mailbox and print a second
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
@@ -1690,6 +1691,7 @@ def case_page_stale_origin_ref_names_the_fetch():
     """A filed number that the clone's origin ref lacks is refused, and the remedy names the fetch. The copy is
     read as of the last fetch. The hook fetches nothing: the origin ref is the same after the run."""
     repo = stale_origin_repo()
+    fixture.set_fetch_head(repo)
     before = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
     source = git(os.path.join(ROOT, "repos", "stale-origin-src"), "rev-parse", RECORD_BRANCH).strip()
     check("page filing: the remote's record branch is past the clone's origin ref", source != before,
@@ -3493,6 +3495,7 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
     Stop with nothing to judge. A flagged judging Stop writes the turn state and the inbox only. A Stop
     with no new item makes no call, starts no grep, and writes the turn state only."""
     root = repeat_repo("repeat-cost", step=True, debt=True)
+    fixture.set_fetch_head(root)
     cfg, sid = new_cfg(), "repeat-cost"
     env = git_counter(cfg)
     capture(cfg, sid, MSG_ONE, cwd=root)
