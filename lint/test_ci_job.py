@@ -2554,7 +2554,7 @@ class PinnedHarness(Job):
         return self.pinned_step("Pin one", self.pin_a) + self.pinned_step("Pin two", git_in(self.source, "rev-parse", "main")) + \
             step("Write dir", self.WRITE_DIR)
 
-    def test_a_step_env_that_sets_it_wins_when_the_one_pin_tree_cannot_be_made(self):  # pick (a): red on 820f5b8b1
+    def test_a_step_env_that_sets_it_wins_when_the_one_pin_tree_cannot_be_made(self):  # the step's own env: wins over the job's pin, even when that tree cannot be made
         own = os.path.join(self.root, "step-checkout")
         os.makedirs(own)
         steps = self.code_step(UNFETCHABLE) + step("Write dir", self.WRITE_DIR, env={"CLAUDE_SETTINGS_DIR": own})
@@ -2562,7 +2562,7 @@ class PinnedHarness(Job):
                                                  env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
         self.assertEqual((rc, verdicts, seen), (0, ["PASS"], own), text)
 
-    def test_a_no_sha_ste_lint_step_takes_no_pin_tree_under_the_flag(self):  # pick (b): red on 820f5b8b1
+    def test_a_no_sha_ste_lint_step_takes_no_pin_tree_under_the_flag(self):  # a uses: step with no sha takes no pin tree: its action runs the local bin/ste-changed
         self.stub_ste_changed()
         caller = self.checkout_naming("decoy", "caller-checkout")
         steps = self.code_step(self.pin_a) + step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@main")
@@ -2572,7 +2572,7 @@ class PinnedHarness(Job):
         self.assertNotIn("(no seen.txt", seen, text)  # scope: the step ran
         self.assertEqual(seen, caller, "under --pinned the no-sha ste-lint step read a pin tree, not the caller's checkout\n" + text)
 
-    def test_a_failed_pin_tree_does_not_make_a_no_sha_ste_lint_step_unknown(self):  # pick (b): red on 820f5b8b1
+    def test_a_failed_pin_tree_does_not_make_a_no_sha_ste_lint_step_unknown(self):  # a failed pin tree makes only the steps that run from it unknown
         self.stub_ste_changed()
         caller = self.checkout_naming("decoy", "caller-checkout")
         steps = self.code_step(UNFETCHABLE) + step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@main")
@@ -2581,7 +2581,7 @@ class PinnedHarness(Job):
         self.assertEqual((rc, verdicts), (0, ["PASS"]), "the job's one pin, which cannot be made, made the no-sha ste-lint step unknown\n" + text)
         self.assertEqual(seen, caller, "the no-sha ste-lint step did not read the caller's checkout\n" + text)
 
-    def test_a_plain_step_whose_one_pin_tree_cannot_be_made_is_unknown_and_names_the_failed_fetch(self):  # pick (c): control
+    def test_a_plain_step_whose_one_pin_tree_cannot_be_made_is_unknown_and_names_the_failed_fetch(self):  # the unknown line names the failed fetch and the pin
         steps = self.code_step(UNFETCHABLE) + step("Write dir", self.WRITE_DIR)
         rc, lines, text = self.run_step(steps, "--step", "Write dir", "--pinned")
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), text)
@@ -2595,13 +2595,13 @@ class PinnedHarness(Job):
         rc, verdicts, seen, text = self.seen_run(steps, "--step", "Write dir", env={"CLAUDE_SETTINGS_DIR": caller})
         self.assertEqual((rc, verdicts, seen), (0, ["PASS"], caller), text)
 
-    def test_two_pins_and_a_plain_step_take_the_caller_value_under_the_flag(self):  # pick (d): control
+    def test_two_pins_and_a_plain_step_take_the_caller_value_under_the_flag(self):  # two pins give a plain step no pin tree: the caller's value still wins
         caller = self.checkout_naming("decoy", "caller-checkout")
         rc, verdicts, seen, text = self.seen_run(self.two_pin_steps(), "--step", "Write dir", "--pinned",
                                                  env={"CLAUDE_SETTINGS_DIR": caller})
         self.assertEqual((rc, verdicts, seen), (0, ["PASS"], caller), text)
 
-    def test_two_pins_and_a_plain_step_take_this_checkout_without_a_caller_value(self):  # pick (d)
+    def test_two_pins_and_a_plain_step_take_this_checkout_without_a_caller_value(self):  # two pins and no caller value: a plain step sees this checkout
         rc, verdicts, seen, text = self.seen_run(self.two_pin_steps(), "--step", "Write dir", "--pinned")
         self.assertEqual((rc, verdicts), (0, ["PASS"]), text)
         self.assertNotIn("(no seen.txt", seen, text)  # scope: the step ran
