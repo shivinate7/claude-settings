@@ -2,7 +2,7 @@
 """Guard for the PR-close cancel: .github/workflows/cancel-on-close.yml and .github/scripts/cancel_closed_pr_runs.py.
 
 WorkflowShape reads the workflow by line, as lint/test_windows_split.py does, with the step parser of lint/workflow_steps.py.
-ScriptSelects proves select_runs cancels only an unfinished pull_request run of this PR's head branch and head SHA, from
+ScriptSelects proves select_runs cancels only an unfinished pull_request run of this PR's head branch, at any head SHA, from
 this repo, whose pull_requests list is empty or names this PR. ScriptSharedHead proves other_open_pr_shares_head finds
 another open PR in this repo on the same head branch. ScriptPrClosed proves pr_is_closed reads only "closed".
 ScriptGhCalls and ScriptMain prove every list call is a GET, main cancels nothing when another open PR shares the head,
@@ -535,10 +535,11 @@ class ScriptSelects(ScriptCase):
         self.assertEqual(self.select([run_of(id=101)], pr=pr_dict(head_repo="someone/fork")), [],
                          "a run was selected for a PR whose head is a fork")
 
-    def test_never_cancels_a_run_of_another_head_sha(self):
+    def test_cancels_a_run_of_another_head_sha_of_this_branch(self):
+        # A close cancels the branch's unfinished runs at any SHA, so an older push's queued run is not left behind.
         got = self.select([run_of(id=101), run_of(id=102, head_sha=OLD_SHA)])
         self.assertIn(101, got, "scope: this PR's run was not selected")
-        self.assertNotIn(102, got, "a run of another head SHA was selected")
+        self.assertIn(102, got, "a run at another head SHA of this branch was not selected")
 
     def test_never_cancels_a_run_of_another_branch(self):
         got = self.select([run_of(id=101), run_of(id=102, head_branch="other")])
@@ -546,7 +547,7 @@ class ScriptSelects(ScriptCase):
         self.assertNotIn(102, got, "a run of another branch was selected")
 
     def test_skips_a_run_missing_a_key(self):
-        for key in ("id", "event", "status", "head_branch", "head_sha", "pull_requests", "head_repository"):
+        for key in ("id", "event", "status", "head_branch", "pull_requests", "head_repository"):
             with self.subTest(missing=key):
                 got = self.select([without(run_of(id=102), key), run_of(id=101)])
                 self.assertIn(101, got, "scope: this PR's run was not selected")
@@ -567,7 +568,7 @@ class ScriptSelects(ScriptCase):
     def test_full_size_list_selects_only_the_matching_runs(self):
         # 300 runs, past one page of the runs API. Every seventh run matches; each other run fails one rule.
         other_rules = [dict(status="completed"), dict(event="push", head_branch="main", pull_requests=[]),
-                       dict(pull_requests=[{"number": OTHER_PR}]), dict(head_sha=OLD_SHA), dict(head_branch="other"),
+                       dict(pull_requests=[{"number": OTHER_PR}]), dict(event="schedule"), dict(head_branch="other"),
                        dict(head_repository={"full_name": "someone/fork"}), dict(head_branch=DEFAULT)]
         runs, want = [], []
         for i in range(300):
@@ -754,11 +755,11 @@ class ScriptMain(ScriptCase):
         self.assertEqual(rc, 1, f"main returned {rc} when the PR could not be read, want 1")
         self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs although the PR could not be read")
 
-    def test_a_run_of_an_older_head_sha_is_not_cancelled(self):
+    def test_cancels_a_run_of_an_older_head_sha_of_this_branch(self):
         err, fake, _ = self.run_main([run_of(id=101, head_sha=OLD_SHA, pull_requests=[{"number": PR}]),
                                       run_of(id=102, pull_requests=[{"number": PR}])])
         self.assertIn(102, cancelled_ids(fake.calls), "scope: the run at the PR's head SHA was not cancelled")
-        self.assertNotIn(101, cancelled_ids(fake.calls), "a run of an older head SHA was cancelled")
+        self.assertIn(101, cancelled_ids(fake.calls), "a run at an older head SHA of this branch was not cancelled")
 
     def test_a_run_of_another_branch_is_not_cancelled(self):
         err, fake, _ = self.run_main([run_of(id=101, head_branch="other", pull_requests=[{"number": PR}]),
