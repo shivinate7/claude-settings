@@ -8955,6 +8955,25 @@ class ClaimCollision(RecordsEnv):
         self.assertTrue(getattr(self.host, "merged", False), "a claim main does not hold did not merge on its second confirm: %s" % out)
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
+class ResumedPageStale(RecordsEnv):
+    """A resumed claim whose records page is current on its own tree, but stale for the merge with main. Confirm proves the merge result after
+    its claim is on origin, and a stale proof stops the run. This run pushed nothing (the claim is the lane's, already on origin), so the
+    refusal reverts nothing: a revert push would undo a claim this run did not make, and the refusal's words say nothing was pushed."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def test_a_resumed_claim_whose_page_main_makes_stale_is_refused_with_no_push(self):
+        self.claim_head({"docs/records.md": page()})  # the claim, and a page current on the head's own tree
+        self.on("main", {"debts/gap-two.md": DEBT_TEXT.replace("Gap one", "Main gap")}, "a debt lands on main")  # the merge result would change the page
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)  # scope first: the run refuses
+        self.assertFalse(getattr(self.host, "merged", False), "the stale page was merged: %s" % out)
+        self.assertEqual(self.refs(), refs_before, "a push landed on the page-stale refusal, which says nothing was pushed: %s" % out)
+        self.assertIn("Nothing was merged or pushed", out)
+
 class RecordsRebuild(RecordsEnv):
     """The records index is rebuilt at merge time, the way record numbers are claimed
     from the slug form at merge: merge.py runs a records generator.
