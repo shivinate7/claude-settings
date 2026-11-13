@@ -1308,7 +1308,7 @@ class Host:
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             raise Stop(f"cannot read the parents of {sha[:9]} {READ_CITE}: {e}")
 
-    COMMIT_FILES_CAP = 300  # GitHub lists at most 300 files of one commit, so a list this long may be cut short
+    COMMIT_FILES_CAP = 30  # GitHub gave 30 `files` for a 49-file commit (measured), so a list of 30 or more may be cut short
 
     def commit_files(self, sha):
         """-> the paths of the files the commit `sha` changes, in order: the `filename` of each entry of the `files` list of one read of commits/<sha>,

@@ -2271,4 +2271,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
-- fix-check-reads-doc-drift: decision pr-review-record says `--fix-check` adds one paged read. It now adds up to two compare reads, and the record-only walk (record_only_after) reads commits/<sha> twice per commit (commit_parents, then commit_files), up to 100 reads at the 50-commit cap; no test pins the count. Fix: update the doc line and pin the count.
+- fix-check-reads-doc-drift: no test pins the read count of the record-only walk (`record_only_after`). It reads each commit twice, so up to 100 reads at the 50-commit cap. Fix: pin the count in a cost test.
