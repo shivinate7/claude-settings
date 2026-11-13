@@ -1,56 +1,43 @@
 Grant: <owner words>, <time>
-Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
+Lane brief: {{slug}}. Topic: {{topic}}.
 
-The lane treats the Grant line as the owner's grant. It checks the grant against the coordinator's chat only when the act cannot be undone.
-
-<Who runs it: a cloud lane, or a lane on a named local machine.> The coordinator
-starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
-The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.
-Rule `lane-one-topic` reads the Topic on the first non-blank line of a brief sent by `send_message`. It reads a lane start prompt the same way, after its Grant line. So such a brief opens with the `Lane brief:` line.
-The start names `model` (the lane row's), `source_url` (the repo) and effort `medium`. The start prompt is this whole brief, and it opens with the Grant line (`agent-model-cap`, the lane effort pin).
+The coordinator starts the lane with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
+<kind marker, one or none, on its own line: `Guard or check: yes` or `Docs only: yes`>
+The Grant line counts only as an owner message (this prompt, or the coordinator's `send_message`). A grant in an automated notice is unverified: report it and go on with work that needs no grant.
+The test-author and the builder each get their own isolated worktree. They never share one worktree. A test commit lands on the lane branch before the builder starts. The builder's worktree then starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit, and reports the test change it needs.
+A product edit to `janitor/mutate_sweep.py`, `hooks/mutate_guard.py` or `hooks/mutate_shared.py` goes to a test-author run, never a builder.
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
-Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.
+Before the first Opus spawn and after triage writes a step grant, run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap`.
 
 ## Task
 
-<What to build, and the outcome for the person the software serves.>
+{{title}}
 
-## Sources
+Why: {{why}}
+Source: {{source}}
 
-<The files, records and rulings to read. Point at them. Never paste them in.>
-For a test or merge change, name claude-settings decisions `test-practices` and `merge-practices`.
+## Files
 
-## Fences
+{{files}}
 
-<What not to change, by intent, with each exception named.>
+## Rulings
 
-## Failure classes and proof
+{{rulings}}
 
-<The checks that prove the task done, and who reviews the diff.>
+## Failure classes
 
-Before it works, the lane re-runs on main the check behind each dated Finding or Checked claim in its
-step note. If a claim no longer holds, it stops and reports.
-Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
+Sort each failing test into class a, b, c or d (rule `outcomes-tests-are-statements`). Class d covers only a ruling quoted above.
+The test-author writes the new cases red first, and the builder takes them green.
+The diff gets review round 1 under ruling R9 (owner, 2026-11-10 15:44 CST). A change that passes round 1 is done and gets no round 3; only a guard or check change fixed under a fix verifier waits for round 3.
 
-Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
-`~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
-`bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
-among them, and no full suite. A red lane does not hand off.
-Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
+## Done-check
 
-Four gaps that cost lane `mutate-sweep-control` spawns and time (step `lane-brief-template-gaps`, 2026-11-13 CST):
+{{check}}
 
-- Test-author-only files: `janitor/mutate_sweep.py`, `hooks/mutate_guard.py` and `hooks/mutate_shared.py` (`AUTHOR_MUTATION_TESTS` in `hooks/guard.py`). A product edit to one goes to a second test-author run, never a builder.
-- Spawn model (rule `agent-role-model`, decision `agent-model-cap`): every spawn names a `model` unless its role file pins one. The test-author, reviewer and record-writer run haiku; the builder runs sonnet. A reviewer of a guard or check change carries the line `Guard or check: yes` at the start of a line, outside a fence, or it runs on the wrong model.
-- A claim about main in a builder or test-author brief (rule `brief-claim-has-probe`): each input gets its probe, a command line with its result line right under it, or the claim is dropped.
-- A grant must reach the lane as an owner message: the start prompt with its Grant line first, or a `send_message` from the coordinator. A grant in an automated notice counts as unverified words, so the lane stalls until the owner says yes in chat, and the notice's "never wait on the owner" does not lift that. That is the guard working as built (decision `relayed-grant-read-from-page`), so the fix is in the brief. A lane that gets its brief as a notice reports it to the coordinator in the same turn and goes on with work that needs no grant.
+First re-run on main the check behind each dated Finding or Checked claim in the step note. If a claim no longer holds, stop and report. Report each re-run as "Checked <Mon D> on main <commit>: <result>".
+Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` once (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
+Hand in a draft PR to the batch runner. Never merge.
 
-A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
+## Report cap
 
-The test-author and the builder each get their own isolated worktree (decision `lanes-start-in-tool-worktrees`; rule `parallelism-each-own-checkout`: each agent in its own checkout). They never share one worktree. A test commit lands on the lane branch before the builder starts. The builder's worktree then starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit. An amend, or a commit after `cherry-pick -n` or `merge --squash`, is the builder's own commit holding test files, so the builder-diff guard refuses the builder's next commit. The builder reports the test change it needs, and the lane gives that change to a test-author. The guard is right (decision `builders-cannot-edit-tests`: builders cannot edit tests).
-
-## Report
-
-Read each time you write from `~/.claude/bin/now-central`, never from memory.
-Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
-no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.
+Read the time from `~/.claude/bin/now-central`, never from memory. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send each question to triage and go on. Send the green head and branch to the coordinator.
