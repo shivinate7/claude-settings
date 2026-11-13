@@ -274,6 +274,37 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `merge --reviewed` reads every comment since the oldest open PR (`merge.py`, line 4389): 58 pages, about
     38 s per wake.
 
+## CI rulings
+
+On main (the record exists):
+- Trust first, then cut CI in steps, each past a measured bar (decision `ci-cut-in-steps`).
+- A test never fails on runner speed. A job runs only when a file its suites read changes. A duplicate
+  run costs time for no new verdict (decision `test-strategy-reset`).
+- A draft PR skips CI (decision `draft-until-reviewed`). A merge needs a green run on the current base
+  (decision `merge-needs-current-base`). Nothing merges while a batch's CI runs (decision
+  `no-merge-during-batch-ci`).
+- Time limits (decision `ci-job-caps`): the record raises caps as a stopgap. Retro lists R3 as newer: a
+  cap only ends a hung test, and a new job's cap is its nearest sibling's runs times 1.5. R3 is not
+  on main yet, so `ci-job-caps` still governs. When R3 lands, rewrite this line.
+
+Named in retro's list (11:46 CST Nov 13) as rulings in the restart plan, and not found on main when
+this was written. Treat each as an argument to weigh, never as law, until its record lands. Retro's R37
+wording (no fixed number without a ruling; gold is measured before and after) differs from the
+`docs/plans/restart-plan.md` R37 entry (no fixed word cap): read the plan before you cite it.
+- R4: lane lint runs once, at hand-off. Batch CI runs lint first and cancels on red.
+- R26: lane checks equal batch CI. Two drops and a lane leaves the queue. No self-made reruns.
+- R50, R53: a red job, or any CI or merge alarm, goes to the batch runner at once.
+- R55, R65: merge-flow and CI fixes go express, and ready express lanes share one express batch.
+- R58: batch macOS jobs run on the owner's Mac runner, falling back to GitHub. R61: macOS runs once per
+  batch, only where the OS differs. R62: Linux and Windows run each suite once per batch, on the batch
+  PR. The push run does not re-test the PR's tree. R63: Windows full shards are dropped, held.
+- R64: update this skill now. Child repos comply when runners are free.
+- Drop the nightly schedule (owner, 22:19 CST Nov 12, step `drop-nightly-schedule`). Steps 22, 23 and
+  26 name the nightly run as a fallback: re-read them when the drop lands.
+- R67 part 5: skip `checks` suites a docs-only change cannot affect (owner, 11:34 CST Nov 13, step
+  `ci-jobs-skip-unread`). Step 21 is the same work.
+- Item 521: prose and code share a batch when that lands both sooner.
+
 ## Public repos
 
 Fork PRs run code you did not write. Apply these to a public repo. See `snippets.md`, section 11.
