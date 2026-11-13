@@ -51,7 +51,8 @@ The CI-wait check of the same mode (decision ci-wait-reads-run-status, "The fall
 transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or nothing:
 - A wait opens at the newest ready call: `gh pr ready <N>` in Bash or PowerShell, or a GitHub MCP
   update_pull_request with draft false. Draft true or absent starts none. Quoted text, heredoc bodies and
-  `#` comments are no call.
+  `#` comments are no call. Global flags before `pr` (`gh -R <repo> pr ready <N>`) do not hide the call, and the
+  PR is read as a merge's is: `-R <repo> <N>`, or the number in a pull URL. A `$VAR` PR word is no number.
 - A later user or queued message with a green or cancelled CI verdict line closes the wait. A red verdict
   keeps it open and voids the check-ins before it. A `CI unknown` line (still running included) closes nothing.
 - A merge closes the wait only when it names the waited PR: `gh pr merge <N>` or `gh pr close <N>` in Bash or
@@ -59,6 +60,9 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
   pullNumber. A bare `gh pr merge` or `gh pr close` (no number, so gh aims at the current branch's PR) also
   closes it. A merge that names another PR closes nothing, and an MCP merge with no pullNumber closes nothing.
   A merge that names a branch (`gh pr merge feature-x`) names no PR, so it closes no numbered wait.
+  A merge with only flags and their values (`gh pr merge --squash --body "x"`) is bare, so it closes the wait
+  too. A merge with `--auto` closes nothing: nothing has merged yet. A `$VAR` PR word is bare, and a wait on
+  `$VAR` closes on any merge or close, as a bare wait does.
 - A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. A check-in whose
   tool_result is an error does not count; one with no result yet, or a good result, does. An open wait with no
   check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
@@ -2567,6 +2571,123 @@ def CI77_bare_ready_closed_by_a_branch_merge_of_any_pr():
     """CI77. a bare gh pr ready opens a wait with no PR number, and gh pr merge <branch> closes it, as a merge of any
     PR does: passes. Control: the bare wait alone blocks, and its reason names no PR number"""
     return bare_wait_closed_by(shell("gh pr merge feature-x"), "gh pr merge of a branch")
+
+
+@case
+def CI78_gh_global_flag_before_pr_opens_a_wait():
+    """CI78. gh -R <repo> pr ready N and gh --repo <repo> pr ready N open a wait on PR N: blocks, and the reason
+    names PR N. Control: the plain gh pr ready N blocks"""
+    repo = "%s/%s" % (CI_OWNER, CI_REPO)
+    return (["gh -R, ready: " + p
+             for p in expect_block([ready(command="gh -R %s pr ready %s" % (repo, CI_PR))])]
+            + ["gh --repo, ready: " + p
+               for p in expect_block([ready(command="gh --repo %s pr ready %s" % (repo, CI_PR))])]
+            + ["control, plain ready: " + p for p in expect_block([ready()])])
+
+
+@case
+def CI79_gh_global_flag_before_pr_closes_the_wait_on_a_merge():
+    """CI79. gh pr ready N, then gh -R <repo> pr merge N, or gh --repo <repo> pr merge N, closes the wait on N:
+    passes. Control: the wait alone blocks"""
+    repo = "%s/%s" % (CI_OWNER, CI_REPO)
+    wait = [ready()]
+    return (["gh -R, merge: " + p
+             for p in silent_with_control(wait + [shell("gh -R %s pr merge %s" % (repo, CI_PR))], wait)]
+            + ["gh --repo, merge: " + p
+               for p in silent_with_control(wait + [shell("gh --repo %s pr merge %s" % (repo, CI_PR))], wait)])
+
+
+@case
+def CI80_ready_with_repo_flag_before_the_number_waits_on_the_number():
+    """CI80. gh pr ready -R <repo> N waits on PR N, not on the repo: blocks, and the reason names PR N. Control:
+    the plain gh pr ready N blocks"""
+    repo = "%s/%s" % (CI_OWNER, CI_REPO)
+    return (expect_block([ready(command="gh pr ready -R %s %s" % (repo, CI_PR))])
+            + ["control, plain ready: " + p for p in expect_block([ready()])])
+
+
+@case
+def CI81_ready_and_merge_with_repo_flag_close_the_wait_on_the_number():
+    """CI81. gh pr ready -R <repo> N, then gh pr merge -R <repo> N, closes the wait on N: passes. Control: the -R
+    wait alone blocks, and a merge of PR 1111 with -R does not close it"""
+    repo = "%s/%s" % (CI_OWNER, CI_REPO)
+    wait = [ready(command="gh pr ready -R %s %s" % (repo, CI_PR))]
+    return (["merge with -R of the waited PR: " + p
+             for p in expect_silent(wait + [shell("gh pr merge -R %s %s" % (repo, CI_PR))])]
+            + ["control, the -R wait alone: " + p for p in expect_block(wait, pr=None)]
+            + ["control, merge with -R of PR %s: " % CI_OTHER_PR + p
+               for p in expect_block(wait + [shell("gh pr merge -R %s %s" % (repo, CI_OTHER_PR))], pr=None,
+                                     not_named=[CI_OTHER_PR])])
+
+
+@case
+def CI82_ready_by_pull_url_waits_on_the_number_in_it():
+    """CI82. gh pr ready <pull URL> waits on the PR number in the URL, so gh pr merge N closes it, and so does a
+    merge by the same URL: passes. Control: the URL wait alone blocks on PR N"""
+    url = "https://github.com/%s/%s/pull/%s" % (CI_OWNER, CI_REPO, CI_PR)
+    wait = [ready(command="gh pr ready %s" % url)]
+    return (["merge by number: " + p for p in silent_with_control(wait + [shell("gh pr merge %s" % CI_PR)], wait)]
+            + ["merge by the same URL: " + p
+               for p in silent_with_control(wait + [shell("gh pr merge %s" % url)], wait)])
+
+
+@case
+def CI83_merge_with_only_flags_and_flag_values_is_bare_and_closes_the_wait():
+    """CI83. gh pr merge with only flags and their values, and no PR number, is bare, so it closes the wait on N:
+    --squash --body "x", --squash --body-file notes.md and --squash --subject "Fix" each pass. Control: a merge
+    with --body "x" and PR 1111 closes nothing, and the wait on N blocks"""
+    wait = [ready()]
+    problems = []
+    for flags in ('--squash --body "x"', "--squash --body-file notes.md", '--squash --subject "Fix"'):
+        problems += ["gh pr merge %s: %s" % (flags, p)
+                     for p in silent_with_control(wait + [shell("gh pr merge " + flags)], wait)]
+    problems += ["control, --body then PR %s: %s" % (CI_OTHER_PR, p)
+                 for p in expect_block(wait + [shell('gh pr merge --squash --body "x" %s' % CI_OTHER_PR)],
+                                       not_named=[CI_OTHER_PR])]
+    return problems
+
+
+@case
+def CI84_merge_with_auto_closes_nothing():
+    """CI84. gh pr merge N --auto, gh pr merge N --auto --squash and a bare gh pr merge --auto close nothing, since
+    nothing has merged yet: each leaves the wait on N open, so it blocks and names PR N. Control: gh pr merge N
+    --squash closes the wait"""
+    wait = [ready()]
+    return (["gh pr merge N --auto: " + p
+             for p in expect_block(wait + [shell("gh pr merge %s --auto" % CI_PR)])]
+            + ["gh pr merge N --auto --squash: " + p
+               for p in expect_block(wait + [shell("gh pr merge %s --auto --squash" % CI_PR)])]
+            + ["bare gh pr merge --auto: " + p for p in expect_block(wait + [shell("gh pr merge --auto")])]
+            + ["control, gh pr merge N --squash: " + p
+               for p in expect_silent(wait + [shell("gh pr merge %s --squash" % CI_PR)])])
+
+
+@case
+def CI85_ready_on_a_shell_variable_is_closed_by_a_merge_or_close_of_any_pr():
+    """CI85. gh pr ready $PR opens a wait on an unknown number, which a merge or close of any PR closes, as a bare
+    wait is: gh pr merge N and gh pr close N each pass. Control: the wait alone blocks"""
+    wait = [ready(command="gh pr ready $PR")]
+    return (["gh pr merge N: " + p
+             for p in silent_with_control(wait + [shell("gh pr merge %s" % CI_PR)], wait, pr=None)]
+            + ["gh pr close N: " + p
+               for p in silent_with_control(wait + [shell("gh pr close %s" % CI_PR)], wait, pr=None)])
+
+
+@case
+def CI86_merge_on_a_shell_variable_is_bare_and_closes_a_numbered_wait():
+    """CI86. gh pr merge $PR, whose PR word is a shell variable, is bare, so it closes the wait on PR N, as a merge
+    of any PR does: passes. Control: the wait on PR N alone blocks"""
+    wait = [ready()]
+    return silent_with_control(wait + [shell("gh pr merge $PR")], wait)
+
+
+@case
+def CI87_full_size_flags_only_merge_closes_the_wait():
+    """CI87. full size: 2000 text records, then a ready call of PR N, then gh pr merge --squash --body "x", which is
+    bare and closes the wait: passes. Control: the same session without the merge blocks on PR N"""
+    items = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    items.append(ready())
+    return silent_with_control(items + [shell('gh pr merge --squash --body "x"')], items)
 
 
 if __name__ == "__main__":
