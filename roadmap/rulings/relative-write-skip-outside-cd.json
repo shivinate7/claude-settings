@@ -1,0 +1,10 @@
+{
+ "id": "relative-write-skip-outside-cd",
+ "at": "2026-11-08T11:23:00-06:00",
+ "title": "The relative-write clause is skipped only after an outside-home cd",
+ "ruling": "Lane ruling 2026-11-08 11:23 CST, under coordinator grant 10:43 CST: the relative-write clause is skipped for a segment only when (a) the last absolute or ~ cd landed outside the home and (b) the folder the segment runs in is outside the home. A variable cd, bare cd, cd -, popd or unknown folder reset (a). An absolute cd into the home is still judged.",
+ "quote": "lane ruling 11:23 CST (Nov 8), under coordinator grant 10:43 CST",
+ "source": "PR #2197 body; its only home was #2197's edit of docs/decisions/an-agent-outside-its-home-tree-must-stop.md. Lane guard-relative-write-escape writes the sentence into that file in its PR, which is its home on main when merged. Filed by triage.",
+ "status": "open",
+ "step": "guard-relative-write-escape"
+}

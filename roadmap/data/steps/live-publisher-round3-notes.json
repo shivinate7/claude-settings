@@ -1,0 +1,14 @@
+{
+ "id": "live-publisher-round3-notes",
+ "title": "File the four round 3 limits of #3147 as notes in docs/debts/notes.md",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane live-publisher-tracked (#3147, handed in to runner 10 at 7c8ad4418) asked who files them; a commit on #3147 would stale its review record.",
+ "source": "lane live-publisher-tracked, 11:59 CST Nov 13",
+ "note": "Triage pick 12:02 CST Nov 13, undoable: a later lane files them as notes, not debts. Limits: (1) a fresh closed read winning over a prev row is not test-pinned; (2) pages.json counts are triage's claim; (3) a \"007\" hold line holds nothing silently; (4) the idle-lanes reader claim is unverified until #3142 lands. Triage's save list for publish_live.py changed: held.txt (required, empty = no holds), pages.json (page count per list), items/.complete, a new folder each run, prev.json ({} the first time).",
+ "updatedAt": "2026-11-13T12:02:44-06:00"
+}
