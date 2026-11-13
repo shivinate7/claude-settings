@@ -160,7 +160,7 @@ Design:
   age lookup prints "age unknown" and keeps the line. No prompt can open: GIT_TERMINAL_PROMPT=0,
   GCM_INTERACTIVE=never, and ssh in BatchMode with a 3 s ConnectTimeout, unless the caller set its own
   ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start
-  and one network call when the sha is unchanged. When it moved, at most four git starts. Files are
+  and one network call when the sha is unchanged (not pinned). When it moved, at most four git starts. Files are
   written only in the cache, and only on a move. Test: a process-start stand-in and a files-written
   snapshot, as in `hooks/test_daily_note.py`.
 - Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
