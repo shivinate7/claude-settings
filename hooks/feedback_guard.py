@@ -1549,7 +1549,7 @@ def inbox_stop(hook):
         if reasons:
             out.update(decision="block", reason="Feedback inbox (decision owner-feedback-inbox): "
                        + "; ".join(r.rstrip(".") for r in reasons)
-                       + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                       + (". The check reads the feedback log at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
                           " message to that repo's triage session, and put open standing ids in the handoff"
                           + (", or end a settled item's line with [closed]."
