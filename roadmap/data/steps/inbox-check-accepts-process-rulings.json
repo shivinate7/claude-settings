@@ -1,0 +1,14 @@
+{
+ "id": "inbox-check-accepts-process-rulings",
+ "title": "The owner-feedback Stop check accepts a process-only ruling whose home is roadmap/rulings",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Possible false alarm (coordinator 12:05 CST Nov 13): the check refused a lane's inbox item for R67 (drain-first-hold) because the ruling lives on origin/roadmap, not main. R67 orders work and rules no behaviour of a lane's code, so no decision record on main is needed.",
+ "source": "coordinator 12:05 CST Nov 13, lane rebuilding #2826/#2892",
+ "note": "Todo. Triage judgement: a ruling file marked process-only on roadmap counts as a home for a lane inbox item; a ruling that rules behaviour still needs a decision record on main. Red first on R67; verify the check's own record of the false alarm first (verification-cry-wolf-guard-is-spent).",
+ "updatedAt": "2026-11-13T12:05:14-06:00"
+}
