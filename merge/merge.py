@@ -400,9 +400,26 @@ def rate_wait(headers, n, now):
         after = reset - now if reset is not None and headers.get("x-ratelimit-remaining") == "0" else 0
     return min(math.ceil(after) if after > 0 else RATE_LADDER[min(n, len(RATE_LADDER)) - 1], RATE_LADDER[-1])  # whole seconds, rounded up
 
-def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, before_wait=None):
+def net_method(args):
+    """-> the HTTP method a `gh` command sends: its LAST -X (or --method), else POST when it passes fields or --input, else GET."""
+    method, fields = None, False
+    for i, a in enumerate(args):
+        if a in ("-X", "--method") and i + 1 < len(args):
+            method = args[i + 1]
+        elif a.startswith("--method="):
+            method = a[len("--method="):]
+        elif a.startswith("-X") and len(a) > 2:
+            method = a[2:].lstrip("=")  # -XPUT or -X=PUT
+        fields = fields or a in ("-f", "-F") or a.split("=")[0] in ("--field", "--raw-field", "--input") or (a[:2] in ("-f", "-F") and len(a) > 2 and a[2] != "-")
+    return (method or ("POST" if fields else "GET")).upper()
+
+def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, before_wait=None, method="GET", idempotent=False, landed=None):
     """-> (code, output, retries used). The output has no `gh api -i` header block. Runs `call` again after `pause(wait)` while it fails with a network
     error, up to `retries` times. The wait is NET_PAUSE, or on a rate limit rate_wait(). Before a rate wait it prints one line that names `what`.
+    A 5xx or network error may come after the call ran, so it is resent only when `method` is GET or HEAD, or the caller says `idempotent`
+    (a resend is harmless by design, said in a comment at the call). A rate limit refused the call before it ran, so any method retries it.
+    Any other write may have landed, so `landed()` is asked first (decision standing-merge-grant: check, then retry): True returns (0, "", retries) with no resend,
+    False resends, and None (the check could not tell) stops with the failed reply. A write with no `landed` is sent once.
     `before_wait(wait)` runs before each rate wait. It extends the merge lock past the wait, or raises NetStop: then the call stops in place of the wait."""
     n = 0
     while True:
@@ -410,8 +427,15 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
         headers, out = split_headers(out)
         if n >= retries or not is_net(c, out):
             return c, out, n
+        rate = bool(RATE_LIMIT.search(out))
+        if not rate and not idempotent and method.upper() not in ("GET", "HEAD"):
+            did = landed() if landed else None
+            if did is None:
+                return c, out, n
+            if did:
+                return 0, "", n
         n += 1
-        if not RATE_LIMIT.search(out):
+        if not rate:
             pause(NET_PAUSE)
             continue
         wait = rate_wait(headers, n, now())
@@ -819,15 +843,15 @@ class GhLock(Lock):
         self.now, self.pause = now, pause
         self.cwd = cwd  # where `gh` runs: {owner}/{repo} in a route names the repo of this directory
 
-    def api(self, *a, once=False):
-        """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
+    def api(self, *a, once=False, idempotent=False, landed=None):
+        """The one home of every lock `gh api` call. A rate limit, or a network error on a GET, an `idempotent` call or a write whose `landed` check says it did not land, is retried NET_RETRIES times with `self.pause`
         (the ladder or GitHub's reset time on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
         Every call asks for the headers (-i), and retry_net drops the block. Once this run holds the lock, extend_for pushes the expiry past each rate wait.
         `once`: no retry and no wait at all. The extension calls and the delete of an expired lock use it: a retry could land after another run's take.
         ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
         retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
-        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for, net_method(a), idempotent, landed)
         return c, out
 
     def read(self, b):
@@ -857,10 +881,15 @@ class GhLock(Lock):
             raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
+        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha", idempotent=True)  # idempotent by design: a commit object no ref names, so a resend leaves at most one orphan
         if c:
             raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
-        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
+        def took():  # a lost reply may still have made the ref: it is ours when it names our commit, not made when it is missing, and no answer when the read fails or another run holds it
+            c3, got = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
+            if not c3:
+                return True if got.strip() == sha.strip() else None
+            return False if not is_net(c3, got) and ("404" in got or "Not Found" in got) else None
+        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}", landed=took)
         if c:
             if is_net(c, out):
                 raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
@@ -888,7 +917,7 @@ class GhLock(Lock):
 
     @staticmethod
     def gone(out):
-        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here).
+        """The ref is not there: a delete that finds this has nothing left to do.
         A network error or rate limit is never "gone", though its text may hold "404" (a user id, a request id)."""
         return not is_net(1, out) and ("404" in out or "Not Found" in out or "does not exist" in out)
 
@@ -900,7 +929,7 @@ class GhLock(Lock):
         """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
-            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
+            raise NetStop("unlock failed " + LOCK_CITE + ", still failing. Run again: " + out)
         if c and not self.gone(out):
             raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return not c
@@ -944,9 +973,9 @@ class Host:
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
-    def gh(self, args, cwd=None):
-        """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
-        `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
+    def gh(self, args, cwd=None, idempotent=False, landed=None):
+        """-> (code, output). The one home of every Host `gh` call. A network error on a GET, or on a call marked `idempotent`, is retried NET_RETRIES times with
+        `self.pause`; after that NetStop. Any other write is sent once on a 5xx or network error, unless the caller gives `landed` (retry_net checks it first); a rate limit retries any method. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
         raw = []
 
@@ -954,7 +983,7 @@ class Host:
             c, out = sh(["gh", *args], cwd=cwd)
             raw[:] = [out]
             return c, out
-        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, raw[0] if "-i" in args else out
@@ -962,7 +991,7 @@ class Host:
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None, body=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
         Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
@@ -973,12 +1002,12 @@ class Host:
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
         if body is None:
-            return self.gh([*args, *extra], self.cwd)
+            return self.gh([*args, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
         fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(body, f)
-            return self.gh([*args, "--input", tmp, *extra], self.cwd)
+            return self.gh([*args, "--input", tmp, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
@@ -1113,7 +1142,7 @@ class Host:
             raise Stop(f"opening the pull request for {branch} failed: {e} {DRAFT_CITE}")
 
     def set_body(self, n, body):
-        c, out = self.api(f"pulls/{n}", method="PATCH", body={"body": body})
+        c, out = self.api(f"pulls/{n}", method="PATCH", body={"body": body}, idempotent=True)  # idempotent by design: a PATCH sets the body to a value, so a resend writes the same value
         if c:
             raise Stop(f"editing the body of #{n} failed: " + out + " " + FREEZE_CITE)
 
@@ -1741,9 +1770,18 @@ class Host:
         state_now = p["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
+        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
+            c4, v = self.api(f"pulls/{n}")
+            try:
+                d = json.loads(v) if not c4 else None
+                if d["merged"]:
+                    return True if d["head"]["sha"] == sha else None  # merged at another head is not this run's merge: no resend
+                return False if d["state"].upper() == "OPEN" else None
+            except (ValueError, KeyError, TypeError, AttributeError):
+                return None
         lost = False
         try:
-            c, out = self.api(f"pulls/{n}/merge", method="PUT", body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", landed=merged_at_sha, body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
@@ -1764,8 +1802,7 @@ class Host:
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
             raise NetStop(f"the merge call of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
                           f"if it merged, do the after-merge steps by hand; if it is open, run again {REFUSED_CITE}.\n{view}")
-        # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
-        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
+        # A refusal reply with the PR still OPEN is proven: gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
         return None, out
 
 # ------------------------------------------------------------------ git steps
