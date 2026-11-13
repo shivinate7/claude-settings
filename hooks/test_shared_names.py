@@ -535,6 +535,51 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
     return not problems, "; ".join(problems) or "both prefixes read the shared tags"
 
 
+def _imports_from_shared_names(tree):
+    """The names a module binds by importing from shared_names, under their own or an alias."""
+    return {alias.asname or alias.name for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
+
+
+def _module_level_bindings(tree, names):
+    """The names in `names` that a module defines: a def, a class, or a plain assignment, at any depth."""
+    defined = {node.name for node in ast.walk(tree)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names}
+    assigned = {target.id for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                for target in node.targets if isinstance(target, ast.Name) and target.id in names}
+    return sorted(defined | assigned)
+
+
+def case_merge_role_reader_is_imported_not_copied():
+    """merge/merge.py takes the merge tiers, the role reader and the role path from shared_names and defines none of them.
+    The coordinator-scope rule and the merge tool read one role file, so one reader must serve both."""
+    with open(os.path.join(HERE, "..", "merge", "merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    want = {"MERGE_ROLES", "read_merge_role", "role_path"}
+    problems = []
+    missing = sorted(want - _imports_from_shared_names(tree))
+    if missing:
+        problems.append("not imported from shared_names: %s" % ", ".join(missing))
+    copies = _module_level_bindings(tree, want)
+    if copies:
+        problems.append("merge.py defines its own: %s" % ", ".join(copies))
+    return not problems, "; ".join(problems) or "merge.py imports the role reader and defines none of it"
+
+
+def case_guard_merge_reads_the_shared_merge_tiers():
+    """hooks/guard_merge.py tests a session's merge role against MERGE_ROLES from shared_names. It binds no tier tuple of
+    its own (ROLE_TIERS), which would drift from the merge tool's set."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    problems = []
+    if "MERGE_ROLES" not in _imports_from_shared_names(tree):
+        problems.append("MERGE_ROLES is not imported from shared_names")
+    copies = _module_level_bindings(tree, {"ROLE_TIERS", "MERGE_ROLES"})
+    if copies:
+        problems.append("guard_merge.py binds its own: %s" % ", ".join(copies))
+    return not problems, "; ".join(problems) or "guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -572,6 +617,10 @@ CASES = [
      case_scan_flags_a_copy_whose_default_sits_in_a_helper),
     ("(q) a fallback copy whose .claude default sits in a helper is not flagged",
      case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
+    ("(r1) merge.py imports the role reader, MERGE_ROLES and role_path from shared_names and defines none of them",
+     case_merge_role_reader_is_imported_not_copied),
+    ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple of its own",
+     case_guard_merge_reads_the_shared_merge_tiers),
 ]
 
 
