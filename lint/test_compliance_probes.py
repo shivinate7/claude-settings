@@ -1572,19 +1572,33 @@ class LiveHooks(unittest.TestCase):
         self.addCleanup(shutil.rmtree, home, True)
         if text is not None or dangling:
             os.makedirs(os.path.join(home, ".claude"))
-        path = os.path.join(home, ".claude", "settings.json")
+        self.settings_file(os.path.join(home, ".claude", "settings.json"), text, dangling)
+        return home
+
+    def config_dir(self, text):
+        """A CLAUDE_CONFIG_DIR folder whose settings.json holds `text`, as `live()` makes ~/.claude; no file when `text` is None."""
+        folder = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.settings_file(os.path.join(folder, "settings.json"), text)
+        return folder
+
+    def settings_file(self, path, text, dangling=False):
+        """Write `text` to `path`; leave no file when `text` is None. `dangling`: make `path` a link to a file that is not there."""
         if dangling:
             self.dangling_link(path)
         elif text is not None:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(text)
-        return home
 
-    def probe(self, repo, home):
-        """(exit code, stdout, stderr) of the hooks group on `repo` with HOME at `home`. Repo.probe passes no env."""
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}  # the probe reads $HOME/.claude, per the spec
+    def probe(self, repo, home, config=None, cwd=None):
+        """(exit code, stdout, stderr) of the hooks group on `repo` with HOME at `home`. `config`: the CLAUDE_CONFIG_DIR the run
+        gets, `""` included. None strips the variable, so this process's own value cannot leak into a case that does not set it.
+        `cwd`: the folder the run starts in."""
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        if config is not None:
+            env["CLAUDE_CONFIG_DIR"] = config
         env["HOME"] = env["USERPROFILE"] = home  # USERPROFILE is the home that expanduser reads on Windows
-        done = subprocess.run([sys.executable, PROBES, "hooks", repo.root], capture_output=True, text=True, env=env)
+        done = subprocess.run([sys.executable, PROBES, "hooks", repo.root], capture_output=True, text=True, env=env, cwd=cwd)
         return done.returncode, done.stdout, done.stderr
 
     def check(self, clone_text, live_text):
@@ -1730,9 +1744,80 @@ class LiveHooks(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
 
-    def trusts(self, repo):
-        """The line `hooks` prints right after the verdict for in shape and out: the clone is the side it trusts."""
-        return "  trusts: clone (%s); live (~/.claude/settings.json) is the copy checked" % os.path.join(repo.root, "settings.json")
+    def test_a_config_dir_settings_file_is_the_live_file_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, the live file is <dir>/settings.json. The ~/.claude copy, equal to the clone, is not read."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(self.source()))
+        cfg = self.config_dir(self.text(edited))
+        repo = self.clone(self.text(self.source()))
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))  # scope first: the home copy is there
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the <dir> copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo, os.path.join(cfg, "settings.json")), out)
+
+    def test_a_config_dir_settings_file_alone_decides_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, a missing ~/.claude/settings.json is not read: <dir>/settings.json decides."""
+        text = self.text(self.source())
+        home = self.live(None)
+        cfg = self.config_dir(text)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(home, ".claude", "settings.json")))  # scope first: no home copy
+        self.assertTrue(os.path.isfile(os.path.join(cfg, "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_config_dir_without_settings_file_is_unknown_and_home_is_not_read(self):
+        """With CLAUDE_CONFIG_DIR set to a folder with no settings.json, the probe is unknown. It does not fall back to a good ~/.claude copy."""
+        text = self.text(self.source())
+        home = self.live(text)
+        cfg = self.config_dir(None)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(cfg, "settings.json")))  # scope first: the folder is there, its file is not
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn(repr(os.path.join(cfg, "settings.json")), head(out), err or out)  # the reason names the file it read
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_an_empty_config_dir_falls_back_to_home(self):
+        """CLAUDE_CONFIG_DIR set to an empty string is unset: the live file is ~/.claude/settings.json. The run starts in an
+        empty folder, so a relative read of `settings.json` finds no file and cannot pass for the fallback."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(edited))  # the home copy holds the change, so a fallback to it shows in the diff
+        repo = self.clone(self.text(self.source()))
+        empty = tempfile.mkdtemp(prefix="cwd-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, empty, True)
+        self.assertEqual(os.listdir(empty), [])  # scope first: nothing relative to find
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config="", cwd=empty)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the home copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo), out)
+
+    def test_in_shape_trusts_line_names_the_live_file_read(self):
+        """The trusts line names the file the probe read: ~/.claude/settings.json when the variable is unset or empty,
+        and <dir>/settings.json when it is set."""
+        text = self.text(self.source())
+        cfg = self.config_dir(text)
+        for name, config, live in (("unset", None, "~/.claude/settings.json"),
+                                   ("empty", "", "~/.claude/settings.json"),
+                                   ("set", cfg, os.path.join(cfg, "settings.json"))):
+            with self.subTest(name):
+                repo = self.clone(text)
+                code, out, err = self.probe(repo, self.live(text), config=config)
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo, live)], out)
+
+    def trusts(self, repo, live="~/.claude/settings.json"):
+        """The line `hooks` prints right after the verdict for in shape and out: the clone is the side it trusts, and `live` is the file read."""
+        return "  trusts: clone (%s); live (%s) is the copy checked" % (os.path.join(repo.root, "settings.json"), live)
 
     def test_in_shape_prints_the_trusts_line_right_after_the_verdict(self):
         for name, doc in (("the same hooks", self.source()), ("no hooks on either side", {"hooks": {}})):
@@ -1805,6 +1890,45 @@ class LiveHooks(unittest.TestCase):
     def test_skill_parent_covered_check_drops_the_same_hooks_block_comparison(self):
         text = self.skill_text()
         self.assertFalse("same `hooks` block" in text, "SKILL.md still compares the live hooks block with the parent's by hand")
+
+    # A claim that the probe never reads CLAUDE_CONFIG_DIR: the variable named after `never`, or `not read` right after it.
+    NEVER_READS = re.compile(r"\bnever\b[^.;]{0,40}CLAUDE_CONFIG_DIR|CLAUDE_CONFIG_DIR\W{0,3}(?:is )?not read\b")
+
+    def probes_md_hooks(self):
+        """The Hooks section of probes.md as one run of words."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            text = handle.read()
+        start = text.find("\n## Hooks\n")
+        self.assertGreaterEqual(start, 0, "probes.md has no `## Hooks` section")  # scope first
+        end = text.find("\n## ", start + 1)
+        return " ".join(text[start:end if end > 0 else len(text)].split())
+
+    def test_probe_docstring_hooks_paragraph_does_not_say_config_dir_is_never_read(self):
+        doc = load_probes().__doc__ or ""
+        start, end = doc.find("\nhooks:"), doc.find("\nscorecard:")
+        self.assertTrue(start >= 0 and end > start, "the probe docstring has no `hooks:` paragraph before `scorecard:`")  # scope first
+        paragraph = " ".join(doc[start:end].split())
+        found = self.NEVER_READS.search(paragraph)
+        self.assertIsNone(found, "the docstring's hooks paragraph still says: %s" % (found and found.group(0)))
+        self.assertNotIn("always under the home folder", paragraph, "the hooks paragraph still says the live file is always under the home")
+
+    def test_probes_md_hooks_section_does_not_say_config_dir_is_never_read(self):
+        section = self.probes_md_hooks()
+        self.assertIn("compliance_probes.py hooks", section, "probes.md's Hooks section does not name the hooks probe")  # scope first
+        found = self.NEVER_READS.search(section)
+        self.assertIsNone(found, "probes.md's Hooks section still says: %s" % (found and found.group(0)))
+
+    def test_skill_names_the_hooks_probe_by_the_parent_placeholder(self):
+        text = self.skill_text()
+        self.assertTrue("<parent>/lint/compliance_probes.py hooks" in text,
+                        "SKILL.md does not name the hooks probe as `<parent>/lint/compliance_probes.py hooks`, as the rest of SKILL.md does")
+        self.assertFalse("$P/lint/compliance_probes.py" in text or "$PY" in text,
+                         "SKILL.md still names the hooks probe with $PY or $P, not <parent>")
+
+    def test_skill_does_not_say_config_dir_is_never_read(self):
+        text = self.skill_text()
+        found = self.NEVER_READS.search(text)
+        self.assertIsNone(found, "SKILL.md's parent-covered check still says: %s" % (found and found.group(0)))
 
 
 def live_anchors():
