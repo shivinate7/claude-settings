@@ -882,10 +882,16 @@ def missing_transcript():
     return os.path.join(tempfile.mkdtemp(prefix="transcript_", dir=ROOT), "transcript.jsonl")
 
 
-def opus_override(cfg, session=OV_SESSION):
-    """(kind, until as an aware datetime or None, role) from the session's Opus override file, or None when it is missing
-    or unreadable. A null `until` is no end time: it reads as None, not as a missing file."""
-    path = os.path.join(cfg, "state", "override", "opus", session + ".json")
+OPUS_FOLDER = "opus"  # the timed Opus override: `opus 2h`, and a plain ask with a length
+OPUS_TURN_FOLDER = "opus-turn"  # a plain ask with no length: the owner's turn only (ruling own-761-d, 14:21 CST Nov 13)
+TURN_BACKSTOP = timedelta(hours=2)  # a turn file's `until`, which ends the grant only when the owner's next prompt's removal fails
+OV_AGENT_ID = "agent-turn-0001"  # an agent's id on a take() call, in the shape take() reads
+
+
+def opus_grant_file(cfg, folder, session=OV_SESSION):
+    """(kind, until as an aware datetime or None, role) from the session's Opus file in `folder` under state/override, or
+    None when it is missing or unreadable. A null `until` reads as None, not as a missing file."""
+    path = os.path.join(cfg, "state", "override", folder, session + ".json")
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
@@ -899,18 +905,48 @@ def opus_override(cfg, session=OV_SESSION):
         return None
 
 
-def no_end_time(until):
-    """True when an Opus override has no end time: its `until` is null, the shape a plain ask with no length writes
-    (owner item 601 a). A far date would not pass."""
-    return until is None
+def opus_override(cfg, session=OV_SESSION, folder=None):
+    """(kind, until, role) for the session's Opus grant, or None. With no folder, the timed file, else the turn file, whose
+    kind reads as "opus" so one check covers both. With a folder, that file alone, kind as written."""
+    if folder is not None:
+        return opus_grant_file(cfg, folder, session)
+    got = opus_grant_file(cfg, OPUS_FOLDER, session)
+    if got is None:
+        got = opus_grant_file(cfg, OPUS_TURN_FOLDER, session)
+        if got is not None:
+            got = ("opus",) + got[1:]
+    return got
 
 
-def take_spawn(cfg, role, at=OV_NOW):
+def backstop_end(got, at):
+    """True when an Opus grant ends TURN_BACKSTOP after the grant at `at`: the end a turn file carries until the owner's
+    next message removes it."""
+    return got is not None and got[1] is not None and abs((got[1] - (at + TURN_BACKSTOP)).total_seconds()) <= 1
+
+
+def turn_path(cfg, session=OV_SESSION):
+    return os.path.join(cfg, "state", "override", OPUS_TURN_FOLDER, session + ".json")
+
+
+def write_turn_file(cfg, role=None, raw=None):
+    """A turn file in the design's shape, written by hand: its role and the 2h backstop from OV_NOW. `raw` writes those
+    bytes instead, for a corrupt file."""
+    os.makedirs(os.path.dirname(turn_path(cfg)), exist_ok=True)
+    with open(turn_path(cfg), "wb") as handle:
+        if raw is not None:
+            handle.write(raw)
+        else:
+            end = (OV_NOW + TURN_BACKSTOP).astimezone(timezone.utc).isoformat()
+            handle.write(json.dumps({"kind": "opus-turn", "role": role, "until": end}).encode("utf-8"))
+
+
+def take_spawn(cfg, role, at=OV_NOW, agent_id=None):
     """override.take() for an Opus spawn of `role` that agent-model-cap refused, in the config dir `cfg`, at instant `at`.
-    No cwd, so no step grant is read. Returns what take() returns."""
+    `agent_id` is the caller's agent, or None for the owner's session. No cwd, so no step grant is read. Returns what
+    take() returns."""
     override, _ = hooks_modules()
     with config_dir_env(cfg):
-        return override.take(OV_SESSION, None, at, rule=override.OPUS_RULE, spawn_role=role, cwd=None)
+        return override.take(OV_SESSION, agent_id, at, rule=override.OPUS_RULE, spawn_role=role, cwd=None)
 
 
 def take_at(cfg, at, agent_id=None):
@@ -922,8 +958,10 @@ def take_at(cfg, at, agent_id=None):
 
 
 def opus_files(cfg):
-    """Every file under the session's Opus override folder, as paths relative to the config dir."""
-    return [f for f in ov_files(cfg) if f.startswith(os.path.join("state", "override", "opus") + os.sep)]
+    """Every file under the session's Opus override folders (timed and turn), as paths relative to the config dir."""
+    folders = (os.path.join("state", "override", OPUS_FOLDER) + os.sep,
+               os.path.join("state", "override", OPUS_TURN_FOLDER) + os.sep)
+    return [f for f in ov_files(cfg) if f.startswith(folders)]
 
 
 def lifted(result):
@@ -942,8 +980,8 @@ def case_opus_ask_judge_approved_lifts_every_role():
     got = opus_override(cfg)
     check("opus ask: a judge-approved prompt with no role word writes an override for every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
-    check("opus ask: a plain ask with no length has no end time: it lasts until session end",
-          got is not None and no_end_time(got[1]), "got %r" % (got,))
+    check("opus ask: a plain ask with no length ends at the owner's next message, backstopped at 2h",
+          backstop_end(got, OV_NOW), "got %r" % (got,))
     took = take_spawn(cfg, "reviewer")
     check("opus ask: the judge-approved override lifts an Opus reviewer spawn refusal", lifted(took),
           "take() returned %r for a reviewer spawn" % (took,))
@@ -1126,8 +1164,8 @@ def case_opus_ask_first_word_opus_is_plain_unless_keyword():
           "judge calls %d" % len(calls))
     check("opus ask: `Opus judges please, send them` writes an override for every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
-    check("opus ask: `Opus judges please, send them` writes an override with no end time",
-          got is not None and no_end_time(got[1]), "got %r" % (got,))
+    check("opus ask: `Opus judges please, send them` writes a turn grant backstopped at 2h",
+          backstop_end(got, OV_NOW), "got %r" % (got,))
     cfg, calls, _, _ = opus_type("opus 2h please", answer={"ok": True})
     check("opus ask: the keyword prompt `opus 2h please` makes no judge call", calls == [],
           "judge calls %d" % len(calls))
@@ -1659,7 +1697,7 @@ def case_opus_ask_source_keyword_forms_are_gated():
 
 
 # PLAIN ASK SCOPE (decision owner-override). A plain ask that names no role takes its roles from the owner's nearby typed
-# prompts, read by scope_judge. When those name none, it grants every role with no end time, and it never asks. These cases call
+# prompts, read by scope_judge. When those name none, it grants every role as the owner's turn, and it never asks. These cases call
 # grant_opus_ask directly, with the yes/no judge and the scope read stood in. A case about excluded records checks first
 # that the read runs on the plain prompt, and only then checks the excluded words, so an empty read cannot pass that
 # check by accident.
@@ -2025,13 +2063,14 @@ def case_opus_scope_read_sees_every_role_before_it_runs():
         seen = stub.seen
         check("opus scope: during the read the Opus override file exists with role null",
               seen is not None and seen[0] == "opus" and seen[2] is None, "file during the read %r" % (seen,))
-        check("opus scope: during the read the file has no end time: it lasts until session end",
-              seen is not None and no_end_time(seen[1]), "file during the read %r" % (seen,))
+        check("opus scope: during the read the file ends at the owner's next message, backstopped at 2h",
+              backstop_end(seen, OV_NOW), "file during the read %r" % (seen,))
 
 
 def case_opus_scope_a_kill_during_the_read_leaves_every_role():
     # A kill during the read, modelled as the KeyboardInterrupt or SystemExit the interpreter raises, leaves an every-role
-    # override with no end time: no scope means every role, and a plain ask with no length has no end.
+    # turn grant: no scope means every role, and a plain ask with no length ends at the owner's next message, backstopped
+    # at 2h (ruling own-761-d, 14:21 CST Nov 13).
     for name, kill in (("a KeyboardInterrupt", KeyboardInterrupt()), ("a SystemExit", SystemExit(1))):
         cfg = ov_cfg()
         stub = ScopeStub(error=kill)
@@ -2039,20 +2078,20 @@ def case_opus_scope_a_kill_during_the_read_leaves_every_role():
         ran = len(stub.calls) == 1
         check("opus scope: %s during the read, the read was reached" % name, ran, "read calls %d" % len(stub.calls))
         got = opus_override(cfg)
-        check("opus scope: %s during the read leaves an every-role override with no end time" % name,
-              got is not None and got[0] == "opus" and got[2] is None and no_end_time(got[1]),
+        check("opus scope: %s during the read leaves an every-role turn grant backstopped at 2h" % name,
+              got is not None and got[0] == "opus" and got[2] is None and backstop_end(got, OV_NOW),
               "got %r; files %r" % (got, ov_files(cfg)))
 
 
 def case_opus_scope_valid_answer_ends_narrowed():
-    # A valid answer still narrows the every-role file, and the narrowed file keeps the no-end of the plain ask.
+    # A valid answer still narrows the every-role turn grant, and the narrowed grant keeps the 2h backstop of the plain ask.
     cfg = ov_cfg()
     scope_grant("send opus now", [owner_turn("builders should do the refactor next")], ScopeStub(answer=["builder"]), cfg=cfg)
     got = opus_override(cfg)
     check("opus scope: a valid answer ends the file narrowed to builder",
           got is not None and got[0] == "opus" and got[2] == "builder", "got %r" % (got,))
-    check("opus scope: the narrowed file keeps the no-end time of the plain ask",
-          got is not None and no_end_time(got[1]), "got %r" % (got,))
+    check("opus scope: the narrowed turn grant keeps the 2h backstop of the plain ask",
+          backstop_end(got, OV_NOW), "got %r" % (got,))
 
 
 # NEGATION AFTER A ROLE, AND THE MODEL'S ROLE NAMES (decision owner-override). A negation within three words after a role
@@ -2144,9 +2183,8 @@ def case_opus_ask_exclusion_words_grant_nothing():
 
 
 def case_opus_ask_plain_lists_still_grant_both():
-    # A plain list (and, a comma, or) between two roles names both roles. A plain ask with no length has no end time: it
-    # lasts until session end or `opus off`, and its file's `until` is null (owner item 601 a, page save 12:54 CST Nov
-    # 12). The 30-minute case keeps its length check.
+    # A plain list (and, a comma, or) between two roles names both roles. A plain ask with no length is a turn grant, backstopped
+    # at 2h (ruling own-761-d, 14:21 CST Nov 13). The 30-minute case keeps its length check.
     for prompt, minutes in (("send opus builders and reviewers", None), ("send opus builders, reviewers", None),
                             ("use opus for builders or reviewers for 30m", 30)):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
@@ -2155,8 +2193,8 @@ def case_opus_ask_plain_lists_still_grant_both():
         check("opus ask: %r names builder and reviewer, as the sorted list" % prompt,
               got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
         if minutes is None:
-            check("opus ask: %r has no length, so no end time: it lasts until session end" % prompt,
-                  got is not None and no_end_time(got[1]), "got %r" % (got,))
+            check("opus ask: %r has no length: its turn grant is backstopped at 2h" % prompt, backstop_end(got, OV_NOW),
+                  "got %r" % (got,))
         else:
             check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
                   got is not None and got[1] is not None
@@ -2863,7 +2901,8 @@ def case_override_queued_plain_ask_typed_still_reaches_the_judge():
 
 # ONE ROUTE, PART 2 (decision owner-override; owner R12, item 601 a). Four rules, each with its red and its green controls:
 # A the Opus keyword `opus <n>` meets the override keyword's source gate; B a `?` or the word `opus` does not rule a plain
-# override ask out, and the judge decides; C an Opus ask with no length lasts until session end or `opus off`; D a one-act
+# override ask out, and the judge decides; C an Opus ask with no length is the owner's turn, ending at the owner's next message
+# (backstopped at 2h) or at `opus off` (ruling own-761-d, 14:21 CST Nov 13); D a one-act
 # override ends at the owner's next typed prompt. Every case that would call a judge stands it in, so no model runs.
 
 OV_QUESTION_JUDGED = (  # a `?` is no gate: the judge is asked, and a judge no or error keeps the prompt's own result
@@ -3021,34 +3060,248 @@ def case_harness_opus_off_leaves_a_pending_one_act_override():
               lifted(take_at(cfg, OV_NOW + timedelta(minutes=2))), "take() was refused")
 
 
-def case_opus_ask_without_a_length_has_no_end():
-    # C: an Opus ask with no length lasts until session end or `opus off`. The file has no end time: `until` is null.
-    for prompt in ("send opus judges", "send a swarm of opus agents"):
+def case_opus_ask_without_a_length_is_a_turn_grant():
+    # C: an Opus ask with no length grants the owner's turn. It is written to the turn file, with the 2h backstop as its
+    # `until`, and never to the timed file. Unit-less numbers (`opus 4`, `opus 15 please`) are no length on this route, so
+    # they get the same turn (ruling own-761-d, 14:21 CST Nov 13).
+    for prompt in ("send opus judges", "send a swarm of opus agents", "opus 4", "opus 15 please"):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
-        check("opus no length: `%s` reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        got = opus_override(cfg)
-        check("opus no length: `%s` writes an every-role Opus override with no end time" % prompt,
-              got is not None and got[0] == "opus" and got[2] is None and no_end_time(got[1]),
-              "got %r; files %r" % (got, opus_files(cfg)))
+        check("opus turn: `%s` reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        turn = opus_grant_file(cfg, OPUS_TURN_FOLDER)
+        check("opus turn: `%s` writes the turn file for every role, backstopped at 2h" % prompt,
+              turn == ("opus-turn", OV_NOW + TURN_BACKSTOP, None), "turn file %r; files %r" % (turn, ov_files(cfg)))
+        check("opus turn: `%s` writes no timed Opus file" % prompt, opus_grant_file(cfg, OPUS_FOLDER) is None,
+              "timed file %r" % (opus_grant_file(cfg, OPUS_FOLDER),))
 
 
 def case_opus_ask_without_a_length_lifts_at_a_later_time():
-    # C: a reviewer spawn is lifted at any later time while the Opus override stands, not only within two hours.
+    # C: a turn grant lifts a reviewer spawn within its 2h backstop, and not after it. With no typed prompt in between, an
+    # hour later the spawn is still lifted, and a day or 400 days later it is refused.
     cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("opus turn: a reviewer spawn an hour later, with no typed prompt, is lifted",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(hours=1))), "take() was refused")
     for days in (1, 400):
         took = take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(days=days))
-        check("opus no length: a reviewer spawn %d days later is lifted" % days, lifted(took),
-              "take() returned %r" % (took,))
+        check("opus turn: a reviewer spawn %d days later, with no typed prompt, is refused by the backstop" % days,
+              not lifted(took), "take() returned %r" % (took,))
 
 
-def case_opus_ask_without_a_length_receipt_names_no_clock_time():
-    # C: the receipt for a grant with no end names session end, and prints no clock time. A clock time would state an end.
+def case_opus_ask_without_a_length_receipt_says_the_next_message():
+    # C: the receipt for a turn grant says it ends at the owner's next message, and prints no clock time. The 2h backstop is
+    # not the end the owner sees (ruling own-761-d, 14:21 CST Nov 13).
     _, _, out, _ = opus_type("send opus judges", answer={"ok": True})
     lines = [line for line in out.splitlines() if line.startswith("Opus override:")]
-    check("opus no length: the grant prints one Opus receipt line", len(lines) == 1, "receipt lines %r" % (lines,))
+    check("opus turn: the grant prints one Opus receipt line", len(lines) == 1, "receipt lines %r" % (lines,))
     if len(lines) == 1:
-        check("opus no length: the receipt names session end and prints no clock time",
-              "session" in lines[0] and not re.search(r"\d\d:\d\d", lines[0]), "receipt %r" % (lines[0],))
+        check("opus turn: the receipt says the grant ends at the owner's next message",
+              "ends at the owner's next message" in lines[0], "receipt %r" % (lines[0],))
+        check("opus turn: the receipt prints no clock time", not re.search(r"\d\d:\d\d", lines[0]),
+              "receipt %r" % (lines[0],))
+
+
+# THE TURN GRANT (ruling own-761-d, 14:21 CST Nov 13; it rewrites the Opus-ask half of item 601 a). A plain Opus ask
+# with no length grants Opus only to the agents spawned in the owner's turn. Its file is the turn file, backstopped at 2h, and
+# the owner's next typed prompt removes it. A plain ask's agents' resumes are SendMessage calls, which the Opus refusal never
+# reads. Each red case here keeps a green control in the same case, so a pass on the old code is never the only evidence.
+
+
+def case_turn_plain_ask_writes_the_turn_file():
+    # Case 1: a plain ask with no length lifts a reviewer spawn in its own turn (control). It writes the turn file, and no
+    # timed file (red on the old code, which writes an Opus file with no end that the spawn reads).
+    cfg, calls, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("opus turn: `send opus judges` reaches the judge once, the precondition",
+          len(calls) == 1, "judge calls %d" % len(calls))
+    check("opus turn: the grant lifts a reviewer spawn in its own turn", lifted(take_spawn(cfg, "reviewer")),
+          "take() was refused")
+    turn = opus_grant_file(cfg, OPUS_TURN_FOLDER)
+    check("opus turn: the grant is written to the turn file, role null, backstopped at 2h",
+          turn == ("opus-turn", OV_NOW + TURN_BACKSTOP, None), "turn file %r; files %r" % (turn, ov_files(cfg)))
+    check("opus turn: the grant writes no timed Opus file", opus_grant_file(cfg, OPUS_FOLDER) is None,
+          "timed file %r" % (opus_grant_file(cfg, OPUS_FOLDER),))
+
+
+def case_turn_ends_at_the_owners_next_typed_prompt():
+    # Case 2: the owner's next typed prompt ends the turn, so a reviewer spawn after it is refused (red on the old code, which
+    # never ends an Opus grant that has no length). The spawn before the prompt is the control.
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("opus turn: a reviewer spawn is lifted a minute in, before the owner's next prompt (control)",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=1))), "take() was refused")
+    opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(minutes=2))
+    check("opus turn: after the owner's next typed prompt, a reviewer spawn is refused",
+          not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=3))), "take() was lifted")
+
+
+def case_turn_notice_between_the_ask_and_the_spawn_keeps_it():
+    # Case 3: a notice between a role-scoped ask and its spawn keeps the grant, so the reviewer spawn is lifted (control). A
+    # typed prompt after the notice ends it (red on the old code). The builder's end-notice must not cancel `opus reviewers`
+    # before the reviewers spawn (ruling own-761-d, 14:21 CST Nov 13). The notice-tag start has no source, so it is
+    # read as typed by _keyword_typed, which the design uses for removal: that conflict is flagged to the owner.
+    notices = (
+        ("a loop_wakeup notice", "a builder ended its round", {"source": "loop_wakeup"}),
+        ("a system record", "a builder ended its round", {"source": "system"}),
+        ("a notice-tag start with no source", "<system-reminder>a builder ended its round</system-reminder>", None),
+    )
+    for name, text, extra in notices:
+        cfg, calls, _, _ = opus_type("opus reviewers", answer={"ok": True})
+        check("opus turn: %s: `opus reviewers` reaches the judge once, the precondition" % name, len(calls) == 1,
+              "judge calls %d" % len(calls))
+        opus_type(text, cfg=cfg, at=OV_NOW + timedelta(minutes=1), extra=extra)
+        check("opus turn: after %s, a reviewer spawn is still lifted (control)" % name,
+              lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=2))), "take() was refused")
+        opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(minutes=3))
+        check("opus turn: after %s and then the owner's next typed prompt, a reviewer spawn is refused" % name,
+              not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=4))), "take() was lifted")
+
+
+def case_timed_grant_survives_a_plain_ask_and_the_next_typed_prompt():
+    # Case 4: a plain ask after `opus 2h` never narrows or replaces the typed timed grant. The reviewer spawn stays lifted
+    # before and after the owner's next typed prompt, and the timed file keeps its own 2h end (red on the old code, where the
+    # plain builders ask overwrites the timed file with a builder-only grant that has no end).
+    cfg, _, _, _ = opus_type("opus 2h")
+    opus_type("send opus builders", answer={"ok": True}, cfg=cfg, at=OV_NOW + timedelta(minutes=10))
+    check("opus turn: after `opus 2h` and a plain builders ask, a reviewer spawn is still lifted",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=15))), "take() was refused")
+    opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(minutes=20))
+    check("opus turn: after the owner's next typed prompt, a reviewer spawn is still lifted by the typed `opus 2h`",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=30))), "take() was refused")
+    check("opus turn: the typed `opus 2h` file keeps its own 2h end, and no plain ask narrowed it",
+          opus_grant_file(cfg, OPUS_FOLDER) == ("opus", OV_NOW + timedelta(hours=2), None),
+          "timed file %r" % (opus_grant_file(cfg, OPUS_FOLDER),))
+    check("opus turn: a reviewer spawn at the typed 2h is refused (control)",
+          not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(hours=2))), "take() was lifted")
+
+
+def case_opus_off_clears_the_turn_file_and_the_timed_file():
+    # Case 5: `opus off` ends both Opus grants. The timed file is removed (control). The turn file is removed too (red on the
+    # old code, which never reads a turn file, so `opus off` leaves it in place).
+    cfg, _, _, _ = opus_type("opus 2h")
+    write_turn_file(cfg, role=None)
+    opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1))
+    check("opus turn: `opus off` removes the timed Opus file (control)", opus_grant_file(cfg, OPUS_FOLDER) is None,
+          "timed file %r" % (opus_grant_file(cfg, OPUS_FOLDER),))
+    check("opus turn: `opus off` removes the turn file", opus_grant_file(cfg, OPUS_TURN_FOLDER) is None,
+          "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+    check("opus turn: after `opus off`, a reviewer spawn is refused (control)",
+          not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=2))), "take() was lifted")
+
+
+def case_turn_grant_never_lifts_an_agents_opus_spawn():
+    # Case 6: the turn grant lifts the spawns the owner's turn made, never an agent's own Opus spawn (red on the old code, which
+    # lifts any spawn the Opus file covers, an agent's too). The owner's own spawn is the control.
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    check("opus turn: the owner's own reviewer spawn is lifted (control)", lifted(take_spawn(cfg, "reviewer")),
+          "take() was refused")
+    took = take_spawn(cfg, "reviewer", agent_id=OV_AGENT_ID)
+    check("opus turn: an agent's own reviewer spawn is not lifted by the turn grant", not lifted(took),
+          "take() returned %r" % (took,))
+
+
+def case_corrupt_turn_file_is_unread_and_the_refusal_stands():
+    # Case 7: a corrupt turn file reads as OPUS_UNREAD, so the guard logs it and the refusal stands. Red on the old code, which
+    # never reads the turn file and returns None. The refusal standing is the control.
+    override, _ = hooks_modules()
+    cfg = ov_cfg()
+    write_turn_file(cfg, raw=b'{"kind": "opus-turn", "role": ')
+    took = take_spawn(cfg, "reviewer")
+    check("opus turn: a corrupt turn file reads as unread (OPUS_UNREAD), not as no grant", took == override.OPUS_UNREAD,
+          "take() returned %r" % (took,))
+    check("opus turn: a corrupt turn file lifts no spawn (control)", not lifted(took), "take() was lifted")
+
+
+def case_turn_grant_never_lifts_a_sendmessage_refusal():
+    # Case 8 (control): the turn grant is read for the Opus spawn refusal only. A SendMessage refusal, which a resume or a
+    # retry of a named agent goes through, is not lifted by it, so the Opus route never decides a resume.
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    override, _ = hooks_modules()
+    with config_dir_env(cfg):
+        took = override.take(OV_SESSION, None, OV_NOW + timedelta(minutes=1), rule="sendmessage-session-id")
+    check("opus turn: a turn grant lifts no SendMessage refusal (control)", not lifted(took),
+          "take() returned %r" % (took,))
+
+
+def case_turn_file_never_lifts_a_settings_write():
+    # Case 13 (control): the settings-write ask of agent-model-cap has no spawn role, so no Opus file lifts it. A turn file is
+    # no exception (ruling own-761-d, 14:21 CST Nov 13). The guard-level twin is op_turn_lifts_nothing_else_check.
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    override, _ = hooks_modules()
+    with config_dir_env(cfg):
+        took = override.take(OV_SESSION, None, OV_NOW + timedelta(minutes=1), rule=override.OPUS_RULE, spawn_role=None,
+                             cwd=None)
+    check("opus turn: a turn grant never lifts the settings-write ask of agent-model-cap (control)", not lifted(took),
+          "take() returned %r" % (took,))
+
+
+def case_length_ask_stays_timed_and_ignores_the_next_typed_prompt():
+    # Case 9 (control): a plain ask with a length stays a timed grant in the timed file, with no turn file. The owner's next
+    # typed prompt does not end it (ruling own-761-d, 14:21 CST Nov 13: an ask with a length stays timed).
+    cfg, _, _, _ = opus_type("send opus judges for 30m", answer={"ok": True})
+    check("opus turn: a plain ask with 30m writes the timed file, ending 30 minutes after the grant",
+          opus_grant_file(cfg, OPUS_FOLDER) == ("opus", OV_NOW + timedelta(minutes=30), None),
+          "timed file %r" % (opus_grant_file(cfg, OPUS_FOLDER),))
+    check("opus turn: a plain ask with 30m writes no turn file", opus_grant_file(cfg, OPUS_TURN_FOLDER) is None,
+          "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+    opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(minutes=5))
+    check("opus turn: the owner's next typed prompt does not end a timed plain ask",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=10))), "take() was refused")
+
+
+def case_a_new_ask_replaces_the_last_turn():
+    # Case 11: a new ask in a later turn replaces the earlier turn's file, and grants for the later turn only (red on the old
+    # code, which writes no turn file). The owner's next typed prompt then ends it (red on the old code).
+    cfg, _, _, _ = opus_type("send opus builders", answer={"ok": True})
+    opus_type("send opus reviewers", answer={"ok": True}, cfg=cfg, at=OV_NOW + timedelta(hours=1))
+    turn = opus_grant_file(cfg, OPUS_TURN_FOLDER)
+    check("opus turn: the later ask writes the turn file for reviewers, backstopped at 2h from its own turn",
+          turn == ("opus-turn", OV_NOW + timedelta(hours=3), "reviewer"), "turn file %r" % (turn,))
+    check("opus turn: in the later turn a builder spawn is refused, the earlier builders grant replaced (control)",
+          not lifted(take_spawn(cfg, "builder", at=OV_NOW + timedelta(hours=1, minutes=1))), "take() was lifted")
+    check("opus turn: in the later turn a reviewer spawn is lifted (control)",
+          lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(hours=1, minutes=1))), "take() was refused")
+    opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(hours=1, minutes=2))
+    check("opus turn: after the owner's next typed prompt, a reviewer spawn is refused",
+          not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(hours=1, minutes=3))), "take() was lifted")
+
+
+def case_role_ask_lifts_its_role_only():
+    # Case 12: `opus reviewers` lifts reviewer spawns only, and the turn file carries the reviewer role (red on the old code,
+    # which writes the grant to the timed file). The builder refusal and the reviewer lift are controls.
+    cfg, calls, _, _ = opus_type("opus reviewers", answer={"ok": True})
+    check("opus turn: `opus reviewers` reaches the judge once, the precondition", len(calls) == 1,
+          "judge calls %d" % len(calls))
+    check("opus turn: `opus reviewers` lifts a reviewer spawn (control)", lifted(take_spawn(cfg, "reviewer")),
+          "take() was refused")
+    check("opus turn: `opus reviewers` does not lift a builder spawn (control)", not lifted(take_spawn(cfg, "builder")),
+          "take() was lifted")
+    check("opus turn: `opus reviewers` writes the turn file with the reviewer role",
+          opus_grant_file(cfg, OPUS_TURN_FOLDER) == ("opus-turn", OV_NOW + TURN_BACKSTOP, "reviewer"),
+          "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+
+
+def case_turn_removal_costs_one_remove_and_no_process():
+    # Case 14: the owner's next typed prompt makes one remove attempt on the turn file, and starts no process. The count is over
+    # os.remove on the turn path only (red on the old code, which makes none).
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+    removes, spawned = [], []
+    real_remove, real_popen = os.remove, subprocess.Popen
+
+    def counting_remove(path, *args, **kwargs):
+        text = os.fspath(path)
+        if os.path.basename(os.path.dirname(text)) == OPUS_TURN_FOLDER:
+            removes.append(text)
+        return real_remove(path, *args, **kwargs)
+
+    def no_process(*args, **kwargs):
+        spawned.append(args)
+        raise RuntimeError("a process started in the grant")
+
+    os.remove, subprocess.Popen = counting_remove, no_process
+    try:
+        opus_type("thanks, carry on", cfg=cfg, at=OV_NOW + timedelta(minutes=1))
+    finally:
+        os.remove, subprocess.Popen = real_remove, real_popen
+    check("opus turn removal cost: one remove attempt on the turn file per typed prompt", len(removes) == 1,
+          "remove attempts %d" % len(removes))
+    check("opus turn removal cost: no process is started by the removal", not spawned, "spawned %r" % (spawned,))
 
 
 def case_opus_ask_length_still_ends_at_its_time():
@@ -3067,7 +3320,7 @@ def case_opus_ask_length_still_ends_at_its_time():
 
 
 def case_opus_off_ends_a_no_length_opus_override():
-    # C control: `opus off` ends the no-end override at any time, a day later included.
+    # C control: `opus off` ends a turn grant at once, a day later included.
     cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
     check("opus off, no length: precondition, a reviewer spawn is lifted a minute in",
           lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=1))), "take() was refused")
@@ -3122,7 +3375,7 @@ def case_once_override_survives_a_harness_queued_command():
 
 
 def case_timed_and_opus_overrides_survive_the_owners_next_typed_prompt():
-    # D control: the removal is for a one-act override only. A timed override and an Opus override outlive the next prompt.
+    # D control: the removal is for a one-act override only. A timed override and a typed `opus 2h` outlive the next prompt.
     cfg = ov_cfg()
     opus_type("override 3h", cfg=cfg)
     opus_type("opus 2h", cfg=cfg)
@@ -3332,9 +3585,22 @@ def main():
         case_typed_opus_off_ends_a_pending_one_act_override()
         case_typed_opus_off_without_an_opus_file_ends_a_pending_one_act_override()
         case_harness_opus_off_leaves_a_pending_one_act_override()
-        case_opus_ask_without_a_length_has_no_end()
+        case_opus_ask_without_a_length_is_a_turn_grant()
         case_opus_ask_without_a_length_lifts_at_a_later_time()
-        case_opus_ask_without_a_length_receipt_names_no_clock_time()
+        case_opus_ask_without_a_length_receipt_says_the_next_message()
+        case_turn_plain_ask_writes_the_turn_file()
+        case_turn_ends_at_the_owners_next_typed_prompt()
+        case_turn_notice_between_the_ask_and_the_spawn_keeps_it()
+        case_timed_grant_survives_a_plain_ask_and_the_next_typed_prompt()
+        case_opus_off_clears_the_turn_file_and_the_timed_file()
+        case_turn_grant_never_lifts_an_agents_opus_spawn()
+        case_corrupt_turn_file_is_unread_and_the_refusal_stands()
+        case_turn_grant_never_lifts_a_sendmessage_refusal()
+        case_turn_file_never_lifts_a_settings_write()
+        case_length_ask_stays_timed_and_ignores_the_next_typed_prompt()
+        case_a_new_ask_replaces_the_last_turn()
+        case_role_ask_lifts_its_role_only()
+        case_turn_removal_costs_one_remove_and_no_process()
         case_opus_ask_length_still_ends_at_its_time()
         case_opus_off_ends_a_no_length_opus_override()
         case_once_override_ends_at_the_owners_next_typed_prompt()
