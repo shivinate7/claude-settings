@@ -1845,6 +1845,31 @@ class RefreshNotice(MailCase):
         self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
                       "the prompt's retried install printed no 'refreshed' line: %r" % lines)
 
+    def test_a_notice_whose_sha_is_not_forty_lowercase_hex_is_never_run(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        for sha in ("a" * 41, "a" * 64):
+            store.publish(REFRESH_PATH, "main moved to %s\n" % sha)
+            lines = turn(receiver)
+            self.assertEqual(read_lines(log), [], "a notice with a %d-character sha ran the install" % len(sha))
+            self.assertTrue(any(line.startswith(UNKNOWN) for line in lines),
+                            "a notice with a %d-character sha printed no 'mail unknown' line: %r" % (len(sha), lines))
+
+    def test_send_refresh_refuses_a_sha_that_is_not_forty_lowercase_hex(self):
+        store = self.store()
+        store.publish("mail/other/keep.md", "Body marker: keep\n")  # a tip to compare after each refusal
+        sender = self.machine("merge", store)
+        before = store.tip()
+        for sha in ("a" * 41, "a" * 64):
+            try:
+                MAIL_MODULE.send_refresh(sender.env, "acme-widgets", sha)
+            except MAIL_MODULE.MailError:
+                pass
+            else:
+                self.fail("send_refresh sent a %d-character sha as a refresh notice" % len(sha))
+            self.assertEqual(store.tip(), before, "a refused %d-character sha moved the mail ref" % len(sha))
+
 
 class InstallStop(MailCase):
     """A refresh install that runs past its bound is stopped with SIGTERM first, so its EXIT trap can release its lock, and
