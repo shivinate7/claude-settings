@@ -5239,7 +5239,7 @@ def sim_lease_holds(session: str, udids: list) -> bool:
 
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
     """Refuse a boot of any of NAMES when the machine is busy by the load brake's bar (simulator-boot-cap; the
-    booted count never decides, sims-load-brake-only, owner 2026-11-12 21:59 CST), or an idle twin is booted. After those two
+    booted count never decides, sims-load-brake-only), or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
     simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
     slot is the launched device (sim_lease_holds)."""
@@ -5271,9 +5271,9 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
         if busy:
             refuse(tool, "deny", "simulator-boot-cap",
                    "The machine is busy: %s. Booting another simulator now would add load. Booted now: %s. "
-                   "%s, or use a booted simulator (decision machine-load-brake)."
+                   "%s%s (decision machine-load-brake)."
                    % (", ".join(busy), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted) or "none",
-                      load_busy_remedy(busy).capitalize()),
+                      load_busy_remedy(busy).capitalize(), ", or use a booted simulator" if booted else ""),
                    name)
         boots, table, now = (sweep.sim_read_boots(os.path.join(guard_core.config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())
@@ -5290,9 +5290,9 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
             if sim_lease_holds(session, udids):
                 continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
-                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
-                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
-                   "which boots it under the lock, or launch a simulator that is already booted. "
+                   "A launch of the shut-down simulator %s boots it outside the lease: `sim-lease` is the "
+                   "Mac's one queue for phone simulators, and this session holds no lease for that device. "
+                   "Run `sim-test`, which takes the lease and boots it, or launch a simulator that is already booted. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",

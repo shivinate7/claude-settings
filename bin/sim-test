@@ -7,10 +7,12 @@
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
 # not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
-# No pairing and no count of booted devices (sims-load-brake-only, owner 2026-11-12 21:59 CST): a duo run boots its own
-# Duo beside a booted 18 Pro, and a pro run its own 18 Pro beside a booted Duo. The lock below serializes sim-test runs on
-# the Mac, and still limits concurrent runs. Beyond that, the load brake in sim-lease is the only limit on how many
-# simulators boot. A simctl list that fails exits 1 with no boot.
+# No rule pairs devices or counts booted ones (sims-load-brake-only): a duo run boots its own Duo beside a booted
+# 18 Pro, and a pro run its own 18 Pro beside a booted Duo. The load brake in sim-lease is the only rule that refuses
+# on load. Known gap: two limits beyond the brake still hold. The lock below serializes sim-test runs on the Mac. The
+# lease grants only the three known devices of SLOT_UDID in bin/sim-lease, in strict FIFO order. sims-load-brake-only
+# settles the direction: a queue and a lock per device, then devices made on demand, limited by the load brake only.
+# A follow-up step holds it. A simctl list that fails exits 1 with no boot.
 # Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
 # a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
 # and a hold too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is
