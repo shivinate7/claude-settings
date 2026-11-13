@@ -733,6 +733,253 @@ def spo_move_1():
                         "agent B's mv of agent A's file is refused", text="from A\n")
 
 
+# Rule scratchpad-owner, a folder removed or moved. A record names a writer per file, so a folder has no record of
+# its own: a rm or mv that names a folder must read the files under it. The incident's exact command text is unknown
+# (it is not in the logs). These cases name the likely forms: the flags, a trailing slash, quotes, a variable, a glob,
+# the scratchpad root, a nested folder and a mv. Each label starts `folder rm` or `folder move`.
+SPO_FOLDER_SUB = ((SPO_WRITER, "sub/a.txt", "from A\n"), (SPO_WRITER, "sub/deep/b.txt", "from A deep\n"))
+SPO_FOLDER_MIXED = ((SPO_WRITER, "mixed/a.txt", "from A\n"), (SPO_OTHER, "mixed/own.txt", "from B\n"))
+SPO_FOLDER_OWN = ((SPO_OTHER, "bonly/x.txt", "from B\n"), (SPO_OTHER, "bonly/deep/y.txt", "from B\n"))
+# Agent B's own folders beside agent A's `sub`: a brace list over two of them, and a parent segment back to its own.
+SPO_FOLDER_BRACE_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own1/x.txt", "from B\n"),
+                                         (SPO_OTHER, "own2/y.txt", "from B\n"))
+SPO_FOLDER_PARENT_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own/x.txt", "from B\n"),
+                                          (SPO_OTHER, "own/deep/y.txt", "from B\n"))
+# Agent B's own file and folders, which it moves into agent A's `sub`: the move takes nothing from A.
+SPO_FOLDER_MOVE_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own.txt", "from B\n"),
+                                        (SPO_OTHER, "own1/x.txt", "from B\n"),
+                                        (SPO_OTHER, "own2/y.txt", "from B\n"))
+# Agent A's second folder `d2`, which a numeric range over d1..d3 names.
+SPO_FOLDER_RANGE = SPO_FOLDER_SUB + ((SPO_WRITER, "d2/f.txt", "from A\n"),)
+
+
+def spo_folder_writes(fx, name, writes):
+    """Each (agent, relative path, text) of `writes`, in order, under this case's scratchpad. An agent writes with
+    Write, so its record names it. An agent of None writes outside the guard, as an editor would: no record is made."""
+    problems = []
+    for agent, rel, text in writes:
+        path = os.path.join(fx["scratch"], rel)
+        problems.append(spo_scope(fx, name, path))
+        if agent is None:
+            write(path, text)
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            problems += spo_wrote(fx, name, agent, path, text)
+    return problems
+
+
+def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny"):
+    """The files of `writes` are made, then `agent`'s call `command_of(scratchpad)` runs. With `want` "deny" the call
+    is refused, and the refusal names scratchpad-owner, neither the folder nor the files. With "allow" it passes."""
+    fx = spo_fixture(tag)
+    problems = spo_folder_writes(fx, name, writes)
+    got, reason = spo_run(fx, agent, command_of(fx["scratch"]))
+    if want == "allow":
+        problems.append(spo_allowed(name, got, reason))
+    else:
+        banned = (fx["scratch"],) + tuple(os.path.basename(rel) for _, rel, _ in writes)
+        problems.append(spo_refused(name, got, reason, banned))
+    return spo_result(problems, passed)
+
+
+SPO_FOLDER_FORMS = (
+    # (case tag, label, agent B's command for the folder at scratchpad path s)
+    ("folder-rm-1", "folder rm 1, agent B's rm -rf of agent A's folder",
+     lambda s: "rm -rf %s" % os.path.join(s, "sub")),
+    ("folder-rm-2", "folder rm 2, agent B's rm -r of agent A's folder",
+     lambda s: "rm -r %s" % os.path.join(s, "sub")),
+    ("folder-rm-3", "folder rm 3, agent B's rm -fr of agent A's folder",
+     lambda s: "rm -fr %s" % os.path.join(s, "sub")),
+    ("folder-rm-4", "folder rm 4, agent B's rm -rf -- of agent A's folder",
+     lambda s: "rm -rf -- %s" % os.path.join(s, "sub")),
+    ("folder-rm-5", "folder rm 5, agent B's rm -rf of agent A's folder with a trailing slash",
+     lambda s: "rm -rf %s/" % os.path.join(s, "sub")),
+    ("folder-rm-6", "folder rm 6, agent B's rm -rf of agent A's folder in double quotes",
+     lambda s: 'rm -rf "%s"' % os.path.join(s, "sub")),
+    ("folder-rm-7", "folder rm 7, agent B's rm -rf of agent A's folder by a shell variable",
+     lambda s: 'D=%s; rm -rf "$D"' % os.path.join(s, "sub")),
+    ("folder-rm-8", "folder rm 8, agent B's rm -rf of the files in agent A's folder by a glob",
+     lambda s: "rm -rf %s/*" % os.path.join(s, "sub")),
+    ("folder-rm-9", "folder rm 9, agent B's rm -rf of every folder in the scratchpad by a glob",
+     lambda s: "rm -rf %s/*" % s),
+    ("folder-rm-10", "folder rm 10, agent B's rm -rf of the scratchpad root",
+     lambda s: "rm -rf %s" % s),
+    ("folder-rm-11", "folder rm 11, agent B's rm -rf of a nested folder holding only agent A's file",
+     lambda s: "rm -rf %s" % os.path.join(s, "sub", "deep")),
+    ("folder-move-1", "folder move 1, agent B's mv of agent A's folder",
+     lambda s: "mv %s %s" % (os.path.join(s, "sub"), os.path.join(s, "moved"))),
+    # A brace list nested in another one: bash expands the inner list too, so `sub` is one of the words.
+    ("folder-rm-19", "folder rm 19, agent B's rm -rf of agent A's folder in a nested brace list",
+     lambda s: "rm -rf %s/{x,{sub,y}}" % s),
+    # A brace list inside a name: `su{b,c}` is `sub` and `suc`, so the text before the list is kept.
+    ("folder-rm-20", "folder rm 20, agent B's rm -rf of agent A's folder by a brace list inside its name",
+     lambda s: "rm -rf %s/su{b,c}" % s),
+    # An empty brace element: `sub{,.bak}` is `sub` and `sub.bak`.
+    ("folder-rm-21", "folder rm 21, agent B's rm -rf of agent A's folder by a brace list with an empty element",
+     lambda s: "rm -rf %s/sub{,.bak}" % s),
+    # A letter range: `{s..u}ub` is `sub`, `tub` and `uub`.
+    ("folder-rm-22", "folder rm 22, agent B's rm -rf of agent A's folder by a letter range",
+     lambda s: "rm -rf %s/{s..u}ub" % s),
+    # A brace list is expanded by bash before rm runs, so each name in it is a folder to remove.
+    ("folder-rm-13", "folder rm 13, agent B's rm -rf of agent A's folder in a brace list, the folder first",
+     lambda s: "rm -rf %s/{sub,nothing}" % s),
+    ("folder-rm-14", "folder rm 14, agent B's rm -rf of agent A's folder in a brace list, the folder last",
+     lambda s: "rm -rf %s/{nothing,sub}" % s),
+    ("folder-rm-15", "folder rm 15, agent B's rm -rf of agent A's folder in a brace list with a glob",
+     lambda s: "rm -rf %s/{sub,x}/*" % s),
+    # A parent segment names the folder it returns to, so the walk must read the folder it resolves to.
+    ("folder-rm-16", "folder rm 16, agent B's rm -rf of agent A's folder through a parent segment, S/../S/sub",
+     lambda s: "rm -rf %s" % os.path.join(s, "..", os.path.basename(s), "sub")),
+    ("folder-rm-17", "folder rm 17, agent B's rm -rf of agent A's folder through a parent segment, S/sub/../sub",
+     lambda s: "rm -rf %s" % os.path.join(s, "sub", "..", "sub")),
+    ("folder-rm-18", "folder rm 18, agent B's rm -rf of agent A's folder through a parent segment, S/sub/deep/..",
+     lambda s: "rm -rf %s" % os.path.join(s, "sub", "deep", "..")),
+)
+
+
+def spo_made_folder_case():
+    """Agent B makes an empty folder with mkdir, which the guard allows. B's rm -rf of that folder is allowed: it holds
+    no file, so no file under it has a record."""
+    fx = spo_fixture("folder-made")
+    made = os.path.join(fx["scratch"], "made")
+    problems = [spo_scope(fx, "folder rm control 4", made)]
+    got, reason = spo_run(fx, SPO_OTHER, "mkdir -p %s" % made)
+    problems.append(spo_allowed("folder rm control 4, agent B's mkdir of the folder", got, reason))
+    os.makedirs(made, exist_ok=True)   # the mkdir lands its folder, as the shell would
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s" % made)
+    problems.append(spo_allowed("folder rm control 4, agent B's rm -rf of the empty folder", got, reason))
+    return spo_result(problems, "agent B's rm -rf of an empty folder it made is allowed")
+
+
+def spo_outside_folder_case():
+    """Agent B's rm -rf of a folder that is outside every scratchpad, a working folder with no checkout. No scratchpad
+    rule applies to it, so it is allowed."""
+    fx = spo_fixture("folder-outside")
+    folder = os.path.join(fx["work"], "other")
+    problems = [spo_outside("folder rm control 5", folder)]
+    write(os.path.join(folder, "x.txt"), "plain\n")
+    write(os.path.join(folder, "deep", "y.txt"), "plain\n")
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s" % folder)
+    problems.append(spo_allowed("folder rm control 5, agent B's rm -rf of a folder outside a scratchpad", got, reason))
+    return spo_result(problems, "agent B's rm -rf of a folder outside any scratchpad is allowed")
+
+
+# Rule scratchpad-owner, the walk's two limits. The folder check reads at most SCRATCHPAD_WALK_CAP entries, and it does
+# not follow a symlink below the folder it is given. The guard runs as its own process for each case, so the cap is not
+# patched: each case builds a real folder over the cap. A bare folder's entries come in no fixed order, so the cap cases
+# name their entries by a glob. The guard sorts a glob's matches, so `big` is read whole before `zz_a.txt`, and the
+# boundary is exact.
+SPO_CAP_DIR = "big"        # the folder of unrecorded files, the first match of the glob
+SPO_CAP_FILE = "zz_a.txt"  # agent A's file, the second match
+SPO_WALK_CAP_DEFAULT = 5000   # the cap the rule states, used only where the guard names no cap
+
+
+def spo_walk_cap():
+    """The folder walk's cap, read from the guard's module, its one home. A product that names no cap reads as the
+    stated default, so the case fails on what the guard does, not on a missing name."""
+    import guard_shared_tree
+    return getattr(guard_shared_tree, "SCRATCHPAD_WALK_CAP", SPO_WALK_CAP_DEFAULT)
+
+
+def spo_cap_case(tag, name, past, passed):
+    """Folder `capfold` holds `big`, which holds unrecorded files, and agent A's file `zz_a.txt`. B's rm -rf of
+    `capfold/*` reads `big` (one entry), its children, then the file. With `past` False the children number the cap
+    less two, so the file is the last entry the walk reads, and the call is refused. With `past` True they number the
+    cap less one, so the cap stops the walk before the file, and the call passes."""
+    import glob
+    cap = spo_walk_cap()
+    fx = spo_fixture(tag)
+    folder = os.path.join(fx["scratch"], "capfold")
+    big = os.path.join(folder, SPO_CAP_DIR)
+    fillers = cap - 1 if past else cap - 2
+    problems = [spo_scope(fx, name, big)]
+    for index in range(fillers):
+        write(os.path.join(big, "n%05d.txt" % index), "plain\n")
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "capfold/%s" % SPO_CAP_FILE, "from A\n"),))
+    listed = sorted(os.path.basename(path) for path in glob.glob(os.path.join(folder, "*")))
+    if listed != sorted([SPO_CAP_DIR, SPO_CAP_FILE]):
+        problems.append("%s: setup, the glob capfold/* lists %s, want %s" % (name, listed, [SPO_CAP_DIR, SPO_CAP_FILE]))
+    held = len(os.listdir(big))
+    if held != fillers:
+        problems.append("%s: setup, %s holds %d entries, want %d" % (name, SPO_CAP_DIR, held, fillers))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s/*" % folder)
+    if past:
+        problems.append(spo_allowed(name, got, reason))
+    else:
+        problems.append(spo_refused(name, got, reason, (fx["scratch"], SPO_CAP_FILE)))
+    return spo_result(problems, passed)
+
+
+def spo_symlink_inside_case():
+    """Agent A's file sits in `keep`, and folder `symfold` holds only a symlink `ln` to `keep`. B's rm -rf of `symfold`
+    removes the link and leaves `keep` alone, so the call passes: the walk does not follow the link."""
+    fx = spo_fixture("folder-walk-link-1")
+    name = "folder rm walk link 1"
+    keep = os.path.join(fx["scratch"], "keep")
+    folder = os.path.join(fx["scratch"], "symfold")
+    link = os.path.join(folder, "ln")
+    problems = [spo_scope(fx, name, keep), spo_scope(fx, name, folder)]
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "keep/a.txt", "from A\n"),))
+    os.makedirs(folder, exist_ok=True)
+    os.symlink(keep, link)
+    if os.path.realpath(link) != os.path.realpath(keep):
+        problems.append("%s: setup, %s does not lead to %s" % (name, link, keep))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s" % folder)
+    problems.append(spo_allowed("%s, agent B's rm -rf of a folder whose link leads to agent A's file" % name, got, reason))
+    return spo_result(problems, "agent B's rm -rf of a folder holding a link to agent A's file is allowed, as the link "
+                                "is not followed")
+
+
+def spo_symlink_out_case():
+    """Folder `d1` holds a symlink `ln` to `target`, a folder outside every scratchpad that holds as many unrecorded files
+    as the cap. Folder `zz` holds agent A's file. B's rm -rf of the scratchpad's entries, `S/*`, is refused: the walk
+    skips `ln` and reads `zz/a.txt`. A walk that followed `ln` would spend the cap on `target` and stop before `zz`."""
+    import glob
+    cap = spo_walk_cap()
+    fx = spo_fixture("folder-walk-link-2")
+    name = "folder rm walk link 2"
+    target = os.path.join(fx["work"], "target")
+    d1 = os.path.join(fx["scratch"], "d1")
+    link = os.path.join(d1, "ln")
+    problems = [spo_outside(name, target)]
+    for index in range(cap):
+        write(os.path.join(target, "n%05d.txt" % index), "plain\n")
+    os.makedirs(d1, exist_ok=True)
+    os.symlink(target, link)
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "zz/a.txt", "from A\n"),))
+    listed = sorted(os.path.basename(path) for path in glob.glob(os.path.join(fx["scratch"], "*")))
+    if listed != ["d1", "zz"]:
+        problems.append("%s: setup, the glob scratchpad/* lists %s, want ['d1', 'zz']" % (name, listed))
+    if os.path.realpath(link) != os.path.realpath(target):
+        problems.append("%s: setup, %s does not lead to %s" % (name, link, target))
+    if len(os.listdir(target)) < cap:
+        problems.append("%s: setup, %s holds fewer entries than the walk cap %d" % (name, target, cap))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s/*" % fx["scratch"])
+    problems.append(spo_refused(name, got, reason, (fx["scratch"], "a.txt")))
+    return spo_result(problems, "agent B's rm -rf of the scratchpad's entries is refused: the link out is not followed, "
+                                "and agent A's file is read")
+
+
+def spo_root_link_case(tag, name, command, want, passed):
+    """Agent A's file sits in `tgt`, and `rl` is a symlink to `tgt` at the top of the scratchpad. `command` is B's rm
+    of `rl`. Without a trailing slash rm unlinks the link and leaves the target alone, so the call is allowed. With a
+    trailing slash the shell reads through the link and empties the target, so the call is refused."""
+    fx = spo_fixture(tag)
+    target = os.path.join(fx["scratch"], "tgt")
+    link = os.path.join(fx["scratch"], "rl")
+    problems = [spo_scope(fx, name, link)]
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "tgt/a.txt", "from A\n"),))
+    os.symlink(target, link)
+    if os.path.realpath(link) != os.path.realpath(target):
+        problems.append("%s: setup, %s does not lead to %s" % (name, link, target))
+    got, reason = spo_run(fx, SPO_OTHER, command % link)
+    if want == "allow":
+        problems.append(spo_allowed(name, got, reason))
+    else:
+        problems.append(spo_refused(name, got, reason, (fx["scratch"], "a.txt")))
+    return spo_result(problems, passed)
+
+
 def spo_approved_case():
     """Agent A writes probe2.py. Agent B's overwrite is refused. The owner types `override 15m` at 30 s, and B's
     overwrite at 60 s is lifted. Once the override has ended, B's run and B's rewrite pass with no override in
@@ -905,6 +1152,155 @@ spo_register("scratchpad-owner: removed 1 agent A's file removed outside the gua
              "is allowed", spo_removed_case)
 spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: refused", spo_removal_1)
 spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: refused", spo_move_1)
+# The folder forms: agent A's files sit under sub/ and sub/deep/, and agent B's call names the folder or its files.
+for _tag, _label, _command_of in SPO_FOLDER_FORMS:
+    spo_register("scratchpad-owner: %s: refused" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_FOLDER_SUB, SPO_OTHER, c,
+                                                                         "%s is refused" % n))
+spo_register("scratchpad-owner: folder rm 12, agent B's rm -rf of a folder holding agent B's file and agent A's file: "
+             "refused",
+             lambda: spo_folder_case("folder-rm-12", "folder rm 12", SPO_FOLDER_MIXED, SPO_OTHER,
+                                     lambda s: "rm -rf %s" % os.path.join(s, "mixed"),
+                                     "agent B's rm -rf of a folder holding both agents' files is refused"))
+spo_register("scratchpad-owner: folder rm pin 1, agent B's rm of agent A's file inside a folder: refused",
+             lambda: spo_folder_case("folder-pin-1", "folder rm pin 1", SPO_FOLDER_SUB, SPO_OTHER,
+                                     lambda s: "rm %s" % os.path.join(s, "sub", "a.txt"),
+                                     "agent B's rm of agent A's file inside a folder is refused"))
+spo_register("scratchpad-owner: folder rm control 1, agent A's rm -rf of its own folder S/sub: allowed",
+             lambda: spo_folder_case("folder-ctl-1", "folder rm control 1", SPO_FOLDER_SUB, SPO_WRITER,
+                                     lambda s: "rm -rf %s" % os.path.join(s, "sub"),
+                                     "agent A's rm -rf of its own folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder rm control 2, agent B's rm -rf of a folder holding only B's files: allowed",
+             lambda: spo_folder_case("folder-ctl-2", "folder rm control 2", SPO_FOLDER_OWN, SPO_OTHER,
+                                     lambda s: "rm -rf %s" % os.path.join(s, "bonly"),
+                                     "agent B's rm -rf of a folder holding only its own files is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder rm control 3, agent B's rm -rf of a folder nobody recorded: allowed",
+             lambda: spo_folder_case("folder-ctl-3", "folder rm control 3",
+                                     ((None, "loose/x.txt", "plain\n"), (None, "loose/deep/y.txt", "plain\n")),
+                                     SPO_OTHER, lambda s: "rm -rf %s" % os.path.join(s, "loose"),
+                                     "agent B's rm -rf of a folder nobody recorded is allowed", want="allow"))
+spo_register("scratchpad-owner: folder rm control 4, agent B's rm -rf of an empty folder it made: allowed",
+             spo_made_folder_case)
+spo_register("scratchpad-owner: folder rm control 5, agent B's rm -rf of a folder outside any scratchpad: allowed",
+             spo_outside_folder_case)
+spo_register("scratchpad-owner: folder rm control 6, agent B's rm -rf of S/{sub}, one brace element bash leaves "
+             "literal: allowed",
+             lambda: spo_folder_case("folder-ctl-6", "folder rm control 6", SPO_FOLDER_SUB, SPO_OTHER,
+                                     lambda s: "rm -rf %s/{sub}" % s,
+                                     "agent B's rm -rf of a one-element brace names no folder and is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder rm control 7, agent B's rm -rf of S/{own1,own2}, two folders of its own: "
+             "allowed",
+             lambda: spo_folder_case("folder-ctl-7", "folder rm control 7", SPO_FOLDER_BRACE_OWN, SPO_OTHER,
+                                     lambda s: "rm -rf %s/{own1,own2}" % s,
+                                     "agent B's rm -rf of a brace list of its own folders is allowed", want="allow"))
+spo_register("scratchpad-owner: folder rm control 8, agent B's rm -rf of S/own/../own, its own folder: allowed",
+             lambda: spo_folder_case("folder-ctl-8", "folder rm control 8", SPO_FOLDER_PARENT_OWN, SPO_OTHER,
+                                     lambda s: "rm -rf %s" % os.path.join(s, "own", "..", "own"),
+                                     "agent B's rm -rf of its own folder through a parent segment is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder rm 23, agent B's rm -rf of agent A's folder in a numeric range: refused",
+             lambda: spo_folder_case("folder-rm-23", "folder rm 23, agent B's rm -rf of agent A's folder in a numeric "
+                                     "range", SPO_FOLDER_RANGE, SPO_OTHER,
+                                     lambda s: "rm -rf %s/d{1..3}" % s,
+                                     "agent B's rm -rf of a numeric range naming agent A's folder is refused"))
+spo_register("scratchpad-owner: folder rm control 9, agent B's rm -rf of a numeric range naming no folder: allowed",
+             lambda: spo_folder_case("folder-ctl-9", "folder rm control 9, agent B's rm -rf of a numeric range naming "
+                                     "no folder", SPO_FOLDER_RANGE, SPO_OTHER,
+                                     lambda s: "rm -rf %s/d{5..6}" % s,
+                                     "agent B's rm -rf of a numeric range with no folder in it is allowed",
+                                     want="allow"))
+# Agent B's own file or folders moved into agent A's folder: the move takes nothing from A, so it passes. A move that
+# takes A's file out of its folder is refused, and a copy of A's folder takes nothing away.
+spo_register("scratchpad-owner: folder move control 1, agent B's mv of its own file into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-1", "folder move control 1, agent B's mv of its own file into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s/" % (os.path.join(s, "own.txt"), os.path.join(s, "sub")),
+                                     "agent B's mv of its own file into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 2, agent B's mv of its own folder into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-2", "folder move control 2, agent B's mv of its own folder into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "own1"), os.path.join(s, "sub")),
+                                     "agent B's mv of its own folder into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 3, agent B's mv of a brace list of its own folders into agent A's "
+             "folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-3", "folder move control 3, agent B's mv of a brace list of its "
+                                     "own folders into agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s/{own1,own2} %s/" % (s, os.path.join(s, "sub")),
+                                     "agent B's mv of a brace list of its own folders into agent A's folder is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder move control 4, agent B's mv -t of its own file into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-4", "folder move control 4, agent B's mv -t of its own file into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv -t %s %s" % (os.path.join(s, "sub"), os.path.join(s, "own.txt")),
+                                     "agent B's mv -t of its own file into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 5, agent B's mv of its own file to a new name in agent A's folder: "
+             "allowed",
+             lambda: spo_folder_case("folder-move-ctl-5", "folder move control 5, agent B's mv of its own file to a new "
+                                     "name in agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "own.txt"),
+                                                             os.path.join(s, "sub", "new.txt")),
+                                     "agent B's mv of its own file to a new name in agent A's folder is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder move control 6, agent B's cp -r of agent A's folder to a new name: allowed",
+             lambda: spo_folder_case("folder-move-ctl-6", "folder move control 6, agent B's cp -r of agent A's folder to "
+                                     "a new name", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "cp -r %s %s" % (os.path.join(s, "sub"), os.path.join(s, "copy")),
+                                     "agent B's cp -r of agent A's folder to a new name is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move 2, agent B's mv of agent A's file out of its folder: refused",
+             lambda: spo_folder_case("folder-move-2", "folder move 2, agent B's mv of agent A's file out of its folder",
+                                     SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "sub", "a.txt"),
+                                                             os.path.join(s, "mine.txt")),
+                                     "agent B's mv of agent A's file out of its folder is refused"))
+# Agent B's one call moves its own file into agent A's folder `sub`, and another word of the same call names that folder
+# too. A folder is walked, not dropped, when another word names it: each of these calls is refused, since it removes or
+# moves A's folder or A's file. Each form is a plain mistake, a move and a clean-up typed as one line.
+SPO_MOVE_INTO_FORMS = (
+    ("folder-move-3", "folder move 3, agent B's mv of its own file into agent A's folder, then rm -rf of that folder",
+     lambda s: "mv %s %s/ && rm -rf %s" % (os.path.join(s, "own.txt"), os.path.join(s, "sub"),
+                                            os.path.join(s, "sub"))),
+    ("folder-move-4", "folder move 4, agent B's mv of its own file into agent A's folder, then a mv of that folder",
+     lambda s: "mv %s %s/; mv %s %s" % (os.path.join(s, "own.txt"), os.path.join(s, "sub"),
+                                        os.path.join(s, "sub"), os.path.join(s, "moved"))),
+    ("folder-move-5", "folder move 5, agent B's mv -t of its own file into agent A's folder, then rm -rf of that folder",
+     lambda s: "mv -t %s %s && rm -rf %s/" % (os.path.join(s, "sub"), os.path.join(s, "own.txt"),
+                                              os.path.join(s, "sub"))),
+    ("folder-move-6", "folder move 6, agent B's rm -rf of agent A's folder, then a mv of its own file into it",
+     lambda s: "rm -rf %s && mv %s %s/" % (os.path.join(s, "sub"), os.path.join(s, "own.txt"),
+                                           os.path.join(s, "sub"))),
+    ("folder-move-7", "folder move 7, agent B's mv of its own file into a brace list naming agent A's folder",
+     lambda s: "mv %s %s/{sub,own1}/" % (os.path.join(s, "own.txt"), s)),
+    ("folder-move-8", "folder move 8, agent B's sudo mv of agent A's folder, then a mv of its own file into it",
+     lambda s: "sudo mv %s %s; mv %s %s/" % (os.path.join(s, "sub"), os.path.join(s, "x"),
+                                             os.path.join(s, "own.txt"), os.path.join(s, "sub"))),
+)
+for _tag, _label, _command_of in SPO_MOVE_INTO_FORMS:
+    spo_register("scratchpad-owner: %s: refused" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_FOLDER_MOVE_OWN, SPO_OTHER, c,
+                                                                         "%s is refused" % n))
+# The walk's limits: the cap at its boundary (over a real folder, as the guard runs in its own process), and the symlinks.
+spo_register("scratchpad-owner: folder rm walk cap 1, agent B's rm -rf of a folder's entries, agent A's file the last "
+             "entry inside the walk cap: refused",
+             lambda: spo_cap_case("folder-walk-cap-1", "folder rm walk cap 1", False,
+                                  "agent A's file inside the walk cap is read, and agent B's rm -rf is refused"))
+spo_register("scratchpad-owner: folder rm walk cap 2, agent B's rm -rf of a folder's entries, agent A's file the first "
+             "entry past the walk cap: allowed",
+             lambda: spo_cap_case("folder-walk-cap-2", "folder rm walk cap 2", True,
+                                  "agent A's file past the walk cap is not read, and agent B's rm -rf is allowed"))
+spo_register("scratchpad-owner: folder rm walk link 1, agent B's rm -rf of a folder whose symlink leads to agent A's "
+             "file inside the scratchpad: allowed", spo_symlink_inside_case)
+spo_register("scratchpad-owner: folder rm walk link 2, agent B's rm -rf of the scratchpad's entries, a symlink out to a "
+             "folder past the cap: refused", spo_symlink_out_case)
+spo_register("scratchpad-owner: folder rm walk link 3, agent B's rm -rf of a symlink to a folder holding agent A's "
+             "file, no trailing slash: allowed",
+             lambda: spo_root_link_case("folder-walk-link-3", "folder rm walk link 3", "rm -rf %s", "allow",
+                                        "agent B's rm -rf of the link unlinks it, and the target's file is not read"))
+spo_register("scratchpad-owner: folder rm walk link 4, agent B's rm -rf of a symlink with a trailing slash to a folder "
+             "holding agent A's file: refused",
+             lambda: spo_root_link_case("folder-walk-link-4", "folder rm walk link 4", "rm -rf %s/", "deny",
+                                        "agent B's rm -rf of the link with a trailing slash is refused"))
 spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
              "gettempdir call", spo_cost_case)
 
