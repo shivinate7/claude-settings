@@ -152,6 +152,15 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
   - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise (unmeasured). No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
+- **Lane step dup** (rule `lane-step-dup`, guard rule that denies a second lane on one step). Risk kind: incident. Incident: 11:45 CST 2026-11-08, step `draft-pr-guard-heredoc` was briefed to a second session while another live session carried its `cs-step` tag. The duplicate cost $37.51. Owner ruling (via the coordinator, 10:45 CST 2026-11-13): refuse a `create_session` or a lane brief for a `cs-step` tag while a live session carries it, or while the step has an open lane pull request.
+  - Part one, live session: a `create_session` tagged `cs-step:<step>`, or a `send_message` brief (the `lane-one-topic` marker line) for `<step>`, is denied when another live session, not the brief's target, carries `cs-step:<step>` and shares a `cs-repo` tag with the subject (the create's own tags, or the target's newest record). The reason names that session and says to send the work there. Steps and tags match without case. A brief to a target that carries the step passes, before any list read: it starts no new lane.
+  - Live: a session is not live when its newest row in the transcript's `list_sessions` reads has an archived `session_status`. A carrier on any page, whole read or not, is a deny.
+  - Unknown reads are denied, as `lane-closes-after-records` denies: no whole `list_sessions` read with no carrier found, a brief whose target has no current record (a `set_session_tags` call after it counts as none), and a subject with no `cs-repo` tag. A whole read is a chain: a read with no cursor, then reads whose `after_id` is the previous page's last row id, the last with `has_more` false. A `tags`, `mine` or `before_id` read, a stray cursor, or text that does not parse breaks the chain. One whole read earlier in the transcript counts, with no freshness limit.
+  - Steer: send the work to the carrier. To start a lane anyway, run `list_sessions` first. An override lifts it.
+  - Known limit: only this transcript is read, so a session started after its newest list read is not seen.
+  - Cost: one transcript read per brief or create with a step, plus one for the target's record; none otherwise. No file written, no process, no extra tool call. The coordinator pays about one `list_sessions` call per page.
+  - Tests: family `lane-step-dup` in `hooks/test_guard.py`.
+  - Landed at merge.
 
 ## How it works
 

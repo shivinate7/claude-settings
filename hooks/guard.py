@@ -189,6 +189,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
                        line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-step-dup       deny. A lane brief (the lane-one-topic marker) or a `create_session` tagged `cs-step:<step>` while
+                       another live session, not the brief's target, carries that step and shares a cs-repo tag with the
+                       subject (the target's record, or the create's own tags), read from this transcript's
+                       list_sessions reads. A session whose newest row is archived is not live. The reason names the
+                       carrier. A brief to a target that carries the step passes. With no carrier found, no whole
+                       list_sessions read (a chain from no cursor, each next read's after_id the page before's last
+                       row id, the last has_more false, none filtered), a target with no current record, and a
+                       subject with no cs-repo tag are refusals. Steps and tags match without case. An override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
                        then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
@@ -583,7 +591,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, step_dup_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -6818,6 +6826,11 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
+    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if doubled:
+        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the

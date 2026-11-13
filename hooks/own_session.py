@@ -134,3 +134,66 @@ def _scan(transcript, own_id, created):
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent, newest_ccr
+
+
+def _list_rows(body):
+    """(rows, has_more) of a list_sessions body: `{"ccr": {"data": [rows], "has_more": bool}}`, bare or in the
+    untrusted wrapper. Each row is (id, tags, archived). Raises ValueError, KeyError, TypeError or AttributeError when
+    the body is not that."""
+    ccr = _record_json(body)["ccr"]
+    rows, more = ccr["data"], ccr["has_more"]
+    if not isinstance(rows, list) or not isinstance(more, bool):
+        raise ValueError("not a list page")
+    found = []
+    for row in rows:
+        tags = row.get("tags") or []
+        if not isinstance(row.get("id"), str) or not isinstance(tags, list):
+            raise ValueError("not a session row")
+        found.append((row["id"], [str(t) for t in tags], "ARCHIVED" in str(row.get("session_status", "")).upper()))
+    return found, more
+
+
+def list_sessions_read(transcript):
+    """(rows, whole) of the list_sessions reads in a transcript (rule lane-step-dup). `rows` maps each session id a read
+    showed to (tags, archived), the newest row deciding. `whole` is True when one chain of reads is the whole list: a
+    read with no cursor, then reads whose after_id is the previous page's last row id, the last with has_more false.
+    A tags, mine or before_id read lists only part of the sessions and breaks a chain, as does an after_id that is not
+    the previous page's last row id. A read whose text does not parse adds no rows and breaks the chain. A whole read
+    stays whole after later reads, because every session they show is a row here.
+    Cost: one read of the transcript; no file written, no process."""
+    rows, whole, chain = {}, False, None  # chain: the last row id of the newest page of an unbroken chain, else None
+    reads = {}  # tool_use id -> (after_id, partial) of a list_sessions call
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                given = block.get("input")
+                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("list_sessions"):
+                    partial = not isinstance(given, dict) or bool(given.get("before_id") or given.get("tags") or given.get("mine"))
+                    after = given.get("after_id") if isinstance(given, dict) and not partial else None
+                    reads[block.get("id")] = (after if isinstance(after, str) and after else None, partial)
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in reads:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    try:
+                        page, more = _list_rows(body)
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        chain = None
+                        continue
+                    for sid, tags, archived in page:
+                        rows[sid] = (tags, archived)
+                    after, partial = reads[block.get("tool_use_id")]
+                    linked = not partial and (after is None or (chain is not None and after == chain))
+                    if linked and not more:
+                        whole, chain = True, None
+                    else:
+                        chain = page[-1][0] if linked and page else None
+    return rows, whole
