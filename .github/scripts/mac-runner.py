@@ -7,15 +7,30 @@ with that label online. Anything else, or a list that cannot be read, picks maco
 self-hosted runner would wait for a day, so an unknown read must never pick it.
 
 Env: EVENT, HEAD_REF, HEAD_REPO, REPO, RUNNER_TOKEN (a token that can read the repo's runners list).
+A read that fails (a 403 means the token lacks Administration: read) falls back and says so: a ::warning:: line and a job-summary line naming the status. A read that works prints its status. No token makes no read and stays quiet.
 RUNNERS_JSON stands in for the API answer, and API_URL for the API host, in tests.
 """
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 SELF_HOSTED = ["self-hosted", "macOS", "claude-settings-mac"]
 FALLBACK = ["macos-latest"]
+
+
+class NoToken(Exception):
+    """No token is set, so no read is made. Quiet on purpose: it is the state before the owner adds the secret."""
+
+
+def warn(text):
+    """A GitHub warning annotation on stdout and a line in the job summary. The pick still falls back."""
+    print("::warning::mac-runner: %s; falling back to macos-latest" % text)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write("mac-runner: %s; falling back to macos-latest\n" % text)
 
 
 def runners_json():
@@ -24,11 +39,12 @@ def runners_json():
         return given
     token = os.environ.get("RUNNER_TOKEN", "")
     if not token:
-        raise RuntimeError("no RUNNER_TOKEN, so the runners list is not read")
+        raise NoToken("no RUNNER_TOKEN, so the runners list is not read")
     req = urllib.request.Request(
         "%s/repos/%s/actions/runners?per_page=100" % (os.environ.get("API_URL", "https://api.github.com"), os.environ["REPO"]),
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=20) as r:
+        print("mac-runner: runners read status %d" % r.status)
         return r.read().decode("utf-8")
 
 
@@ -50,7 +66,13 @@ def pick():
         return FALLBACK, "head repo is not this repo (a fork never reaches the self-hosted runner)"
     try:
         online = mac_online(runners_json())
+    except NoToken as e:
+        return FALLBACK, "runners list unknown (%s)" % e
+    except urllib.error.HTTPError as e:  # 403 means the token lacks Administration: read
+        warn("runners read status %d (the token needs Administration: read)" % e.code)
+        return FALLBACK, "runners list unknown (status %d)" % e.code
     except Exception as e:  # an unknown read falls back, and says why
+        warn("runners read failed (%s)" % e)
         return FALLBACK, "runners list unknown (%s)" % e
     return (SELF_HOSTED, "claude-settings-mac is online") if online else (FALLBACK, "claude-settings-mac is offline")
 
