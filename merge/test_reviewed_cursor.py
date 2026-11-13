@@ -12,7 +12,7 @@ import test_merge as tm  # noqa: E402  the git half's fixtures; importing it run
 
 FLOOR = "2026-10-01T00:00:00Z"  # the open pull request's created_at (batch_pull's default): the oldest floor
 OLD_PR = "2026-09-30T00:00:00Z"  # a pull request reopened older than the floor
-T1 = "2026-10-02T00:00:00Z"  # the record and lint comments of a case: once read, the cursor is their updated_at
+T1 = "2026-10-02T00:00:00Z"  # the log and lint comments of a case: once read, the cursor is their updated_at
 T2 = "2026-10-03T00:00:00Z"
 T_NEWEST = "2026-10-04T00:00:00Z"
 OVERLAP = datetime.timedelta(minutes=5)  # since = cursor less this overlap (reviewed_read)
@@ -48,29 +48,29 @@ def padding():
     return [tm.review_comment(1000 + i, 8, "LGTM", created="2026-10-01T12:00:00Z") for i in range(60)]
 
 
-def standard_comments(record=None, lint=None):
-    """The padding, then #7's record and lint at T1, or the ones given."""
-    record = record or tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
-    return [*padding(), record, lint or tm.lint_of(7, tm.REVIEW_HEAD)]
+def standard_comments(log=None, lint=None):
+    """The padding, then #7's log and lint at T1, or the ones given."""
+    log = log or tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
+    return [*padding(), log, lint or tm.lint_of(7, tm.REVIEW_HEAD)]
 
 
-def own_record(cid, rounds=tm.REVIEW_PASS, created=T1):
-    """#7's review record at the live head, as the repo's comment list gives it."""
+def own_log(cid, rounds=tm.REVIEW_PASS, created=T1):
+    """#7's review log at the live head, as the repo's comment list gives it."""
     return tm.review_comment(cid, 7, tm.record_text(rounds=rounds), created=created)
 
 
 def alpha_comments():
-    """ALPHA's comments: #7's record is open."""
-    return [*padding(), own_record(1, rounds=ROUND_ONE_FAIL), tm.lint_of(7, tm.REVIEW_HEAD)]
+    """ALPHA's comments: #7's log is open."""
+    return [*padding(), own_log(1, rounds=ROUND_ONE_FAIL), tm.lint_of(7, tm.REVIEW_HEAD)]
 
 
 def beta_comments():
-    """BETA's comments: its own record is from before the cursor, and passes."""
-    return [*padding(), own_record(21, created=EARLY), tm.lint_of(7, tm.REVIEW_HEAD)]
+    """BETA's comments: its own log is from before the cursor, and passes."""
+    return [*padding(), own_log(21, created=EARLY), tm.lint_of(7, tm.REVIEW_HEAD)]
 
 
-def record_row(cid=1):
-    return {"id": cid, "issue": 7, "kind": "record", "body": tm.record_text(rounds=tm.REVIEW_PASS), "created": T1, "updated": T1}
+def log_row(cid=1):
+    return {"id": cid, "issue": 7, "kind": "log", "body": tm.record_text(rounds=tm.REVIEW_PASS), "created": T1, "updated": T1}
 
 
 def lint_row(cid=507):
@@ -83,7 +83,7 @@ def without(row, key):
 
 def edited(**changes):
     """The state file's dict with this repo's cache in reviewed_read's shape, its fields changed by `changes`. The rest stays valid."""
-    cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [record_row(), lint_row()]}
+    cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [log_row(), lint_row()]}
     cache.update(changes)
     return {"reviewed_cursor": {REPO_NAME: cache}}
 
@@ -102,10 +102,10 @@ DAMAGES = (
     ("cursor is not a time", lambda: edited(cursor="soon"), True),
     ("full_at is a string", lambda: edited(full_at="now"), True),
     ("rows is an object", lambda: edited(rows={}), True),
-    ("a row is a string", lambda: edited(rows=[record_row(), "x"]), True),
-    ("a row lacks its body", lambda: edited(rows=[without(record_row(), "body"), lint_row()]), True),
-    ("a row has an unknown kind", lambda: edited(rows=[{**record_row(), "kind": "other"}, lint_row()]), True),
-    ("a row id is a string", lambda: edited(rows=[record_row(), {**lint_row(), "id": "507"}]), True),
+    ("a row is a string", lambda: edited(rows=[log_row(), "x"]), True),
+    ("a row lacks its body", lambda: edited(rows=[without(log_row(), "body"), lint_row()]), True),
+    ("a row has an unknown kind", lambda: edited(rows=[{**log_row(), "kind": "other"}, lint_row()]), True),
+    ("a row id is a string", lambda: edited(rows=[log_row(), {**lint_row(), "id": "507"}]), True),
     ("the state file is nested 100000 deep", DEEP_STATE, True),
 )
 
@@ -204,25 +204,25 @@ class ReviewedCursor(tm.CloudSession):
         self.assert_from_cursor(host, T1)
         self.assertEqual(warm, cold, "the warm run printed other lines than the cold run")
 
-    def test_a_record_posted_on_the_live_head_after_the_cursor_shows_on_the_next_run(self):
+    def test_a_log_posted_on_the_live_head_after_the_cursor_shows_on_the_next_run(self):
         lint = tm.lint_of(7, tm.REVIEW_HEAD)
         host, before = self.run_reviewed([lint])
         self.assert_full_read(host)
         self.assertEqual(tm.no_record_numbers(before), {7}, before)
-        record = tm.review_comment(2, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T2)
-        host, after = self.run_reviewed([lint, record])
+        log = tm.review_comment(2, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T2)
+        host, after = self.run_reviewed([lint, log])
         self.assert_from_cursor(host, T1)
         self.assertRegex(tm.list_line(self, after, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ")
 
-    def test_an_edited_record_replaces_its_cached_row(self):
+    def test_an_edited_log_replaces_its_cached_row(self):
         lint = tm.lint_of(7, tm.REVIEW_HEAD)
-        record = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
-        host, first = self.run_reviewed([record, lint])
+        log = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
+        host, first = self.run_reviewed([log, lint])
         self.assert_full_read(host)
         self.assertRegex(tm.list_line(self, first, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ")
         # The edit keeps created_at and moves updated_at past the cursor: only the updated time brings it back.
-        edited_record = tm.review_comment(1, 7, "<!-- review-record -->\nPR: #7\n", created=T1, updated=T2)
-        host, after = self.run_reviewed([edited_record, lint])
+        edited_log = tm.review_comment(1, 7, "<!-- review-record -->\nPR: #7\n", created=T1, updated=T2)
+        host, after = self.run_reviewed([edited_log, lint])
         self.assert_from_cursor(host, T1)
         self.assertRegex(tm.list_line(self, after, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} bad: ")
 
@@ -242,6 +242,17 @@ class ReviewedCursor(tm.CloudSession):
                     self.assert_from_cursor(host, T1)
                     self.assertEqual(out, cold, "the rebuilt cache printed other lines than the cold run")
 
+    def test_the_damage_table_baseline_reads_from_the_cursor(self):
+        """The undamaged cache that DAMAGES damages is accepted: its warm read comes from the cursor. Without this, a damaged subtest could
+        full-read on a baseline the validator rejects, and the damage would not be what forced the full read."""
+        comments = standard_comments()
+        host, cold = self.run_reviewed(comments)
+        self.assert_full_read(host)
+        self.put_state(edited())
+        host, out = self.run_reviewed(comments)
+        self.assert_from_cursor(host, T1)
+        self.assertEqual(out, cold, "the undamaged baseline printed other lines than the cold run")
+
     def test_a_cache_with_no_rows_reads_from_the_cursor_and_prints_the_cold_lines(self):
         comments = standard_comments()
         host, cold = self.run_reviewed(comments)
@@ -253,23 +264,23 @@ class ReviewedCursor(tm.CloudSession):
     def test_a_reopened_pull_request_older_than_the_floor_forces_a_full_read(self):
         pr7 = tm.batch_pull(7, tm.REVIEW_HEAD, created_at=FLOOR)
         pr9 = tm.batch_pull(9, tm.REVIEW_OLD_HEAD, created_at=OLD_PR)
-        record7 = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T_NEWEST)
+        log7 = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T_NEWEST)
         lint7 = tm.lint_of(7, tm.REVIEW_HEAD)
-        # PR 9's record predates the cursor, so only a read from the reopened pull request's created_at returns it.
-        record9 = tm.review_comment(3, 9, tm.record_text(n=9, head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASS), created=T1)
+        # PR 9's log predates the cursor, so only a read from the reopened pull request's created_at returns it.
+        log9 = tm.review_comment(3, 9, tm.record_text(n=9, head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASS), created=T1)
         lint9 = tm.lint_of(9, tm.REVIEW_OLD_HEAD)
-        host, first = self.run_reviewed([record7, lint7], pulls=[pr7])
+        host, first = self.run_reviewed([log7, lint7], pulls=[pr7])
         self.assert_full_read(host)
-        comments, pulls = [record7, lint7, record9, lint9], [pr7, pr9]
+        comments, pulls = [log7, lint7, log9, lint9], [pr7, pr9]
         host, second = self.run_reviewed(comments, pulls=pulls)
         self.assert_full_read(host, floor=OLD_PR)
         self.assertRegex(tm.list_line(self, second, 9), rf"^#9 feat9 {tm.REVIEW_OLD_HEAD[:9]} done: ")
         host, third = self.run_reviewed(comments, pulls=pulls)
         self.assert_from_cursor(host, T_NEWEST)
-        self.assertEqual(third, second, "the cache lost the reopened pull request's record on the next run")
+        self.assertEqual(third, second, "the cache lost the reopened pull request's log on the next run")
 
     def stale_case_comments(self):
-        """-> (open record, passing record, lint): the newest record fails round 1, so #7 is open until it is deleted."""
+        """-> (open log, passing log, lint): the newest log fails round 1, so #7 is open until it is deleted."""
         lint = tm.lint_of(7, tm.REVIEW_HEAD)
         passing = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
         failed = tm.review_comment(2, 7, tm.record_text(rounds=ROUND_ONE_FAIL), created=T2)
@@ -290,13 +301,13 @@ class ReviewedCursor(tm.CloudSession):
         host, first = self.run_reviewed(both)
         self.assert_full_read(host)
         self.assertRegex(tm.list_line(self, first, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} open: ")
-        self.clock = CLOCK0 + STALE_SECS + 1  # 1801 seconds on: stale, and the failed record was deleted meanwhile
+        self.clock = CLOCK0 + STALE_SECS + 1  # 1801 seconds on: stale, and the failed log was deleted meanwhile
         host, stale = self.run_reviewed(after_delete)
         self.assert_full_read(host)
         self.assertRegex(tm.list_line(self, stale, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ")
 
     def test_write_merge_role_keeps_the_reviewed_cursor(self):
-        cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [record_row(), lint_row()]}
+        cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [log_row(), lint_row()]}
         self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner", "reviewed_cursor": {REPO_NAME: cache}})
         with self.cloud():
             tm.merge.write_merge_role("batch-runner")
@@ -334,14 +345,14 @@ class ReviewedCursor(tm.CloudSession):
         self.assertEqual(lines, writable, "an unwritable state folder changed the printed lines")
 
     def assert_second_repo_reads_in_full(self, first, second, cwd=None):
-        """Shared step of the no-name cases: ALPHA runs and leaves its cache, then BETA runs with its own early record. BETA's run reads in
-        full and prints its own record as done, never ALPHA's rows, which are open."""
+        """Shared step of the no-name cases: ALPHA runs and leaves its cache, then BETA runs with its own early log. BETA's run reads in
+        full and prints its own log as done, never ALPHA's rows, which are open."""
         host, _ = self.run_as(ALPHA, first, cwd)
         self.assert_full_read(host)
         host, out = self.run_as(BETA, second, cwd)
         got = self.since_of(host)
         self.assertEqual(when(got), when(FLOOR), f"{BETA} read from {ALPHA}'s cache: its since is {got}, not the floor {FLOOR}")
-        self.assertRegex(tm.list_line(self, out, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ", f"{BETA}'s run did not print its own record as done")
+        self.assertRegex(tm.list_line(self, out, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ", f"{BETA}'s run did not print its own log as done")
 
     def test_a_repo_with_no_name_in_the_run_never_reads_another_repos_cache(self):
         self.assert_second_repo_reads_in_full(alpha_comments(), beta_comments())
@@ -370,9 +381,9 @@ class ReviewedCursor(tm.CloudSession):
         self.assert_full_read(host)
         self.assertEqual(warm, full, "the edit that removed a marker left its cached row: the warm run printed other lines than a full read")
 
-    def test_an_edit_that_removes_the_record_marker_drops_its_cached_row(self):
+    def test_an_edit_that_removes_the_log_marker_drops_its_cached_row(self):
         unmarked = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS).split("\n", 1)[1], created=T1, updated=T2)
-        self.assert_an_edit_drops_its_cached_row(standard_comments(), standard_comments(record=unmarked))
+        self.assert_an_edit_drops_its_cached_row(standard_comments(), standard_comments(log=unmarked))
 
     def test_an_edit_that_removes_the_lint_marker_drops_its_cached_row(self):
         lint = tm.lint_of(7, tm.REVIEW_HEAD)
