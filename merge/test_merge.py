@@ -20926,19 +20926,25 @@ class BatchFreeze(CloudSession):
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
 
-    # Blame by debt refusal: a debt-close refusal of a batch integration PR names the one frozen lane whose diff closes the debt, and stores
-    # that lane as Blamed, so --batch-drop may take it off. A refusal that names no lane, or two, stores nothing. The debts carry PROSE_RETIRE,
-    # which names no runnable check, so each finding is a prose one and no test runs.
+    # Blame by debt refusal: a debt-close refusal of a batch integration PR on --confirm names the one frozen lane whose diff closes the debt,
+    # and stores that lane as Blamed, so --batch-drop may take it off. A refusal that names no lane, or two, stores nothing, and a preview of
+    # the refusal stores nothing. The debts carry PROSE_RETIRE, which names no runnable check, so each finding is a prose one and no test runs.
 
-    def debt_batch(self, closes, numbers, blamed=()):
+    def debt_batch(self, closes, numbers, blamed=(), stacked=None, on_batch=None):
         """Debts retire-a and retire-b are on main. Lanes `numbers` are cut from main, and `closes` maps a lane number to the debt its commit
-        deletes. -> the integration pull request of the ready batch `nightly` that freezes them, with `blamed` as its stored blames."""
+        deletes. `stacked` maps a lane number to the lane its head is cut from, so its head holds that lane's head. `on_batch` = (NAME, lanes):
+        the ready batch NAME holds `lanes` first, and the integration batch stacks on it, its block carrying the On line.
+        -> the integration pull request of the ready batch `nightly` that freezes `numbers`, with `blamed` as its stored blames."""
         land_debts(self.other, {"retire-a": PROSE_RETIRE, "retire-b": PROSE_RETIRE})
-        for n in numbers:
-            self.lane(n)
+        stacked = stacked or {}
+        on_name, on_lanes = on_batch or (None, ())
+        for n in (*on_lanes, *numbers):
+            self.lane(n, on=stacked.get(n))
             if n in closes:
                 self.lane_commit(n, f"docs/debts/{closes[n]}.md", None, f"lane {n}: closes {closes[n]}")
-        return self.frozen_batch("nightly", numbers, blamed=blamed)
+        if on_name:
+            self.frozen_batch(on_name, on_lanes)
+        return self.frozen_batch("nightly", numbers, on=f"batch-{on_name}" if on_name else None, blamed=blamed)
 
     def assert_debt_refusal_stores_nothing(self, pr, argv, slugs):
         """The run `argv` is refused by the debt check on each of `slugs`, and it writes nothing: set_body is never called, and pull request pr
@@ -20955,8 +20961,8 @@ class BatchFreeze(CloudSession):
     def test_a_debt_refusal_of_the_integration_pr_stores_the_one_lane_that_closes_the_debt_as_blamed(self):
         pr = self.debt_batch({101: "retire-a"}, [101, 102])
         self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        rc, out = self.run_batch(str(pr))
-        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
         names_kind(self, out, "retire-a", "prose")
         self.assertEqual(self.stored_blamed(pr), [101],
                          "the refusal names one lane, #101, whose diff closes retire-a, but the batch stores no blame for it: %s" % out)
@@ -20998,23 +21004,63 @@ class BatchFreeze(CloudSession):
     def test_a_debt_blame_keeps_a_stored_blame_and_adds_the_lane_in_order_without_a_duplicate(self):
         pr = self.debt_batch({101: "retire-a"}, [101, 102, 103], blamed=(103,))
         self.assertEqual(self.stored_blamed(pr), [103], "setup: the batch does not hold #103's stored blame")
-        rc, out = self.run_batch(str(pr))
-        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
         names_kind(self, out, "retire-a", "prose")
         self.assertEqual(self.stored_blamed(pr), [101, 103],
                          "the refusal adds #101 beside the stored #103 in order, but the block holds %s: %s" % (self.stored_blamed(pr), out))
-        self.run_batch(str(pr))  # the same refusal again: the stored blames stay as they are
+        self.run_batch(str(pr), "--confirm")  # the same refusal again: the stored blames stay as they are
         self.assertEqual(self.stored_blamed(pr), [101, 103], "a second refusal of retire-a changed the stored blames: %s" % self.stored_blamed(pr))
 
     def test_a_debt_blame_prints_the_same_refusal_and_one_line_naming_the_blame_and_its_drop_command(self):
         pr = self.debt_batch({101: "retire-a"}, [101, 102])
-        rc, out = self.run_batch(str(pr))
-        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
         names_kind(self, out, "retire-a", "prose")
         self.assertIn("closes a debt without proof that its Retire check holds", out, "the debt refusal's own text is no longer printed: %s" % out)
         line = printed(out, "merge --batch-drop nightly 101")
         self.assertTrue(line, "no line prints the drop command for #101, whose blame the refusal stored: %s" % out)
         self.assertIn("blame", line.lower(), "the line that prints the drop command for #101 does not name the stored blame: %s" % line)
+
+    def test_a_debt_refusal_of_the_integration_pr_on_preview_stores_no_blame_and_writes_no_body(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr),), ["retire-a"])
+        self.assertEqual(self.stored_blamed(pr), [], "the preview refused by retire-a stored a blame: the block holds Blamed lines")
+
+    def test_a_debt_closed_by_a_lane_and_by_a_lane_holding_its_deletion_blames_only_the_held_lane(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102], stacked={102: 101})
+        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not hold lane #101's head")
+        rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
+        names_kind(self, out, "retire-a", "prose")
+        self.assertEqual(self.stored_blamed(pr), [101],
+                         "lane #102 holds #101's head, so #101 is the one lane that closes retire-a, but the batch stores %s: %s" % (self.stored_blamed(pr), out))
+
+    def test_a_debt_closed_by_a_lane_holding_a_deletion_already_in_the_on_batch_stores_nothing(self):
+        pr = self.debt_batch({101: "retire-a"}, [201], stacked={201: 101}, on_batch=("x", [101]))
+        self.assertTrue(self.ancestor(self.heads[101], self.heads[201]), "setup: lane #201 does not hold lane #101's head")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "ls-tree", "--name-only", "origin/batch-x", "--", "docs/debts/retire-a.md"), "",
+                         "setup: batch-x, the On batch, still holds retire-a, so the debt is not absent at the batch start")
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr), "--confirm"), ["retire-a"])
+
+    def test_a_debt_blame_keeps_a_blame_the_fresh_body_holds_and_the_read_before_the_store_lacks(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102, 103])
+        real = merge.debt_blamed_lane
+        seen = []
+
+        def other_session_blames_103(*args, **kwargs):
+            if not seen:  # once: after this run read the body, another session stores #103's blame, and before this run stores #101's
+                seen.append(True)
+                self.host.set_body(pr, self.body(pr).replace(BATCH_END, f"Blamed: #103\n{BATCH_END}"))
+            return real(*args, **kwargs)
+
+        with unittest.mock.patch.object(merge, "debt_blamed_lane", side_effect=other_session_blames_103):
+            rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertTrue(seen, "setup: the debt check looked for no lane, so the other session's blame of #103 was never written: %s" % out)
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
+        self.assertEqual(self.stored_blamed(pr), [101, 103],
+                         "the refusal stores #101 after another session stored #103 in the body, but the block holds %s: %s" % (self.stored_blamed(pr), out))
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
