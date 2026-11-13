@@ -973,9 +973,10 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
         if n == same[0] and any(i in burst for i in same) and not any(blocks[i]["items"] for i in same):
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         grant = is_grant(text)
+        merged = [item(ln) for i in same for ln in blocks[i]["items"]]
         for found in (answer_problem(b, text, seen[text], homes, pages),
-                      grant_problem(b, text, [item(ln) for ln in b["items"]]),
-                      page_form_problem(text, [item(ln) for ln in b["items"]], homes, pages, session)):
+                      grant_problem(b, text, merged) if n == same[0] else None,
+                      page_form_problem(text, merged, homes, pages, session) if n == same[0] else None):
             if found:
                 out.append(found)
         for ln in b["items"]:
