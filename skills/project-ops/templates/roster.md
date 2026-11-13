@@ -9,6 +9,9 @@ sends triage the new id in the same turn (ruling R22 point 2, which names a lane
   <date and time>.
 - Batch runner (integration batch, CI waits, merge tool runs under the coordinator's grant, archiving the lanes `merge --idle-lanes` prints):
   "<session title>", <session id>, since <date and time>.
-- Batch runner per repo scope, and the arbiter: one row each, in this form, when the repo has them.
+- Batch runner per repo scope: one row each, in this form, when the repo has them.
+- Arbiter (decider only; makes rulings and grants, each marked as its own, for its own repo
+  only; the coordinator starts one only on the owner's grant): "<session title>", <session id>,
+  since <date and time>. It compacts in place. Keep this line only while an arbiter exists.
 
 Lanes are not on the roster. The coordinator holds lane state.
