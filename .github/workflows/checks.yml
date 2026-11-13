@@ -165,6 +165,9 @@ jobs:
       - name: SendMessage state fixture suite
         run: python3 hooks/test_sendmessage_state.py
 
+      - name: Roadmap readers fixture suite
+        run: python3 hooks/test_roadmap_readers.py
+
       - name: Refusal note fixture suite
         run: python3 hooks/test_refusal_note.py
 
@@ -311,6 +314,9 @@ jobs:
 
       - name: Ruled store fixture suite
         run: python3 lint/test_ruled_store.py
+
+      - name: Roadmap ref fixture suite
+        run: python3 lint/test_roadmap_ref.py
 
       - name: Route judge measure fixture suite
         run: python3 lint/test_prove_route_judge.py
