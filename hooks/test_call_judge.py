@@ -52,8 +52,13 @@ Interface the hook must match:
   set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
   is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
   copy, and a missing name fails its checks with a named cause, never a crash.
-- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
-  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` and the two send tools runs call_judge.py with
+  a timeout of 130 s: the dedicated past-ruling call (60 s) plus the form call (60 s) plus start-up. No `prompt` or
+  `agent` hook is left on any of the three tools.
+- Owner questions (the past-ruling rebuild): a send by a send tool whose message holds a Goal and a Problem line gets the
+  dedicated past-ruling call (its prompt holds PAST_CALL_TEXT) before it goes. A judged page item write runs that call
+  first, alone, and the form call after it. run_hook's `past` is the dedicated call's answer and `past_fail` makes it
+  fail. Run.past holds the dedicated calls, Run.calls the chat and form calls, and Run.seq the order.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -90,6 +95,9 @@ FUTURE, PAST = "2099-01-01T00:00:00+00:00", "2000-01-01T00:00:00+00:00"
 TIMED = {"kind": "timed", "until": FUTURE}
 ONCE = {"kind": "once", "until": FUTURE, "id": "0" * 32}
 MARK = "BRIEFMARK-7d2e"
+# The dedicated past-ruling call's prompt (lint/report_guard.py past_ruling_problem, also the Stop hook's): item 8 alone.
+# Only that call holds this text, so a case tells it from the form and chat calls.
+PAST_CALL_TEXT = "Judge only item 8 below"
 AGENT_MODEL, QUESTION_MODEL = "claude-sonnet-5-5", "claude-opus-5-5"
 # The waiting page of a fixture repo. lint/layout.py reads it from .claude/layout-extras.json, key
 # "waiting-page", in the git root of the payload's cwd. The one home of this fixture: hooks/test_question_form.py
@@ -227,19 +235,31 @@ def _fake_run(argv, **kwargs):
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
-    if os.environ.get("CJ_MODEL_FAIL"):
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
-    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
+    # The dedicated past-ruling call (report_guard.past_ruling_problem) carries "Judge only item 8 below" and answers
+    # CJ_PAST_ANSWER; its failure is CJ_PAST_FAIL. Every other call is a chat or form call: CJ_ANSWER, CJ_MODEL_FAIL.
+    if "Judge only item 8 below" in prompt:
+        if os.environ.get("CJ_PAST_FAIL"):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub past-ruling failure")
+        answer = os.environ["CJ_PAST_ANSWER"]
+    else:
+        if os.environ.get("CJ_MODEL_FAIL"):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
+        answer = os.environ["CJ_ANSWER"]
+    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
 _real_popen = subprocess.Popen
 
 
 class _CountingPopen(_real_popen):
-    # Records each git process start, so a case counts the git processes a judged call spawns.
+    # Records each git process start, so a case counts the git processes a judged call spawns. Every process start
+    # also goes to procs.log, so a case counts all the subprocesses a call spawns (the claude stub is not one).
     def __init__(self, args, *rest, **kwargs):
         argv = args if isinstance(args, (list, tuple)) else [args]
-        if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
+        name = os.path.basename(str(argv[0])).lower() if argv else ""
+        with open(os.path.join(os.environ["CJ_LOADED_DIR"], "procs.log"), "a", encoding="utf-8") as f:
+            f.write((name or "?") + "\n")
+        if name in ("git", "git.exe"):
             with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
                 f.write("git\n")
         _real_popen.__init__(self, args, *rest, **kwargs)
@@ -264,6 +284,9 @@ class _WatchQuestionForm:
 
 
 sys.meta_path.insert(0, _WatchQuestionForm())
+# CJ_BLOCK_IMPORT names a module the child cannot import: a None entry in sys.modules makes its import raise.
+if os.environ.get("CJ_BLOCK_IMPORT"):
+    sys.modules[os.environ["CJ_BLOCK_IMPORT"]] = None
 '''
 
 
@@ -282,11 +305,21 @@ class Run:
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
         imports = os.path.join(base, "imports.log")
         self.imports = open(imports, encoding="utf-8").read().split() if os.path.exists(imports) else []
+        # calls: the chat and form calls, as before. past: the dedicated past-ruling calls (PAST_CALL_TEXT). seq: every
+        # call in order, "past" or "form", so a case reads which call ran first.
         path = os.path.join(base, "calls.jsonl")
-        self.calls = []
+        self.calls, self.past, self.seq = [], [], []
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
-                self.calls = [json.loads(line) for line in f if line.strip()]
+                for line in f:
+                    if not line.strip():
+                        continue
+                    call = json.loads(line)
+                    dedicated = PAST_CALL_TEXT in call["prompt"]
+                    (self.past if dedicated else self.calls).append(call)
+                    self.seq.append("past" if dedicated else "form")
+        procs = os.path.join(base, "procs.log")
+        self.procs = len(open(procs, encoding="utf-8").read().split()) if os.path.exists(procs) else 0
         gitlog = os.path.join(base, "git.log")
         self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
         log = os.path.join(base, "config", "guard.log")
@@ -313,7 +346,10 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=ALLOW, past_fail=False, block=None):
+    """One hook run. `answer` is the chat and form calls' canned answer, `model_fail` makes those calls fail. `past` is
+    the dedicated past-ruling call's answer and `past_fail` makes only that call fail. `block` names a module the child
+    cannot import (a check that needs it cannot run)."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -328,6 +364,11 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
+    env["CJ_PAST_ANSWER"] = past
+    if past_fail:
+        env["CJ_PAST_FAIL"] = "1"
+    if block:
+        env["CJ_BLOCK_IMPORT"] = block
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -985,11 +1026,12 @@ def case_page_relative_file_path_reaches_the_review():
     relative_name_precondition(repo, name)
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "file_path": name}, repo)
     check("relative item: the form check reads the file at the payload cwd and passes it", got == ("", ""), got)
-    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=apps_refusal())
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("relative item: the write reaches one model review", len(r.calls) == 1, detail(r))
+    # Item 8 runs in the dedicated past-ruling call, which is the call that refuses the item here.
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=ALLOW, past=apps_refusal())
+    prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
+    check("relative item: the write reaches one dedicated model review", len(r.past) == 1, detail(r))
     check("relative item: the model sees the item read from the file", PAGE_MARK in prompt, prompt[:160])
-    check("relative item: the APPS record and its ruling reach the prompt",
+    check("relative item: the APPS record and its ruling reach the dedicated call's prompt",
           APPS_SLUG in prompt and APPS_RULING in prompt, prompt[:160])
     rule = question_form.PAST_RULING_RULE
     check("relative item: the past-ruling refusal is denied under rule %s, with one deny line" % rule,
@@ -1011,16 +1053,17 @@ def case_page_relative_file_path_passing_item_passes():
 
 
 def case_page_absolute_file_path_is_judged():
-    # The control: an absolute file_path is read on main too, so this case is green before and after the fix.
+    # The control: an absolute file_path is read as a file on main too. The dedicated past-ruling call refuses it.
     import question_form  # the one form check (hooks/question_form.py)
     repo = relative_item_repo()
     path = os.path.join(repo, "absolute-item-deny.json")
     write_item_file(path, apps_item())
     check("absolute item: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
-    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=path), answer=apps_refusal())
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=path), answer=ALLOW, past=apps_refusal())
+    prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
     rule = question_form.PAST_RULING_RULE
-    check("absolute item: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("absolute item: the write reaches one dedicated model review", len(r.past) == 1 and PAGE_MARK in prompt,
+          detail(r))
     check("absolute item: the past-ruling refusal is denied under rule %s" % rule,
           r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": "),
           detail(r))
@@ -1415,9 +1458,12 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
-    check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the two send tools",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", *SEND_TOOL_NAMES}, entry.get("matcher"))
+    # A judged page write runs the dedicated past-ruling call (60 s) and then the form call (60 s), so the hook needs
+    # both plus start-up. A hook timeout lets the write through unvetted.
+    check("settings: its timeout is 130 s, past-ruling call 60 s plus form call 60 s plus start-up",
+          hook.get("timeout", 0) == 130, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
     proc = subprocess.run(["sh", "-c", hook["command"]], input="{}", capture_output=True, text=True,
@@ -1515,9 +1561,10 @@ def case_past_ruling_replay_item_133():
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c133", "data": item})
     check("past ruling 133 fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
     r = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("past ruling 133: the prompt holds the step c95 ruling sentence",
-          len(r.calls) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
+    # Item 8 of a judged page write runs in the dedicated past-ruling call, so the step ruling reaches that call.
+    prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
+    check("past ruling 133: the dedicated call holds the step c95 ruling sentence",
+          len(r.past) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
 
 
 def case_past_ruling_cited_passes():
@@ -1576,7 +1623,10 @@ def case_past_ruling_cost():
           len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
+    # A judged page write adds one Sonnet call, the dedicated past-ruling call, before its one form call. Its git reads
+    # are the same two starts as before.
+    check("past ruling cost: a judged page write runs its dedicated call, then the form call, with two git processes",
+          len(p.past) == 1 and len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
     check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
           len(q.calls) == 1 and q.git <= 2, detail(q))
@@ -1693,13 +1743,14 @@ def case_page_task_gets_item_8_and_is_refused():
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t8", "data": task})
     check("page task fixture: the task passes item_hit, so the model judges it", got == ("", ""), got)
     refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
-    r = run_hook(page_input("set", task, doc_id="t8", cwd=DECISIONS_REPO), answer=refuse)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("page task: the one model call carries item 8 and the ruling, and the item never exempts a task",
-          len(r.calls) == 1 and item_text(prompt, 8) != "" and "never applies to a task" not in item_text(prompt, 8).lower()
+    # Item 8 of a judged page write runs in the dedicated past-ruling call, which refuses the ruled task.
+    r = run_hook(page_input("set", task, doc_id="t8", cwd=DECISIONS_REPO), answer=ALLOW, past=refuse)
+    prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
+    check("page task: the dedicated call carries item 8 and the ruling, and the item never exempts a task",
+          len(r.past) == 1 and item_text(prompt, 8) != "" and "never applies to a task" not in item_text(prompt, 8).lower()
           and APPS_RULING in without_call(prompt, task), detail(r))
-    check("page task: a ruled task is refused by the judge", (r.deny() or {}).get("permissionDecision") == "deny"
-          and "Unvetted:" not in r.reason(), detail(r))
+    check("page task: a ruled task is refused by the dedicated call", (r.deny() or {}).get("permissionDecision") == "deny"
+          and r.reason().startswith("past-ruling: ") and "Unvetted:" not in r.reason(), detail(r))
 
 
 def case_mid_reason_unlisted_id_is_a_plain_refusal():
@@ -1714,6 +1765,321 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
     r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=opens)
     check("unlisted id opening the reason: still a bogus cite, takes the Unvetted path",
           "Unvetted:" in r.reason(), detail(r))
+
+
+# ------------------------------------------------------------------ owner-question sends and the dedicated call
+#
+# Rulings of the past-ruling rebuild. (1) An owner question, a message by a send tool with a Goal line and a Problem
+# line that has a stake, outside code fences, gets the dedicated past-ruling call (lint/report_guard.py
+# past_ruling_problem, item 8 alone) before it is sent. A judged page item write runs that call first, alone, and the
+# form judge (items 1 to 7) only after it allows. (2) Every Unvetted outcome of a PreToolUse refusal prints
+# UNVETTED_REMEDY with its `Unvetted:` marker, and a relay refusal (a ruling found) stays facts-only. (3) Item 8 holds
+# the record-kind sentence R and the step rules S1 to S4. The send tool names are the harness's own, pinned here; a
+# case checks that the one home (hooks/shared_names.py) holds them.
+SEND_TOOL_NAMES = ("mcp__claude-code-remote__send_message", "SendMessage")
+PAGE_FILLER = "Background sentence for the owner. " * 200  # about 8,000 characters, past ASK_TEXT_MAX
+SEND_LOG_FILLER = "Lane 4 log: ruff clean, no finding.\n" * 200  # about 7,200 characters, past ASK_TEXT_MAX
+SHARED_NAMES = os.path.join(HERE, "shared_names.py")
+REPORT_GUARD = os.path.join(REPO, "lint", "report_guard.py")
+TRANSCRIPT = os.path.join(REPO, "lint", "_transcript.py")
+WT_SLUG, OUT_SLUG = "when-a-worktree-may-be-removed", "an-agent-outside-its-home-tree-must-stop"
+WT_MARK, OUT_MARK = "worktree-5e8a", "outside-2b7f"
+WT_RULING = ("Owner, 2026-10-30: a worktree goes only when it is clean and idle, and a running agent's lock is never "
+             "freed. Marker " + WT_MARK + ".")
+OUT_RULING = ("Owner, 2026-10-30: each session writes only inside its own checkout, and an agent whose worktree is gone "
+              "stops and reports. Marker " + OUT_MARK + ".")
+SEND_REPO = make_repo("send-incidents", decisions={WT_SLUG: WT_RULING, OUT_SLUG: OUT_RULING})
+GOAL_357 = "Goal: a merge frees disk without losing a running agent's work."
+PROBLEM_357 = "Problem (risk): freeing a running agent's worktree loses its uncommitted files."
+BASED_READ = ("Based on (read): guard rule worktree-home already stops an agent whose worktree is gone, so it cannot "
+              "write into main.")
+BASED_RULING = ("Based on (ruling): decisions/%s says a worktree goes only when clean and idle. This case has a running "
+                "agent, so the owner is asked again: the ruling does not name it." % WT_SLUG)
+# The owner question a send carries (the coordinator's page item text, verbatim).
+INCIDENT = "\n".join([
+    "Page item for the owner (from coordinator). Title: How should a merge free disk without losing a running agent's work?",
+    GOAL_357,
+    PROBLEM_357,
+    BASED_READ,
+    "Departs from: main, where the merge frees any lock it finds. Each option adds a test before the free.",
+    "Options: a. Never free a running agent's lock; the worktree goes when the agent ends. b. Save, then free: copy "
+    "uncommitted changes to an archive ref, then remove the worktree. c. Both: a for running agents, b for finished ones "
+    "(recommended).",
+])
+WT_OPTIONS = [
+    {"label": "Never free a running lock (Recommended)",
+     "description": "Gain: a running agent keeps its uncommitted files. Lose: the worktree stays until the agent ends."},
+    {"label": "Save, then free",
+     "description": "Gain: the worktree goes now. Lose: the archive ref must be cleaned up later."}]
+WT_PAGE_ITEM = good_page_item(
+    context="\n".join((GOAL_357, PROBLEM_357, BASED_READ, DEPARTS_LINE)),
+    options=[{"key": "a", "label": "Never free a running lock", "gain": "A running agent keeps its uncommitted files.",
+              "lose": "The worktree stays until the agent ends."},
+             {"key": "b", "label": "Save, then free", "gain": "The worktree goes now.",
+              "lose": "The archive ref needs cleaning later."}])
+# Item 8's sentences, verbatim (the one text, call_judge.PAST_RULING_ITEM, that the chat box and the dedicated call send).
+ITEM8_SENTENCES = (
+    ("R", "A listed decision or debt record is a ruling by its kind, so cite it with no owner marker."),
+    ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted."),
+    ("S2", "A line where a session made the call, such as a recommended option, a proposed pick, or a lane's call, "
+           "is not a ruling."),
+    ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
+    ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
+)
+
+
+def ruled_by(slug):
+    """A canned refusal that cites the one record the model was shown, with its date, as item 8 asks."""
+    return json.dumps({"ok": False, "reason": "decisions/%s: ruled 2026-10-30, so the owner is not asked again." % slug})
+
+
+def send_input(tool, message, cwd=SEND_REPO, session=SID_A):
+    """One send, as the harness sends it. The mcp tool names its target by session_id, SendMessage by to."""
+    if tool == SEND_TOOL_NAMES[0]:
+        tool_input = {"session_id": "session_lane07", "message": message}
+    else:
+        tool_input = {"to": "session_lane07", "message": message, "summary": "owner question"}
+    return json.dumps({"session_id": session, "tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+
+
+def batch_input(writes, cwd):
+    """A batch ArtifactData call with the payload's cwd set to `cwd` (page_batch_input fixes it to PAGE_REPO)."""
+    payload = {"session_id": SID_A, "tool_name": "ArtifactData", "cwd": cwd,
+               "tool_input": {"action": "batch", "url": PAGE_URL, "writes": writes}}
+    return json.dumps(payload)
+
+
+def unvetted_marker(text):
+    """The backtick span an Unvetted remedy asks for: `Unvetted: <why it could not be checked>`."""
+    found = re.search(r"`Unvetted: [^`]*`", text or "")
+    return found.group(0) if found else ""
+
+
+def facts_only_line(reason, constant):
+    """True when a refusal prints the facts-only owner line of lint/report_guard.py `constant`, read at test time: its
+    fixed text on both sides of the judge's reason, in order, and no `Remedy:` text and no `Unvetted:` marker anywhere
+    (decision guard-remedy-not-to-owner). False for a missing constant, so the check fails on the missing piece."""
+    text = guard_constant(REPORT_GUARD, constant)
+    wording = getattr(load_file_module(REPORT_GUARD, "probe_session_wording"), "session_wording", None)
+    if text.count("%s") != 1 or wording is None:
+        return False
+    head, tail = text.split("%s", 1)
+    at = reason.find(head)
+    return (at >= 0 and tail in reason[at + len(head):] and not wording(head + tail)
+            and "Remedy:" not in reason and "Unvetted:" not in reason)
+
+
+def guard_constant(path, name):
+    """One constant of a hook or lint file, read at test time and never copied. "" when the file or the name is absent,
+    so a check names the missing piece instead of crashing."""
+    try:
+        return getattr(load_file_module(path, "probe_" + name), name, "") or ""
+    except Exception:
+        return ""
+
+
+def page_item_passes_the_form(label):
+    # Scope first: the item must pass the form, so the judge runs and a refusal below is the judge's.
+    import question_form  # the one form check (hooks/question_form.py)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": WT_PAGE_ITEM})
+    check("page dedicated %s: the item passes question_form.item_hit, so the judge runs" % label, got == ("", ""), got)
+
+
+def case_send_owner_question_gets_the_dedicated_call_before_it_goes():
+    # Control: the same ruled question in the chat box is refused as past-ruling.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=GOAL_357, problem=PROBLEM_357, based=(BASED_READ,), options=WT_OPTIONS)
+    check("send fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    control = run_hook(question_input(box=box, cwd=SEND_REPO), answer=ruled_by(WT_SLUG))
+    check("send control: the same question in the chat box is refused as past-ruling",
+          (control.deny() or {}).get("permissionDecision") == "deny" and control.reason().startswith("past-ruling: "),
+          detail(control))
+    for tool in SEND_TOOL_NAMES:
+        name = "send via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT), past=ruled_by(WT_SLUG))
+        check(name + ": the dedicated past-ruling call runs before the send, and no other call", r.seq == ["past"],
+              detail(r))
+        check(name + ": the dedicated call runs on Sonnet", len(r.past) == 1
+              and model_of(r.past[0]["argv"]) == AGENT_MODEL, detail(r))
+        check(name + ": the dedicated call holds the ruling record", len(r.past) == 1
+              and WT_MARK in r.past[0]["prompt"], detail(r))
+        check(name + ": the send is denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": the refusal prints the relay owner line, facts only",
+              facts_only_line(r.reason(), "RELAY_RULE_REASON"), r.reason()[:200])
+
+
+def case_send_based_on_ruling_line_reaches_the_dedicated_call():
+    # A re-ask the ruling allows is sent. The dedicated call reads the Based on (ruling) line, and the allow passes it.
+    text = INCIDENT.replace(BASED_READ, BASED_READ + "\n" + BASED_RULING, 1)
+    check("send based-on fixture: the Based on ruling line follows the Based on read line", BASED_RULING in text, "fixture")
+    for tool in SEND_TOOL_NAMES:
+        name = "send based-on via %s" % tool
+        r = run_hook(send_input(tool, text), past=ALLOW)
+        check(name + ": one dedicated call, and no form call", r.seq == ["past"], detail(r))
+        check(name + ": the prompt carries the Based on ruling line", len(r.past) == 1
+              and BASED_RULING in r.past[0]["prompt"], detail(r))
+        check(name + ": the allowed send is not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_send_dedicated_call_error_is_unvetted_unless_marked():
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    check("send unvetted: call_judge holds UNVETTED_REMEDY with its `Unvetted:` marker", bool(marker),
+          "UNVETTED_REMEDY has no backtick Unvetted marker")
+    marked = INCIDENT + "\n" + UNVETTED_LINE
+    for tool in SEND_TOOL_NAMES:
+        name = "send, dedicated call fails, via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT), past_fail=True)
+        check(name + ": refused as past-ruling", (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), r.reason()[:200])
+        check(name + ": guard.log records the past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
+        r = run_hook(send_input(tool, marked), past_fail=True)
+        check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_send_check_that_cannot_run_is_refused_as_unvetted():
+    # report_guard cannot be imported, so the past-ruling check cannot run. A send that a ruling settles must not go.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    for tool in SEND_TOOL_NAMES:
+        name = "send, check cannot run (report_guard blocked), via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT), block="report_guard")
+        check(name + ": refused, not allowed", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), r.reason()[:200])
+        check(name + ": no fail-open line on stderr", "call judge failed open" not in r.err, r.err[-200:])
+
+
+def case_send_over_the_cap_keeps_the_goal_and_problem():
+    # A send past ASK_TEXT_MAX: its form lines sit at the top, where a front cut would drop them. Both reach the prompt.
+    cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
+    message = INCIDENT + "\n" + SEND_LOG_FILLER
+    check("send over the cap: the message is longer than ASK_TEXT_MAX", isinstance(cap, int) and len(message) > cap, cap)
+    for tool in SEND_TOOL_NAMES:
+        name = "send over the cap via %s" % tool
+        r = run_hook(send_input(tool, message), past=ALLOW)
+        prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
+        check(name + ": one dedicated call", r.seq == ["past"], detail(r))
+        check(name + ": the Goal line reaches the prompt", GOAL_357 in prompt, detail(r))
+        check(name + ": the Problem line reaches the prompt", PROBLEM_357 in prompt, detail(r))
+
+
+def case_send_stray_fence_does_not_hide_the_form():
+    # A fence line that never closes opens no fence: the form lines after it are prose, so the send is judged.
+    message = "```\nAn earlier quote, left open by mistake:\n" + INCIDENT
+    for tool in SEND_TOOL_NAMES:
+        name = "send after a stray fence line via %s" % tool
+        r = run_hook(send_input(tool, message), past=ruled_by(WT_SLUG))
+        check(name + ": the dedicated call runs, and the send is denied as past-ruling",
+              r.seq == ["past"] and (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), detail(r))
+
+
+def case_send_reads_the_forms_owners_pages_use():
+    # The form lines on an owner's page are often bold, bulleted, quoted or headed. Each variant is still judged.
+    def replace_line(prefix, new):
+        return "\n".join(new if part.startswith(prefix) else part for part in INCIDENT.split("\n"))
+    variants = (
+        ("a bold Goal", replace_line("Goal:", "**Goal:** " + GOAL_357[len("Goal: "):])),
+        ("a bulleted Goal", replace_line("Goal:", "- " + GOAL_357)),
+        ("a blockquoted Goal", replace_line("Goal:", "> " + GOAL_357)),
+        ("a heading Goal", replace_line("Goal:", "## " + GOAL_357)),
+        ("a bold Problem (risk)", replace_line("Problem (risk):", "**" + PROBLEM_357 + "**")),
+    )
+    for label, message in variants:
+        name = "send form, %s" % label
+        r = run_hook(send_input(SEND_TOOL_NAMES[0], message), past=ruled_by(WT_SLUG))
+        check(name + ": the dedicated call runs, and the send is denied as past-ruling",
+              r.seq == ["past"] and (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_send_tool_names_have_one_home():
+    shared = guard_constant(SHARED_NAMES, "SEND_TOOLS")
+    check("send names: hooks/shared_names.py holds SEND_TOOLS, the two send tool names",
+          tuple(shared) == SEND_TOOL_NAMES, shared)
+    for path, label in ((HOOK, "hooks/call_judge.py"), (TRANSCRIPT, "lint/_transcript.py")):
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        check("send names: %s holds no literal copy of SEND_TOOLS" % label,
+              re.search(r"^SEND_TOOLS\s*=", text, re.M) is None, label)
+
+
+def case_item8_holds_the_record_kind_and_step_ruling_sentences():
+    box = good_box(goal=GOAL_357, problem=PROBLEM_357, based=(BASED_READ,), options=WT_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=SEND_REPO), answer=ALLOW)
+    item8 = item_text(r.calls[0]["prompt"], 8) if len(r.calls) == 1 else ""
+    for name, sentence in ITEM8_SENTENCES:
+        check("item 8 %s: the chat box's item 8 holds the sentence verbatim" % name, sentence in item8, item8[:160])
+
+
+def case_page_item_write_runs_the_dedicated_call_first_and_alone():
+    page_item_passes_the_form("A")
+    item8 = guard_constant(HOOK, "PAST_RULING_ITEM")
+    check("page dedicated: call_judge holds the item 8 text to look for", bool(item8), "PAST_RULING_ITEM is missing")
+    r = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=ALLOW, past=ALLOW)
+    check("page dedicated: the calls are the dedicated past-ruling call, then the form call", r.seq == ["past", "form"],
+          detail(r))
+    check("page dedicated: the dedicated call runs on Sonnet", len(r.past) == 1
+          and model_of(r.past[0]["argv"]) == AGENT_MODEL, detail(r))
+    check("page dedicated: the form call runs on Opus", len(r.calls) == 1
+          and model_of(r.calls[0]["argv"]) == QUESTION_MODEL, detail(r))
+    form_prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page dedicated: the form-judge prompt holds no item 8 text", bool(item8) and item8 not in form_prompt,
+          item8[:60])
+    check("page dedicated: the write is allowed", r.code == 0 and r.out == "" and r.deny() is None, detail(r))
+
+
+def case_page_item_refused_by_the_dedicated_call_is_denied_before_the_form_judge():
+    # Control: the form judge's own refusal denies the same item, rule question-judge.
+    page_item_passes_the_form("B")
+    control = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=PAGE_FLAG, past=ALLOW)
+    check("page dedicated control: a form refusal denies the item, rule question-judge",
+          (control.deny() or {}).get("permissionDecision") == "deny" and control.reason().startswith("question-judge: "),
+          detail(control))
+    r = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=ALLOW, past=ruled_by(WT_SLUG))
+    check("page dedicated: the dedicated call alone refuses the write, and no form call follows", r.seq == ["past"],
+          detail(r))
+    check("page dedicated: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+    check("page dedicated: the refusal prints the relay owner line, facts only",
+          facts_only_line(r.reason(), "RELAY_RULE_REASON"), r.reason()[:200])
+
+
+def case_page_item_dedicated_call_error_is_unvetted_unless_marked():
+    page_item_passes_the_form("C")
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    r = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=ALLOW, past_fail=True)
+    check("page dedicated C: the write is refused as past-ruling, and no form call follows",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: ")
+          and r.seq == ["past"], detail(r))
+    check("page dedicated C: the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), r.reason()[:200])
+    marked = dict(WT_PAGE_ITEM, context=WT_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
+    r = run_hook(page_input("set", marked, cwd=SEND_REPO), answer=ALLOW, past_fail=True)
+    check("page dedicated C: with an Unvetted line in context, the form call follows and the write is not refused",
+          r.seq == ["past", "form"] and r.deny() is None, detail(r))
+
+
+def case_page_check_that_cannot_run_is_refused_as_unvetted():
+    page_item_passes_the_form("D")
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    r = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=ALLOW, block="report_guard")
+    check("page dedicated D: the write is refused, not allowed", (r.deny() or {}).get("permissionDecision") == "deny",
+          detail(r))
+    check("page dedicated D: the refusal is rule past-ruling and names the Unvetted marker",
+          r.reason().startswith("past-ruling: ") and bool(marker) and marker in r.reason(), r.reason()[:200])
+    check("page dedicated D: no form call follows", r.calls == [], detail(r))
+
+
+def case_page_batch_reaches_the_dedicated_call_whole():
+    # The batch's second write is past ASK_TEXT_MAX, so a front cut would drop the first write's text. Both reach the call.
+    long_context = "\n".join((GOAL_357, PROBLEM_357, BASED_READ, DEPARTS_LINE, PAGE_FILLER))
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
+              {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p2",
+               "data": good_page_item(PAGE_MARK_B, context=long_context)}]
+    r = run_hook(batch_input(writes, SEND_REPO), answer=ALLOW, past=ALLOW)
+    prompt = r.past[0]["prompt"] if len(r.past) == 1 else ""
+    check("page batch: one dedicated call for the batch, then one form call", r.seq == ["past", "form"], detail(r))
+    check("page batch: the first write's text reaches the dedicated call", PAGE_MARK in prompt, detail(r))
+    check("page batch: the second write's text reaches the dedicated call", PAGE_MARK_B in prompt, detail(r))
 
 
 def main():
@@ -1741,7 +2107,20 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_send_owner_question_gets_the_dedicated_call_before_it_goes,
+                 case_send_based_on_ruling_line_reaches_the_dedicated_call,
+                 case_send_dedicated_call_error_is_unvetted_unless_marked,
+                 case_send_check_that_cannot_run_is_refused_as_unvetted,
+                 case_send_over_the_cap_keeps_the_goal_and_problem,
+                 case_send_stray_fence_does_not_hide_the_form,
+                 case_send_reads_the_forms_owners_pages_use, case_send_tool_names_have_one_home,
+                 case_item8_holds_the_record_kind_and_step_ruling_sentences,
+                 case_page_item_write_runs_the_dedicated_call_first_and_alone,
+                 case_page_item_refused_by_the_dedicated_call_is_denied_before_the_form_judge,
+                 case_page_item_dedicated_call_error_is_unvetted_unless_marked,
+                 case_page_check_that_cannot_run_is_refused_as_unvetted,
+                 case_page_batch_reaches_the_dedicated_call_whole):
         try:
             case()
         except Exception as exc:

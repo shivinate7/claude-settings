@@ -4544,6 +4544,18 @@ C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settin
                  "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
 
 
+# An owner question sent by a send tool is judged when its Goal and Problem lines sit outside code fences
+# (hooks/call_judge.py). A fence line that never closes must not hide the lines after it, so it opens no fence: a
+# question there is read as prose. The closed-fence case is the control.
+class UnclosedFenceIsProse(unittest.TestCase):
+    def test_red_a_question_after_an_unclosed_fence_line_is_prose(self):
+        self.assertIn("Is the Problem still open?", RG.prose_questions("Goal: x\n```\nIs the Problem still open?"),
+                      "a question after a fence line that never closes reads as code")
+
+    def test_green_a_closed_fence_hides_its_question(self):
+        self.assertNotIn("Is the Problem still open?", RG.prose_questions("```\nIs the Problem still open?\n```\nAfter."))
+
+
 class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     PAGE = tcj.PAGE_URL  # the waiting page tcj.make_repo names, which the writer read cites
 
