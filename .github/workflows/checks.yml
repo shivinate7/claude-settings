@@ -266,7 +266,6 @@ jobs:
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_wrappers.py
 
       # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
@@ -339,7 +338,6 @@ jobs:
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_scratchpad_owner.py
 
       - name: Ruling census fixture suite
@@ -680,7 +678,6 @@ jobs:
         run: python3 lint/check_skill_model_rows.py
 
       - name: Skill model rows fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_skill_model_rows.py
 
       - name: Python 3.9 floor check
