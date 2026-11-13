@@ -55,7 +55,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
-    - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`.
+    - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`. The field is in the page's `itemFields` list. Drop it with `lane` when no lane waits on the item any more (the withdrawn path and unpark).
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
@@ -363,7 +363,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. An answer already routed (its item has `lane`, a `lastAnswer.at` equal to the answer's `at`, and a receipt with `read` at or after that `at`) is not listed, so the lane is not messaged twice. A routed answer with no such receipt is listed. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text. When the line ends `, lane <slug>)`, it sends the same message to that lane too, found as "Never-ending wait" says.
-  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holdsLane` true and no `lane`, whatever its `waits`. Find the lane that waits on it (ask the item's `owner`), then write `lane` on the item. Never drop `holds`. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears when a receipt with `read` at or after the answer's `at` exists, so write the reply and that receipt in one wake. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
+  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holdsLane` true and no `lane`, whatever its `waits`. Find the lane that waits on it (ask the item's `owner`). If the lane still waits, write `lane`. If no lane waits any more, drop `holdsLane`. Never drop `holds`. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears when a receipt with `read` at or after the answer's `at` exists, so write the reply and that receipt in one wake. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
@@ -436,7 +436,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
 - Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
-  (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
+  and `holdsLane` (`{"lane": {"__delete__": true}, "holdsLane": {"__delete__": true}}`), since no lane waits on the item any more. It changes nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
   can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
@@ -523,7 +523,7 @@ unique in the list, else a new slug. `ref` is the item's home and title in plain
 Then it closes the item with `lastAnswer` `{act: "park", note, at}`, so the owning session sees at its wake that the item is parked and stops
 waiting, and it deletes the answer. When the item has `lane`, that close update also drops it (`{"lane": {"__delete__": true}}`): a Park
 withdraws the item, so no card says it waits on a lane. The owning session sends no second tell. It does not reopen or
-re-route the item. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`, no `lane`).
+re-route the item. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`, no `lane`, no `holdsLane`: no lane waits on it any more).
 In the same wake it removes the entry and deletes the answer. At each wake while `meta/page.parked` is not empty, the writer
 saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`.
 It then finishes what that names: `parked-open <id>` is an entry to remove, and `park-answer-old <key>` is an answer to route or delete.
