@@ -3613,13 +3613,18 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
+    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
+    "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
+}
+# Suites a row's module never runs (step mutation-tests-for-cost). merge/test_merge.py times out at 180 s on the clean
+# source. The other three assert on guard.py's own text, which the report's ast.unparse copy drops comments from, so each
+# reads not green on the clean copy and never kills a mutant.
+GUARD_MODULE_DROPPED_SUITES = {
+    "hooks/guard.py": ["merge/test_merge.py", "hooks/test_wrappers.py", "lint/test_layout.py",
+                       "lint/test_report_guard_stamped.py"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
-    "hooks/guard.py": "every family reaches it, so a mutant of it needs the whole test_guard.py, which takes minutes, so its mutation "
-                      "report does not fit the 300 s budget (0 of 10 mutants ran in 6 runs); hooks/test_wrappers.py, "
-                      "lint/test_layout.py and lint/test_report_guard_stamped.py assert on its own text, which the report's "
-                      "ast.unparse copy drops comments from, so they read not green on the clean copy",
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
@@ -4386,7 +4391,7 @@ def tests_for_main(argv) -> int:
     names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
     (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
     with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
-    whole `hooks/test_guard.py`. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    whole `hooks/test_guard.py` and each suite of GUARD_MODULE_DROPPED_SUITES for it. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
     `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -4410,6 +4415,7 @@ def tests_for_main(argv) -> int:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
             names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
+            names.difference_update(GUARD_MODULE_DROPPED_SUITES.get(path, ()))
     for name in sorted(names):
         print(name)
     return 0
