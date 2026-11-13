@@ -5,24 +5,27 @@
 # that parent's edit, so it is refused as lost. Both directions are pinned. The controls pin what stays allowed: the
 # result keeps the changed body, and both parents leave the case at base. The lane-changed direction that keeps the
 # changed body is s23301's MT2_ONE_BODY.
-# The fixtures reuse s23301's _mt2_same and MT2_TAIL and s23300's case helpers (_mt_case, _mt_refuse, _mt_allow,
-# MT_CARRY, MT_BASE, MT_LANE, MT_MAIN), so this section adds no copy of them.
+# The fixtures reuse s23301's _mt2_same and s23300's case helpers (_mt_case, _mt_refuse, _mt_allow, MT_CARRY, MT_BASE,
+# MT_LANE, MT_MAIN, MT_FULL_LANE, MT_FULL_MAIN), so this section adds no copy of them.
 _MT3_PRIOR_FAMILY = FAMILY
 FAMILY = "builder-refuse"
 
+# A comment, not a test case, keeps the two sides' edits apart. A case here would be one more case in the empty state.
+MT3_SEP = "# the two sides' edits sit apart, so only the end of the file conflicts\n"
 
-def _mt3_one_changed(name, changed, kept):
-    """A merge that conflicts at the end of a test file. The base holds the case at 1, then a tail. `changed` names the
-    side that edits the case to 2 (`lane` or `main`), or is None when neither does. Each side appends its own case after
-    the tail. The resolution keeps `kept` for the case, then both appended cases."""
+
+def _mt3_one_changed(name, changed, kept, head=MT_BASE, lane=MT_LANE, main=MT_MAIN):
+    """A merge that conflicts at the end of a test file. The base is `head`, the case at 1, then the separator. `changed`
+    names the side that edits the case to 2 (`lane` or `main`), or is None when neither does. Each side appends its
+    `lane` or `main` cases after the separator. The resolution keeps `kept` for the case, then both appended sets."""
     lane_value = 2 if changed == "lane" else 1
     main_value = 2 if changed == "main" else 1
     return _mt_case(name,
-                    [(TEST_A, MT_BASE + _mt2_same(lane_value) + MT2_TAIL + MT_LANE)],
-                    [(TEST_A, MT_BASE + _mt2_same(main_value) + MT2_TAIL + MT_MAIN)],
+                    [(TEST_A, head + _mt2_same(lane_value) + MT3_SEP + lane)],
+                    [(TEST_A, head + _mt2_same(main_value) + MT3_SEP + main)],
                     [TEST_A],
-                    resolve=[(TEST_A, MT_BASE + _mt2_same(kept) + MT2_TAIL + MT_LANE + MT_MAIN)], stage=True,
-                    files={**BASE_FILES, TEST_A: MT_BASE + _mt2_same(1) + MT2_TAIL})
+                    resolve=[(TEST_A, head + _mt2_same(kept) + MT3_SEP + lane + main)], stage=True,
+                    files={**BASE_FILES, TEST_A: head + _mt2_same(1) + MT3_SEP})
 
 
 # ---- REFUSED (red on the old code: the case's changed body is dropped, and the reason is not checked yet) ----
@@ -35,6 +38,16 @@ _mt_refuse("builder-refuse: a merge that keeps the unchanged parent's body of a 
 MT3_MAIN_DROPS = _mt3_one_changed("mt3-main-changed-drops", "main", kept=1)
 _mt_refuse("builder-refuse: a merge that keeps the unchanged parent's body of a case only main changed, dropping main's "
            "edit, is refused as lost", MT3_MAIN_DROPS, "lost", (MT_CARRY["lost"],))
+
+# Empty state: the file holds no case but the changed one, and the lane alone changed it.
+MT3_EMPTY_DROPS = _mt3_one_changed("mt3-empty-lane-drops", "lane", kept=1, head="")
+_mt_refuse("builder-refuse: a merge into a file that holds only a case the lane alone changed, keeping main's body, is "
+           "refused as lost", MT3_EMPTY_DROPS, "lost", (MT_CARRY["lost"],))
+
+# Full-size state: each side appends thirty cases, and the lane alone changed the case.
+MT3_FULL_DROPS = _mt3_one_changed("mt3-full-lane-drops", "lane", kept=1, lane=MT_FULL_LANE, main=MT_FULL_MAIN)
+_mt_refuse("builder-refuse: a merge that keeps main's body of a case the lane alone changed, with thirty cases from each "
+           "side, is refused as lost", MT3_FULL_DROPS, "lost", (MT_CARRY["lost"],))
 
 
 # ---- ALLOWED (green on the old code: the result keeps the changed body, or no parent changed the case) ----
