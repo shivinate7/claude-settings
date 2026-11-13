@@ -1566,7 +1566,7 @@ def page_label_hit(writes, transcript_path, cwd=""):
     (LABELS_UNKNOWN, the reason), which the caller allows and notes."""
     try:
         return _page_label_hit(writes, transcript_path, cwd)
-    except (ValueError, OSError) as err:  # UnreadChat is a ValueError
+    except Exception as err:  # an unreadable transcript, no path, or UnreadChat (a ValueError): unknown, not a raise
         return LABELS_UNKNOWN, type(err).__name__ + ": " + str(err)
 
 
