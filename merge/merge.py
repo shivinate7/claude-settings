@@ -5465,7 +5465,10 @@ def batch_label(host, n):
     """merge --batch-label PR: add PR_BATCH_LABEL to an open pull request whose head branch starts with BATCH_PREFIX, the integration PR of a batch, so the
     ledger reads it as a batch run (decision pr-ledger). Any other PR is a Stop with nothing written: a lane PR labelled by mistake would read `batch run`.
     Reads the PR once, writes one label, takes no lock and no lint. A failed read or add is a Stop. Returns 0."""
-    info = host.pr(n)
+    try:
+        info = host.pr(n)
+    except Stop as e:
+        raise Stop(f"{e} {BATCH_LABEL_CITE}")
     if info["state"] != "OPEN":
         raise Stop(f"#{n} is {info['state'].lower()}, not open: only an open integration pull request takes the `{PR_BATCH_LABEL}` label. Nothing was labelled. {BATCH_LABEL_CITE}")
     if not info["branch"].startswith(BATCH_PREFIX):

@@ -3034,7 +3034,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
 
 class BatchLabelWrite(CiJobStub, tm.CloudSession):
-    """`merge --batch-label <pr>` adds the `batch` label to a batch's integration pull request (decision pr-ledger, coordinator 2026-11-10 01:07 CST:
+    """`merge --batch-label <pr>` adds the `batch` label to a batch's integration pull request (decision pr-ledger, the ruling:
     `merge --lane-lint` writes no label, and the label is its own write with a target check). The target is an open PR whose head branch starts with
     `batch-`; any other PR is refused with nothing written. A failed add is a refusal, exit 1. It takes no lint, no lock and no merge role. The gh shim
     answers pull request 7 with the head branch a case names. setUp mirrors LintPostsPassComment, which this class does not subclass, so its cases run once."""
@@ -3119,12 +3119,35 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         rc, out = self.run_label("--batch-label", "7")
         self.assertEqual(rc, 1, out)
         self.assertIn("reading the pull request failed", out)
+        self.assertIn("decision pr-ledger", out, "the refusal to read the PR names no decision:\n" + out)
         self.assertEqual(self.labeled(), [], "a failed read still wrote a label:\n" + out)
 
     def test_it_runs_in_the_checkout_that_dash_c_names(self):
         self.as_pr()
-        rc, out = self.run_label("-C", str(self.co), "--batch-label", "7")
-        self.assertEqual(rc, 0, "`-C PATH --batch-label 7` was refused as not standing alone:\n" + out)
+        seen = []
+        real = merge.Host
+
+        class Recording(real):
+            def __init__(self, *a, **k):
+                seen.append(k.get("cwd"))
+                super().__init__(*a, **k)
+
+        out, err = io.StringIO(), io.StringIO()
+        prior = os.getcwd()
+        os.chdir(tempfile.mkdtemp(dir=RUN_FOLDER))  # the process stands outside the checkout, so only -C can name it
+        try:
+            with unittest.mock.patch.object(merge, "Host", Recording), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = merge.main(["-C", str(self.co), "--batch-label", "7"], host=None, lock=self.lock)
+        finally:
+            os.chdir(prior)
+        self.assertEqual(rc, 0, "`-C PATH --batch-label 7` failed:\n" + out.getvalue() + err.getvalue())
+        self.assertEqual(seen, [str(self.co)], "the Host was not built in the -C checkout")
+        self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], out.getvalue())
+
+    def test_a_draft_batch_pull_request_gets_the_batch_label(self):
+        self.as_pr(draft=True)  # the integration PR is a draft until the batch is ready
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 0, out)
         self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], out)
 
     def test_a_failed_add_is_a_refusal_that_names_the_pull_request(self):
@@ -3134,7 +3157,7 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         self.assertIn("#7", out)
         self.assertEqual(self.labeled(), [], "the failed add was kept as a label")
 
-    def test_a_lane_lint_pass_on_a_batch_pull_request_adds_no_label(self):  # the 2026-11-10 ruling: --lane-lint writes no label
+    def test_a_lane_lint_pass_on_a_batch_pull_request_adds_no_label(self):  # the ruling: --lane-lint writes no label
         self.as_pr(checks_seq=[[("touched", "pass", "")]])  # the draft's touched job passed: the lint's read of the head's draft run
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_label("--lane-lint", "7")
@@ -3145,7 +3168,9 @@ class BatchLabelWrite(CiJobStub, tm.CloudSession):
         self.as_pr()
         alone = "--batch-label takes one pull request number and stands alone"
         for argv, text in ((("--batch-label",), alone), (("--batch-label", self.head("feat")), "invalid int value"), (("--batch-label", "7", "--confirm"), alone),
-                           (("--batch-label", "7", "--lane-lint"), alone), (("--batch-label", "7", "--base", "main"), "--base goes with")):
+                           (("--batch-label", "7", "--lane-lint"), alone), (("--batch-label", "7", "--base", "main"), "--base goes with"),
+                           (("--batch-label", "7", "--role", "batch-runner"), alone), (("--batch-label", "7", "--session", "s1"), alone),
+                           (("--batch-label", "7", "--unlock"), alone), (("--batch-label", "7", "--reviewed"), alone)):
             with self.subTest(argv=argv):
                 rc, out = self.run_label(*argv)
                 self.assertEqual(rc, 2, out)
