@@ -530,6 +530,17 @@ def tool_payload(tool, tool_input):
     return {"tool_name": tool, "tool_input": tool_input}
 
 
+PAGE_URL = "https://claude.ai/artifact/remedy-probe"  # the waiting page of the fixture repo, set in setUpModule
+
+
+def page_payload(tool_input):
+    """An ArtifactData call on the fixture repo's waiting page: the page rules judge it from the repo the cwd names."""
+    body = tool_payload("ArtifactData", dict({"url": PAGE_URL, "action": "set", "collection": "items",
+                                              "doc_id": "probe-item"}, **tool_input))
+    body["cwd"] = "<REPO>"
+    return body
+
+
 RUN = None
 CFG = None
 REPO_DIR = None
@@ -548,6 +559,10 @@ def setUpModule():
     subprocess.run(["git", "init", "-q", REPO_DIR], check=True, capture_output=True)
     subprocess.run(["git", "init", "-q", "--bare", origin], check=True, capture_output=True)
     subprocess.run(["git", "-C", REPO_DIR, "remote", "add", "origin", origin], check=True, capture_output=True)
+    # The waiting page of this fixture repo: the page rules judge an ArtifactData write only on the page the repo names.
+    os.makedirs(os.path.join(REPO_DIR, ".claude"))
+    with open(os.path.join(REPO_DIR, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "waiting-page": PAGE_URL}, f)
     # The stamp probe restamps a premise, so the guard needs a dated handoff on disk and a transcript to read.
     os.makedirs(os.path.join(CFG, "handoffs"))
     with open(os.path.join(CFG, "handoffs", "probe-stamp.md"), "w", encoding="utf-8") as f:
@@ -660,12 +675,160 @@ REMEDY_PROBES.update({
         "git push origin HEAD:lane-probe 2>&1 | tail -1", "<REPO>"))],
 })
 
+# ---- the spawn, lane, role, page and shell rules: each act is the one its Remedy names, judged as allowed.
+
+GET_SESSION = "mcp__claude-code-remote__get_session"
+CREATE_SESSION = "mcp__claude-code-remote__create_session"
+LANE_START = tool_payload(CREATE_SESSION, {
+    "prompt": "Grant: the owner said to run the probe lane, 2026-11-12 10:00 CST\n"
+              "Lane brief: probe-step. Topic: probe-topic.\nRun the probe and report.",
+    "effort": "medium", "model": "sonnet", "source_url": "https://github.com/probe/probe",
+    "tags": ["cs-build:lane", "cs-repo:probe/probe", "cs-topic:probe-topic"]})
+EDIT_PRODUCT = {"file_path": "<REPO>/src/app.py", "old_string": "a", "new_string": "b"}
+
+
+def brief_spawn(prompt, role="builder", model="sonnet"):
+    return tool_payload("Agent", {"subagent_type": role, "model": model, "prompt": prompt, "description": "probe"})
+
+
+def role_payload(role, tool, tool_input):
+    """A call from an agent of one role, in the fixture repo: the agent type and id the role rules read."""
+    body = tool_payload(tool, tool_input)
+    body.update(agent_id="probe-agent", agent_type=role, session_id="probe-session-1", cwd="<REPO>")
+    return body
+
+
+# A waiting-page decision that every page rule passes: the form lines, a Departs from line, a stake on the
+# Problem line, and a gain and a lose on each option.
+PAGE_OPTIONS = [{"key": "a", "label": "Ship it", "how": "Merge it.", "gain": "g", "lose": "l"},
+                {"key": "b", "label": "Wait", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]
+PAGE_CONTEXT = ("Goal: keep the guard honest.\nProblem (risk): the probe needs his word.\n"
+                "Based on (read): the probe ran.\nDeparts from: main — adds a probe check.\nThe probe checks the guard.")
+PAGE_PRESS_OPTION = dict(PAGE_OPTIONS[0], label="Merge home#374 yourself", how="Mark home#374 ready and press Merge.",
+                         links=[{"label": "home#374 on GitHub", "url": "https://github.com/shivinate7/home/pull/374"}])
+PAGE_TASK = {"id": "probe-item", "kind": "task", "status": "open", "title": "Probe the guard",
+             "steps": ["Open Terminal", "Paste the command below and run it"],
+             "command": {"powershell": "git status", "mac": "git status"},
+             "context": "Why yours: a session on your computer was asked first and none could reach the remote "
+                        "(measured 2026-11-12, the check ran and refused)."}
+
+
+def page_item(**over):
+    item = {"id": "probe-item", "kind": "decision", "status": "open", "title": "Ship the probe?",
+            "context": PAGE_CONTEXT, "options": PAGE_OPTIONS}
+    item.update(over)
+    return item
+
+
+def page_write(data, action="set"):
+    """One ArtifactData write of a waiting item to the fixture repo's waiting page."""
+    return page_payload({"action": action, "data": data})
+
+
+REMEDY_PROBES.update({
+    "agent-no-remote-tools": [("the agent's own shell work, not a remote call",
+                               agent_payload(bash_payload("git status", "<REPO>")))],
+    "agent-model-floor": [("an Agent spawn on sonnet", brief_spawn("probe")),
+                          ("a lane start on sonnet with its source_url", LANE_START)],
+    "ask-alone": [("the force push with --force-if-includes, alone in its call", bash_payload(
+        "git push --force-with-lease --force-if-includes origin HEAD:probe-branch", "<REPO>"))],
+    "brief-claim-has-probe": [("a builder brief that carries the probe under its claim", brief_spawn(
+        "Keep the scan as it is.\nmain allows `port: 0`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nallowed\n```"))],
+    "brief-destructive-git": [("a brief that orders tests only", brief_spawn(
+        "Run the tests and report the result. Discard nothing."))],
+    "builder-diff": [("a builder's Edit of a product file", role_payload("builder", "Edit", EDIT_PRODUCT))],
+    "builder-test-edit": [("a builder's Edit of a product file", role_payload("builder", "Edit", EDIT_PRODUCT))],
+    "command-in-item": [("a task whose command is set for both shells", page_write(PAGE_TASK))],
+    "designer-scope": [("a designer's Write in the design folder", role_payload("designer", "Write", {
+        "file_path": "<REPO>/docs/design/probe-mockup.html", "content": "probe"}))],
+    "draft-pr": [("create_pull_request with draft true", tool_payload("mcp__github__create_pull_request", {
+        "owner": "probe", "repo": "probe", "title": "probe", "head": "lane-probe", "base": "main", "body": "probe",
+        "draft": True}))],
+    "gh-login-switch": [("a task whose command switches the gh login first", page_write(dict(PAGE_TASK, command={
+        "powershell": "gh auth switch -u shivinate7; gh pr view 1",
+        "mac": "gh auth switch -u shivinate7 && gh pr view 1"})))],
+    "impeccable-review-only": [("the impeccable skill with audit as its first word", tool_payload(
+        "Skill", {"skill": "impeccable", "args": "audit <screen>"}))],
+    "item-field-rendered": [("an item whose fields the page draws", page_write(page_item()))],
+    "lane-effort-pin": [("a lane start at medium, its Grant line first", LANE_START)],
+    "lane-one-topic": [("a lane start whose cs-topic tag holds its brief's topic", LANE_START)],
+    "lane-repo-tag": [("a lane start with the full cs-repo tag", LANE_START)],
+    "lane-start-settings": [("a lane start with its model and source_url", LANE_START)],
+    "message-time-matches-clock": [("the clock read with now-central", bash_payload(
+        "~/.claude/bin/now-central", "<REPO>"))],
+    "mockup-home": [("a design whose file is a mockup in the design folder", page_write(page_item(designs=[
+        {"id": "d1", "file": "docs/design/probe-mockup.html", "label": "d1"}])))],
+    "option-letter-keys": [("options keyed a and b in the order shown", page_write(page_item()))],
+    "owner-judge": [("a decision whose Problem line names a stake", page_write(page_item()))],
+    "page-thread-reply": [("the item rewritten, the act the Remedy names", page_write(
+        page_item(context=PAGE_CONTEXT + "\nRewritten after the comment.")))],
+    "playwright-install": [("the playwright install under node 22", bash_payload(
+        "npx -y node@22 node_modules/playwright/cli.js install", "<REPO>"))],
+    "port-question": [("a port item with its Departs from line", page_write(page_item(port=True)))],
+    "press-link": [("a press option with its link", page_write(page_item(options=[PAGE_PRESS_OPTION, PAGE_OPTIONS[1]])))],
+    "question-checked-with-repo": [("a question on this repo, named by its repo field", page_write(
+        page_item(repo="probe/probe")))],
+    "question-departs": [("a Departs from line with both sides filled", page_write(page_item()))],
+    "question-form": [("a decision in the form, a gain and a lose on each option", page_write(page_item()))],
+    "record-writer-scope": [("a record writer's Write of a Markdown file", role_payload("record-writer", "Write", {
+        "file_path": "<REPO>/docs/probe-record.md", "content": "probe"}))],
+    "rework-off-page": [("an item closed with a home that names the rework", page_write(page_item(
+        status="closed", home="rework of probe-item",
+        context=PAGE_CONTEXT + "\nThe item is being reworked; the fresh item carries the options.")))],
+    "rm-after-cd": [("a recursive delete with no cd before it, the target a full path", bash_payload(
+        "rm -rf /tmp/w/out", "<REPO>"))],
+    "rm-var-unguarded": [("a variable written as ${NAME:?}", bash_payload('D=/tmp/w; rm -rf "${D:?}"/old', "<RUN>")),
+                         ("a literal path", bash_payload("rm -rf /srv/build/out", "<RUN>"))],
+    "roadmap-one-writer": [("get_session with no argument", tool_payload(GET_SESSION, {}))],
+    "roles-third-round-steps-up": [("a reviewer's second round on sonnet", brief_spawn(
+        "Round 2 of 3. Review the diff.", role="reviewer"))],
+    "sendmessage-session-id": [("send_message with the id as session_id", tool_payload(
+        "mcp__claude-code-remote__send_message", {"session_id": "session_probe", "message": "probe"}))],
+    "simulator-boot-bypass": [("sim-test, which takes the lock and boots", bash_payload(
+        "sim-test -scheme Probe", "<REPO>"))],
+    "task-names-check": [("a task whose context holds a Why yours line", page_write(PAGE_TASK))],
+    "task-why-cited": [("a Why yours line that ends in a measured cite", page_write(PAGE_TASK))],
+    "test-author-scope": [("a test author's Write of a test file", role_payload("test-author", "Write", {
+        "file_path": "<REPO>/tests/test_probe.py", "content": "probe"}))],
+    "trust-card-in-build": [("get_session with no argument", tool_payload(GET_SESSION, {}))],
+    "uniform-pick": [("an item with no pick", page_write(page_item()))],
+    "workflow-args-shape-check": [("a Workflow started with a real value", tool_payload(
+        "Workflow", {"script": "probe", "args": {"repo": "probe/probe"}}))],
+    "wsl-allow-list": [("wsl with -e and a python script", bash_payload("wsl -e python3 hooks/test_guard.py", "<REPO>"))],
+})
+
 REMEDY_PROSE_ONLY.update({
     "worktree-home": "the Remedy is to stop and report to the orchestrator: no tool call is the act",
     # The Remedy's act is a Read. The guard never judges a Read, and the check clears on the read itself, outside
     # the guard, so no guard call can prove the Remedy. A probe here would pass whatever the Read did.
     "handoff-unread": "the Remedy's act is a Read, which the guard never judges: the read clears the check outside "
                       "the guard, so no guard call can prove it",
+    # A placeholder for a rule the caller passes in: call_judge.unvetted's callers name spawn-judge and question-judge.
+    "<rule>": "a placeholder for a rule passed in as a parameter, not a rule: its callers are spawn-judge and "
+              "question-judge, which are prose-only here",
+    "lane-closes-after-records": "the act is get_session on the target and then the archive again, and the archive's check "
+                                 "reads the lane's records from its transcript, which this fixture does not stage",
+    "load-brake": "the Remedy's act is to end the turn and send the reading to the parent: no tool call the guard judges",
+    "merge-confirm-repo": "the act is get_session in this session's own turn, and the check reads the live session's "
+                          "tags and the pull request, which this fixture does not stage",
+    "merge-role-proof": "the act is get_session in the batch runner's own turn, or a review record on the pull request; "
+                        "the check reads the live session and the pull request, which this fixture does not stage",
+    "page-item-design": "the check reads the live waiting page to see the republished design, and this fixture holds "
+                        "no live page",
+    "page-stale": "the check compares the publish file with main's page.html and with the live page, and neither is "
+                  "staged here",
+    "past-ruling": "the question judge checks the question against the records with a model call, which this fixture "
+                   "does not make",
+    "question-judge": "the verdict is a model's (call_judge), and this fixture makes no model call",
+    "spawn-judge": "the verdict is a model's (call_judge), and this fixture makes no model call",
+    "simulator-boot-cap": "the rule reads the booted simulators through janitor sweep, which needs xcrun, and this "
+                          "Linux fixture has none",
+    "simulator-boot-lease": "the rule reads the booted simulators through janitor sweep, which needs xcrun, and this "
+                            "Linux fixture has none",
+    "simulator-boot-route": "the rule reads the booted simulators through janitor sweep, which needs xcrun, and this "
+                            "Linux fixture has none",
+    "simulator-boot-twin": "the rule reads the booted simulators through janitor sweep, which needs xcrun, and this "
+                           "Linux fixture has none",
 })
 
 
@@ -712,30 +875,11 @@ def run_guard(body):
 # every PR passes alone; the last one leaves this table empty. A rule listed here that already carries a
 # Remedy fails test_pending_rules_still_lack_a_remedy, so a line cannot outlive its fix.
 REMEDY_PENDING = {
-    "git": ["rm-after-cd", "rm-var-unguarded"],
-    "merge": ["draft-pr", "merge-confirm-repo", "merge-role-proof"],
-    "spawn": [
-        "agent-model-floor", "agent-no-remote-tools", "brief-claim-has-probe", "brief-destructive-git",
-        "builder-diff", "builder-test-edit", "designer-scope", "record-writer-scope", "test-author-scope",
-        "lane-closes-after-records", "lane-effort-pin", "lane-one-topic", "lane-repo-tag",
-        "lane-start-settings", "roles-third-round-steps-up", "sendmessage-session-id", "spawn-judge",
-    ],
-    "page": [
-        "command-in-item", "gh-login-switch", "item-field-rendered", "mockup-home", "option-letter-keys",
-        "owner-judge", "page-item-design", "page-stale", "page-thread-reply", "port-question", "press-link",
-        "question-checked-with-repo", "question-departs", "question-form", "question-judge", "past-ruling",
-        "rework-off-page", "task-names-check", "task-why-cited", "uniform-pick",
-    ],
-    "simulator": [
-        "simulator-boot-bypass", "simulator-boot-cap", "simulator-boot-lease", "simulator-boot-route",
-        "simulator-boot-twin",
-    ],
-    "other": [
-        "ask-alone", "impeccable-review-only", "load-brake", "message-time-matches-clock",
-        "playwright-install", "roadmap-one-writer", "trust-card-in-build", "workflow-args-shape-check",
-        "wsl-allow-list", "agent-model-cap",
-        "<rule>",  # the two wrappers that take the rule as a parameter: guard.py ask() and call_judge.py
-    ],
+    # The ask path. settle_ask()'s refuse() takes its reason from the queue that ask_command() fills, which the scan
+    # does not follow, so its site reads as "<rule>". Those asks carry no Remedy yet: shared-tree (WORKTREE_PRUNE_ASK_REASON,
+    # TREE_ASK_REASON), force-push (PUSH_ASK_REASON), push-main (PUSH_MAIN_REASON) and push-stray-branch (PUSH_STRAY_REASON).
+    # The row goes once those carry one and the scan follows the queue.
+    "ask": ["<rule>"],
 }
 PENDING = {rule for rules in REMEDY_PENDING.values() for rule in rules}
 

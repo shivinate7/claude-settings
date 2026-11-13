@@ -133,7 +133,7 @@ add("floor step-up: builder Round 1 of 3 on opus is denied (only round 3 is a st
 # verifier on Haiku or with no model runs Haiku); a false refusal (a builder, or a marker not on line one, is refused).
 FIX_VERIFIER = "Fix check"
 FIX_BRIEF = FIX_VERIFIER + ". Re-check the diff."
-FIX_VERIFIER_REASON = "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
+FIX_VERIFIER_REASON = "Reviewer fix verifier runs on Sonnet. Remedy: spawn it with model sonnet."
 add("floor step-up: reviewer fix verifier with no model is denied, and names Sonnet", "deny", STEP_UP,
     tool="Agent", prompt=FIX_BRIEF, subagent_type="reviewer", carries=(FIX_VERIFIER_REASON,), lacks=("Opus",))
 add("floor step-up: reviewer fix verifier on haiku is denied, and names Sonnet", "deny", STEP_UP,
