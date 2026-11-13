@@ -1,0 +1,14 @@
+{
+ "id": "handin-cannot-drop",
+ "title": "A handed-in lane PR cannot fall off the batch runner's list",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 built batches from a list it carried and ran merge --reviewed only for lanes it named, never the --root form whose 'open batch now' line lists every done PR. #2816 and #2848 read done from 03:50 CST Nov 13 and missed batches 124-130 with no reason. #2917 and #2817 read open (fix check passed, no round recorded) and nobody told the lane, which idled waiting on runner 10. #2922 is stacked on #2817. Lane archive-flow's 5 PRs waited from 20:13 CST Nov 12.",
+ "source": "retrospective 09:19 CST Nov 13; owner 09:16 CST: 'how are we losing track of built work if we have a plan?'",
+ "note": "(1) The batch runner builds each batch from merge --reviewed --root (skill project-ops batch-runner brief and the runner start line). (2) A PR whose record reads open or bad goes back to its lane by name, session id from the PR footer, in the same pass. (3) The upkeep list shows a handed-in PR (review record posted) that no batch has taken after 6 h. Guard: the left-out report of step batch-build-names-left-out, read at every build. Red first: a done PR the runner did not name still shows in the batch build.",
+ "updatedAt": "2026-11-13T09:19:53-06:00"
+}

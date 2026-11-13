@@ -1,0 +1,11 @@
+{
+ "id": "stale-draft-joint-pass",
+ "at": "2026-11-13T09:16:00-06:00",
+ "title": "One idle-lanes line closes a stale draft and archives its lane",
+ "ruling": "Owner 09:16 CST Nov 13 confirms the stood pick on step stale-draft-joint-pass: decision stalled-steps ruling p (triage closes the build's stale drafts once, then at each batch) plus option a of item 688, a joint close-and-archive line in merge --idle-lanes.",
+ "quote": "my previous ruling + option A ought to cover it i believe",
+ "source": "owner chat 09:16 CST Nov 13, relayed by the retrospective 09:18 CST; page item 688",
+ "status": "open",
+ "supersedes": [],
+ "step": "stale-draft-joint-pass"
+}
