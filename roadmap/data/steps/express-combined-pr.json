@@ -1,14 +1,14 @@
 {
  "id": "express-combined-pr",
  "title": "One hand-built combined PR merges the express heads in order, built by a lane off main",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL48xL9QenHUiW2apQp",
  "owner": "triage",
  "blockedBy": [],
  "why": "Many express lanes each cost a PR run and a main run; the owner allows a combined PR that saves CI, and nothing builds one yet.",
  "source": "Coordinator 15:44 CST Nov 13; ruling own-767-a-combined-pr; text rules in step claude-md-merge-alone-or-combined.",
- "note": "Filed 15:45 CST Nov 13. One hand-built PR merges the express heads in order, built by a lane off main, under the recipe of step combined-pr-recipe (lane lint, ready, its own record; the runner merges it alone on its own green run; a red one drops a lane). The coordinator starts its lane once main reads green or the owner force-merges. Not started. Past rulings other than own-767-a not checked.",
- "updatedAt": "2026-11-13T15:45:33-06:00"
+ "note": "Filed 15:45 CST Nov 13. One hand-built PR merges the express heads in order, built by a lane off main, under the recipe of step combined-pr-recipe (lane lint, ready, its own record; the runner merges it alone on its own green run; a red one drops a lane). The coordinator starts its lane once main reads green or the owner force-merges. Not started. Past rulings other than own-767-a not checked. Lane 15:46 CST Nov 13 (coordinator 15:46): session_013NEJL48xL9QenHUiW2apQp (Sonnet, medium), started 15:46. Members: #3180, #3172, #3023, #3168, #2971, #3153, #3142, #2783, #3021 (retro's picks 15:45: #3168 in, #3111 after, #2778 out). Member list is retro's and the coordinator's, not read by triage.",
+ "updatedAt": "2026-11-13T15:46:50-06:00"
 }
