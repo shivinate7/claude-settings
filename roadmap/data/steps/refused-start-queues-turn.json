@@ -1,0 +1,14 @@
+{
+ "id": "refused-start-queues-turn",
+ "title": "A session start refused on another session's turn queues for the next owner turn",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Degen ledger D27: a start refused on a turn another session began lands on an idle lane instead of waiting for the owner.",
+ "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D27",
+ "note": "When a session start is refused on a turn another session began, the coordinator queues it for the next owner turn, not an idle lane. Borrowing lanes is already ruled (session-tiers.md:143,179).",
+ "updatedAt": "2026-11-12T21:43:35-06:00"
+}

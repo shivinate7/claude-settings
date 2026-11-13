@@ -1,14 +1,14 @@
 {
  "id": "page-sort-newest-first",
  "title": "The waiting page sorts items newest first inside each tier",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL12HQVjVuXAgtmtu9E",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 21:37 CST Nov 12: \"sort the artifact by time so i can quickly answer thr newest ones\". The page sorts oldest first inside a tier (sorted() byAge in skills/waiting-page/page.html), so the newest asks sit at the bottom.",
  "source": "owner chat with triage 21:37 CST Nov 12; store entry page-newest-first",
- "note": "Fix: in skills/waiting-page/page.html sorted(), byAge becomes `age(b) - age(a) || ts(b.added) - ts(a.added) || b.n - a.n`, with a comment citing the ruling; tiers and rank stay. A page test pins the order (red first). Then every repo's page republishes from main. Triage tried a live-only edit at 21:40 CST; guard page-stale refused it (the page must match main), as designed. Departs from: main sorts oldest first inside a tier.",
- "updatedAt": "2026-11-12T21:40:15-06:00"
+ "note": "Fix: in skills/waiting-page/page.html sorted(), byAge becomes `age(b) - age(a) || ts(b.added) - ts(a.added) || b.n - a.n`, with a comment citing the ruling; tiers and rank stay. A page test pins the order (red first). Then every repo's page republishes from main. Triage tried a live-only edit at 21:40 CST; guard page-stale refused it (the page must match main), as designed. Departs from: main sorts oldest first inside a tier. Coordinator 21:42 CST Nov 12: lane session_013NEJL12HQVjVuXAgtmtu9E, express, newest-first first; it then owns #2906 (waiting-page-sorting) and its 320 px sideways-scroll CSS fix. #2904 waits on #2906.",
+ "updatedAt": "2026-11-12T21:43:35-06:00"
 }
