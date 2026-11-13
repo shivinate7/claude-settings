@@ -732,11 +732,12 @@ class SymbolTests(StaleCase):
             "with": "with open(path) as fh:\n    X = 1\n",
             "for": "for item in items:\n    X = 1\n",
             "while": "while running:\n    X = 1\n",
-            "match": "match mode:\n    case 1:\n        X = 1\n",
             "except": "try:\n    pass\nexcept ValueError:\n    X = 1\n",
             "for else": "for item in items:\n    pass\nelse:\n    X = 1\n",
             "finally": "try:\n    pass\nfinally:\n    X = 1\n",
         }
+        if sys.version_info >= (3, 10):  # the product floor is 3.9, whose parser has no match statement
+            blocks["match"] = "match mode:\n    case 1:\n        X = 1\n"
         for kind, block in blocks.items():
             with self.subTest(kind=kind):
                 self.assert_bound_name_not_flagged("hooks/mod.py", "X", base_mod,
