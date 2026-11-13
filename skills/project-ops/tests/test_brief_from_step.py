@@ -91,6 +91,11 @@ MODEL_NAME = re.compile(r"sonnet|haiku|opus", re.I)
 # The R9 ruling's own words and time, copied from roadmap/rulings/r9.json on origin/roadmap,
 # so no test reads that branch.
 R9_WORDS = ("passes round 1 is done", "fixed under a fix verifier waits for round 3", "15:44")
+SPAWN_HEAD = "Agent spawn brief head"  # the heading of the block a lane copies into a spawn brief
+MARKER_FORMS = ("Guard or check: yes", "Fix check", "Round 2 of 3", "Round 3 of 3", "Audit:")
+GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.abspath(os.path.join(HERE, "..", "..", "..", "hooks", "guard.py"))
+# The real decision record the guard reads for the role table and the round rows.
+DECISION_RECORD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "docs", "decisions", "agent-model-cap.md"))
 
 
 def setUpModule():
@@ -157,6 +162,56 @@ def unreadable_count(repo):
     listed = fixture.git(repo, "ls-tree", "--name-only", "refs/heads/" + REF, "roadmap/rulings/")
     files = [name for name in listed.split("\n") if name.endswith(".json")]
     return len(files) - len(fixture.ruled_store.read_store(repo, REF)[0])
+
+
+def spawn_block(out):
+    """The lines after the `Agent spawn brief head` heading (plain, or with # marks), or None when there is none."""
+    lines = out.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().lstrip("#").strip() == SPAWN_HEAD:
+            return lines[index + 1:]
+    return None
+
+
+def is_marker_line(line):
+    return any(line.startswith(form) for form in MARKER_FORMS)
+
+
+def fenced_pairs(lines):
+    """(line, inside a ``` fence) for each line; a fence line counts as inside."""
+    fenced, pairs = False, []
+    for line in lines:
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            pairs.append((line, True))
+        else:
+            pairs.append((line, fenced))
+    return pairs
+
+
+def spawn_brief(block, marker=None):
+    """The text a lane copies into a spawn brief: `marker` on the first line, then the block's own lines without its
+    marker-form listing. The listing is left out so the guard reads only the marker the lane chose."""
+    kept = [line for line in block if line.strip() and line.strip() != "none" and not is_marker_line(line)]
+    return "\n".join(([marker] if marker else []) + kept)
+
+
+def guard_reason(config, prompt, model="sonnet", subagent="reviewer"):
+    """The real guard's answer to one Agent spawn, as Claude Code reads it: "" for an allow, else the deny reason."""
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "cwd": config,
+               "tool_input": {"subagent_type": subagent, "model": model, "prompt": prompt}}
+    env = dict(fixture.ENV, CLAUDE_CONFIG_DIR=config)
+    env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # the env pin lifts the refusal; the cases must not inherit it
+    done = _nowindow.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+                         env=env, timeout=60)
+    text = done.stdout.strip()
+    if not text:
+        return ""
+    try:
+        body = json.loads(text)["hookSpecificOutput"]
+    except (ValueError, KeyError, TypeError):
+        return "unreadable guard output: %s" % text[:200]
+    return body.get("permissionDecisionReason") or body.get("permissionDecision") or "unreadable guard output"
 
 
 def template_tail():
@@ -477,6 +532,47 @@ class RulingsAndSource(BriefCase):
         quote_lines = [line for line in out.splitlines() if Q_RELAYED in line]
         self.assertTrue(any(RELAYED in line for line in quote_lines),
                         "the relayed source is not printed on the quote's line")
+
+
+class SpawnBriefHead(BriefCase):
+    """The block a lane copies into a spawn brief, and the real guard's answer to that brief."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = os.path.join(self.root, "config")
+        pointer = os.path.join(self.config, "pointer")
+        os.makedirs(os.path.join(pointer, "docs", "decisions"))
+        # A copy of the real record in a temp pointer checkout: the guard reads the same file the repo holds.
+        shutil.copy(DECISION_RECORD, os.path.join(pointer, "docs", "decisions", "agent-model-cap.md"))
+        open(os.path.join(pointer, "CLAUDE.md"), "w", encoding="utf-8").close()
+        with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % pointer.replace(os.sep, "/"))
+
+    def block(self):
+        out = self.build(self.make_repo(step=step_doc()))
+        block = spawn_block(out)
+        self.assertIsNotNone(block, "the output has no Agent spawn brief head block")
+        return block
+
+    def test_block_lists_each_marker_form_at_a_line_start_outside_a_fence(self):
+        pairs = fenced_pairs(self.block())
+        for form in MARKER_FORMS:
+            self.assertTrue(any(line.startswith(form) and not fenced for line, fenced in pairs),
+                            "the block does not list the marker form %r at a line start outside a fence" % form)
+        self.assertTrue(any("first line" in line for line, _fenced in pairs),
+                        "the block does not say the marker goes on the spawn brief's first line")
+
+    def test_spawn_brief_from_the_block_passes_the_real_guard_with_each_marker(self):
+        block = self.block()
+        for marker in ("Guard or check: yes", "Fix check", "Round 2 of 3"):
+            reason = guard_reason(self.config, spawn_brief(block, marker))
+            self.assertEqual(reason, "", "the real guard refused a sonnet reviewer whose first line is %r: %s"
+                             % (marker, reason[:200]))
+
+    def test_the_real_guard_refuses_the_same_spawn_without_a_marker(self):
+        reason = guard_reason(self.config, spawn_brief(self.block()))
+        self.assertTrue(reason.startswith("agent-role-model:"),
+                        "the spawn with no marker was not refused by agent-role-model: %r" % reason[:200])
 
 
 if __name__ == "__main__":
