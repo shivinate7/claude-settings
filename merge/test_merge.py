@@ -3915,7 +3915,7 @@ class GhHalf(Env):
         self.assertIn("GET pulls/7", self.calls())
 
     def test_a_batch_without_lanes_reads_no_open_pr_list_after_the_merge(self):
-        # confirm reads the open pull list before the merge, for the batch brake. Only list reads after the PUT count here.
+        # No batch brake is left to read the open pull list, so a merge reads none after its PUT: nothing cuts a batch's lanes after a merge.
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         lines = self.calls().splitlines()
@@ -3936,6 +3936,13 @@ class GhHalf(Env):
     def test_confirm_merges_past_an_ignored_running_workflow_on_another_ready_pr(self):
         rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("sync", "in_progress", None)], rows=[("checks", "pass", "")],
                                                                       ignore={"sync": "the sync job is advisory"}))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", self.calls())
+
+    def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
+        # Re-pointed from the batch brake's cases. Act 4 removes the brake, so another ready pull request's pending required check holds no merge.
+        # The old batch path refused this merge and named that check: red on a11bafe09.
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[], rows=[("checks", "pending", "")]))
         self.assertEqual(rc, 0, out)
         self.assertIn("PUT pulls/7/merge", self.calls())
 
@@ -11627,39 +11634,16 @@ class HeadReadNoBatchRead(unittest.TestCase):
 
 
 class BatchBrake(Env):
-    """The batch brake (act 4 removes it): no read of the other ready pull requests holds a merge. Kept as the cases that the merge
-    goes through with another ready pull request's check pending, and with that read unreadable."""
-
-    def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
-        put_base_config(self, complete_config())  # the base's config is complete, so the first line out is the stop, not the defaults notice
-        self.host.batch = [BATCH_BLOCKER]  # the brake is gone: another ready PR's pending check does not hold this merge
-        rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("merged as", out)
-        self.assertEqual(self.host.waits, [], "the head was waited on under the lock: %s" % (self.host.waits,))
-        self.assertTrue(getattr(self.host, "merged", False))
+    """Lone-lane merges with no other ready pull request. The brake's other-PR cases are in GhHalf, the one home of that read (act 4 removes the brake)."""
 
     def test_confirm_proceeds_when_no_other_pr_blocks(self):
         rc, out = self.run_merge("1", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False))
 
-    def test_an_unreadable_pulls_list_does_not_refuse_confirm(self):
-        put_base_config(self, complete_config())  # the base's config is complete, so the first line out is the stop, not the defaults notice
-        self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the read was the brake's: with no brake, no read holds the merge
-        rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(getattr(self.host, "merged", False))
-
-    def test_preview_of_a_lone_lane_names_no_batch(self):
-        """A lane is its own merge (act 4): the preview prints no batch line, even while another ready pull request has a check pending."""
-        self.host.batch = [BATCH_BLOCKER]
-        rc, out = self.run_merge("1")
-        self.assertEqual([l for l in out.splitlines() if l.startswith("  batch:")], [], "the preview of a lone lane printed a batch line: " + out)
-
 class ExpressPath(ScopedRepo, Env):
     """confirm with a bare --express: a prose-only pull request whose body names a ruling in the store (origin/roadmap's rulings) goes on
-    to the merge. Every other case refuses before anything is pushed. A live batch run holds no merge (act 4 removes the batch brake)."""
+    to the merge. Every other case refuses before anything is pushed."""
 
     RULINGS = ("r55", "timer-allowed-when-cheaper")  # the real ids; the second has the hyphens the id pattern allows
     FLAG_ARGV = ("7", "--confirm", "--express")
@@ -11902,16 +11886,6 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown")
-
-    def test_a_live_batch_run_under_express_merges_the_prose_pr(self):
-        """Under --express a live batch run holds no merge: the express path merges the prose-only pull request as it does with no batch run."""
-        self.store(self.RULINGS)
-        self.host.body = "Ruling: r55\n"
-        self.assert_prose_only()  # the express check passes, so the merge is the express path's
-        self.host.batch = [BATCH_BLOCKER]
-        rc, out = self.run_express()
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_without_express_a_non_prose_pr_merges_as_before(self):
         self.on("feat", {"hooks/note.py": "X = 2\n"})
