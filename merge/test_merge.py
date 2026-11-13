@@ -7513,16 +7513,16 @@ class LockHolder(Env):
         return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def peek(self, *args):
-        """Run `merge 7 --confirm *args`. Inside its wait, read the lock message and run a second merge.
-        Returns (lock message, the second run's output). A run that never reaches the wait gives ("", "")."""
+        """Run `merge 7 --confirm *args`. At the head's one read under the lock (Host.head_state), read the lock message and run a second merge.
+        Returns (lock message, the second run's output). A run that never reaches that read gives ("", "")."""
         seen = {"msg": "", "second": ""}
-        orig = self.host.wait_checks
-        def wait(n, sha, d, prior=None):
+        orig = self.host.head_state
+        def read(n, sha=None):
             if not seen["msg"]:
                 seen["msg"] = self.lock_msg()
                 seen["second"] = self.run_merge("8", "--confirm")[1]
-            return orig(n, sha, d, prior)
-        self.host.wait_checks = wait
+            return orig(n, sha)
+        self.host.head_state = read
         try:
             self.run_merge("7", "--confirm", *args)
         except SystemExit:
@@ -10410,19 +10410,20 @@ class GhLockRateRetry(unittest.TestCase):
             self.lock().read("main")
 
 class BeforeWaitHost(FakeHost):
-    """Keeps the hook the run has handed it (Host.before_wait) when its first wait starts."""
+    """Keeps the hook the run has handed it (Host.before_wait) at the first read the run makes under the lock: the head's read, the
+    per-lane confirm's only read before the claim (it waits on nothing)."""
     seen = "never read"
 
-    def wait_checks(self, n, sha, d, prior=None):
+    def head_state(self, n, sha=None):
         if self.seen == "never read":
             self.seen = getattr(self, "before_wait", None)
-        return super().wait_checks(n, sha, d, prior)
+        return super().head_state(n, sha)
 
 class LockExtensionReachesHost(Env):
     """A rate wait is the exception to the lock's take expiry. So once the lock is
     taken, confirm hands the host the lock's own extend_for (host.before_wait): the host runs it before each rate wait. It hands over no bound
     (host.until) that stops a wait at the end of the lock's spare."""
-    def test_the_run_hands_the_host_the_lock_extension_before_its_first_wait(self):
+    def test_the_run_hands_the_host_the_lock_extension_before_its_first_read_under_the_lock(self):
         host = BeforeWaitHost(self.co, self.other)
         rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertEqual(rc, 0, out)
