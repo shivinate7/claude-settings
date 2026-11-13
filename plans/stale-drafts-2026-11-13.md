@@ -294,6 +294,6 @@ Joined the 225 with archive pass 2's lane-to-PR pairs (helper session_013NEJKzn2
 - Held, an idle lane holds it: 55.
 - Held, first pass held it (owner list or live step), and those lanes are not archived: 92.
 - Held, its branch is a step still doing with a lane: 5 (#2658, #2660, #2698, #2700, #2825).
-- To close: 73 (closing from 23:47 CST), no closing comment, no branch delete. A closed PR reopens from its page.
+- Closed: 73, finished 23:49 CST, no closing comment, no branch delete. A closed PR reopens from its page.
 
 Closed: #2654 #2661 #2663 #2664 #2665 #2666 #2672 #2673 #2674 #2676 #2680 #2685 #2687 #2689 #2695 #2697 #2699 #2701 #2702 #2704 #2705 #2711 #2715 #2716 #2717 #2718 #2721 #2722 #2724 #2725 #2726 #2728 #2734 #2736 #2740 #2742 #2747 #2755 #2759 #2761 #2762 #2763 #2764 #2765 #2767 #2769 #2771 #2772 #2775 #2777 #2780 #2782 #2784 #2786 #2787 #2788 #2789 #2790 #2792 #2793 #2795 #2797 #2798 #2799 #2802 #2808 #2809 #2812 #2815 #2818 #2819 #2821 #2822
