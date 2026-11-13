@@ -149,10 +149,11 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   minutes of the item's block, either direction, stamp to stamp, each stamp read with its UTC offset:
   a message that close is a follow-up on the same thread, not a repeat. A block 31 minutes away, and
   any block of another session's inbox, stay candidates. The 30-minute window comes from step
-  repeat-mark-skips-followups (owner gripe 14:24 CST Nov 12, relayed 14:25 CST; the window is the
-  step's, in the coordinator's lane grant 14:27 CST Nov 12). A recorded rule is an argument, not law. The prompt says a follow-up or
-  detail on the same topic is not a repeat. A candidate is named only when the new item asks again
-  for a change it already asked for and got an answer. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
+  repeat-mark-skips-followups (owner gripe 14:24 CST Nov 12, relayed 14:25 CST). The prompt says a
+  follow-up or detail on the same topic is not a repeat, and a shared word or a broad topic is not
+  a repeat. A candidate is named only when the new item asks again for a change it already asked for
+  and got an answer. It must also ask for the same specific change as the whole item. An item
+  that holds two topics gets no candidate that covers only one of them. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
   to the item line (one inbox rewrite through a temp file) and prints one systemMessage line. A mark
   never blocks the turn. A line that cannot be found is reported as not marked. The session merges
   the work or drops the mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
