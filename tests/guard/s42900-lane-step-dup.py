@@ -23,19 +23,7 @@ STEPDUP_BRIEF = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
 STEPDUP_NO_OPEN_PR = fake_gh_path(ARCHCLOSED)
 
 
-def stepdup_row(sid, status, tags):
-    """One list_sessions row: the keys the tool returns for a session, with `tags` as a list."""
-    return {"id": sid, "title": "a lane session", "session_status": status, "tags": list(tags)}
-
-
-def stepdup_list(tool_id, rows, more=False, args=None, cut=False):
-    """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that is not the
-    last page. `args` is the call's input: an after_id cursor makes the read a page of a chain. `cut` drops the end of
-    the result, so the text is not a whole record."""
-    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
-    return [role_use(tool_id, LIST_SESSIONS, dict(args or {})), role_result(tool_id, body[:-40] if cut else body)]
-
-
+# stepdup_row and stepdup_list, the list_sessions read, are in section 13406 with the other transcript helpers.
 def stepdup_fill(count):
     """`count` live lanes on other steps: the rows a full page holds before its last row."""
     return [stepdup_row("session_STEPDUPFILL%03d" % n, STEPDUP_LIVE,

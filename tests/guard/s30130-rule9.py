@@ -125,10 +125,21 @@ add("lane-start-settings: a denied lane with no model names model in its reason"
 add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
+# The open pull requests of the lane's cs-repo, for lane-step-dup-pr: a stand-in for claude-settings with none open.
+LANE_START_GH = os.path.join(ROOT, "lanestart-gh")
+
+
+def build_lane_start_gh():
+    """The stand-in pull request tool for claude-settings: it answers only that repo, and holds no open pull request."""
+    make_fake_gh(LANE_START_GH, "main", need=["shivinate7/claude-settings"])
+
+
+lazy_fixture([LANE_START_GH], build_lane_start_gh)
 add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
-    model="sonnet", source_url=LANE_SOURCE_URL)
+    model="sonnet", source_url=LANE_SOURCE_URL,
+    transcript=role_path("lane-start-listed"), env_path=fake_gh_path(LANE_START_GH))
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
 add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
