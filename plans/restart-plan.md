@@ -524,6 +524,14 @@ with no hand-back, so their caller waited on nothing. An agent's end always reac
   quotes match the feedback log word for word skips the review round that decision
   docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
   the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
+- **Prose merge order (item 521, pick a).** Owner 20:24 CST Nov 11: "for a large part prose truly can
+  all be done first". He added that some prose has to wait behind some code, "otherwise it'd be
+  confusing". Owner, chat with runner 10, 11:19 and 11:24 CST Nov 13: prose and code stay in separate
+  batches "when it's faster". So the split is a speed choice, never a fixed wall. The batch runner
+  mixes prose and code in one batch when that lands both sooner. One limit stays, for accuracy. A prose
+  lane that describes code not yet on main never merges ahead of that code; the same batch is fine.
+  Measured 11:21 CST Nov 13: a batch of only .md files still runs about 93 suite steps in the `checks`
+  job, so a separate prose batch costs a full CI run until step ci-jobs-skip-unread lands.
 
 ### 3.14 Prose stores tend themselves
 
@@ -1050,6 +1058,18 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      rulings are being read too strictly". R55's list names the kinds of fix it means; it is not a
      closed list to read word by word.
   Home: R66; decision session-tiers (the coordinator's lane starts).
+
+- **R68. Every standing role's compaction audit reads main.** Owner 11:19 CST Nov 13: "i think any of
+  the standing roles, so triage, batch runners, consultants, cordinators, etc all ought to have the
+  check that coordinator has for compaction". After each compaction, the Sonnet audit of triage, each
+  batch runner, the consultant and the coordinator checks each "done" or "landed" claim against main,
+  the roadmap and the PRs. Today only the coordinator's does (step coordinator-transcript-reconcile).
+  Home: ruling audit-reads-main-every-role (triage 11:23 CST); decision precompact-handoff item 16,
+  widened; step handoff-audit-after-compact.
+- **R67 part 5. Two more express lanes.** Owner 11:21 CST, through runner 10, on CI skip: "address it".
+  Step ci-jobs-skip-unread. Its first lane flags the `checks` suites that read no .md file. Owner 11:23
+  CST, on the CLAUDE.md load: "if it loses nothing approved". A session started in /home/user loads 7
+  CLAUDE.md files, which adds 27k tokens to each Explore start (44.2k against 71.9k, 19 runs).
 
 ## Stage 5. Resume lanes
 
