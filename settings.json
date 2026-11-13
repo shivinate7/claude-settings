@@ -270,7 +270,7 @@
         ]
       },
       {
-        "matcher": "Agent|AskUserQuestion|ArtifactData",
+        "matcher": "Agent|AskUserQuestion|ArtifactData|mcp__claude-code-remote__send_message|mcp__claude-code-remote__create_session|SendMessage",
         "hooks": [
           {
             "type": "command",
