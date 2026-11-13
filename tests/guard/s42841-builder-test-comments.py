@@ -92,6 +92,21 @@ TC_MUT_BASE = "# mutant note\nx = 1\n"
 TC_INI = "pytest.ini"
 TC_INI_BASE = "[pytest]\n# note\naddopts = -q\n"
 
+# A block comment that holds a line break after `return`: the break ends the statement (automatic semicolon
+# insertion), so the collapsed form is code, not a comment.
+TC_ASI = "web/asi.test.js"
+TC_ASI_BASE = "export function f(x) {\n  return /* c\n */ x;\n}\n"
+# A regex literal holds `//`, which a line cut would read as a comment opener.
+TC_RE = "web/regex.test.js"
+TC_RE_BASE = (r"const r = /a\/\/b/;" "\n" r"const u = /https?:\/\//;" "\n" "// note\n"
+              'export const ok = r.test("a//b") && u.test("http://");\n')
+# A coding cookie (PEP 263) is read from line 1 or 2, so a change to its text is no comment change.
+TC_COOKIE = "tests/test_tc_cookie.py"
+TC_COOKIE_BASE = "# -*- coding: utf-8 -*-\nx = 1  # keep\n"
+# The smallest file a cookie sits in: the cookie and nothing else.
+TC_COOKIE_ONLY = "tests/test_tc_cookie_only.py"
+TC_COOKIE_ONLY_BASE = "# -*- coding: utf-8 -*-\n"
+
 TC_FILES = {
     **BASE_FILES,
     TC_PY: TC_PY_BASE, TC_STR: TC_STR_BASE, TC_MLINE: TC_MLINE_BASE, TC_DISGUISE: TC_DISGUISE_BASE,
@@ -99,6 +114,7 @@ TC_FILES = {
     TC_JS: TC_JS_BASE, TC_TPL: TC_TPL_BASE, TC_JSX: TC_JSX_BASE, TC_JS_UNCOMMENT: TC_JS_UNCOMMENT_BASE,
     TC_JS_SLASH: TC_JS_SLASH_BASE, TC_JS_BROKEN: TC_JS_BROKEN_BASE,
     TC_RB: TC_RB_BASE, TC_MUT: TC_MUT_BASE, TC_INI: TC_INI_BASE,
+    TC_ASI: TC_ASI_BASE, TC_RE: TC_RE_BASE, TC_COOKIE: TC_COOKIE_BASE, TC_COOKIE_ONLY: TC_COOKIE_ONLY_BASE,
 }
 
 # The write tool judges the file on disk, with the edit applied, so its cases share one clean checkout.
@@ -288,3 +304,78 @@ sh("builder-refuse: a `//` removed from a javascript code line is denied at comm
 sh("builder-refuse: a comment edit in an unparsable javascript test file is denied at commit", COMMIT, "deny",
    rule=BDIFF, cwd=_tc_change("js-unparsable", TC_JS_BROKEN, _tc_edit(TC_JS_BROKEN_BASE, "// note", "// changed")),
    **TC_BUILDER)
+
+
+# A line break inside a block comment after `return` ends the statement, so the collapsed form changes the code.
+sh("builder-refuse: a javascript block comment holding a line break, collapsed onto one line after return, is denied at commit",
+   COMMIT, "deny", rule=BDIFF,
+   cwd=_tc_change("js-asi-collapsed", TC_ASI, _tc_edit(TC_ASI_BASE, "/* c\n */ x;", "/* c */ x;")), **TC_BUILDER)
+add("builder-refuse: a javascript block comment holding a line break, collapsed onto one line after return, is denied by the Edit tool",
+    "deny", rule=TC_RULE, tool="Edit", file_path=TC_ASI, old_string="/* c\n */ x;", new_string="/* c */ x;",
+    cwd=_tc_base_repo, **TC_BUILDER)
+# GREEN control: the same block comment with its line break kept and only its text changed is a comment change.
+sh("builder-refuse: a javascript block comment holding a line break, with its text changed and the break kept, is allowed at commit",
+   COMMIT, "allow", cwd=_tc_change("js-asi-kept", TC_ASI, _tc_edit(TC_ASI_BASE, "/* c\n", "/* d\n")), **TC_BUILDER)
+
+# A `//` inside a regex literal is regex text. Changing it is a code change, though a line cut would read
+# `//b/;` as a comment.
+sh("builder-refuse: a regex literal holding // changed inside the regex is denied at commit", COMMIT, "deny",
+   rule=BDIFF, cwd=_tc_change("js-regex-slashes", TC_RE, _tc_edit(TC_RE_BASE, r"/a\/\/b/", r"/a\/\/c/")),
+   **TC_BUILDER)
+sh("builder-refuse: a regex literal holding https?:// changed inside the regex is denied at commit", COMMIT, "deny",
+   rule=BDIFF, cwd=_tc_change("js-regex-url", TC_RE, _tc_edit(TC_RE_BASE, r"/https?:\/\//", r"/http:\/\//")),
+   **TC_BUILDER)
+add("builder-refuse: a regex literal holding // changed inside the regex is denied by the Edit tool", "deny",
+    rule=TC_RULE, tool="Edit", file_path=TC_RE, old_string=r"/a\/\/b/", new_string=r"/a\/\/c/",
+    cwd=_tc_base_repo, **TC_BUILDER)
+# GREEN control: a comment edited next to the regex literal is a comment change.
+sh("builder-refuse: a comment edited next to a regex literal holding // is allowed at commit", COMMIT, "allow",
+   cwd=_tc_change("js-regex-comment", TC_RE, _tc_edit(TC_RE_BASE, "// note", "// note, reworded")), **TC_BUILDER)
+
+# A coding cookie on line 1 is read by the interpreter. A comment above it, or between it and the code, moves
+# no code. A change to the cookie's text, or its removal, changes how the file is read, so it stays refused.
+sh("builder-refuse: a python comment added on line 2, under the coding cookie, is allowed at commit", COMMIT,
+   "allow", cwd=_tc_change("cookie-note-line-2", TC_COOKIE,
+                           _tc_edit(TC_COOKIE_BASE, "x = 1  # keep", "# note\nx = 1  # keep")), **TC_BUILDER)
+sh("builder-refuse: a python comment added after the code, under the coding cookie, is allowed at commit", COMMIT,
+   "allow", cwd=_tc_change("cookie-note-after-code", TC_COOKIE,
+                           _tc_edit(TC_COOKIE_BASE, "x = 1  # keep\n", "x = 1  # keep\n# note\n")), **TC_BUILDER)
+sh("builder-refuse: a python comment added above the coding cookie is allowed at commit", COMMIT, "allow",
+   cwd=_tc_change("cookie-note-above", TC_COOKIE,
+                  _tc_edit(TC_COOKIE_BASE, "# -*- coding: utf-8 -*-", "# note\n# -*- coding: utf-8 -*-")), **TC_BUILDER)
+sh("builder-refuse: a python comment added to a file that holds only the coding cookie is allowed at commit", COMMIT,
+   "allow", cwd=_tc_change("cookie-only-note", TC_COOKIE_ONLY,
+                           _tc_edit(TC_COOKIE_ONLY_BASE, "# -*- coding: utf-8 -*-\n",
+                                    "# -*- coding: utf-8 -*-\n# note\n")), **TC_BUILDER)
+sh("builder-refuse: a python coding cookie whose encoding is changed is denied at commit", COMMIT, "deny",
+   rule=BDIFF, cwd=_tc_change("cookie-encoding", TC_COOKIE, _tc_edit(TC_COOKIE_BASE, "utf-8", "latin-1")),
+   **TC_BUILDER)
+sh("builder-refuse: a python coding cookie line that is deleted is denied at commit", COMMIT, "deny", rule=BDIFF,
+   cwd=_tc_change("cookie-deleted", TC_COOKIE, _tc_edit(TC_COOKIE_BASE, "# -*- coding: utf-8 -*-\n", "")),
+   **TC_BUILDER)
+add("builder-refuse: a python comment added on line 2, under the coding cookie, is allowed by the Edit tool", "allow",
+    tool="Edit", file_path=TC_COOKIE, old_string="x = 1  # keep", new_string="# note\nx = 1  # keep",
+    cwd=_tc_base_repo, **TC_BUILDER)
+add("builder-refuse: a python comment added above the coding cookie is allowed by the Edit tool", "allow",
+    tool="Edit", file_path=TC_COOKIE, old_string="# -*- coding: utf-8 -*-", new_string="# note\n# -*- coding: utf-8 -*-",
+    cwd=_tc_base_repo, **TC_BUILDER)
+add("builder-refuse: a python coding cookie whose encoding is changed is denied by the Edit tool", "deny",
+    rule=TC_RULE, tool="Edit", file_path=TC_COOKIE, old_string="utf-8", new_string="latin-1",
+    cwd=_tc_base_repo, **TC_BUILDER)
+
+# A write call that holds both shapes is refused. The guard replays the comment edit, and the tool may write the
+# code in `content` instead.
+add("builder-refuse: a Write with a comment edit and a code content is denied by the Write tool", "deny",
+    rule=TC_RULE, tool="Write", file_path=TC_PY, content="assert 2", old_string="# A note on the module.",
+    new_string="# A changed note on the module.", cwd=_tc_base_repo, **TC_BUILDER)
+add("builder-refuse: a Write with an edits list of a comment edit and a code content is denied by the Write tool",
+    "deny", rule=TC_RULE, tool="Write", file_path=TC_PY, content="assert 2",
+    edits=[{"old_string": "# A note on the module.", "new_string": "# A changed note on the module."}],
+    cwd=_tc_base_repo, **TC_BUILDER)
+add("builder-refuse: an Edit with an edits list of a comment edit and a code content is denied by the Edit tool",
+    "deny", rule=TC_RULE, tool="Edit", file_path=TC_PY, content="assert 2",
+    edits=[{"old_string": "# A note on the module.", "new_string": "# A changed note on the module."}],
+    cwd=_tc_base_repo, **TC_BUILDER)
+add("builder-refuse: an Edit with a comment edit and a code content is denied by the Edit tool", "deny",
+    rule=TC_RULE, tool="Edit", file_path=TC_PY, content="assert 2", old_string="# A note on the module.",
+    new_string="# A changed note on the module.", cwd=_tc_base_repo, **TC_BUILDER)
