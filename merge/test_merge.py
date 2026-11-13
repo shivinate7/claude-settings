@@ -15720,6 +15720,19 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.reviewed_line(self.reviewed_host(fx, fx.after_plain), fx.after_plain, "stale",
                            "a clean merge whose first parent is a plain commit must read stale: the plain commit is not a clean merge")
 
+    def test_c_a_non_merge_commit_on_a_guard_path_after_the_reviewed_head_reads_stale(self):
+        # A non-merge commit on a guard path after the last review leaves the review not done, so the merge step refuses it (decision pr-review-record).
+        # ReleaseCheck's plain-commit case pins that refusal; this case pins the state the refusal reads.
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        guard = "lint/report_guard.py"
+        self.assertEqual(merge.guard_hits([guard]), [guard], "fixture: the path is no guard path, so the case tests nothing")
+        top = self.git_commit(fx.fixed, {guard: "guard\n"})
+        self.facts(fx, [top])
+        host = self.reviewed_host(fx, top)
+        self.reviewed_line(host, top, "stale", "a non-merge commit on a guard path after the last review must read stale, not done")
+        self.assertIn(top, host.commit_reads, "the walk did not read the commit, so the case tests nothing")
+
     def test_d_a_merge_of_a_branch_on_the_base_but_not_on_main_reads_stale(self):
         fx = self.real_commits()
         self.assert_clean_merge_done(fx)
