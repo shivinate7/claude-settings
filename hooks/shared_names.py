@@ -45,6 +45,11 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+
+# A reviewer's brief for a guard or check diff has a line that starts with this text (rule agent-role-model); the guard then
+# reads the `1 guard` round row of the model record for it. It is the review record's field line for such a change, which
+# merge/merge.py review_body writes, so the record and the brief carry one text.
+REVIEW_GUARD_MARKER = "Guard or check: yes"
 # A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
 FIX_CHECK_MARKER = "Fix check"
 
@@ -142,6 +147,8 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that reads, watches, replies to and resolves comment threads on an artifact (hooks/guard.py rule page-thread-reply).
+COMMENTS_TOOL = "ArtifactComments"
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
