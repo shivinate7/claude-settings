@@ -5070,6 +5070,12 @@ class PromiseNeedsMechanismTests(unittest.TestCase):
         # Catches: the check runs only on landed turns; the incident turn landed nothing.
         self.assert_blocked(self.INCIDENT, "Promise guard", self.INCIDENT)
 
+    def test_pr_red_refusal_names_the_rule_and_no_dated_owner_cite(self):
+        # Catches: the refusal text cites a dated owner line as the reason a handoff is no mechanism, so the
+        # rule's name is not the cite the reader meets.
+        out = self.assert_blocked(self.INCIDENT, "Promise guard", "building-mistake-names-its-guard")
+        self.assertNotIn("2026-11-06", out["reason"], "the refusal text carries a dated owner cite")
+
     def test_pr_red_incident_line_blocks_in_a_report_on_a_landed_turn(self):
         # Catches: a promise inside the report blockquote passes.
         self.assert_blocked("> **Done** BUILT abc1234\n> **Next** " + self.INCIDENT, "Promise guard", landed=True)
