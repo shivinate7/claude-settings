@@ -149,7 +149,6 @@ class FakeHost:
         self.body = ""  # the PR body gh reports: a `Drops-lines:` line in it excuses a path at the silent-undo check
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
-        self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
         self.batch_pulls, self.created, self.batch_pr_calls = {}, [], []  # batch_pulls: the batch pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
@@ -189,12 +188,6 @@ class FakeHost:
 
     def required_names(self):
         return ["checks"]
-
-    def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
-        self.batch_calls.append((n, base))
-        if self.batch_error:
-            raise self.batch_error
-        return list(self.batch)
 
     def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
@@ -11657,7 +11650,7 @@ P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
 def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", head_ref=None):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads.
+    """An open pull request as `pages("pulls")` lists it, with the fields the pulls read takes and created_at, which the review list reads.
     head_ref names the head branch; the default is feat<number>."""
     return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": head_ref or "feat%d" % number, "sha": sha}}
 
@@ -11805,8 +11798,8 @@ class PullsHost(merge.Host):
             return self.files
         raise AssertionError("unexpected read: " + rel)
 
-class BatchRunningReads(unittest.TestCase):
-    """merge.Host.batch_running over scripted reads. Only `pages` is faked: the filters and the check judging are the real code."""
+class HeadReadNoBatchRead(unittest.TestCase):
+    """head_read over scripted reads: a settled head makes no read of the open pull requests."""
 
     def test_head_read_on_a_settled_head_makes_no_batch_read(self):
         # head_read's verdict is the head's own, and a batch read of the other ready pull requests cannot change it. Each open pull request costs
@@ -11817,133 +11810,6 @@ class BatchRunningReads(unittest.TestCase):
         self.assertEqual((verdict, detail), ("green", ""), "precondition: the own head reads green, so the batch read is the only one in question")
         self.assertNotIn("pulls", host.reads, "head_read read the open pull requests for the batch read, and discarded the answer")
 
-    def test_a_pending_required_check_on_another_ready_pr_blocks(self):
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks")]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("checks", blockers[0])
-        self.assertIn(BATCH_LINK, blockers[0])
-        self.assertEqual(host.reads.count("pulls"), 1)  # the open pull list is read once
-
-    def test_a_required_check_that_ran_green_or_red_does_not_block(self):
-        for conclusion in ("success", "failure"):
-            with self.subTest(conclusion=conclusion):
-                host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", conclusion)]})
-                self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_draft_pr_never_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA, draft=True)], {OTHER_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_pending_check_that_is_not_required_does_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success"), batch_run("sync")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_the_pr_own_pending_run_never_blocks_it(self):
-        host = PullsHost([batch_pull(1, OWN_SHA)], {OWN_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_pr_on_another_base_never_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA, base="release")], {OTHER_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_failed_pulls_read_stops(self):
-        host = PullsHost([], {}, pulls_error="reading pulls from GitHub failed: boom")
-        with self.assertRaises(merge.Stop):
-            host.batch_running(1, "main")
-
-    def test_a_running_workflow_blocks_before_its_required_check_reports(self):
-        # scope runs first and checks needs it: the workflow is in progress, no required row exists yet, only the non-required scope row is pending
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "in_progress", "conclusion": None}]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("ci-checks", blockers[0])
-
-    def test_a_queued_workflow_with_no_check_rows_blocks(self):
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "queued", "conclusion": None}]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("ci-checks", blockers[0])
-
-    def test_finished_workflows_with_the_required_check_passed_do_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "completed", "conclusion": "success"}]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_an_ignored_running_workflow_does_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
-                         workflow_runs={OTHER_SHA: [{"name": "sync", "status": "in_progress", "conclusion": None}]},
-                         ignore={"sync": "the sync job is advisory"})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_busy_pr_whose_head_holds_this_head_does_not_block(self):
-        # The replay: #63 merges while #65, which holds #63's head, runs CI. The head of #63 is read through pr(63).
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-        self.assertEqual(host.batch_running(63, "main", head=N63_SHA), [])
-        self.assertIn((N63_SHA, P65_SHA), host.compare_reads)
-
-    def test_a_busy_pr_on_this_very_head_does_not_block(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, N63_SHA)], {N63_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, N63_SHA): "identical", ("main", N63_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-
-    def test_a_busy_pr_whose_head_does_not_hold_this_head_still_blocks(self):
-        for status in ("diverged", "behind"):
-            with self.subTest(status=status):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compares={(N63_SHA, P65_SHA): status})
-                blockers = host.batch_running(63, "main")
-                self.assertEqual(len(blockers), 1, blockers)
-                self.assertIn("#65", blockers[0])
-                self.assertIn("checks", blockers[0])
-                self.assertIn(BATCH_LINK, blockers[0])
-
-    def test_a_containing_busy_pr_is_passed_and_a_non_containing_one_is_named(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA), batch_pull(66, Q66_SHA)],
-                         {P65_SHA: [batch_run("checks")], Q66_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead", (N63_SHA, Q66_SHA): "diverged", ("main", N63_SHA): "ahead"})
-        blockers = host.batch_running(63, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#66", blockers[0])
-        self.assertNotIn("#65", blockers[0])
-
-    def test_a_failed_compare_read_stops(self):  # unknown is red: the pull request is not skipped
-        for code_and_text in ((1, "gh: Not Found (HTTP 404)"), (1, "gh: Server Error (HTTP 500)")):
-            with self.subTest(read=code_and_text[1]):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compare_error=code_and_text)
-                with self.assertRaises(merge.Stop):
-                    host.batch_running(63, "main")
-
-    def test_a_busy_pr_on_a_head_behind_the_base_blocks_and_is_named(self):
-        # The busy PR holds this head, but this head is behind main: a run on it did not test main's tip
-        for status in ("behind", "diverged"):
-            with self.subTest(status=status):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): status})
-                blockers = host.batch_running(63, "main")
-                self.assertEqual(len(blockers), 1, blockers)
-                self.assertIn("#65", blockers[0])
-                self.assertIn(BATCH_LINK, blockers[0])
-
-    def test_a_failed_base_compare_read_stops(self):  # the base read is its own read: a failure stops, and never skips the pull request
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead"}, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
-        with self.assertRaises(merge.Stop):
-            host.batch_running(63, "main")
-
-    def test_the_containment_read_is_made_only_for_a_busy_pr(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks", "completed", "success")]},
-                         compares={(N63_SHA, P65_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-        self.assertEqual(host.compare_reads, [])
 
 class BatchBrake(Env):
     """The batch brake (act 4 removes it): no read of the other ready pull requests holds a merge. Kept as the cases that the merge
