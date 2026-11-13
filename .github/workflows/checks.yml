@@ -138,6 +138,9 @@ jobs:
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook page writer suite
+        run: python3 lint/test_report_guard_page_writer.py
+
       - name: Stop-hook stamped copy suite
         run: python3 lint/test_report_guard_stamped.py
 
@@ -174,6 +177,9 @@ jobs:
 
       - name: Stale prose check fixture suite
         run: python3 lint/test_stale_cites.py
+
+      - name: Ruled store fixture suite
+        run: python3 lint/test_ruled_store.py
 
       - name: Route judge measure fixture suite
         run: python3 lint/test_prove_route_judge.py
@@ -574,9 +580,6 @@ jobs:
       - name: Directory before a segment suite
         run: python3 hooks/test_dir_before_segment.py
 
-      - name: Stop-hook page writer suite
-        run: python3 lint/test_report_guard_page_writer.py
-
       - name: Ruling home fixture suite
         run: python3 hooks/test_ruling_home.py
 
@@ -610,8 +613,6 @@ jobs:
       - name: Janitor sweep mutation test
         if: ${{ needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
-      - name: Ruled store fixture suite
-        run: python3 lint/test_ruled_store.py
 
       - name: Reap proof Git Bash one-home suite
         if: ${{ needs.scope.outputs.code == 'true' }}
