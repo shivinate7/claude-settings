@@ -52,7 +52,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts.
   It flags to the coordinator each lane whose step another step waits on, or that is on the express list (R55).
   It flags it only when the lane has sent no report or message since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step.
-  It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the closes and the page itself (rule `roles-orchestrator-never-builds`).
+  It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the step closes and the page itself (rule `roles-orchestrator-never-builds`).
 - **Batch runner.** A standing session. It owns the integration batch until the cutover (claude-settings decision `all-repos-switch-together`); after it, it merges each lane PR alone, on its own green run. It also owns the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
@@ -78,10 +78,10 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
   The runner keeps only the merge itself, which the merge lock serializes. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds nothing (rule `roles-orchestrator-never-builds`):
-  - Each close comes from the proof that triage reads for a close (the evidence ledger), with its comment: one agent per close.
+  - Each PR close comes from the PR ledger (decision `pr-ledger`, read by `merge --reviewed`), with its comment: one agent per close. A step close stays with triage.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
   - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
-  - Before each `--batch-build`, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled, since a failed run refuses the build. `--ready` also stops on an unfinished or missing run. The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
+  - Before it builds a batch or merges a lane PR, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled (`merge --lane-lint` reads it). The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
   - The per-PR fix verifiers and the records start at once, in parallel, never one after another.
   - A build it started in the background is never waited on in the foreground. It ends its turn and sets a one-time check-in, so the next hand-off gets a turn. This holds for builds and CI waits, not for `--confirm`, which stays foreground (record `merge-confirm-repo`).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
