@@ -4536,7 +4536,10 @@ def main(argv, host=None, lock=None, hosts=None):
         h = host or Host(cwd=root)
         if not a.reviewed:
             a.pr = int(a.pr)
-            info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+            try:
+                info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+            except (subprocess.TimeoutExpired, OSError, ValueError) as e:  # ValueError: gh printed a reply that is not JSON. The second step of a two-step confirm reads here with its claim already pushed, so no read that could not run may revert it
+                raise Unproven(f"the result is unknown: the pull request #{a.pr} could not be read: {type(e).__name__}: {' '.join(str(e).split())[:300]}. This run changed nothing; a claim an earlier run pushed stays on its branch. Run again {UNKNOWN_CITE}.") from e
         if a.review_record:
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
