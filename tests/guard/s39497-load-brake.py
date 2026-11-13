@@ -85,6 +85,24 @@ for name in ("system", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn"
              "startfile"):
     if hasattr(os, name):
         setattr(os, name, counted(name, getattr(os, name)))
+# The network seams are counted only for a case that asks (spec "network"). A call through one is refused here,
+# so it never reaches a socket. A case with no network key leaves them as they are.
+network = []
+
+
+def refused_network(name):
+    def call(*args, **kwargs):
+        network.append(name)
+        raise OSError("%s is refused in this probe" % name)
+    return call
+
+
+if spec.get("network"):
+    import socket
+    import urllib.request
+    urllib.request.urlopen = refused_network("urlopen")
+    socket.create_connection = refused_network("create_connection")
+    socket.socket.connect = refused_network("socket connect")
 
 
 def listing():
@@ -237,6 +255,7 @@ except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
 out["sleeps"] = len(sleeps)
 out["children"] = children
+out["network"] = network
 with open(side, "w", encoding="utf-8") as handle:
     json.dump(out, handle, default=str)
 if out.get("probe_error"):

@@ -973,11 +973,14 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     output_file(base, "bnoimp600", 600)
     recs = flagged("bnoimp600", desc="Serve q_max files on 3202. until: round 1 bids are served")
     path = transcript(recs)
-    lone = new_dir()
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
     shutil.copy(os.path.join(HERE, "shared_names.py"), lone)
     # stall_watch imports own_session with no guard, so the copy needs it; guard_stream is the one left out
     shutil.copy(os.path.join(HERE, "own_session.py"), lone)
+    lint_beside(root)
     rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
@@ -992,16 +995,27 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     return problems
 
 
+def lint_beside(root):
+    """Lay lint/_transcript.py at `root`/lint, where a copy in `root`/hooks reads it (`../lint`). Without it the
+    Stop check has no finish reader, so it prints nothing for any job."""
+    os.makedirs(os.path.join(root, "lint"), exist_ok=True)
+    shutil.copy(os.path.join(os.path.dirname(HERE), "lint", "_transcript.py"), os.path.join(root, "lint"))
+
+
 def hooks_copy(shared):
-    """A scratch copy of hooks/*.py. shared None leaves out shared_names.py; "stale" writes one with no
-    TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the copy's stall_watch.py."""
-    lone = new_dir()
+    """A scratch copy of hooks/*.py in `root`/hooks, with lint/_transcript.py beside it. shared None leaves out
+    shared_names.py; "stale" writes one with no TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the
+    copy's stall_watch.py."""
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     for name in os.listdir(HERE):
         if name.endswith(".py") and not (name == "shared_names.py" and shared != "real"):
             shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
     if shared == "stale":
         with open(os.path.join(lone, "shared_names.py"), "w", encoding="utf-8") as f:
             f.write("PROJECT_FROZEN_FILES = ()\n")
+    lint_beside(root)
     return os.path.join(lone, os.path.basename(MODULE))
 
 
@@ -1034,6 +1048,33 @@ def finished_job_is_silent_with_shared_names_missing():
 def finished_job_is_silent_with_shared_names_stale():
     """N4b. shared_names.py without TASK_NOTIFICATION_TAG: a finished job idle 2 h prints nothing, exit 0"""
     return finished_job_is_silent_without_the_notice_tag("stale", "shared_names stale")
+
+
+@case
+def missing_reader_is_named_on_stderr_not_silent():
+    """N5. lint/_transcript.py absent beside the copy: a finished job prints nothing on stdout, exit 0, and the
+    Stop check prints one stderr line that names the missing reader, not silence. A control with lint beside the
+    copy prints nothing on stderr."""
+    base = new_dir()
+    output_file(base, "bnolint7200", 7200)
+    done = transcript(flagged("bnolint7200") + [notice("bnolint7200")])
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
+    for name in ("stall_watch.py", "shared_names.py", "own_session.py"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
+    rc, out, err = run_stop(done, base, module=os.path.join(lone, "stall_watch.py"))
+    problems = expect(rc == 0, f"lint missing: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"lint missing: a finished job prints on stdout: {out[:200]!r}")
+    lines = [line for line in err.splitlines() if line.strip()]
+    problems += expect(len(lines) == 1, f"lint missing: stderr holds {len(lines)} line(s), want one: {err[:300]!r}")
+    if len(lines) == 1:
+        problems += expect("_transcript.py" in lines[0],
+                           f"lint missing: the stderr line does not name _transcript.py: {lines[0][:300]!r}")
+    rc, out, err = run_stop(done, base, module=hooks_copy("real"))
+    problems += expect(rc == 0 and err.strip() == "",
+                       f"control: lint beside the copy, stderr is not empty: rc {rc}, {err[:200]!r}")
+    return problems
 
 
 # Row tables. Each row is one case body from above, and keeps its S-label.
@@ -1406,13 +1447,15 @@ def agent_path(folder, aid):
     return os.path.join(folder, "session", "subagents", "agent-%s.jsonl" % aid)
 
 
-def agent_launch(aid, output, desc="review the diff"):
+def agent_launch(aid, output, desc="review the diff", subagent_type=None):
     """A background agent's launch: its Agent tool_use, then the async result. The result's toolUseResult
-    names the agent id and the outputFile."""
+    names the agent id and the outputFile. `subagent_type` is the role the Agent input names, when given."""
     cid = "toolu_" + aid
+    spawn = {"description": desc, "prompt": "review", "run_in_background": True}
+    if subagent_type is not None:
+        spawn["subagent_type"] = subagent_type
     use = {"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": cid, "name": "Agent",
-         "input": {"description": desc, "prompt": "review", "run_in_background": True}}]}}
+        {"type": "tool_use", "id": cid, "name": "Agent", "input": spawn}]}}
     result = {"type": "user", "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": cid,
          "content": "Async agent launched successfully. agentId: %s." % aid}]},
@@ -1421,11 +1464,11 @@ def agent_launch(aid, output, desc="review the diff"):
     return [use, result]
 
 
-def background_agent(folder, aid, records, idle, output=None):
+def background_agent(folder, aid, records, idle, output=None, subagent_type=None):
     """A background agent of the session in folder. Return (launch, spec): the launch records for the
     session's items, and the spec for transcript(agents=). The launch names output when given, else the
-    agent's own transcript."""
-    return agent_launch(aid, output or agent_path(folder, aid)), (aid, records, idle)
+    agent's own transcript. `subagent_type` is the role the spawn ran as."""
+    return agent_launch(aid, output or agent_path(folder, aid), subagent_type=subagent_type), (aid, records, idle)
 
 
 def agent_step(tag, text="done\n"):
@@ -1486,14 +1529,14 @@ def stop_in_process(transcript_path):
 
 @case
 def A1_quiet_agent_is_listed_once_with_its_remedy():
-    """A1. a background agent whose transcript has not changed for 600 s, after 300 earlier steps, its last
-    record a tool_result: listed once, by its id, with the remedy: resume it by name, or send a fresh
-    reviewer the prior report"""
+    """A1. a background reviewer whose transcript has not changed for 600 s, after 300 earlier steps, its last
+    record a tool_result: listed once, by its id. Its remedy sends a fresh agent the prior report and offers no
+    resume by name, since a reviewer is never resumed (roles-resume-by-name)"""
     folder = new_dir()
     many = []
     for i in range(300):
         many += agent_step("s%d" % i)
-    launch, spec = background_agent(folder, agent_id(1), many + agent_step("last"), 600)
+    launch, spec = background_agent(folder, agent_id(1), many + agent_step("last"), 600, subagent_type="reviewer")
     path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
@@ -1502,8 +1545,32 @@ def A1_quiet_agent_is_listed_once_with_its_remedy():
     if problems:  # the remedy is read from a listing: with no listing, there is no remedy to check
         return problems
     low = msg.lower()
-    for word in ("resume", "by name", "fresh reviewer", "prior report"):
-        problems += expect(word in low, f"the remedy has no {word!r}: {msg!r}")
+    problems += expect("prior report" in low, f"the remedy does not pass the prior report: {msg!r}")
+    problems += expect("fresh reviewer" in low or "fresh agent" in low,
+                       f"the remedy does not send a fresh agent: {msg!r}")
+    problems += expect("resume it by name" not in low and "resume by name" not in low,
+                       f"the remedy for a reviewer still offers a resume by name: {msg!r}")
+    return problems
+
+
+@case
+def A1c_quiet_agent_with_no_worktree_keeps_the_resume_by_name_remedy():
+    """A1c. a quiet background Explore that ran with no worktree and is no reviewer: once stopped, a resume by name
+    is still allowed, so its remedy keeps offering one. The control for A1, which the reviewer's remedy must differ from"""
+    folder = new_dir()
+    many = []
+    for i in range(300):
+        many += agent_step("s%d" % i)
+    launch, spec = background_agent(folder, agent_id(3), many + agent_step("last"), 600, subagent_type="Explore")
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(3), by_line=True)
+    if problems:
+        return problems
+    problems += expect("resume it by name" in msg.lower(),
+                       f"the remedy for an Explore with no worktree has no resume by name: {msg!r}")
     return problems
 
 

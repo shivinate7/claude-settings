@@ -2140,6 +2140,30 @@ DESIGNER_ROLE = "designer"
 # The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
 # brief hook and the tests import it, and none types it.
 REFUTER_ROLE = "refuter"
+ROLE_DEFAULT = "general-purpose"
+
+
+def role_key(subagent_type) -> str:
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
+    normaliser: role_name and opus_spawn_hit's Explore grant (guard.py) and the review log rule (guard_merge.py) read the role through it.
+    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
+    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
+
+
+def role_bare(subagent_type) -> str:
+    """role_key without a plugin prefix (`my-plugin:reviewer` reads `reviewer`): the role a role file or a rule names."""
+    return role_key(subagent_type).rsplit(":", 1)[-1]
+
+
+# The reviewer roles: guard_merge's review log reads a spawn of one as a round, and resume_finished_hit refuses a resume of a finished one.
+RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")
+# The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
+RESUME_ISOLATIONS = ("worktree", "remote")
+
+
+def is_reviewer_role(subagent_type) -> bool:
+    """True for a reviewer or design-reviewer spawn, in any case and with any plugin prefix."""
+    return role_bare(subagent_type) in RECORD_REVIEWER_ROLES
 
 
 def agent_role(payload) -> str:

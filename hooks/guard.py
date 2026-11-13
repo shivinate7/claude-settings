@@ -214,6 +214,41 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  review-log-after-round
+                       deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `builder` or
+                       `test-author`, or a send_message, when the transcript's last Agent or Task spawn of a `reviewer`
+                       or `design-reviewer` has no later call that posted a review log (an add_issue_comment
+                       whose body, or a Bash command, holds the merge tool's REVIEW_MARKER, read through
+                       `merge_module`). No reviewer spawn, and a missing or unreadable transcript, allow. A merge tool
+                       that cannot load allows and is noted as `review-log-unread`. The reason names the
+                       merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
+                       call, no subprocess, no network. An override lifts it. (pr-review-record)
+  resume-finished-reviewer
+                       deny. A built-in `SendMessage`, from the main session or an agent's send (a payload with `agent_id`, judged
+                       against the parent's transcript), whose `to` names an Agent or Task
+                       spawn that has finished and ran in a worktree (any role), so its worktree is gone and a
+                       resume runs with no tree. A spawn ran in a worktree when its `isolation` input is `worktree`
+                       or `remote`, or, with no input, when its role file in agents/ pins one of them
+                       (`role_isolation_pin`). A `reviewer` or `design-reviewer` is refused with no
+                       worktree too: a resume runs on the parent's model, which can give a wrong verdict. `to` matches the launch result's `toolUseResult.agentId` or the
+                       spawn call's `name`; the latest spawn with that name wins. The state is read by
+                       `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal
+                       notice or a TaskStop result, is finished; an async_launched result with no close is running.
+                       A spawn whose result is an error ran no agent and is skipped. A trailing ` [<ref>]` on `to`
+                       is stripped before matching. A state the read cannot place asks, and so does a parsed
+                       transcript record with the wrong shape (noted as `resume-finished-reviewer-unparsed`); a
+                       line that is not JSON is dropped by the reader and does not ask. A send to `main`, a
+                       name with no spawn or Workflow agent, a running spawn, and a finished spawn with no worktree that is not a
+                       reviewer pass. A name no spawn holds is looked up as a Workflow agent (`_transcript.workflow_agent`:
+                       its agentId or label in the run journal under the transcript's own `subagents/workflows/`; with
+                       only a started line, the run record `workflows/<runId>.json` beside it settles the state: status
+                       killed or completed is finished, no record is running, an unreadable one or another status asks), whose
+                       role is its meta agentType: finished and a reviewer, a role that pins a worktree, or a meta with
+                       spawnedWithWorktree true, is refused;
+                       finished with no meta file asks. A missing or unreadable
+                       transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
+                       fresh agent of the same role (named in it) and pass it the prior report. One transcript read per judged send, shared with
+                       review-log-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -540,7 +575,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, ROLE_DEFAULT, role_key, role_bare, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -583,7 +618,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, resume_finished_hit, review_log_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -3559,7 +3594,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
     read_only = {role.lower() for role in READ_ONLY}
     for spawn in _brief_spawns(tool, tool_input):
         prompt = spawn.get("prompt")
-        role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]   # plugin prefix: my-plugin:reviewer
+        role = role_bare(spawn.get("subagent_type"))
         if not isinstance(prompt, str) or role in read_only:
             continue
         for command, before, covered in _brief_commands(prompt):
@@ -3636,7 +3671,6 @@ ROLE_TABLE_MAX = 256 * 1024
 ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
-ROLE_DEFAULT = "general-purpose"
 # A reviewer brief whose round has a round row above the reviewer's row (a `Round N of 3` marker, a guard marker line, a
 # fix verifier brief) may run on that row's model: role_round_table reads the rows, and ROLE_ROUND_FALLBACK stands in for any row the
 # record does not hold. A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix verifier) runs its fix verifier row.
@@ -3829,16 +3863,37 @@ def role_agent_keys(pointer_root):
         yield frontmatter_keys(lines[1:end])
 
 
+def role_pin(pointer_root, role, key):
+    """The raw frontmatter value of `key` in the agent file that names this role in the pointer checkout's agents
+    folder: "" when the file lacks the key or no file names the role, None when the folder cannot be read. The one
+    reader of a role's pin: role_has_model_pin and role_isolation_pin call it."""
+    try:
+        for keys in role_agent_keys(pointer_root):
+            if keys.get("name", "").lower() == role.lower():
+                return keys.get(key, "")
+    except OSError:
+        return None
+    return ""
+
+
 def role_has_model_pin(pointer_root, role):
     """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
     frontmatter, False when none does, None when the folder cannot be read."""
-    try:
-        for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
-                return True
-    except OSError:
-        return None
-    return False
+    pin = role_pin(pointer_root, role, "model")
+    return None if pin is None else bool(pin)
+
+
+def role_isolation_pin(pointer_root, role):
+    """The `isolation:` a role's agent file pins, without quotes or a trailing comment, or "" when it pins none or
+    the folder cannot be read or there is no pointer checkout (a rule that reads it then stands down, as the pointer
+    rules do)."""
+    if not pointer_root:
+        return ""
+    raw = (role_pin(pointer_root, role, "isolation") or "").strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    return re.split(r"\s#", raw, maxsplit=1)[0].strip()
 
 
 # General-purpose and claude have no agents/ file, so they are listed here to count as real roles. Plan and Explore
@@ -3876,13 +3931,6 @@ def role_list_drift(pointer_root):
         for role in sorted(want - have):
             lines.append("%s lacks %s, which the role table puts on %s (%s)" % (name, role, row, home))
     return lines
-
-
-def role_key(subagent_type) -> str:
-    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
-    normaliser in this file: role_name and opus_spawn_hit's Explore grant both read the role through it.
-    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
-    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
 def role_name(table, subagent_type) -> str:
@@ -6934,6 +6982,25 @@ def judge(payload) -> None:
     written = written_time_hit(tool, tool_input, cwd)
     if written:
         refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
+
+    # A builder, test-author or handoff while the last reviewer spawn has no review log (rule review-log-after-round).
+    record_reason, record_matched, record_unknown = review_log_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+    if record_unknown:
+        record(tool, "noted", "review-log-unread", tool)
+    if record_reason:
+        refuse(tool, "deny", "review-log-after-round", record_reason, record_matched)
+
+    # A SendMessage to a spawn that has finished and ran in a worktree, or to a finished reviewer (rule resume-finished-reviewer).
+    resume_decision, resume_reason, resume_matched, resume_note = resume_finished_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+        lambda role: role_isolation_pin(pointer_checkout(), role))
+    if resume_note:
+        record(tool, "noted", resume_note, tool)
+    if resume_decision == "deny":
+        refuse(tool, "deny", "resume-finished-reviewer", resume_reason, resume_matched)
+    if resume_decision == "ask":
+        refuse(tool, "ask", "resume-finished-reviewer", resume_reason, resume_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

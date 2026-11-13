@@ -51,4 +51,3 @@ add("sendmessage-session-id: the right tool, send_message, to a session_ id is a
     cwd=NOGIT, silent=True, session_id=ROLE_OTHER, message=SENDMESSAGE_BODY)
 
 
-# =========================================================================== 5d. cite by id

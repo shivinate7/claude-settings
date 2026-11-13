@@ -10,15 +10,16 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, role_key, is_reviewer_role, RECORD_REVIEWER_ROLES, RESUME_ISOLATIONS, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TASK_NOTIFICATION_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -2227,6 +2228,332 @@ def hook_bypass_hit(texts):
             elif written:
                 return written, event[1], "this " + event[1] + " runs after core.hooksPath is written, so git's hooks point at another folder"
     return None
+
+
+# ---- the review log after a round (rule review-log-after-round, decision pr-review-record)
+RECORD_SPAWN_TOOLS = ("Agent", "Task")
+RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
+RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
+# The remedy's merge call takes the flags merge/merge.py's --review-record takes (its usage line and argparse), each as a placeholder.
+MERGE_REVIEW_FLAG = "--review-record"  # the merge tool's own flag, an external contract (merge/merge.py)
+REVIEW_LOG_DECISION = "pr-review-record"  # the decision's slug stays (GLOSSARY.md, review log row)
+REVIEW_LOG_CALL = "merge <pr> " + MERGE_REVIEW_FLAG + " --head <sha> --kind <kind> --guard <yes|no> --round <n>:<role>:<model>:<verdict>"
+REVIEW_LOG_REASON = (
+    "review-log-after-round: the last reviewer spawn in this session has no review log after it, so the "
+    "round is not on the pull request yet. Run `" + REVIEW_LOG_CALL + "` with the reviewed sha, post the body "
+    "it prints with the GitHub comment tool (add_issue_comment), then retry. "
+    "(decision " + REVIEW_LOG_DECISION + ", a lane posts the record after each round)"
+)
+REVIEW_LOG_DESIGN_NOTE = (
+    " The last reviewer spawn was a design-reviewer: add its line, `Round <n>: design-reviewer, <model>, <verdict>`, "
+    "to that round's record, with `" + REVIEW_LOG_CALL.replace("<role>", "design-reviewer") + "`."
+)
+REVIEW_LOG_DESIGN_REASON = REVIEW_LOG_REASON + REVIEW_LOG_DESIGN_NOTE
+
+
+def _transcript_reader():
+    """lint/_transcript.py, the one home of the transcript readers, found beside this file's folder."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript
+
+
+_READ_CACHE = {}  # one slot: the main session's records for the last transcript read, with the file's identity
+
+
+def _main_records(transcript: str):
+    """The main session's records of the transcript at `transcript` (no sidechain), read once per call: the second
+    reader of the same file, unchanged since, takes the cached list. Raises what the read raises. The file's size
+    and mtime are in the key, so a file that grew between two calls is read again."""
+    stat = os.stat(transcript)
+    key = (os.path.realpath(transcript), stat.st_mtime_ns, stat.st_size)
+    if _READ_CACHE.get("key") != key:
+        records = [rec for rec in _transcript_reader().read_transcript(transcript) if not rec.get("isSidechain")]
+        _READ_CACHE.clear()
+        _READ_CACHE.update(key=key, records=records)
+    return _READ_CACHE["records"]
+
+
+def _is_spawn_of(use, roles) -> bool:
+    given = use.get("input")
+    return (use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict)
+            and role_key(given.get("subagent_type")) in roles)
+
+
+_COMMENT_PATH = re.compile(r"(?:^|/)(?:issues|pulls)/[^/\s]+/comments/?$")
+_GH_BODY_FLAGS = ("-b", "--body")
+_GH_FILE_FLAGS = ("-F", "--body-file")
+_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+
+
+def _flag_values(args, flags):
+    """The values given for `flags` in `args`: `-b v`, `--body v`, `--body=v`, and a glued `-bv` of a short flag."""
+    found = []
+    for i, arg in enumerate(args):
+        for flag in flags:
+            if arg == flag and i + 1 < len(args):
+                found.append(args[i + 1])
+            elif flag.startswith("--") and arg.startswith(flag + "="):
+                found.append(arg[len(flag) + 1:])
+            elif not flag.startswith("--") and arg.startswith(flag) and len(arg) > len(flag):
+                found.append(arg[len(flag):])
+    return found
+
+
+def _gh_posts_record(args, marker) -> bool:
+    """True when the gh call (the tokens after `gh`) posts a PR or issue comment that holds the marker. An inline
+    body must carry the marker. A body read from a file or stdin counts on its shape, because the guard cannot read it."""
+    if args[:2] in (["pr", "comment"], ["issue", "comment"]):
+        return bool(_flag_values(args, _GH_FILE_FLAGS)) or any(marker in body for body in _flag_values(args, _GH_BODY_FLAGS))
+    if args[:1] != ["api"] or not any(_COMMENT_PATH.search(arg) for arg in args[1:]):
+        return False
+    if "--input" in args or any(a.startswith("--input=") for a in args):
+        return True   # the whole request body comes from a file
+    for field in _flag_values(args, _API_FIELD_FLAGS):
+        name, _, value = field.partition("=")
+        if name == "body":
+            return value.startswith("@") or marker in value
+    return False
+
+
+def _bash_posts_record(command, marker) -> bool:
+    """True when one segment of the command is a gh call that posts a review log comment. A segment that only
+    names the marker (a grep, an echo) is no post. Segments come from the guard's own quote-aware splitter."""
+    for segment in split_segments(command):
+        args = gh_call_of(segment)
+        if args and _gh_posts_record(args, marker):
+            return True
+    return False
+
+
+def _posts_record(use, marker) -> bool:
+    given = use.get("input")
+    if not isinstance(given, dict):
+        return False
+    name = use.get("name")
+    if name == RECORD_COMMENT_TOOL:
+        body = given.get("body")
+        return isinstance(body, str) and marker in body
+    command = given.get("command")
+    return name == "Bash" and isinstance(command, str) and _bash_posts_record(command, marker)
+
+
+_ASYNC_LAUNCH = "Async agent launched successfully"
+_LAUNCH_AGENT = re.compile(r"agentId:\s*(\S+)")
+_NOTICE_TASK = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
+_NOTICE_COMPLETED = re.compile(r"<status>\s*completed\s*</status>")
+
+
+def _spawn_events(reader, records):
+    """(events, launched, done) from the main-session records, in order. `events` holds ("use", tool_use) and
+    ("done", agent_id) entries, one per call and one per completion notice. `launched` maps a spawn's tool_use id to
+    the agentId its launch result names, for a background spawn only. `done` maps an agentId to the position of
+    its last completion notice in `events`. A notice is a task-notification block in a queued_command attachment
+    (whatever the record's type) or a user line (`owner_text`); it is keyed on its task-id, never its tool-use-id, which changes on resume."""
+    events, launched, done = [], {}, {}
+    for rec in records:
+        for use in reader.tool_uses(rec):
+            events.append(("use", use))
+        for res in reader.tool_results(rec):
+            text = reader.result_text(res)
+            found = _LAUNCH_AGENT.search(text)
+            if _ASYNC_LAUNCH in text and found and isinstance(res.get("tool_use_id"), str):
+                launched[res["tool_use_id"]] = found.group(1)
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else reader.owner_text(rec)
+        for part in (text or "").split(TASK_NOTIFICATION_TAG)[1:]:
+            task = _NOTICE_TASK.search(part)
+            if task and _NOTICE_COMPLETED.search(part):
+                events.append(("done", task.group(1)))
+                done[task.group(1)] = len(events) - 1
+    return events, launched, done
+
+
+def _anchor_at(index, use, launched, done):
+    """The position in the events after which a record must be posted for the reviewer spawn at `index`. A
+    foreground spawn counts at its own position. A background spawn counts at its agent's completion notice, and
+    anchors nothing while the notice is missing."""
+    agent = launched.get(use.get("id"))
+    return index if agent is None else done.get(agent)
+
+
+def review_log_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+    """(reason, matched, unknown): the refusal when this builder or test-author spawn, or this send_message (the
+    remote tool or the built-in SendMessage), comes after the session's last completed reviewer spawn and no later call posted
+    a review log, else ("", "", unknown). A reviewer spawn whose result is an error never ran and anchors nothing.
+    A background spawn counts when its completion notice arrives, a foreground spawn at once.
+    `unknown` is true when the merge tool (the home of the record marker) could not be loaded: the call is
+    allowed and the caller notes it. A call with an agent_id is an agent's and is not judged. A missing or
+    unreadable transcript allows. Cost: one transcript read per judged call, shared with resume_finished_hit (_main_records
+    holds it for the second reader), no subprocess, no network; the merge tool is loaded once, and only when a reviewer
+    spawn is found."""
+    if agent or not isinstance(tool_input, dict) or not transcript:
+        return "", "", False
+    try:
+        reader = _transcript_reader()
+        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS and role_key(tool_input.get("subagent_type")) in RECORD_TRIGGER_ROLES)
+        if not judged:
+            return "", "", False
+        records = _main_records(transcript)
+        failed = reader.failed_tool_use_ids(records)
+        events, launched, done = _spawn_events(reader, records)
+    except Exception:
+        return "", "", False
+    anchors = [(_anchor_at(i, ev[1], launched, done), ev[1]) for i, ev in enumerate(events)
+               if ev[0] == "use" and _is_spawn_of(ev[1], RECORD_REVIEWER_ROLES) and ev[1].get("id") not in failed]
+    anchors = [g for g in anchors if g[0] is not None]
+    if not anchors:
+        return "", "", False
+    anchor, last = max(anchors, key=lambda g: g[0])
+    try:
+        marker = merge_module().REVIEW_MARKER
+    except Exception:
+        marker = None
+    if not isinstance(marker, str) or not marker:
+        return "", "", True
+    if any(_posts_record(ev[1], marker) for ev in events[anchor + 1:] if ev[0] == "use"):
+        return "", "", False
+    matched = "%s after a reviewer spawn with no review log" % tool
+    if role_key(last["input"].get("subagent_type")) == "design-reviewer":
+        return REVIEW_LOG_DESIGN_REASON, matched, False
+    return REVIEW_LOG_REASON, matched, False
+
+
+# ---- a resume of a finished agent (rule resume-finished-reviewer, rule roles-resume-by-name)
+RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
+RESUME_MAIN = "main"
+# The Agent input's isolation wins when it is set (the binary reads input ?? the role file's pin); else the role file's pin.
+# RESUME_ISOLATIONS, the values that leave no tree, is in guard_core.
+# One reason for every role: it names the role, so the remedy names a fresh agent of that same role.
+RESUME_REASON = (
+    "this %(role)s has finished, and the worktree of a finished agent is gone or reaped with its finish, so a resume runs with no "
+    "tree%(model)s. Spawn a fresh %(role)s and pass it the prior report. "
+    "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
+)
+# A reviewer or design-reviewer is refused even with no worktree: a resume runs on the parent's model.
+RESUME_MODEL_CLAUSE = ", and it runs on the parent's model, which can give a wrong verdict"
+RESUME_ASK_REASON = (
+    "the guard cannot tell whether this %(role)s has finished. A finished one that ran in a "
+    "worktree has no worktree, so a resume runs with no tree; then spawn a fresh %(role)s and pass it the prior report. "
+    "Allow this send only if the %(role)s is still running. (rule roles-resume-by-name)"
+)
+
+
+RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule of a send whose transcript could not be read
+RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
+RESUME_UNPARSED_REASON = (
+    "the guard read a record in this session's transcript that has the wrong shape, so it "
+    "cannot tell whether this agent has finished. A finished one that ran in a worktree has no worktree, so a resume runs "
+    "with no tree; then spawn a fresh agent of the same role and pass it the prior report. "
+    "Allow this send only if the agent is still running. "
+    "(rule roles-resume-by-name)"
+)
+
+
+def _resume_worktree(spawn, role, isolation_pin):
+    """True when the spawn's effective isolation (its input's, else the role file's pin) leaves no tree after it
+    finishes. A pin read that fails reads as no pin."""
+    isolation = spawn.get("isolation")
+    if isolation is None and isolation_pin:
+        try:
+            isolation = isolation_pin(role)
+        except Exception:
+            isolation = None
+    return isolation in RESUME_ISOLATIONS
+
+
+def _workflow_resume_hit(reader, tool, transcript, target, isolation_pin):
+    """resume_finished_hit's verdict for a name no main-transcript spawn holds: a Workflow agent of the run journals
+    beside the transcript, or nothing. The caller maps a raise to the unparsed ask."""
+    found = reader.workflow_agent(transcript, target)
+    if found is None:
+        return "", "", "", ""
+    state, agent_type, meta_worktree = found
+    if state == reader.RUNNING:
+        return "", "", "", ""
+    # The meta's spawnedWithWorktree is the agent's effective isolation: a Workflow spawn has no Agent input, so it
+    # counts beside the role file's pin.
+    worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))
+    reviewer = is_reviewer_role(agent_type)
+    if state == reader.FINISHED and (agent_type or worktree):
+        if not reviewer and not worktree:
+            return "", "", "", ""
+        model = RESUME_MODEL_CLAUSE if reviewer else ""
+        return ("deny", RESUME_REASON % {"role": agent_type or "agent", "model": model},
+                "%s to a finished %s" % (tool, agent_type or "agent"), "")
+    if agent_type and not reviewer and not worktree:
+        return "", "", "", ""
+    role = agent_type or "agent"
+    return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
+
+
+def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=None):
+    """(decision, reason, matched, note): "deny" when this built-in SendMessage, from the main session or an agent's send (a payload with agent_id), names a spawn
+    that has finished and ran in a worktree (any role: its worktree is gone), or is a reviewer or
+    design-reviewer. A spawn ran in a worktree when its effective isolation is in RESUME_ISOLATIONS: the Agent input's
+    `isolation` when it is set (a value in another case reads as no worktree), else `isolation_pin(role)`, the role
+    agent file's pin (guard.role_isolation_pin; None means no pin read) (refused with no worktree too: a resume runs on the parent's model), "ask" when the spawn's state is unknown or a parsed transcript
+    record has the wrong shape (a line that is not JSON is dropped by the reader, so a half-written last line passes), else ("", "", "", ...).
+    `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
+    the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
+    ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_log_hit skips it. A send
+    to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, and a running spawn pass.
+    A call with an agent_id is judged as the main session's is, against the parent's transcript (its `transcript_path`).
+    A name no spawn in the transcript holds is then looked up as a Workflow agent (_transcript.workflow_agent: the
+    agentId or the label in the run's journal beside the transcript; a started line with no result line is settled by the
+    run record: killed or completed is finished, no record is running). Its role is its meta agentType and its isolation
+    is the role file's pin, or a worktree when its meta has spawnedWithWorktree true. It is refused when finished and a reviewer, a design-reviewer, or a role that pins a worktree
+    or remote; a running one passes; a finished one with no meta file, or of unknown state, asks.
+    `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
+    be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
+    (it asks). The state read is _transcript.agent_state, the one reader of an Agent or Task spawn's finish;
+    _transcript.workflow_agent is the one reader of a Workflow agent's, which has no spawn. Cost: one transcript
+    read per judged send, shared with review_log_hit (_main_records), and, only when no spawn holds the name, one
+    directory listing and one read per journal in the transcript's own workflows folder, then one meta read and, for an
+    agent with no result line, one run-record read. No subprocess, no network."""
+    target = tool_input.get("to") if isinstance(tool_input, dict) else None
+    if tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
+        return "", "", "", ""
+    if not transcript:
+        return "", "", "", RESUME_UNREAD_NOTE
+    target = re.sub(r" \[[^\[\]]*\]$", "", target)
+    try:
+        reader = _transcript_reader()
+        records = _main_records(transcript)
+    except Exception:
+        return "", "", "", RESUME_UNREAD_NOTE
+    try:
+        failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
+        agents = {res.get("tool_use_id"): rec["toolUseResult"].get("agentId")
+                  for rec in records if isinstance(rec.get("toolUseResult"), dict)
+                  for res in reader.tool_results(rec)}
+        spawns = [use for rec in records for use in reader.tool_uses(rec)
+                  if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
+                  and use.get("id") not in failed]
+        # A launch result that is a bare string holds no agent id; the finish notice names the spawn by its id and its tool use id.
+        noticed = {uid: tid for rec in records for tid, uid, _st in reader.notice_blocks(reader.notice_text(rec), TASK_NOTIFICATION_TAG)
+                   if tid and uid}
+        named = [use for use in spawns if use["input"].get("name") == target
+                 or target in (agents.get(use.get("id")), noticed.get(use.get("id")))]
+        if not named:
+            return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)
+        spawn = named[-1]["input"]
+        role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
+        reviewer = is_reviewer_role(role)
+        if not reviewer and not _resume_worktree(spawn, role, isolation_pin):
+            return "", "", "", ""
+        state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
+    except Exception:
+        return "ask", RESUME_UNPARSED_REASON, "%s with a transcript record the read cannot parse" % tool, RESUME_UNPARSED_NOTE
+    if state == reader.FINISHED:
+        model = RESUME_MODEL_CLAUSE if reviewer else ""
+        reason = RESUME_REASON % {"role": role, "model": model}
+        return "deny", reason, "%s to a finished %s" % (tool, role), ""
+    if state == reader.UNKNOWN:
+        return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
+    return "", "", "", ""
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
