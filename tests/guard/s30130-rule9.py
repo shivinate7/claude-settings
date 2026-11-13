@@ -1,9 +1,10 @@
 # section 30130
 FAMILY = "rule9"  # the cases after this section keep rule 9's family
 
-# ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
+# ---- Cost. The rule starts two git processes for a lane create_session: the origin/main blob read, then remote get-url
+# when that blob names no repo (step guards-read-origin-main-config, the ruled bound of github_repo). It starts none for any
 # other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
-# argv starts with git is the rule's read of the origin.
+# argv starts with git is one of the rule's reads of the repo.
 def lane_cost_run(body):
     """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
     os.makedirs(LB_DIR, exist_ok=True)
@@ -48,10 +49,10 @@ def lane_cost_check(label, body, want_git, want_decision):
     LOG_CHECKS_EXTRA.append((label, check))
 
 
-lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
+lane_cost_check("lane-repo-tag: a lane create_session starts two git processes, the origin/main blob read then remote get-url",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
                  "tool_input": {"prompt": LANE_PROMPT, "effort": LANE_EFFORT_FIELD, "tags": OWN_LANE_TAGS,
-                                "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
+                                "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 2, "allow")
 lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
                  "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
