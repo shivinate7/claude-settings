@@ -1317,7 +1317,7 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — already in the lint job",
 ]
 # A line with an empty side, one side only, or nothing after the colon. Each is refused. A missing dash alone is no
-# refusal (coordinator ruling, 2026-11-12 11:22 CST: the dash check is deleted); a missing side is.
+# refusal; a missing side is.
 MALFORMED = [
     "Departs from:",
     "Departs from:   ",
@@ -1456,7 +1456,7 @@ REFUSED_NO_CHANGE = [
     "Departs from: x — no difference",
     "Departs from: x — identical to main",
     "Departs from: x — the phone app stays on the list when offline",
-    # No dash at all: the no-change word still refuses the line (the dash check is deleted, 2026-11-12 11:22 CST).
+    # No dash at all: the no-change word still refuses the line.
     "Departs from: lint/stamp.py:run_stamp keeps the stamp check on main",
 ]
 PASS_AFTER_SEMICOLON = [
@@ -1473,8 +1473,7 @@ PLACEHOLDERS = [
     "Departs from: <what on main> — adds y",
 ]
 # Line forms that a Departs from line may take: a bullet, a bold label, a star bullet, a double hyphen
-# as the separator, and an em dash with no spaces. Each passes. A line with no dash passes when both sides are filled
-# (coordinator ruling, 2026-11-12 11:22 CST: the dash check is deleted).
+# as the separator, and an em dash with no spaces. Each passes. A line with no dash passes when both sides are filled.
 LINE_FORMS = [
     "- Departs from: x — adds y",
     "**Departs from:** x — adds y",
