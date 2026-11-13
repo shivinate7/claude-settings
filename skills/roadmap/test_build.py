@@ -3862,9 +3862,9 @@ class IdleLanes(UpkeepFixture):
     # in merge/test_idle_lanes.py, the CLI's copy of the same line.
     DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
-    def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
-        """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
-        return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
+    def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE", tags=()):
+        """A sessions row for a lane of this repo that names `step`, with its get_session bucket and any extra tags."""
+        return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, *tags, status_bucket=bucket)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=(), landed=None):
         """UpkeepFixture.publish with the items key present: [] unless a case names rows. items=None leaves the key out,
@@ -4427,6 +4427,19 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+    def test_page_row_carries_hold_for_a_tagged_lane_whose_handoff_is_not_on_the_record_branch(self):
+        # The untagged lane is the control: its entry reads as it does today. The tagged lane's handoff is not on the
+        # record branch, so its entry carries the HOLD flag that merge --idle-lanes prints.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_t", "c1", tags=("cs-archive-ready:alpha",)),
+                               self.lane("session_u", "c2")])
+        _, entries = self.archive()
+        self.assertEqual(self.ids(entries), ["session_t", "session_u"], entries)
+        self.assertIn("session_u (c2; topic -)", entries)
+        held = [entry for entry in entries if entry.startswith("session_t ")]
+        self.assertEqual(len(held), 1, entries)
+        self.assertIn("HOLD: handoff alpha is not on the record branch", held[0])
 
     def test_completed_lane_with_a_doing_step_under_it_is_held_not_archived(self):
         # c1 is the lane's own step, landed. c2 is still doing and names this lane, so nothing else owns it: the lane reads
