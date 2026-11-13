@@ -19,9 +19,9 @@ _CREATED_LINE = re.compile(r"Created session (" + _CREATED_ID.pattern + ")")
 
 
 def _created_session_id(body, is_error=False):
-    """The id a successful create_session result names: the `id` or `session_id` string of a JSON object, or a
-    `Created session <id>` line. None for an errored result, and for any other text, so a session word in an error
-    names no session."""
+    """The id a successful create_session result names: the `id` or `session_id` string of a JSON object or of its
+    top-level `ccr` object, or a `Created session <id>` line. None for an errored result, and for any other text, so
+    a session word in an error names no session."""
     if is_error or not isinstance(body, str):
         return None
     try:
@@ -29,9 +29,11 @@ def _created_session_id(body, is_error=False):
     except ValueError:
         parsed = None
     if isinstance(parsed, dict):
-        for key in ("id", "session_id"):
-            if isinstance(parsed.get(key), str):
-                return parsed[key]
+        nested = parsed.get("ccr")
+        for holder in (parsed, nested if isinstance(nested, dict) else {}):
+            for key in ("id", "session_id"):
+                if isinstance(holder.get(key), str):
+                    return holder[key]
         return None
     found = _CREATED_LINE.match(body.strip())
     return found.group(1) if found else None
