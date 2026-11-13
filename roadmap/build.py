@@ -20,7 +20,8 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 `sh roadmap/hooks/install.sh`, which never sets core.hooksPath; step c138). It reads the step files from the index, not the
 working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
-note never blocks another's commit. It writes no page.
+note never blocks another's commit. It also refuses a staged roadmap/rulings/*.json that is empty or not
+valid JSON. It writes no page.
 """
 import datetime
 import json
@@ -109,6 +110,58 @@ def over_cap(steps):
 
 
 STEPS_PATH = "roadmap/data/steps"
+RULINGS_PATH = "roadmap/rulings"
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                          encoding="utf-8", errors="surrogateescape")
+
+
+def shown(path):
+    """A path for a message: non-UTF8 bytes survive git's surrogateescape, so print them as U+FFFD."""
+    return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+def staged_entries(repo, folder):
+    """(mode, blob, path) for each file under folder that the staged commit adds or changes, from the index.
+
+    Before the first commit there is no HEAD to diff, so every indexed file counts as added.
+    """
+    entries = []
+    if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0:
+        fields = git(repo, "diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
+                     folder).stdout.split("\0")
+        for meta, path in zip(fields[0::2], fields[1::2]):
+            _, mode, _, blob, _ = meta.split(" ", 4)
+            entries.append((mode, blob, path))
+    else:
+        for line in filter(None, git(repo, "ls-files", "-s", "-z", "--", folder).stdout.split("\0")):
+            meta, path = line.split("\t", 1)
+            mode, blob, _ = meta.split(" ")
+            entries.append((mode, blob, path))
+    return entries
+
+
+def staged_top_level_json(repo, folder):
+    """(mode, blob, path) for each staged .json directly in folder, as load() reads them."""
+    return [e for e in staged_entries(repo, folder)
+            if str(pathlib.PurePosixPath(e[2]).parent) == folder and e[2].endswith(".json")]
+
+
+def staged_unparsable_rulings(repo):
+    """Refusal lines for each staged roadmap/rulings/*.json that is empty or not valid JSON, read from the index.
+
+    Only the commit's own adds and changes count, so a broken ruling already on HEAD never blocks another
+    writer's commit.
+    """
+    refused = []
+    for _, blob, path in staged_top_level_json(repo, RULINGS_PATH):
+        try:
+            json.loads(git(repo, "cat-file", "blob", blob).stdout)
+        except ValueError as e:
+            refused.append(f"{shown(path)} does not parse as JSON: {e}")
+    return refused
 
 
 def staged_notes_over_cap(repo):
@@ -120,47 +173,26 @@ def staged_notes_over_cap(repo):
     since load() would follow it. A staged file that is not valid JSON is skipped: it has no note to count,
     and the next build fails loudly on it.
     """
-    def git(*args):
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
-                              encoding="utf-8", errors="surrogateescape")
-
-    def shown(path):
-        return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-
     def step_at(rev, path):
-        r = git("show", f"{rev}:{path}")
+        r = git(repo, "show", f"{rev}:{path}")
         try:
             d = json.loads(r.stdout) if r.returncode == 0 else None
         except ValueError:
             return None
         return d if isinstance(d, dict) else None
 
-    bases = ["HEAD"] if git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
-    merge_head = pathlib.Path(repo, git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
+    bases = ["HEAD"] if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
+    merge_head = pathlib.Path(repo, git(repo, "rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
     if merge_head.is_file():
         bases += merge_head.read_text().split()
-    entries = []  # (mode, blob, path)
-    if bases:
-        fields = git("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
-                     STEPS_PATH).stdout.split("\0")
-        for meta, path in zip(fields[0::2], fields[1::2]):
-            _, mode, _, blob, _ = meta.split(" ", 4)
-            entries.append((mode, blob, path))
-    else:
-        for line in filter(None, git("ls-files", "-s", "-z", "--", STEPS_PATH).stdout.split("\0")):
-            meta, path = line.split("\t", 1)
-            mode, blob, _ = meta.split(" ")
-            entries.append((mode, blob, path))
     steps, refused = {}, []
-    for mode, blob, path in entries:
+    for mode, blob, path in staged_top_level_json(repo, STEPS_PATH):
         p = pathlib.PurePosixPath(path)
-        if str(p.parent) != STEPS_PATH or not p.name.endswith(".json"):
-            continue
         if mode == "120000":
             refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
             continue
         try:
-            d = json.loads(git("cat-file", "blob", blob).stdout)
+            d = json.loads(git(repo, "cat-file", "blob", blob).stdout)
         except ValueError:
             print(f"pre-commit: {shown(path)} is not valid JSON; its note was not counted", file=sys.stderr)
             continue
@@ -178,6 +210,7 @@ def check_staged():
                          encoding="utf-8", errors="surrogateescape")
     repo = top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
     hits, refused = staged_notes_over_cap(repo)
+    refused += staged_unparsable_rulings(repo)
     if hits:
         print(f"Commit refused: these notes are over {NOTE_WORDS} words. Cut them, stage, and commit again:",
               file=sys.stderr)
