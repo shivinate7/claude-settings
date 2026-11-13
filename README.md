@@ -109,8 +109,8 @@ missing from `/opt/pw-browsers`. Agents never install a browser (decision
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
-install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
-re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
+install.sh also writes a `SessionStart` hook that re-runs it, so each new, resumed or compacted
+session re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 `CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
 
 A repo's own `.claude/settings.json` hooks, deny rules, and `SessionStart` hooks do not run in a
@@ -152,7 +152,7 @@ Once merged:
 * Local (copy mode, Windows without Developer Mode): the `post-merge` git hook copies the
   changed files after your next `git pull` on `main`, and re-runs `install.ps1` itself if
   `install.ps1` changed.
-* Cloud: the next new session runs the setup script, and each new or resumed session runs the `SessionStart` refresh hook; both pick up the change.
+* Cloud: the next new session runs the setup script; a new, resumed or compacted one runs the `SessionStart` refresh hook; both pick up the change.
 
 ## The `merge` command
 
