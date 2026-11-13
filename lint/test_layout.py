@@ -669,12 +669,17 @@ class DefaultBranchPage(GitTree):
         self.assertEqual(json.loads(self.working_extras())["waiting-page"], self.URL_MAIN,
                          "the writer did not write the key into the checkout's extras file")
 
-    def test_guard_read_starts_at_most_two_git_processes_per_call_and_reads_origin_main(self):
+    def test_guard_read_starts_exactly_one_git_process_and_reads_origin_main(self):
         self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
         _, starts = self.git_starts(self.layout.waiting_page, self.tree)
-        self.assertGreaterEqual(len(starts), 1,
-                                "the guard read started no git process, so it read the checkout's extras file, not origin/main")
-        self.assertLessEqual(len(starts), 2, "the guard read started %d git processes: %s" % (len(starts), starts))
+        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin/main blob read): %s"
+                         % (len(starts), starts))
+
+    def test_guard_read_of_a_fork_starts_no_git_process(self):
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "waiting-page": self.URL_LOCAL}
+        self.stale_checkout(json.dumps(fork), self.registry(self.URL_MAIN))
+        _, starts = self.git_starts(self.layout.waiting_page, self.tree)
+        self.assertEqual(starts, [], "a fork's guard read started git processes, which a fork's own file must not: %s" % starts)
 
     def test_guard_read_runs_no_fetch_and_writes_no_file(self):
         self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
@@ -754,6 +759,8 @@ class GithubGuardRead(GitTree):
     OLD = "old/repo"
     NEW = "new/repo"
     ORIGIN = "https://github.com/new/repo.git"
+    FORK = "fork/repo"  # the repo a fork checkout names for itself
+    FORK_BRANCH = "fork-roadmap"  # the record branch a fork checkout sets for itself
 
     def setUp(self):
         super().setUp()
@@ -785,21 +792,28 @@ class GithubGuardRead(GitTree):
         self.assertEqual(self.git_reads.github_repo(self.tree), self.OLD,
                          "an origin/main blob that does not parse made the guard read fail or lose the checkout's repo")
 
-    def test_github_repo_guard_read_starts_at_most_two_git_processes_per_call_when_origin_main_names_the_repo(self):
+    def test_github_repo_guard_read_starts_exactly_one_git_process_when_origin_main_names_the_repo(self):
         self.stale_checkout(self.extras(self.OLD), self.extras(self.NEW))
         _, starts = self.git_starts(self.git_reads.github_repo, self.tree)
-        self.assertGreaterEqual(len(starts), 1,
-                                "the guard read started no git process, so it read the checkout's repo, not origin/main")
-        self.assertLessEqual(len(starts), 2, "the guard read started %d git processes: %s" % (len(starts), starts))
+        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin/main blob read): %s"
+                         % (len(starts), starts))
 
-    def test_github_repo_guard_read_starts_at_most_two_git_processes_per_call_when_it_reads_the_origin_url(self):
+    def test_github_repo_guard_read_starts_exactly_one_git_process_when_it_reads_the_origin_url(self):
         self.git("remote", "add", "origin", self.ORIGIN)
         self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds an extras file")
         self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
         self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
         value, starts = self.git_starts(self.git_reads.github_repo, self.tree)
         self.assertEqual(value, self.NEW, "the guard read did not name the repo of the origin URL")
-        self.assertLessEqual(len(starts), 2, "the guard read started %d git processes: %s" % (len(starts), starts))
+        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin URL read is no process): %s"
+                         % (len(starts), starts))
+
+    def test_github_repo_of_a_fork_starts_no_git_process_and_names_its_own_repo(self):
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "roadmap": {"github": self.FORK}}
+        self.stale_checkout(json.dumps(fork), self.extras(self.NEW))
+        value, starts = self.git_starts(self.git_reads.github_repo, self.tree)
+        self.assertEqual(starts, [], "a fork's repo read started git processes, which a fork's own file must not: %s" % starts)
+        self.assertEqual(value, self.FORK, "a fork's repo read did not name its own repo")
 
     def test_github_repo_guard_read_runs_no_fetch_and_writes_no_file(self):
         self.stale_checkout(self.extras(self.OLD), self.extras(self.NEW))

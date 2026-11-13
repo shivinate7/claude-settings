@@ -9,23 +9,36 @@ SHARED_RESOURCES_UNDER_TEST overrides the script path.
 """
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  rm_tree also removes the read-only git objects of a fixture (testing/tracked_tree.py)
 SCRIPT = os.environ.get("SHARED_RESOURCES_UNDER_TEST") or os.path.join(HERE, "check_shared_resources.py")
 EXTRAS = ".claude/layout-extras.json"
 GOOD = {"name": "ha-green", "owner": "me/home", "preflight": "scripts/preflight.sh", "holds": "holds"}
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
 
 
 class SharedResourcesTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(SCRIPT), "script absent: lint/check_shared_resources.py")
-        self.root = tempfile.mkdtemp(prefix="shres_")
-        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.root = tempfile.mkdtemp(prefix="shres_", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, self.root)
 
     def repo(self, extras, origin=None, files=()):
         os.makedirs(os.path.join(self.root, ".claude"))
@@ -39,6 +52,27 @@ class SharedResourcesTests(unittest.TestCase):
         for rel in files:
             os.makedirs(os.path.dirname(os.path.join(self.root, rel)), exist_ok=True)
             open(os.path.join(self.root, rel), "w").close()
+
+    def git(self, *args, env=None, stdin=None):
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.root, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=stdin, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def real_repo(self, checkout, origin_main):
+        """A real git checkout: its working extras file holds `checkout`, and refs/remotes/origin/main holds the
+        extras file `origin_main` (text), with no origin/HEAD. A read of origin's blob is live, not a config stub."""
+        self.repo(checkout)
+        self.git("init", "-q")
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "main-index"))
+        self.git("read-tree", "--empty", env=env)
+        blob = self.git("hash-object", "-w", "--stdin", stdin=origin_main, env=env).strip()
+        self.git("update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, EXTRAS), env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "main", env=env).strip()
+        self.git("update-ref", "refs/remotes/origin/main", commit)
+        done = subprocess.run(["git", "-C", self.root, "cat-file", "-e", "refs/remotes/origin/main:" + EXTRAS], capture_output=True)
+        self.assertEqual(done.returncode, 0, "scope: origin/main holds no extras file")
 
     def run_check(self):
         done = subprocess.run([sys.executable, SCRIPT, "--root", self.root], capture_output=True, text=True)
@@ -94,6 +128,12 @@ class SharedResourcesTests(unittest.TestCase):
     def test_owner_not_owner_slash_repo_is_red(self):
         self.repo(self.entry(owner="home"))
         self.assertRed("ha-green", "owner")
+
+    def test_checkouts_own_bad_owner_is_red_when_origin_main_lacks_the_key(self):
+        self.real_repo(self.entry(owner="not an owner"), json.dumps({"kinds": {}}))
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "the checkout's own bad owner passed: the check read origin/main's file, not the checkout's. Output: %s" % out)
+        self.assertIn("owner", out)
 
     def test_owner_repo_missing_preflight_file_is_red(self):
         self.repo(self.entry(), origin="Me/Home")
