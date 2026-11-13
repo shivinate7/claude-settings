@@ -293,29 +293,85 @@ class Slots(LeaseCase):
                                 "SIM_LEASE_WAIT does not set the wait: the take does not poll")
 
 
-class PoolExclusive(LeaseCase):
+class PoolPerDevice(LeaseCase):
+    """Each device is its own: a pro and a duo never block each other. A take is judged on its own device's slot and
+    on the busy bar, so the load alone decides whether a second phone may boot."""
+
     def test_pro_is_granted_when_nothing_is_held(self):
         pid = self.spawn().pid
         self.assertEqual(grant(self.take("pro", pid)), (0, "pro"), "a pro take with nothing held is not granted pro")
 
-    def test_duo_is_refused_while_pro_is_held(self):
+    def test_duo_is_granted_slot_1_while_pro_is_held(self):
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("pro", first.pid)), (0, "pro"), "the pro take is not granted pro")
-        self.assertEqual(self.take("duo", second.pid).returncode, 1, "a duo take is granted while pro is held")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "1"),
+                         "a duo take is refused while pro is held: the pro lease still blocks the duos")
 
-    def test_pro_is_refused_while_a_duo_is_held(self):
+    def test_pro_is_granted_while_a_duo_is_held(self):
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the duo take is not granted slot 1")
-        self.assertEqual(self.take("pro", second.pid).returncode, 1, "a pro take is granted while a duo is held")
+        self.assertEqual(grant(self.take("pro", second.pid)), (0, "pro"),
+                         "a pro take is refused while duo slot 1 is held: the duo lease still blocks the pro")
+
+    def test_pro_is_granted_while_both_duo_slots_are_held(self):
+        first, second, pro = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
+        self.assertEqual(grant(self.take("pro", pro.pid)), (0, "pro"),
+                         "a pro take is refused while both duo slots are held")
+
+    def test_slot_2_is_granted_while_pro_and_slot_1_are_held(self):
+        pro, first, second = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", pro.pid)), (0, "pro"), "the pro take is not granted pro")
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"),
+                         "a duo take is refused while pro is held: the pro lease still blocks the duos")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"),
+                         "slot 2 is refused while pro and slot 1 are held")
+
+    def test_control_when_slot_1_gives_slot_2_keeps_its_lease_and_the_next_duo_gets_slot_1(self):
+        first, second, third = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
+        self.give(first.pid)
+        self.assertIn("lease slot 2 pid %d " % second.pid, self.status().stdout,
+                      "slot 2 lost its lease when slot 1 gave")
+        self.assertEqual(grant(self.take("duo", third.pid)), (0, "1"),
+                         "the next duo is not granted slot 1 once slot 1 gives")
+
+    def test_a_busy_disk_refuses_a_pro_take_with_nothing_held(self):
+        self.set_disk(926, 10)
+        r = self.take("pro", self.spawn().pid)
+        self.assertEqual(r.returncode, 1, "a pro take is granted on a busy disk with nothing held")
+        self.assertEqual(r.stdout.strip(), "", "a refused pro take prints a slot")
+
+    def test_a_busy_disk_refuses_a_duo_take_while_pro_is_held(self):
+        pro, first = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", pro.pid)), (0, "pro"), "the pro take is not granted pro")
+        self.set_disk(926, 10)
+        r = self.take("duo", first.pid)
+        self.assertEqual(r.returncode, 1, "a duo take is granted on a busy disk while pro is held")
+        self.assertEqual(r.stdout.strip(), "", "a refused duo take prints a slot")
 
 
 class Queue(LeaseCase):
-    def test_second_waiter_is_not_granted_ahead_of_the_head(self):
+    def test_a_pro_head_is_granted_beside_a_held_duo_and_the_later_duo_takes_slot_2(self):
         holder, head, later = self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
-        self.queue_waiter("pro", head.pid)
-        r = self.take("duo", later.pid)
-        self.assertEqual(r.returncode, 1, "a duo take is granted slot 2 ahead of the queued pro head")
+        self.assertEqual(grant(self.take("pro", head.pid)), (0, "pro"),
+                         "the pro head is refused beside a held duo: the pro lease still blocks the duos")
+        self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
+                         "the later duo is not granted slot 2 after the pro head")
+
+    def test_a_pro_take_does_not_pass_a_queued_duo_head_when_both_duo_slots_are_held(self):
+        first, second, head, later = self.spawn(), self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
+        self.queue_waiter("duo", head.pid)
+        self.assertIn("waiter pid %d " % head.pid, self.status().stdout,
+                      "the duo head is not queued before the pro take")
+        r = self.take("pro", later.pid)
+        self.assertEqual(r.returncode, 1, "a pro take is granted ahead of the queued duo head")
+        self.assertEqual(r.stdout.strip(), "", "a refused pro take prints a slot")
 
     def test_second_duo_is_granted_slot_2_when_no_waiter_is_queued(self):
         holder, later = self.spawn(), self.spawn()
@@ -363,10 +419,11 @@ class Queue(LeaseCase):
 
 
     def test_a_timed_out_take_leaves_the_queue(self):
-        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        holder, pro_holder, head, later = self.spawn(), self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("pro", pro_holder.pid)), (0, "pro"), "the pro holder is not granted pro")
         r = self.take("pro", head.pid, wait=1)
-        self.assertEqual(r.returncode, 1, "a pro take with a duo held is not refused")
+        self.assertEqual(r.returncode, 1, "a pro take is granted while pro is held")
         self.assertFalse(mentions(self.status().stdout, head.pid), "the timed-out pro take is still on the queue")
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
                          "a timed-out waiter still blocks the next duo take")
@@ -616,12 +673,12 @@ class MemoryBrake(LeaseCase):
         pid = self.spawn().pid
         self.assert_refused_on_memory(self.take("duo", pid), 90.0, "slot 1")
 
-    def test_memory_busy_refuses_slot_2_while_slot_1_is_held(self):
+    def test_memory_busy_refuses_a_second_duo_take(self):
         self.set_and_check(50.0)
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1 at 50%")
         self.set_and_check(90.0)
-        self.assert_refused_on_memory(self.take("duo", second.pid), 90.0, "slot 2")
+        self.assert_refused_on_memory(self.take("duo", second.pid), 90.0, "second duo take")
 
     def test_an_unreadable_memory_grants_a_take_when_the_brake_is_loaded(self):
         self.set_memory_unreadable()

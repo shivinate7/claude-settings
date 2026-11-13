@@ -33,17 +33,19 @@ else:
 
 
 def sim_test_cap_check():
-    """bin/sim-test keeps its own CAP, as bash cannot import SIM_BOOT_CAP. The two must be equal."""
+    """No booted-count cap is set anywhere (decision sims-load-brake-only): bin/sim-test has no CAP line, and the
+    guard has no SIM_BOOT_CAP. The load brake is the only gate on a boot."""
     with open(os.path.join(HERE, "..", "bin", "sim-test"), encoding="utf-8") as f:
-        caps = re.findall(r"^CAP=(\d+)\b", f.read(), re.M)
-    want = _load_guard_module().SIM_BOOT_CAP
-    if caps != [str(want)]:
-        return False, "bin/sim-test CAP lines %s, want one equal to SIM_BOOT_CAP %d" % (caps, want)
-    return True, "bin/sim-test CAP=%d equals SIM_BOOT_CAP" % want
+        caps = re.findall(r"^CAP=", f.read(), re.M)
+    guard_cap = getattr(_load_guard_module(), "SIM_BOOT_CAP", None)
+    if caps or guard_cap is not None:
+        return False, "a booted-count cap is still set: bin/sim-test CAP lines %d, guard SIM_BOOT_CAP %r" % (
+            len(caps), guard_cap)
+    return True, "bin/sim-test and the guard set no booted-count cap"
 
 
 # LOG_CHECKS_EXTRA has already joined LOG_CHECKS above, so this check joins LOG_CHECKS itself.
-SIM_TEST_CAP_LABEL = "simulator: bin/sim-test's cap equals SIM_BOOT_CAP"
+SIM_TEST_CAP_LABEL = "simulator: bin/sim-test and the guard set no booted-count cap"
 LOG_CHECKS = LOG_CHECKS + ((SIM_TEST_CAP_LABEL, sim_test_cap_check),)
 LOG_FAMILY[SIM_TEST_CAP_LABEL] = FAMILY
 FIXTURELESS_CHECKS.add(sim_test_cap_check)

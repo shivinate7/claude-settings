@@ -352,12 +352,16 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, load=None, **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
     cases that need a checkout whose origin/main they control (see the page-stale section). None runs
     this repository's guard.
+
+    `load` is the machine reading the guard sees on this case's run, a dict of memory_pct, disk_free_gb and
+    disk_total_gb (see decide). None is the neutral reading. A simulator case always runs under a reading, so
+    its boot rules never meet this host's real load.
 
     `env` is the environment the guard run gets on top of the runner's own, for the cases that name a
     session id (see decide, which drops the runner's id first).
@@ -401,6 +405,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env": env,
         # The guard copy this case runs (see add), or None for this repository's guard.
         "guard": guard,
+        # The machine reading the case's run sees (see add), or None for the neutral reading.
+        "load": load,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -416,10 +422,10 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
        carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
-       agent_type=None, transcript=None, env=None):
+       agent_type=None, transcript=None, env=None, load=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, load=load, command=command)
 
 
 # ASK ALONE. A shell call that holds a command

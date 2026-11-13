@@ -7,11 +7,12 @@
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
 # not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
-# Cross-role (13:51 CST: never a Duo and the 18 Pro booted together): a duo run with only a non-Duo iPhone booted, or a pro
-# run with only a Duo booted, boots nothing, runs nothing, names the booted device on stderr and exits 1.
-# Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
-# names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
-# list that fails exits 1 with no boot.
+# No rule pairs devices or counts booted ones (sims-load-brake-only): a duo run boots its own Duo beside a booted
+# 18 Pro, and a pro run its own 18 Pro beside a booted Duo. The load brake in sim-lease is the only rule that refuses
+# on load. Known gap: two limits beyond the brake still hold. The lock below serializes sim-test runs on the Mac. The
+# lease grants only the three known devices of SLOT_UDID in bin/sim-lease, in strict FIFO order. sims-load-brake-only
+# settles the direction: a queue and a lock per device, then devices made on demand, limited by the load brake only.
+# step:sims-on-demand holds it. A simctl list that fails exits 1 with no boot.
 # Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
 # a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
 # and a hold too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is
@@ -19,14 +20,14 @@
 # pid, with no boot and no xcodebuild. A dead holder: the folder is renamed to a name unique to this run (one rename
 # wins), removed, and the mkdir retried. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
 # pid reads as a live holder.
-# Lease: the own-boot path only. After the lock and the cap check and before `simctl boot`, it runs
+# Lease: the own-boot path only. After the lock and the reuse check and before `simctl boot`, it runs
 # `sim-lease take --device <role> --udid --pid $$` (bin/sim-lease, beside this script). That is the one Mac-wide queue
 # and load limit for phone simulators. A refusal exits 1 with no boot and no xcodebuild. A no-op take (prints none: CI,
 # or not macOS) boots and runs nothing, prints one stderr line saying no lease, and exits 1. The lease is given back
 # after the shutdown and before the lock is freed, on every exit, INT and TERM too. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
-# reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
-# goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
+# reruns the reuse check before the boot: a simulator a dead holder left booted is reused (the lease
+# goes back). A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
 # it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
@@ -49,7 +50,6 @@
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
 # The exit code is otherwise xcodebuild's.
 # macOS only. It runs under /bin/bash 3.2.
-CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 POLL=${SIM_TEST_POLL:-2}
 LOCK_WAIT=${SIM_TEST_LOCK_WAIT:-300}
 WINDOW=${SIM_TEST_WINDOW:-30}
@@ -165,28 +165,16 @@ list_reports() {
 acquire_lock
 
 # scan: read the booted devices under the lock. Sets udid to the booted device of this role (reuse), else empty. Exits 1,
-# booting nothing, when the list cannot be read, when only the other phone kind is booted, or at the cap with no reuse.
+# booting nothing, when the list cannot be read.
 udid_of() { sed -n 's/^.* (\([0-9A-F-]\{36\}\))$/\1/p'; }
 scan() {
-  local listing duo_line pro_line mine other count
+  local listing duo_line pro_line mine
   listing=$(xcrun simctl list devices booted) || { echo "sim-test: simctl list failed; booted nothing, ran nothing." >&2; exit 1; }
   booted=$(printf '%s\n' "$listing" | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
   duo_line=$(printf '%s\n' "$booted" | grep 'iPhone Duo' | head -1)
   pro_line=$(printf '%s\n' "$booted" | grep iPhone | grep -v Duo | head -1)
-  if [ "$role" = duo ]; then mine=$duo_line other=$pro_line; else mine=$pro_line other=$duo_line; fi
+  if [ "$role" = duo ]; then mine=$duo_line; else mine=$pro_line; fi
   udid=$(printf '%s\n' "$mine" | udid_of)
-  [ -n "$udid" ] && return 0
-  if [ -n "$other" ]; then
-    echo "sim-test: $other is booted, and a $role run needs the other phone kind: one phone kind at a time (owner ruling 2026-11-02 13:51 CST). Booted nothing, ran nothing; use --device for that kind, or ask the owner to stop it." >&2
-    exit 1
-  fi
-  count=$(printf '%s\n' "$booted" | grep -c .)
-  if [ "$count" -ge "$CAP" ]; then
-    echo "sim-test: $count simulators are already booted, the cap is $CAP:" >&2
-    printf '%s\n' "$booted" | sed 's/^/  /' >&2
-    echo "sim-test: use one, or ask the owner to stop one." >&2
-    exit 1
-  fi
 }
 
 scan
@@ -204,8 +192,8 @@ if [ -z "$udid" ]; then
     echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
     exit 1
   fi
-  # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse, cross-role and
-  # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease goes back.
+  # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse
+  # check again under the lock before the boot. A device that is now reusable is used, and the lease goes back.
   scan
   if [ -n "$udid" ]; then
     "$(dirname "$0")/sim-lease" give --pid $$

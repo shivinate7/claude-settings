@@ -64,11 +64,12 @@ def decide(case):
         env["PATH"] = case["env_path"]
     guard_file = case.get("guard") or GUARD
     command = [sys.executable, guard_file]
-    if case.get("tool") in dict(LB_TOOLS).values():
+    if case.get("tool") in dict(LB_TOOLS).values() or case.get("load") is not None or case.get("family") == "simulator":
         # A start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
         # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
-        # the case names one (`load`). Only the load-brake family sets a busy or full reading.
+        # the case names one (`load`). A simulator boot reads the load too (the boot cap), so every
+        # simulator case runs in the probe as well. Only a case that names a reading sets a busy or full one.
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
