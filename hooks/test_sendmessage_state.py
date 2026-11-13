@@ -683,8 +683,14 @@ R44_REF = ('docs/decisions/%s.md: "Pins stay current on demand: the session that
 R44_TEXT = ("- **R44. Child repos follow claude-settings, with cited exceptions only.** Free text: decision %s "
             "says pins move only when a session sees drift." % SLUG)
 R46_TEXT = "- **R46. Fixture ruling with a free-text mention only.** Free text: decision %s stands as written." % FREE
-R47_REF = "test-strategy-reset: Reset of the test strategy: the old test plan no longer applies."  # slug first
+R47_REF = "test-strategy-reset: Reset of the test strategy: the old plan applies no longer, and the new plan replaces it."
 R47_TEXT = "- **R47. Fixture ruling that replaces the test strategy.** Free text: a new strategy note, nothing more."
+R48_REF = ('docs/decisions/punct-case-decision.md: "CURRENT demand: the Session sees the DRIFT, and it moves on; '
+           'no SCHEDULE!"')  # the same key words as R44's sentence, in other case and punctuation
+R48_TEXT = "- **R48. Fixture ruling whose quoted sentence has other case and punctuation.** Free text: none."
+R49_TEXT = "- **R49. Fixture ruling that retires a whole decision by its docs path.** Free text: none."
+R50_TEXT = "- **R50. Fixture ruling that retires a whole decision by its bare slug.** Free text: none."
+KEY_SENTENCE = "The session sees the drift."  # two key words shared with R44's sentence: the deny threshold
 CITE_FORMS = ("docs/decisions/%s.md", "`docs/decisions/%s`", "decision %s", "decisions `%s`", "decision `%s`")
 GIT_IDENT = {"GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
              "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
@@ -692,7 +698,7 @@ STORES = {}  # one fixture repo per kind, built on first use and shared by the c
 
 
 def settled_text(sentence, cite):
-    return "%s Pin the four actions to a main commit, per %s." % (sentence, cite)
+    return "%s Pin the four actions to a main commit, per %s. %s" % (sentence, cite, KEY_SENTENCE)
 
 
 def ruling_json(rid, ruling, refs=()):
@@ -704,9 +710,13 @@ def ruling_json(rid, ruling, refs=()):
 
 def store_files():
     """The rulings a real store holds: r44 supersedes SLUG in the docs-path shape, r47 supersedes a slug in the
-    slug-first shape, r46 names FREE in its free text, and the filler brings the store to full size."""
+    slug-first shape, r46 names FREE in its free text, r48 quotes a sentence in other case and punctuation,
+    r49 and r50 retire a whole decision (no quoted sentence), and the filler brings the store to full size."""
     files = {"r44.json": ruling_json("r44", R44_TEXT, (R44_REF,)), "r46.json": ruling_json("r46", R46_TEXT),
-             "r47.json": ruling_json("r47", R47_TEXT, ({"kind": "decision", "ref": R47_REF},))}
+             "r47.json": ruling_json("r47", R47_TEXT, ({"kind": "decision", "ref": R47_REF},)),
+             "r48.json": ruling_json("r48", R48_TEXT, (R48_REF,)),
+             "r49.json": ruling_json("r49", R49_TEXT, ("docs/decisions/bare-path-retired.md",)),
+             "r50.json": ruling_json("r50", R50_TEXT, ({"kind": "decision", "ref": "bare-slug-retired"},))}
     for n in range(1, 151):
         files.setdefault("r%d.json" % n, ruling_json("r%d" % n, "Filler ruling %d, supersedes nothing." % n))
     return files
@@ -912,7 +922,7 @@ def case_cite_forms_are_caught():
         reason = denied(r)
         check("cite form %s: deny naming %s and r44" % (cite, SLUG),
               reason is not None and SLUG in reason and "r44" in reason, detail(r))
-    r = past_run("%s Don't reopen it.\n- decision %s" % (SETTLING[0][1], SLUG), "full")
+    r = past_run("%s Don't reopen it.\n- decision %s. %s" % (SETTLING[0][1], SLUG, KEY_SENTENCE), "full")
     reason = denied(r)
     check("cite after a lone apostrophe and a newline: deny naming %s and r44" % SLUG,
           reason is not None and SLUG in reason and "r44" in reason, detail(r))
@@ -972,9 +982,9 @@ def case_prefix_slug_does_not_match():
 def case_second_slug_in_a_list_is_caught():
     check("fixture: test-practices is in no ref line, so only the later slug is superseded",
           "test-practices" not in R44_REF + R47_REF)
-    for text in ("Settled, per decisions test-practices and %s." % SLUG,
-                 "Settled. Decision: %s." % SLUG,
-                 "Settled. decisions/%s.md." % SLUG):
+    for text in ("Settled, per decisions test-practices and %s. %s" % (SLUG, KEY_SENTENCE),
+                 "Settled. Decision: %s. %s" % (SLUG, KEY_SENTENCE),
+                 "Settled. decisions/%s.md. %s" % (SLUG, KEY_SENTENCE)):
         r = past_run(text, "full")
         reason = denied(r) or ""
         check("second slug in a list (%r): deny naming %s and r44, not test-practices" % (text, SLUG),
@@ -986,27 +996,27 @@ def case_slug_first_ref_shape_supersedes():
     text = store_text(store("full"), "roadmap", "roadmap/rulings/r47.json")
     check("fixture: r47's ref line is slug first: \"ref\": \"test-strategy-reset: ...\"",
           '"ref": "test-strategy-reset: ' in text, " ".join(text.split())[:160])
-    r = past_run("Settled, per decision test-strategy-reset.", "full")
+    r = past_run("Settled, per decision test-strategy-reset: the old plan applies no longer.", "full")
     reason = denied(r) or ""
     check("slug-first ref shape (r47): deny naming test-strategy-reset and r47",
           reason.startswith("past-ruling: ") and "test-strategy-reset" in reason and "r47" in reason, detail(r))
-    r = past_run("Settled, per decision %s." % SLUG, "full")
+    r = past_run("Settled, per decision %s. %s" % (SLUG, KEY_SENTENCE), "full")
     reason = denied(r) or ""
     check("the docs-path ref shape (r44) still denies, naming %s and r44" % SLUG,
           reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
 
 
 def case_already_decided_phrase_denies():
-    r = past_run("Already decided: see decision %s." % SLUG, "full")
+    r = past_run("Already decided: see decision %s. %s" % (SLUG, KEY_SENTENCE), "full")
     reason = denied(r) or ""
     check("'already decided' settles: deny naming %s and r44" % SLUG,
           reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
 
 
 def case_negated_settling_word_is_allowed():
-    for text in ("Not settled yet: decision %s may still apply." % SLUG,
-                 "This isn't settled: decision %s may still apply." % SLUG,
-                 "It is unsettled: decision %s may still apply." % SLUG):
+    for text in ("Not settled yet: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE),
+                 "This isn't settled: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE),
+                 "It is unsettled: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE)):
         r = past_run(text, "full")
         check("negated settling word (%r): allow (exit 0, no output, no stderr), no git start, judge reached" % text,
               r.code == 0 and r.out == "" and r.err == "" and not r.git_starts and len(r.wording_calls) == 1,
@@ -1045,6 +1055,70 @@ def case_refusal_remedy_is_generic():
           "re-check" in reason.lower() and "override" in reason.lower(), detail(r) + " reason=%r" % reason)
 
 
+# ---- round 3: a quoted sentence refuses a reply only when the two share at least two key words. Key words:
+# lowercase words of 5+ letters in the sentence, minus question_form.STOPWORDS and minus the words of the
+# decision's own slug. A ref with no quoted sentence (a bare slug, or a docs path with nothing after) refuses
+# any settling cite of that decision.
+
+
+def case_real_sentence_refuses_a_reply_with_two_key_words():
+    check("fixture: r44's ref quotes the real sentence",
+          '"Pins stay current on demand: the session that runs the tool sees the drift and moves the pin. '
+          'No bot and no schedule."' in R44_REF)
+    r = past_run("Settled per decision %s: no bot, the session sees the drift and moves the pin" % SLUG, "full")
+    reason = denied(r) or ""
+    check("real r44 sentence, reply shares session, drift and moves: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_reply_under_two_key_words_is_allowed():
+    r = past_run("Settled per decision %s: the zizmor twin runs in place" % SLUG, "full")
+    check("real r44 sentence, reply shares no key word: allow (exit 0, no output, no stderr), judge reached",
+          r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_threshold_is_two_shared_key_words():
+    r = past_run("Settled per decision %s: the session stays put." % SLUG, "full")
+    check("exactly one shared key word (session): allow (exit 0, no output)",
+          r.code == 0 and r.out == "" and denied(r) is None, detail(r))
+    r = past_run("Settled per decision %s: the session sees the drift." % SLUG, "full")
+    reason = denied(r) or ""
+    check("exactly two shared key words (session, drift): deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_whole_decision_ref_refuses_any_settling_cite():
+    full = store("full")
+    check("fixture: r49 and r50 are whole-decision refs, with no quoted sentence",
+          '"ref": "docs/decisions/bare-path-retired.md"' in store_text(full, "roadmap", "roadmap/rulings/r49.json")
+          and '"ref": "bare-slug-retired"' in store_text(full, "roadmap", "roadmap/rulings/r50.json"))
+    for slug, rid in (("bare-path-retired", "r49"), ("bare-slug-retired", "r50")):
+        r = past_run("Settled, per decision %s." % slug, "full")
+        reason = denied(r) or ""
+        check("whole-decision ref (%s): deny with no key word shared, naming %s and %s" % (slug, slug, rid),
+              reason.startswith("past-ruling: ") and slug in reason and rid in reason, detail(r))
+
+
+def case_slug_words_do_not_count():
+    check("fixture: r47's quoted sentence has strategy and reset, which are slug words",
+          "strategy" in R47_REF and "reset" in R47_REF)
+    r = past_run("Settled per decision %s: pins and sessions follow the action." % SLUG, "full")
+    check("reply repeating only the slug's own words (pins, sessions, follow, action): allow, no deny",
+          denied(r) is None and r.code == 0 and r.out == "", detail(r))
+    r = past_run("Settled, per decision test-strategy-reset: the strategy reset and the test strategy.", "full")
+    check("reply repeating slug words the quoted sentence also has (strategy, reset): allow, no deny",
+          denied(r) is None and r.code == 0 and r.out == "", detail(r))
+
+
+def case_sentence_matches_case_and_punctuation_blind():
+    check("fixture: r48's quoted sentence is in other case and punctuation (Session, DRIFT)",
+          "Session" in R48_REF and "DRIFT" in R48_REF)
+    r = past_run("Settled per decision punct-case-decision: the session sees the drift.", "full")
+    reason = denied(r) or ""
+    check("stored sentence in other case and punctuation: two key words still deny, naming punct-case-decision and r48",
+          reason.startswith("past-ruling: ") and "punct-case-decision" in reason and "r48" in reason, detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -1079,7 +1153,13 @@ def case_hook_runs():
                  case_negated_settling_word_is_allowed,
                  case_no_cwd_allows_with_one_stderr_line,
                  case_stale_local_ref_checks_origin,
-                 case_refusal_remedy_is_generic):
+                 case_refusal_remedy_is_generic,
+                 case_real_sentence_refuses_a_reply_with_two_key_words,
+                 case_reply_under_two_key_words_is_allowed,
+                 case_threshold_is_two_shared_key_words,
+                 case_whole_decision_ref_refuses_any_settling_cite,
+                 case_slug_words_do_not_count,
+                 case_sentence_matches_case_and_punctuation_blind):
         try:
             case()
         except subprocess.TimeoutExpired as exc:  # run_hook's cap: one FAIL line naming the case, no traceback
