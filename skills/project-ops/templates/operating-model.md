@@ -17,6 +17,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
+  It plans, briefs, verifies and reports, and builds nothing (rule `roles-orchestrator-never-builds`). A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -42,7 +43,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
-  It may run agents.
+  It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the closes and the page itself (rule `roles-orchestrator-never-builds`).
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
@@ -66,6 +67,13 @@ A spawner is a session that starts its own agents. Each session role is a set of
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step.
+  The runner keeps only the merge itself, which the merge lock serializes. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds nothing (rule `roles-orchestrator-never-builds`):
+  - Each close comes from the evidence ledger, with its comment: one agent per close.
+  - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
+  - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
+  - Before each `--batch-build`, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head passed, since a failed, cancelled, unfinished or missing run refuses the build. The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
+  - The per-PR fix checks and the records start at once, in parallel, never one after another.
+  - A build it started in the background is never waited on in the foreground. It ends its turn and sets a one-time check-in, so the next hand-off gets a turn. This holds for builds and CI waits, not for `--confirm`, which stays foreground (record `merge-confirm-repo`).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
