@@ -1,0 +1,14 @@
+{
+ "id": "page-item-quotes-pr-title",
+ "title": "A page item that names a PR quotes the PR's own title and files",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 12:00 CST Nov 13: item 721 said PR #1779 fixes child repos' pages; it changes two claude-settings scripts. The owner picked a on the wrong text; runner 11 asked what #1779 was and I read the PR.",
+ "source": "triage, runner 11 question 11:57 CST Nov 13",
+ "note": "Todo. Add a check in the waiting-page skill (or a page-item lint) that an item naming a PR number carries that PR's title and changed files, read from GitHub when the item is posted. Triage reads the PR before posting, not the ledger line.",
+ "updatedAt": "2026-11-13T12:00:59-06:00"
+}
