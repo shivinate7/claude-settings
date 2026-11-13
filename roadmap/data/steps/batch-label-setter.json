@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Note batch-label-setter-missing; owner ruling 13:20 CST Nov 7: \"fix, not note\".",
  "source": "coordinator 12:54 CST Nov 12",
- "note": "Stacks on #2845 (pr-state-is-on-the-pr), at runner 10. Runner 10 pick (coordinator accepted 12:55 CST): #2845 holds until this lane hands in; both ride one batch. Lane 13:37 CST Nov 12: owner page item on the settings.json \"Merge Tool Read Checks\" text (a lane-lint PASS with --integration also adds a label). Owner page save 13:49 CST Nov 12: item 618 b, widen the \"Merge Tool Read Checks\" text to name the label a PASS with --integration adds (lane facts: no allow entry names a label write; the guard allows the call today; only the prose is stale).",
- "updatedAt": "2026-11-12T13:50:47-06:00"
+ "note": "Stacks on #2845 (pr-state-is-on-the-pr), at runner 10. Runner 10 pick (coordinator accepted 12:55 CST): #2845 holds until this lane hands in; both ride one batch. Lane 13:37 CST Nov 12: owner page item on the settings.json \"Merge Tool Read Checks\" text (a lane-lint PASS with --integration also adds a label). Owner page save 13:49 CST Nov 12: item 618 b, widen the \"Merge Tool Read Checks\" text to name the label a PASS with --integration adds (lane facts: no allow entry names a label write; the guard allows the call today; only the prose is stale). Rebuilt 14:13 CST Nov 13 (lane batch-label-setter): PR #3252 (draft, replaces #2871, stacked on #2845) adds `merge --batch-label <pr>`. Owner 618 b (old design) no longer fits; re-asked as page item 759 (pick-batch-label-allow-entry), a recommended, b widening. The PR does not wait. Code reading is the lane's, unread by triage.",
+ "updatedAt": "2026-11-13T14:13:26-06:00"
 }
