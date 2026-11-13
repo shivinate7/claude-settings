@@ -1304,9 +1304,22 @@ class WakeCost(WaitCase):
 
 
 # The refresh mail's cost line, in the decision's "Refresh mail cost:" form (decision merge-mail-refreshes-sessions).
-REFRESH_COST = (r"Refresh mail cost: processes (\d+) long-lived; timers (\d+); per merge: (\d+) ls-remote, (\d+) fetch, "
-                r"(\d+) commit, (\d+) push; per session: (\d+) install per new sha; files written (\d+) \(last-installed sha\)")
+# The per-merge clause is taken whole and parsed by stated_per_merge.
+REFRESH_COST = (r"Refresh mail cost: processes (\d+) long-lived; timers (\d+); per merge: ([^;]+); "
+                r"per session: (\d+) install per new sha; files written (\d+) \(last-installed sha\)")
 REFRESH_SHAS = ["%040x" % number for number in (1, 2, 3)]  # three merges, so three new shas
+
+
+def stated_per_merge(clause):
+    """(total, breakdown) that a per-merge clause states. The total is the numbers outside its parentheses. The breakdown
+    is the leading number of each comma-separated item inside them, or None when the clause has no parentheses."""
+    groups = re.findall(r"\(([^)]*)\)", clause)
+    total = sum(int(number) for number in re.findall(r"\d+", re.sub(r"\([^)]*\)", "", clause)))
+    if not groups:
+        return total, None
+    items = [item.strip() for group in groups for item in group.split(",")]
+    leads = [re.match(r"(\d+)\s", item) for item in items]
+    return total, sum(int(lead.group(1)) for lead in leads if lead)
 
 
 @unittest.skipIf(os.name == "nt", test_mail.NT_NO_STUB)
@@ -1381,11 +1394,9 @@ class RefreshCost(MailCase):
                 sends.append(total.argv[first:])
                 for name in sorted(receivers):
                     turn(receivers[name])
-        per_merge = set()
-        for argv in sends:
-            subs = Counter(git_subcommand(args) for args in argv if program_name(args) == "git")
-            per_merge.add((subs["ls-remote"], subs["fetch"], subs["commit-tree"], subs["push"]))
-        others = [args for args in total.argv if program_name(args) != "git" and args[0] not in scripts.values()]
+        # Every git start of a send counts: each Popen the send makes, whatever its subcommand.
+        per_merge = {len(git_names(argv)) for argv in sends}
+        others =[args for args in total.argv if program_name(args) != "git" and args[0] not in scripts.values()]
         # The top-level files the refresh leaves in a cache, less what a moved turn already writes: the cache's own config
         # and HEAD, the FETCH_HEAD that git fetch writes, and the listing file. What is left is the refresh's own file.
         files = {}
@@ -1394,7 +1405,7 @@ class RefreshCost(MailCase):
             files[name] = [entry for entry in os.listdir(cache) if os.path.isfile(os.path.join(cache, entry))
                            and entry not in ("config", "HEAD", "FETCH_HEAD") and not entry.startswith("listing-")] \
                 if os.path.isdir(cache) else []
-        return {"per_merge": per_merge, "timers": len(started), "others": others,
+        return {"per_merge": per_merge, "ran": git_names(sends[0]), "timers": len(started), "others": others,
                 "installs": {name: len(test_mail.read_lines(logs[name])) for name in receivers},
                 "files": {name: len(found) for name, found in files.items()}}
 
@@ -1404,20 +1415,23 @@ class RefreshCost(MailCase):
         self.assertIsNotNone(found, "%s has no 'Refresh mail cost:' line, so the refresh mail's cost is not written down"
                              % RECORD_REL)
         m = self.simulate()
-        self.assertEqual(len(m["per_merge"]), 1, "the three merges ran git with %r, not one set of counts"
-                         % sorted(m["per_merge"]))
-        processes, timers, ls_remote, fetch, commit, push, per_sha, files = (int(value) for value in found.groups())
-        self.assertEqual((ls_remote, fetch, commit, push), next(iter(m["per_merge"])),
-                         "the record says per merge %d ls-remote, %d fetch, %d commit, %d push; the stand-in counted %r"
-                         % (ls_remote, fetch, commit, push, sorted(m["per_merge"])))
-        self.assertEqual(processes, len(m["others"]), "the record says processes %d, the stand-in started %d processes "
+        self.assertEqual(len(m["per_merge"]), 1, "the three merges ran %r git starts, not one count" % sorted(m["per_merge"]))
+        processes, timers, clause, per_sha, files = found.groups()
+        stated, breakdown = stated_per_merge(clause)
+        actual = next(iter(m["per_merge"]))
+        self.assertEqual(stated, actual, "the record says %d git processes per merge, the stand-in started %d in each merge: %r"
+                         % (stated, actual, m["ran"]))
+        if breakdown is not None:
+            self.assertEqual(breakdown, stated, "the record's per-merge items sum to %d, not its total %d: %r"
+                             % (breakdown, stated, clause))
+        self.assertEqual(int(processes), len(m["others"]), "the record says processes %s, the stand-in started %d processes "
                          "that are not git or an install" % (processes, len(m["others"])))
-        self.assertEqual(timers, m["timers"], "the record says timers %d, the stand-in started %d threads"
+        self.assertEqual(int(timers), m["timers"], "the record says timers %s, the stand-in started %d threads"
                          % (timers, m["timers"]))
-        self.assertEqual({count / len(REFRESH_SHAS) for count in m["installs"].values()}, {per_sha},
-                         "the record says %d install per new sha per session, the stand-in ran %r installs for %d shas"
+        self.assertEqual({count / len(REFRESH_SHAS) for count in m["installs"].values()}, {int(per_sha)},
+                         "the record says %s install per new sha per session, the stand-in ran %r installs for %d shas"
                          % (per_sha, sorted(m["installs"].values()), len(REFRESH_SHAS)))
-        self.assertEqual(set(m["files"].values()), {files}, "the record says files written %d per session, the stand-in "
+        self.assertEqual(set(m["files"].values()), {int(files)}, "the record says files written %s per session, the stand-in "
                          "wrote %r" % (files, sorted(m["files"].values())))
 
 
