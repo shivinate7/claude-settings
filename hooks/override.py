@@ -42,15 +42,14 @@ writes, so a session cannot grant itself an override. It is valid only while now
   A prompt counts as typed through _keyword_typed: a payload `source` that is absent or the owner's, and no transcript
   record of that prompt with a harness or peer origin. A prompt with an absent source and no matching record in the
   transcript tail counts as typed, so the one-act ends (it fails closed). A timed override and an Opus override do not
-  end it, and a typed Opus grant does not either.
+  end it, and a typed Opus grant does not either. A prompt that starts with a notice tag is no typed prompt, whatever its source.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
-"until": ISO-8601 UTC, or null for no end (the session's end or `opus off`), "role": null, one role, or a sorted
-list of 2 or more roles}. It lives beside the override, so the two never
-replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
-rule's settings-write ask, and it reaches agents.
+"until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override,
+so the two never replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
+rule's settings-write ask, and it reaches agents. A plain ask with no length writes the turn file instead (below).
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
-  `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing. A grant needs the
+  `opus off` ends it, and the turn file too. The same whole-prompt rule holds: any other text after `opus` grants nothing. A grant needs the
          owner's typed words, the override keyword's own gate (_keyword_typed; owner Q1). `opus off` needs none: it
          only narrows.
   A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
@@ -80,7 +79,23 @@ rule's settings-write ask, and it reaches agents.
       and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role, with no
       `opus-grant` line.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
-      min(s), minute(s). None: no end, "until" is null: it lasts until the session ends or `opus off`.
+      min(s), minute(s). None: the turn file, below. A length keeps the timed file.
+A plain ask with no length grants Opus only to the agents spawned for that ask, in the owner's turn (ruling
+own-761-d-task-scoped-opus: it rewrites the Opus half of item 601 a). It writes the turn file, <config dir>/state/override/
+opus-turn/<session_id>.json, {"kind": "opus-turn", "role": null, one role or a list, "until": TURN_BACKSTOP from the ask}.
+It is a second file beside the timed one, so a plain ask never narrows or replaces a typed `opus 2h`. The role is scoped as
+for the timed file (the every-role file first, narrowed after the scope read). Its rules:
+    - take() reads it after the timed file, and only on an Opus spawn refusal. It lifts only a call with no agent_id: an
+      agent's own Opus spawn is not part of the owner's turn. A timed grant still reaches agents. A resume or retry of a
+      named agent is a SendMessage call, which the Opus refusal never reads.
+    - It ends at the owner's next typed prompt: end_turn, which local_time.grant_override runs before any grant, in its own
+      try, through the one typed test (_keyword_typed). A prompt that starts with a notice tag, a payload `source` that is
+      not the owner's (system, loop_wakeup, schedule_wakeup) and a peer or task-notification origin in the transcript do
+      not end it, so a builder's end-notice cannot cancel an `opus reviewers` ask before the reviewers spawn.
+    - A new ask replaces the file. `opus off` removes both files. The `until` ends the grant only when the removal failed:
+      past it the grant is expired and refused. A corrupt turn file reads as OPUS_UNREAD, and the refusal stands.
+    - Cost: one stat of the turn file per owner prompt, and one tail read and one remove only while it exists; one more
+      file open only when an Opus spawn is refused. No model call, process or timer.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -115,6 +130,8 @@ except ImportError:  # a missing or stale helper: the keyword grants still run, 
     def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
+TURN_FOLDER, TURN_KIND = "opus-turn", "opus-turn"  # the plain ask's turn file: state/override/opus-turn/<session>.json
+TURN_BACKSTOP = timedelta(hours=2)  # a turn file's `until`: the end only when the owner's next prompt cannot remove it
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
 # The first word, then one mark (`,` `.` `!` `;` or a dash) that is dropped, then the rest. A mark counts
@@ -256,9 +273,14 @@ def _grant_opus(session_id, rest, at, typed):
     if path is None or not words or (rest[:1] and not rest[:1].isspace()):
         return None
     if [w.lower() for w in words] == ["off"]:
-        try:
-            os.remove(path)
-        except FileNotFoundError:
+        removed = False
+        for file in (path, _path(session_id, TURN_FOLDER)):  # the timed file and the turn file: `opus off` ends any grant
+            try:
+                os.remove(file)
+                removed = True
+            except FileNotFoundError:
+                pass
+        if not removed:
             return None
         _log(session_id, "opus-off", "")
         return "opus-off", None
@@ -271,22 +293,40 @@ def _grant_opus(session_id, rest, at, typed):
     return _write_opus(session_id, path, at, length.groups(), role)
 
 
-def _write_opus(session_id, path, at, length, role, said=None, log=True):
-    """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
-    shape, for the keyword grant and the plain ask. `length` None means no end: "until" is null and the `until`
-    returned is None. `role` is None, one role, or a sorted list of 2 or more roles. `said` is the owner's words, for
-    the log; `log` False writes the file and no log line. Returns ("opus", until, role)."""
-    until = _length_end(at, *length) if length else None
-    stamp = until.astimezone(timezone.utc).isoformat() if until else None
-    _write(path, {"kind": "opus", "until": stamp, "role": role})
-    if not log:
-        return "opus", until, role
-    detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role",
-                              stamp or "session end")
+def _role_text(role):
+    return ", ".join(role) if isinstance(role, list) else role or "every role"
+
+
+def _log_said(session_id, detail, said):
+    """The one `opus-grant` line of a grant: `detail`, then the owner's words `said` when given."""
     if said:
         detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
     _log(session_id, "opus-grant", detail)
+
+
+def _write_opus(session_id, path, at, length, role, said=None, log=True):
+    """Write the timed Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
+    shape, for the keyword grant and the plain ask with a length. `role` is None, one role, or a sorted list of 2 or more
+    roles. `said` is the owner's words, for the log; `log` False writes the file and no log line. Returns ("opus",
+    until, role)."""
+    until = _length_end(at, *length)
+    stamp = until.astimezone(timezone.utc).isoformat()
+    _write(path, {"kind": "opus", "until": stamp, "role": role})
+    if log:
+        _log_said(session_id, "%s until %s" % (_role_text(role), stamp), said)
     return "opus", until, role
+
+
+def _write_turn(session_id, path, at, role, said=None, log=True):
+    """Write the session's turn file and log it: the grant of a plain Opus ask with no length (ruling own-761-d). It lifts
+    the Opus spawns of the owner's turn only: the owner's next typed prompt removes it (end_turn). Its `until`, TURN_BACKSTOP
+    from `at`, is the end only when that removal fails. A new ask replaces the file. Returns ("opus-turn", until, role)."""
+    until = at + TURN_BACKSTOP
+    stamp = until.astimezone(timezone.utc).isoformat()
+    _write(path, {"kind": TURN_KIND, "until": stamp, "role": role})
+    if log:
+        _log_said(session_id, "%s for the owner's turn, backstop %s" % (_role_text(role), stamp), said)
+    return TURN_KIND, until, role
 
 
 def _strip_blocks(prompt):
@@ -321,7 +361,7 @@ def _near_negation(names, at, negations):
 
 
 def _ask_scope(text):
-    """(length, roles) a plain ask names (length None: no end), or None when the words are unclear: two lengths, a decimal or compound
+    """(length, roles) a plain ask names (length None: none named, so a turn grant), or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
     none."""
@@ -501,9 +541,10 @@ def _owner_ask(prompt, source, transcript, wanted):
 def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=None, scope_judge=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask and
-    `scope_judge` is call_judge.opus_scope unless a caller passes another. Returns ("opus", until, role) for a new
-    override, else None. The module docstring holds the rules of the words and of the scope. `source`, the payload's
-    field, must be in OPUS_ASK_SOURCES; any other value, an unknown one too, grants nothing.
+    `scope_judge` is call_judge.opus_scope unless a caller passes another. Returns ("opus", until, role) for a new timed
+    override, ("opus-turn", backstop, role) for an ask with no length (the turn file, _write_turn), else None. The module
+    docstring holds the rules of the words and of the scope. `source`, the payload's field, must be in OPUS_ASK_SOURCES;
+    any other value, an unknown one too, grants nothing.
     Cost: one tail read (_tail_prompts) when the prompt carries the whole word `opus`; the judge sees the stripped
     ask alone. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a
     file, a machine-tag start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud
@@ -534,26 +575,34 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     length, roles = scope
     said = " ".join(text.split())
     context = [] if roles else _context_prompts(found, prompt, seed)
+
+    def put(role, log=True):  # a length: the timed file, as `opus 2h`. None: the turn file, which never touches the timed one
+        if length:
+            return _write_opus(session_id, path, at, length, role, said, log)
+        return _write_turn(session_id, _path(session_id, TURN_FOLDER), at, role, said, log)
+
     if context:
         # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
         # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
-        _write_opus(session_id, path, at, length, None, said, log=False)
+        put(None, log=False)
         if scope_judge is None:
             from call_judge import opus_scope as scope_judge
         try:
             roles = _scoped_roles(scope_judge, text, context)
         except BaseException:  # an interrupt or an exit during the read: log the every-role grant that stands
-            _write_opus(session_id, path, at, length, None, said)
+            put(None)
             raise
-    return _write_opus(session_id, path, at, length, _file_role(roles), said)
+    return put(_file_role(roles))
 
 
 def _keyword_typed(prompt, source, transcript):
-    """True when the keyword route may grant `prompt`: the owner typed it. The payload `source` is absent or the owner's
-    (OPUS_ASK_SOURCES), and the prompt's own record in the transcript tail (the last prompt record with the same text,
-    a peer's too) passes _owner_text. No transcript, or no such record: no evidence against, so True. Cost: one
-    tail read, only for a prompt that would grant."""
-    if source not in OPUS_ASK_SOURCES:
+    """True when `prompt` is the owner's typed turn, the one test of "typed" for the keyword grants and for what a typed
+    prompt ends (end_once, end_turn). The payload `source` is absent or the owner's (OPUS_ASK_SOURCES), the prompt does not
+    start with a notice tag (NOTICE_TAGS: a builder's end-notice or a wakeup is no typed turn, though it carries no source),
+    and the prompt's own record in the transcript tail (the last prompt record with the same text, a peer's too) passes
+    _owner_text. No transcript, or no such record: no evidence against, so True. Cost: one tail read, only for a prompt
+    that would grant or end something."""
+    if source not in OPUS_ASK_SOURCES or prompt.lstrip().startswith(NOTICE_TAGS):
         return False
     for _, rec in reversed(_tail_prompts(transcript, any_origin=True)):
         if _text_of(_unpeered(rec)).strip() != prompt.strip():
@@ -643,6 +692,25 @@ def end_once(session_id, prompt, at, transcript=None, source=None):
             return False
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return False  # no file, an unreadable one, a naive time: take() reads it as it did
+    if not _keyword_typed(prompt, source, transcript):
+        return False
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    return True
+
+
+def end_turn(session_id, prompt, at, transcript=None, source=None):
+    """Remove the session's turn file for an owner prompt that is a typed turn (_keyword_typed): the end of a plain Opus
+    ask with no length (ruling own-761-d). A notice, a wakeup, a peer or a task notification never ends it, so a builder's
+    end-notice cannot cancel an `opus reviewers` ask before the reviewers spawn. The caller runs it before the prompt's own
+    grants, so a new ask writes the next turn file after this one is gone. An absent source with no matching transcript
+    record counts as typed (fails closed: the grant ends). Cost: one stat of the turn file per prompt, and only when it
+    exists one tail read and one remove; no timer, no process. Returns True when it removed the file."""
+    path = _path(session_id, TURN_FOLDER)
+    if path is None or not isinstance(prompt, str) or not os.path.exists(path):
+        return False
     if not _keyword_typed(prompt, source, transcript):
         return False
     try:
@@ -772,20 +840,16 @@ def _log(session_id, decision, detail, rule=OPUS_RULE):
     guard_core.record("UserPromptSubmit", decision, rule, detail)
 
 
-def _take_opus(session_id, spawn_role, at):
-    """OPUS_LIFTED when the session's Opus override covers a spawn of spawn_role now, OPUS_UNREAD when the
-    file exists but cannot be read, else None."""
-    path = _path(session_id, "opus")
-    if path is None:
-        return None
+def _take_opus_file(path, kind, spawn_role, at):
+    """OPUS_LIFTED when the Opus file at `path` (of `kind`: "opus" or TURN_KIND) covers a spawn of spawn_role now,
+    OPUS_UNREAD when it exists but cannot be read, else None."""
     try:
         with open(path, "rb") as handle:
             data = json.loads(handle.read().decode("utf-8"))
-        until = None if data["until"] is None else datetime.fromisoformat(data["until"])  # null: no end
+        until = datetime.fromisoformat(data["until"])
         role = data["role"]
         roles = role if isinstance(role, list) else [role]  # null, one role, or a list of roles
-        if (data["kind"] != "opus" or (until is not None and until.tzinfo is None)
-                or (isinstance(role, list) and not role)
+        if (data["kind"] != kind or until.tzinfo is None or (isinstance(role, list) and not role)
                 or any(r is not None and (not isinstance(r, str) or opus_role(r) != r) for r in roles)):
             return OPUS_UNREAD
     except FileNotFoundError:
@@ -794,9 +858,24 @@ def _take_opus(session_id, spawn_role, at):
         return OPUS_UNREAD
     if isinstance(role, list) and str(spawn_role).lower() in role:
         role = str(spawn_role).lower()  # a list that names the spawn's role covers it as that one role
-    if (until is not None and at >= until) or (role is not None and role != str(spawn_role).lower()):
+    if at >= until or (role is not None and role != str(spawn_role).lower()):
         return None
     return OPUS_LIFTED
+
+
+def _take_opus(session_id, spawn_role, at, agent_id=None):
+    """OPUS_LIFTED when the session's timed Opus override, or else its turn file, covers a spawn of spawn_role now,
+    OPUS_UNREAD when a file read exists but cannot be read, else None. The timed file reaches agents. The turn file lifts
+    only the owner's own spawn (no agent_id): an agent's Opus spawn is not part of the owner's turn (ruling own-761-d).
+    The turn file is opened only when the timed file lifts nothing."""
+    timed = _path(session_id, "opus")
+    turn = _path(session_id, TURN_FOLDER)
+    if timed is None or turn is None:
+        return None
+    got = _take_opus_file(timed, "opus", spawn_role, at)
+    if got == OPUS_LIFTED or agent_id:
+        return got
+    return _take_opus_file(turn, TURN_KIND, spawn_role, at) or got
 
 
 def remote_session_id():
@@ -887,7 +966,7 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None):
     creates its claim marker wins. For the Opus spawn refusal (rule OPUS_RULE with a spawn_role) the Opus
     override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
     spends no one-act override. `cwd` is the call's directory, where the step grant is read."""
-    opus = _take_opus(session_id, spawn_role, at) if rule == OPUS_RULE and spawn_role is not None else None
+    opus = _take_opus(session_id, spawn_role, at, agent_id) if rule == OPUS_RULE and spawn_role is not None else None
     if opus == OPUS_LIFTED:
         return opus
     step = None

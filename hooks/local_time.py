@@ -134,11 +134,12 @@ def override_line(result):
         return "Override: ended."
     if kind == "opus-off":
         return "Opus override: ended."
-    if kind == "opus":
+    if kind in ("opus", "opus-turn"):
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
         who = "%s spawns" % roles if roles else "spawns"
-        end = central_hhmm(until) if until else "the session ends or `opus off`"  # no end time: a plain ask with no length
-        return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, end)
+        # a turn grant (a plain ask with no length) names no clock time: the owner's next prompt ends it
+        end = " until %s" % central_hhmm(until) if kind == "opus" else "; it ends at the owner's next message"
+        return "Opus override: the model-cap refusal is lifted for Opus %s%s." % (who, end)
     if kind == "once":
         return "Override: one act, ends at %s if unused." % central_hhmm(until)
     return "Override: until %s" % central_hhmm(until)
@@ -355,10 +356,17 @@ def grant_override(raw, at):
     the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most two
     judge calls per prompt (an Opus no, then the override ask, for a prompt with both words). Those calls are why the
     settings.json row has "timeout": 30. A prompt no route granted, and a typed `opus off`, ends a pending one-act
-    override (override.end_once; owner, item 601). Any failure is one stderr line, no override."""
+    override (override.end_once; owner, item 601). Every typed prompt, first of all, ends the turn grant of a plain Opus
+    ask with no length (override.end_turn; ruling own-761-d), in its own try. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
+        try:  # a typed prompt ends the last plain Opus ask's turn before any grant; a failure here never stops the grants
+            if isinstance(hook, dict):
+                override.end_turn(hook.get("session_id"), hook.get("prompt"), at,
+                                  transcript=hook.get("transcript_path"), source=hook.get("source"))
+        except Exception as e:
+            print("local_time: opus turn end: %s" % e, file=sys.stderr)
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at,
                                 transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result is None:
