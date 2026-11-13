@@ -5,7 +5,7 @@ currently a patchwork of lessons bugs and fixes and stale prose". The item cover
 watches, wakes, sweeps, reaps or logs.
 
 This record holds the model (section 1), the table of mechanisms (section 2), the merges (section 3),
-the deletes (section 4), the lanes (section 5) and the owner questions (section 6). Section 6 is open.
+the deletes (section 4), the lanes (section 5) and the owner questions (section 6). Section 6 has one open question, Q6.
 This change changes no behaviour. It fixes stale prose in Markdown records and in code comments.
 
 ## Method
@@ -30,16 +30,14 @@ Eight rules. A rule becomes a check when a check exists. Until then it is a plai
 1. **Events.** A mechanism runs inside a hook or tool process that the harness started, or
    when a person asks. A timer is allowed only when its record shows it costs less than it saves (rule `outcomes-mechanize-rules`; timer ruling `timer-allowed-when-cheaper`). The hook events on main are PreToolUse, PostToolUse,
    PermissionRequest, PermissionDenied, Stop, SubagentStart, SubagentStop, SessionStart, SessionEnd,
-   PreCompact, PostCompact and UserPromptSubmit (checked: `settings.json`). The daily job is the one
-   timer. Q4 covers it.
+   PreCompact, PostCompact and UserPromptSubmit (checked: `settings.json`). Three named exceptions may run on a timer or hold a process: the stall watcher, `ci_wake` and the daily job (Cockpit item 180, pick a, 2026-11-06 12:19 CST). Their home and status are in `.claude/rules/hooks.md`. The stall watcher and `ci_wake` are long-lived, which the root rule does not allow. That is open (step `watchers-plan-lanes`).
 2. **Children.** A mechanism starts no process that outlives its hook. A child is short and bounded by the
-   hook timeout, such as `git` or `ps`. Q1 and Q2 cover the exceptions.
+   hook timeout, such as `git` or `ps`. A model call through `invoke_model` is such a child (Cockpit item 248, pick b; Q2). The stall watcher and `ci_wake` are the named exceptions (Q1a and Q3).
 3. **Waiting.** A session waits through the harness's wake: an asyncRewake exit, a PR comment (`ci-done`),
    or `send_later`. It does not wait on a polling process we start. Two mechanisms break this rule today,
-   the stall watcher and `ci_wake`. Q1 and Q3 cover them.
-4. **Cost.** Each record states its cost: process starts, files written, and how often. Owner item 180
-   fixes the form. No cost line is written before then.
-5. **Proof.** One shared test helper proves the stated cost. It counts child processes, files written and
+   the stall watcher and `ci_wake`. Q1a and Q3 name them as exceptions.
+4. **Cost.** Each record states its cost: process starts, files written, and how often (rule `outcomes-mechanize-rules`). Decision `cost-line-pinned` and its checker check each file and count that a Cost line names.
+5. **Proof.** One shared test helper proves the stated cost (`hooks/test_support/cost_probe.py`, on lane branch `lane/watcher-cost-tests-main`, not yet on main). It counts child processes, files written and
    sleep passes. The test is the proof. A cost claim with no test is not proven.
 6. **Logs.** Each log names its reader in its record. Each log has a size cap. A cap rotates the file. It
    never trims the file, because a trim can remove rows a reader needs (the `crash` lines that
@@ -62,12 +60,12 @@ small, M medium, L large).
 | Stall temp files | The hook exits 3 before `rm -f LOG BEAT`. A stalled job leaves `.log` and `.beat` files (line 17). | Remove them on every exit path. | no | S |
 | Stall Stop check (`--stop`) | Lists each quiet job once per crossing: at the first Stop after its stall crossed, against the previous Stop (`stop()`, `scan_jobs`). A job that goes quiet again after new output is listed again. | None. Test `each_stale_job_is_listed_once` holds it. | no | - |
 | `wait-pid` (`bin/wait-pid`) | One process per wait. Ownership reads run at start (record `stall-watch`; code unchecked). | Add the cost test. | no | S |
-| `ci_wake` (PostToolUse, Bash and PowerShell) | One python per `gh pr ready`. Timeout 3600 s. Reads runs every 30 s, then gaps up to 120 s (checked: `settings.json`; `hooks/ci_wake.py` header). | Keep as a standing exception with its cost stated, or replace. Q3. | 3 | M |
+| `ci_wake` (PostToolUse, Bash and PowerShell) | One python per `gh pr ready`. Timeout 3600 s. Reads runs every 30 s, then gaps up to 120 s (checked: `settings.json`; `hooks/ci_wake.py` header). | Keep as a named exception with its cost stated (Q3, decided). Long-lived: open (step `watchers-plan-lanes`). | 3 | M |
 | `merge/merge.py` poll loops | Two loops of its own. `retry_net` (line 223) pauses between network retries. `wait_checks` (line 967) pauses through `block` (lines 1223 to 1229): 30 s when a check has an Actions run, else a minute. It also pauses 30 s for a settle read (lines 1017 to 1021). | Share the `gh` call and the pause seam with `ci_wake`. Do not share the loop. | no | M |
 | Config watch (`hooks/config_watch.py`, PostToolUse 20 s, Stop 20 s) | Hashes the two watched settings files on each matching call (record `config-watch-fast-exit`). | Add a test that a clean call starts no process. Fix the docstring. | no | S |
-| Decision watch | No Stop row runs `decision_watch.py` (checked: `settings.json`). The mod runs in the app (checked: `register.mjs`). Its model call is used by `hooks/reply_judge.py` and `lint/report_guard.py` (checked). | Make the log append-only. Q5 covers the `STOP seen` line. | 5 | M |
-| Model-call judges | `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData; 70 s). `prose_judge` (PreToolUse on Edit and Write; 45 s). `reply_judge` (Stop; 25 s). `feedback_guard` (Stop; 60 s). `report_guard` (Stop; 35 s; calls `decision_watch.invoke_model` at line 1267). `local_time` (UserPromptSubmit; 30 s; its model call is unchecked). Each judge calls a model. `invoke_model` is at `hooks/decision_watch.py` line 671. | One home (`invoke_model`) and one test. Q2. | 2 | M |
-| Other hooks with no row | `ruling_home` (Stop; 20 s). `reread_check` (Stop 10 s, PreToolUse Read 10 s, PostCompact 10 s). `blind_brief` (PreToolUse on Agent or Task; 10 s). `rm_prompt_answer` (PermissionRequest on Bash; 20 s). `sendmessage_state` (PreToolUse on SendMessage; 50 s; starts a node reader child at line 91 with `start_new_session`). `agent_brief` (SubagentStart; 20 s). `local_time` (SubagentStart 10 s; PostToolUse on ArtifactData 10 s). `refusal_note` (PermissionDenied; 10 s). `precompact_handoff` (PreCompact and Stop, 30 s each; SessionStart and SessionEnd rows, 10 s each). `guard.py` (SubagentStop 20 s; PreToolUse 60 s). `sim_boot_record` (PreToolUse Bash 20 s; PostToolUse 600 s). All checked in `settings.json`. | Add each row to the table. Record each cost once item 180 fixes the form. | no | M |
+| Decision watch | No Stop row runs `decision_watch.py` (checked: `settings.json`). The mod runs in the app (checked: `register.mjs`). Its model call is used by `hooks/reply_judge.py` and `lint/report_guard.py` (checked). | Make the log append-only. Keep the `STOP seen` line: `/dw` reads it. | 5 | M |
+| Model-call judges | `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData; 70 s). `prose_judge` (PreToolUse on Edit and Write; 45 s). `reply_judge` (Stop; 25 s). `feedback_guard` (Stop; 60 s). `report_guard` (Stop; 80 s; calls `decision_watch.invoke_model` in its past-ruling check). `local_time` (UserPromptSubmit; 30 s) calls a model for a prompt with the whole word `override` or `opus` (`override.grant_override_ask`, `override.grant_opus_ask`, `hooks/override.py`). Each judge calls a model. `invoke_model` is at `hooks/decision_watch.py` line 678. | One home (`invoke_model`). Costs are in decision `haiku-prompt-hooks` (Q2, decided). | 2 | M |
+| Other hooks with no row | `ruling_home` (Stop; 20 s). `reread_check` (Stop 10 s, PreToolUse Read 10 s, PostCompact 10 s). `blind_brief` (PreToolUse on Agent or Task; 10 s). `rm_prompt_answer` (PermissionRequest on Bash; 20 s). `sendmessage_state` (PreToolUse on SendMessage; 50 s; starts a node reader child at line 91 with `start_new_session`). `agent_brief` (SubagentStart; 20 s). `local_time` (SubagentStart 10 s; PostToolUse on ArtifactData 10 s). `refusal_note` (PermissionDenied; 10 s). `precompact_handoff` (PreCompact and Stop, 30 s each; SessionStart and SessionEnd rows, 10 s each). `guard.py` (SubagentStop 20 s; PreToolUse 60 s). `sim_boot_record` (PreToolUse Bash 20 s; PostToolUse 600 s). All checked in `settings.json`. | Add each row to the table. Record each cost in the form of rule 4. | no | M |
 | `question_form.py` git child | Starts one long-lived `git cat-file --batch` process (line 1422). | Bound it to the hook timeout, or close it when the call ends. | no | S |
 | `bin/ci-job` verdict run | Starts one `verdict` process per job (line 351). | Record it. | no | S |
 | `hooks/mutate_shared.py` child | Starts a child with `start_new_session` on POSIX (line 483). The critic found it. The map read this file as CI tooling. | Record its cost. Bound it by time. | no | S |
@@ -100,8 +98,7 @@ small, M medium, L large).
   decides where the scan runs.
 - **Agent-end reap.** One record for the reap and its payload log. The process tiers keep their own record,
   `unattended-sweep-stops-proven-orphans`.
-- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6 asks whether
-  they should match.
+- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6 is open. Owner items 304 and 309 picked one shared definition, memory and disk only (rulings `load-def-shared-304a` and `load-def-memory-disk-309a`). `hooks/guard_load.py` is not on main.
 
 ## 4. Deletes
 
@@ -109,65 +106,46 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 
 - **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` line 81 writes it. Line 358
   counts it for `/dw`. It is the only live evidence that the mod fires, and the record says no live read
-  has happened. Delete it only after another fire check lands. Q5.
-- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Its reader is unchecked. Q5.
+  has happened. Kept: `/dw` reads it, so it has a reader (Q5, ruling `watchers-log-reader-249b`).
+- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. A reader exists: `read_last_runs` in the same file (Q5, ruling `watchers-log-reader-249b`).
 - **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
-  So the run has no reader for it. Its scan cost is unchecked. Q4.
-- **Stall watcher.** Q1. Not in this list until ruled.
+  So the run has no reader for it. The SessionEnd run skips it (decision `the-janitor-is-one-machine-wide-sweep`). Its scan cost is unchecked. Q4 is decided.
+- **Stall watcher.** Kept (Q1a, decided). Not a delete.
 
 ## 5. Lanes, smallest first
 
 1. **Text only (this change).** Fix stale prose in the decision records, debts, `docs/*.md` and
    `janitor/GUIDE.md`. Size S. It needs no owner answer.
-2. **Cost tests for the cheap mechanisms.** After item 180 fixes the form. One shared helper. Size S.
+2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`, on lane branch `lane/watcher-cost-tests-main`. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
    watcher stays until Q1 is ruled.
-4. **Log cull.** After Q5. Size S.
-5. **SessionEnd scope.** After Q4. Size M.
+4. **Log readers.** Name a reader for each log, with no delete (Q5, ruling `watchers-log-reader-249b`). Size S.
+5. **SessionEnd scope.** The SessionEnd half of Q4 (ruling `watchers-sessionend-250a`). Size M.
 6. **Decision watch log.** Append-only. Any skip on a quiet turn uses the same protected-path set as
    `--emit-prompt`, so a protected change is still judged. Size M.
 7. **Agent-end reap.** Bound the delete child by time. One process scan per session end. Size M.
-8. **Record lint.** The check for rules 4 to 8. After item 180. Size M.
+8. **Record lint.** The check for rules 4 to 8. Size M.
 9. **Stall watcher and `ci_wake`.** Replace or cap, per Q1 and Q3. Size L.
 
 Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 ## 6. Owner questions
 
-**Status: open.** Item 180 is on the Cockpit. So are the new items below: Q2 (model-call hooks), Q4
-(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
+**Status: Q1a to Q5 decided, Q6 open, Q7 decided.** Q1a, Q1b, Q3 and the daily-timer half of Q4 decide on Cockpit item 180, pick a (2026-11-06 12:19 CST). Q2 decides on item 248, pick b (same time). The SessionEnd half of Q4 and Q5 decide on rulings `watchers-sessionend-250a` and `watchers-log-reader-249b`, whose answer times are not on record. Open, not decided: whether a long-lived watch fits the root rule (rule 1; step `watchers-plan-lanes`). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
 
-**Q1a. Stall watcher.** Options: (a) delete it, and keep the Stop check and `wait-pid`; (b) keep it with
-a cost cap and a test; (c) leave it as is. Q1b decides between them. Recommendation: (b), until Q1b
-has a replacement.
+**Q1a. Stall watcher. Decided:** keep it as a named exception, with its cost stated and pinned by `hooks/test_stall_watch.py` (class `CostTests`). Its lifetime is open (rule 1).
 
-**Q1b. A wake for an idle session.** For a stalled background job, only the watcher's exit-3 report wakes an idle
-session. The Stop check runs at the end of a turn and repeats at every Stop. An idle session has no Stop.
-So a background job that stalls while the session is idle is never reported by it. (`ci_wake` also wakes
-an idle session, but only for CI results.) Options: (a) accept that gap; (b) keep the watcher's wake; (c) give the session another
-wake for a stalled job. Recommendation: (b), until (c) exists.
+**Q1b. A wake for an idle session. Decided:** keep the watcher's wake (Cockpit item 180, pick a). For a stalled background job, only the watcher's exit-3 report wakes an idle session. The Stop check runs at the end of a turn and repeats at every Stop. An idle session has no Stop. `ci_wake` also wakes an idle session, but only for CI results.
 
-**Q2. Model-call hooks under the no-new-process rule.** Do the model judges in section 2 count under
-rule 2? Options: (a) yes. They are children inside a hook budget. Each has its own timeout and one test,
-and one home (`invoke_model`). (b) no. They form a separate class, named in the rule. Recommendation: (a).
+**Q2. Model-call hooks under the no-new-process rule. Decided:** they count under rule 2, as children inside a hook budget. All six stay command hooks, each with its cost stated. The move to a prompt hook is re-checked on three triggers (Cockpit item 248, pick b, 2026-11-06 12:19 CST). Home: decision `haiku-prompt-hooks`.
 
-**Q3. `ci_wake`.** Options: (a) keep it as a standing exception, with its cost stated; (b) replace it
-with the PR subscription, and keep the local watch only as a fallback. Recommendation: (a), for now.
+**Q3. `ci_wake`. Decided:** a named exception, with its cost stated (Cockpit item 180, pick a). Its lifetime is open (rule 1). Home: decision `ci-wait-reads-run-status`.
 
-**Q4. SessionEnd scope and the daily timer.** Does the SessionEnd hook run stay machine-wide? The record
-says it sweeps one repository. The code also scans every process and lists simulators. Options:
-(a) one repository only. The machine-wide tiers run in the daily job only. Orphaned servers and booted
-simulators then stay until the next daily run. A sweep that runs less often means more
-`simulator-boot-cap` refusals, which are false alarms, not holes. (b) keep the hook run machine-wide.
-Recommendation: (a), because the record already says one repository.
+**Q4. SessionEnd scope and the daily timer. Decided.** The daily timer is a named exception, with its cost stated (Cockpit item 180, pick a). The SessionEnd half is ruling `watchers-sessionend-250a`: one repository at SessionEnd, machine-wide only in the daily job (Cockpit item 250, pick a). The answer time is not on record. Home: decision `the-janitor-is-one-machine-wide-sweep`. Lane 5 carries the change. The record says the hook sweeps one repository, and the code also scans every process and lists simulators.
 
-**Q5. Logs with no reader.** Options: (a) delete now the logs that have no reader: `janitor-runs.jsonl`.
-`hooks/daily_note.py` now reads the agent-end payload log and the launchd error log. The `STOP seen` line goes only after another fire check
-lands. (b) name a reader for each one. Recommendation: (a) for the logs with no reader. Keep `guard.log`,
-with a rotating cap.
+**Q5. Logs with no reader. Decided** by ruling `watchers-log-reader-249b` (Cockpit item 249, pick b: "Name a reader for each"). The answer time is not on record. Each log gets a named reader in its record, and none is deleted. `hooks/daily_note.py` reads the agent-end payload log and the launchd error log. Keep `guard.log`, with a rotating cap.
 
-**Q6. Load definition. Low value.** Options: (a) one shared definition; (b) keep the two definitions, and
-one record that says why. Recommendation: (b). `sim-lease` already states its own definition.
+**Q6. Load definition. Open.** Owner items 304 and 309 picked a: "One shared definition" (ruling `load-def-shared-304a`, 2026-11-06 15:24 CST) and "Memory and disk only" (ruling `load-def-memory-disk-309a`, 2026-11-06 15:45 CST). Ruling `sims-load-brake-only` (2026-11-12 21:59 CST) does not supersede 309a as written. Its supersedes field names only the 2026-11-02 ruling on the 18 Pro. It names the load brake as the only limit on simulator count, so it leans on the load definition without changing it. 309a stays open. `sim-lease` already states its own definition.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
@@ -180,11 +158,11 @@ One line each, with the reason the text stays.
 
 - stall-watch: "no test pins the cost" (wait-pid). An honest admission. True now.
 - stall-watch: "a builder's choice, not measured" (300 s age). Unmeasured, not false.
-- stall-watch: the heading premise "the watcher does the waiting" and the waiter-rule argument. Q1a holds them. No edit before the owner rules.
+- stall-watch: the heading premise "the watcher does the waiting" and the waiter-rule argument. Item 180 keeps the watcher, so they stay true.
 - stall-watch: incident 2026-10-31 and ruling 2026-10-18 15:15 CDT inside the ruling. The reasons still hold. Not superseded.
 - stall-watch (wait-pid): the subreaper "reads foreign" line. An open question, unmeasured.
-- stall-watch (wait-pid): the inline statement "one process per wait". True as written. Cost statements wait on item 180.
-- ci-wait: no cost statement in the title or in "The CI wake-up". Cost lines wait on item 180.
+- stall-watch (wait-pid): the inline statement "one process per wait". True as written. Unmeasured: no test pins its cost.
+- ci-wait: the cost line is written, under "The CI wake-up".
 - ci-wait: "owner, 2026-10-21, back-off" is date-only. The code cannot re-derive it. Not false.
 - ci-wait: `ci_wake.py` header matches the record. No stale text.
 - agents-wait: remedy names the CI-wake notice or Monitor. Checked true (`WAITER_REASON`, `hooks/guard_stream.py` line 248).
