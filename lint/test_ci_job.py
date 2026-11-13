@@ -2545,9 +2545,9 @@ class PinnedHarness(Job):
         git_in(self.source, "checkout", "-q", "main")
         return pin
 
-    def blocking_fetch_env(self, signal_pipe, gate_pipe):
+    def blocking_fetch_env(self, signal_pipe, hold_pipe):
         """PATH with a git stub first. Its `fetch origin stable` runs the real fetch, writes a line to `signal_pipe`, and waits
-        for a line on `gate_pipe` before it returns, so a test can hold one run between its fetch and its read of FETCH_HEAD.
+        for a line on `hold_pipe` before it returns, so a test can hold one run between its fetch and its read of FETCH_HEAD.
         Every other git call runs the real git. Posix only."""
         bin_dir = tempfile.mkdtemp(prefix="gitblock-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, bin_dir, True)
@@ -2555,10 +2555,10 @@ class PinnedHarness(Job):
                   'if [ "$1" = fetch ] && [ "$4" = stable ]; then\n'
                   '  "%(git)s" "$@" || exit $?\n'
                   '  echo fetched > "%(signal)s"\n'
-                  '  read _ < "%(gate)s"\n'
+                  '  read _ < "%(hold)s"\n'
                   '  exit 0\n'
                   'fi\n'
-                  'exec "%(git)s" "$@"\n') % {"git": shutil.which("git"), "signal": signal_pipe, "gate": gate_pipe}
+                  'exec "%(git)s" "$@"\n') % {"git": shutil.which("git"), "signal": signal_pipe, "hold": hold_pipe}
         path = os.path.join(bin_dir, "git")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(script)
@@ -2639,14 +2639,14 @@ class PinnedHarness(Job):
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         args = ("--step", "STE lint", "--base", "origin/main")
-        pipes = tempfile.mkdtemp(prefix="fetch-gate-", dir=RUN_FOLDER)
+        pipes = tempfile.mkdtemp(prefix="fetch-hold-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, pipes, True)
-        signal_pipe, gate_pipe = os.path.join(pipes, "fetched"), os.path.join(pipes, "gate")
+        signal_pipe, hold_pipe = os.path.join(pipes, "fetched"), os.path.join(pipes, "hold")
         os.mkfifo(signal_pipe)
-        os.mkfifo(gate_pipe)
+        os.mkfifo(hold_pipe)
         argv, env = self.job_call(ste, args=args, script=self.ci_job,
                                   env={"CLAUDE_CONFIG_DIR": self.cfg, "VERDICT_LOG": os.path.join(self.logs, "run-a.log"),
-                                       **self.blocking_fetch_env(signal_pipe, gate_pipe)})
+                                       **self.blocking_fetch_env(signal_pipe, hold_pipe)})
         run_a = subprocess.Popen(argv, cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         def reap():
@@ -2667,12 +2667,12 @@ class PinnedHarness(Job):
                          "scope: run B did not see the moved stable head, so the two runs do not differ\n" + text_b)
 
         def release():
-            with open(gate_pipe, "w", encoding="utf-8") as gate:  # blocks until run A's stub opens the gate
-                gate.write("go\n")
+            with open(hold_pipe, "w", encoding="utf-8") as hold:  # blocks until run A's stub opens the hold pipe
+                hold.write("go\n")
         opener = threading.Thread(target=release, daemon=True)
         opener.start()
         opener.join(120)
-        self.assertFalse(opener.is_alive(), "run A never reached its gate")
+        self.assertFalse(opener.is_alive(), "run A never reached its hold pipe")
         out_a, _ = run_a.communicate(timeout=120)
         lines_a = [ln for ln in out_a.splitlines() if not ln.startswith("log=")]
         log_a = os.path.join(self.logs, "run-a.log")
