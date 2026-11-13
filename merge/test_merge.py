@@ -15440,9 +15440,13 @@ class ReadBackEnv(ReviewEnv):
         """A PullsHost whose pull request 7 is at REVIEW_HEAD, with the repo's comments as given, oldest first."""
         return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=comments, post_refuse=post_refuse, post_swallow=post_swallow)
 
-    def three_record(self, n=7, head=REVIEW_HEAD):
+    def three_record(self, n=7, head=REVIEW_HEAD, cid=1, created="2026-10-02T00:00:00Z"):
         """The comment of a three-round record for pull request n at `head`, PASS in every round: the record a lane posts once its review passes."""
-        return review_comment(1, n, record_text(rounds=THREE_ROUND_LINES, head=head, n=n))
+        return review_comment(cid, n, record_text(rounds=THREE_ROUND_LINES, head=head, n=n), created=created)
+
+    def broken_body(self, head=REVIEW_HEAD, n=7):
+        """The body of a three-round record for pull request n at `head` with prose after its CI line, before the ---: a record that does not parse."""
+        return record_text(rounds=THREE_ROUND_LINES, head=head, n=n) + PROSE_LINE + "\n---\n"
 
     def flags_known(self, *argv):
         """The parser knows each --read-back or --post in argv, or the case fails by name: on this main the flag is absent."""
@@ -15507,9 +15511,9 @@ class ReadBackArgs(ReadBackEnv):
         self.assert_passed(rc, out, err)
 
 class ReadBackReads(ReadBackEnv):
-    """--read-back reads the pull request's review record comments back through parse_review and prints PASS only for one that parses with the
-    pull request's number at --head. Each failing read names its one cause on its FAILED line: no record comment, a record that does not parse,
-    or a record at another head."""
+    """--read-back reads the pull request's newest review record comment back through parse_review and prints PASS only when it parses with the
+    pull request's number at --head. Each failing read names its one cause on its FAILED line: no record comment, a newest record that does not
+    parse, or a newest record at another head."""
 
     def test_no_record_comment_is_named_as_the_reason(self):
         host = self.read_back_host()
@@ -15570,10 +15574,22 @@ class ReadBackReads(ReadBackEnv):
         rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(review_comment(1, 8, body)))
         self.assert_failed(rc, out, err, "no record comment found")
 
-    def test_one_parsing_record_at_the_head_is_enough(self):
-        broken = record_text(rounds=THREE_ROUND_LINES, head=REVIEW_HEAD) + PROSE_LINE + "\n---\n"
-        self.assertIsNone(review_fn(self, "parse_review")(broken), "fixture: the newer record parses, so the case proves nothing")
-        host = self.read_back_host(self.three_record(), review_comment(2, 7, broken, created="2026-10-03T00:00:00Z"))
+    def test_a_newer_record_that_does_not_parse_fails_over_an_older_one_at_the_head(self):
+        """Only the newest record comment counts, as --reviewed reads it: a newer one that does not parse fails, even with an older parsing record
+        at the head."""
+        self.assertIsNone(review_fn(self, "parse_review")(self.broken_body()), "fixture: the newer record parses, so the case proves nothing")
+        older = self.three_record()
+        parse_text(self, older["body"])  # fixture: the older record parses at the head
+        host = self.read_back_host(older, review_comment(2, 7, self.broken_body(), created="2026-10-03T00:00:00Z"))
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_failed(rc, out, err, "does not parse", PROSE_LINE)
+
+    def test_a_newer_parsing_record_at_the_head_passes_over_an_older_one_that_does_not_parse(self):
+        """Only the newest record comment counts: a newer one that parses at the head passes, even with an older one that does not parse."""
+        self.assertIsNone(review_fn(self, "parse_review")(self.broken_body()), "fixture: the older record parses, so the case proves nothing")
+        newer = self.three_record(cid=2, created="2026-10-03T00:00:00Z")
+        parse_text(self, newer["body"])  # fixture: the newer record parses at the head
+        host = self.read_back_host(review_comment(1, 7, self.broken_body()), newer)
         rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
         self.assert_passed(rc, out, err)
 
