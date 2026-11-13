@@ -76,6 +76,19 @@ Taken by the coordinator at 11:43 CST on 2026-11-12, as an undoable pick (no own
 
 The R28 steps `prose-tending-contract`, `prose-tending-move-stores`, `feedback-log-tends-itself` and `shared-job-finder` stay as they are. The copy is a store that `prose-tending-contract` tends: its "still true?" test compares the copy with the database, its live view. The copy is the home, so a difference is the copy's lag, never the database's error.
 
+## Plan: the steps that make "git is home" true end to end
+
+Coordinator, 2026-11-13 12:14 CST, from the retrospective's blind review. This record names them. It builds none of the code. Triage files each as a step.
+
+1. A page writer exports the same document to git and pushes in the same turn, before any relay. Step `waiting-export-miss-cloud` makes the Stop check catch a cloud writer.
+2. The `receipts` collection joins the exported ones. `lint/layout.py:275` drops it today.
+3. Readers move from the page database to git: the answer check in `page_grant.py` and the Relayed Grant entry. This needs the owner's word first. Step `page-one-store-answers` holds it.
+4. Every repo registers every artifact with its account label. Each account's sessions export their own, with `export_page.py --all --account`.
+5. The cite check covers handoffs and CLAUDE.md, or they resolve links through `lint/layout.py`.
+6. The copy-age reader (step `waiting-copy-age-read`) flags a copy older than its page's last write.
+
+Done proof: a fresh clone on the other account rebuilds each page from git alone, receipts included.
+
 ## Why
 
 Protects: the owner sees live data on the page, and the data survives a lost page or an account switch because git is its home. A lost page or an account switch loses what the copy has not yet caught, and the copy's age has no set bound. A session in another account reads the copy with its age beside it. It also protects against building a second system the owner does not need.
