@@ -74,6 +74,7 @@ VERDICT_COLUMNS = ("PR", "verdict", "kind", "step", "head", "reason")  # the ver
 LEDGER_FIELDS = {"pr", "step", "state", "group", "record", "age_h", "commits_not_on_main", "subsumed_by", "files", "verdict", "sorted"}
 NO_MAIL = (0, "")
 NO_ROUTE = (1, "no route to the lane")
+COMMIT_MINUTES = 48 * 60  # a commit's default age on the host's clock: two days, past the six-hour floor of a branch (state f)
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -148,8 +149,9 @@ class LostWorkFixture(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def commit_on(self, parent, files=None, message="work"):
-        """A commit on `parent` that adds `files` (path -> text) to its tree, or keeps the parent's tree when `files` is None. -> its sha."""
+    def commit_on(self, parent, files=None, message="work", minutes=COMMIT_MINUTES):
+        """A commit on `parent` that adds `files` (path -> text) to its tree, or keeps the parent's tree when `files` is None. Its committer date is
+        `minutes` before the host's clock, so a branch's age (state f) is set by the case and never by the real clock. -> its sha."""
         if files:
             index = {"GIT_INDEX_FILE": str(pathlib.Path(self.tmp.name) / "index")}
             roadmap.git(self.repo, "read-tree", parent, env=index)
@@ -161,7 +163,8 @@ class LostWorkFixture(unittest.TestCase):
             tree = roadmap.git(self.repo, "write-tree", env=index).strip()
         else:
             tree = roadmap.git(self.repo, "rev-parse", parent + "^{tree}").strip()
-        return roadmap.git(self.repo, "commit-tree", tree, "-p", parent, "-m", message, env=_test_git.apply({})).strip()
+        dated = _test_git.apply({"GIT_COMMITTER_DATE": iso_before(minutes)})
+        return roadmap.git(self.repo, "commit-tree", tree, "-p", parent, "-m", message, env=dated).strip()
 
     def push_branch(self, name, sha):
         """Push branch `name` to origin at `sha`, and list it in the live file's branches, as the publisher does. No pull request is opened."""
