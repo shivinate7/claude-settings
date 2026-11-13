@@ -899,10 +899,36 @@ class GitFixtureMixin:
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None):
+    def make_origin(self):
+        """A bare origin at self.origin_repo, added as the primary checkout's remote. The caller pushes what it needs."""
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+
+    def advance_origin_main(self, commits=1, grants=True):
+        """Another clone pushes `commits` commits to origin's main. With `grants`, the first carries fresh grants and the
+        rest are empty; without, every commit is empty. The primary checkout does not fetch them. Returns the new tip's sha."""
+        other = os.path.join(self.root, "other")
+        vcs(self.root, "clone", "-q", self.origin_repo, other)
+        first = 1
+        if grants:
+            self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
+            self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
+            vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
+            vcs(other, "commit", "-q", "-m", "fresh grants at origin")
+            first = 2
+        for number in range(first, commits + 1):
+            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
+        vcs(other, "push", "-q", "origin", "HEAD:main")
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def checkout_lane(self):
+        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
+
+    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None, source=None):
         """The hook's lines, after a control: the hook ran and printed its checkout line."""
         lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout,
-                              trace_file=trace_file)
+                              trace_file=trace_file, source=source)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         return lines
@@ -1285,29 +1311,10 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
 
     def setUp(self):
         super().setUp()
-        self.origin_repo = os.path.join(self.root, "origin.git")
-        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
-        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        self.make_origin()
         self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
         self.commit("stale grants")
         vcs(self.primary, "push", "-q", "origin", "main")
-
-    def advance_origin_main(self, commits=1):
-        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
-        does not fetch them. Returns the new tip's sha."""
-        other = os.path.join(self.root, "other")
-        vcs(self.root, "clone", "-q", self.origin_repo, other)
-        self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
-        self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
-        vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
-        vcs(other, "commit", "-q", "-m", "fresh grants at origin")
-        for number in range(2, commits + 1):
-            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
-        vcs(other, "push", "-q", "origin", "HEAD:main")
-        return vcs(other, "rev-parse", "HEAD").stdout.strip()
-
-    def checkout_lane(self):
-        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
 
     @staticmethod
     def fetch_starts(starts):
@@ -2132,6 +2139,232 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
         self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+
+FF_LINE = re.compile(r"^checkout (?P<top>.+): fast-forwarded (?P<branch>\S+) (?P<old>[0-9a-f]{7,40}) -> "
+                     r"(?P<new>[0-9a-f]{7,40}), (?P<count>\d+) commits$")
+NOT_FF_LINE = re.compile(r"^checkout (?P<top>.+): not fast-forwarded, (?P<reason>.+)$")
+
+
+def same_checkout(printed, path):
+    """True when the path a hook line prints names the checkout at `path`, whatever its slashes or links."""
+    return os.path.normcase(os.path.realpath(printed)) == os.path.normcase(os.path.realpath(path))
+
+
+class SessionStartFastForwardTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """Startup fast-forward of a clean checkout. At a startup start, after the origin refresh succeeded, a clean checkout on
+    the default branch that is behind origin/<default> fast-forwards to it and prints one line. A checkout that cannot move
+    prints one not-fast-forwarded line with its reason and changes nothing. A resume, a compact or a failed refresh moves
+    nothing. Each case runs the hook on a real origin and a real checkout."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_origin()
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def origin_tip(self):
+        return vcs(self.origin_repo, "rev-parse", "refs/heads/main").stdout.strip()
+
+    def origin_moves_ahead(self, commits=3):
+        """Another clone pushes `commits` empty commits to origin's main. The checkout learns of them only at the hook's refresh.
+        Returns the new tip."""
+        fresh = self.advance_origin_main(commits=commits, grants=False)
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        return fresh
+
+    def run_startup(self, session_cwd=None, path_dir=None, fetch_timeout="30"):
+        return self.run_checked(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout, source="startup")
+
+    @staticmethod
+    def ff_lines(lines):
+        return [found for found in map(FF_LINE.match, lines) if found]
+
+    @staticmethod
+    def not_ff_lines(lines):
+        return [found for found in map(NOT_FF_LINE.match, lines) if found]
+
+    def assert_one_not_ff(self, lines, reason):
+        """Exactly one not-fast-forwarded line, and its reason is `reason`."""
+        found = self.not_ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one not-fast-forwarded line with reason %r, got %r" % (reason, lines))
+        self.assertEqual(found[0].group("reason"), reason,
+                         "the not-fast-forwarded line gives another reason: %r" % found[0].group(0))
+
+    def assert_no_move(self, before, label):
+        self.assertEqual(self.head_sha(), before, "the hook moved the checkout (%s)" % label)
+
+    def checkout_state(self, where):
+        """HEAD, the index entries and the status of the checkout at `where`. A no-op leaves all three as they were."""
+        return (vcs(where, "rev-parse", "HEAD").stdout.strip(),
+                vcs(where, "ls-files", "--stage").stdout,
+                vcs(where, "status", "--porcelain=v1", "--untracked-files=all").stdout)
+
+    def test_a_clean_default_branch_behind_origin_fast_forwards_and_prints_one_line(self):
+        # origin/HEAD names origin/main, so the existing behind line is in play and must not print after the move.
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        before = self.head_sha()
+        fresh = self.origin_moves_ahead(commits=3)
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line for a clean checkout behind origin/main, got %r" % lines)
+        self.assertEqual(found[0].group("branch"), "main", "the line names another branch: %r" % found[0].group(0))
+        self.assertTrue(before.startswith(found[0].group("old")),
+                        "the line's old sha is not the checkout's old tip: %r" % found[0].group(0))
+        self.assertTrue(fresh.startswith(found[0].group("new")),
+                        "the line's new sha is not origin/main's tip: %r" % found[0].group(0))
+        self.assertEqual(found[0].group("count"), "3", "the line counts another number of commits: %r" % found[0].group(0))
+        self.assertTrue(same_checkout(found[0].group("top"), self.primary),
+                        "the line names another checkout: %r" % found[0].group(0))
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "the fast-forward left the working tree dirty")
+        behind = [line for line in lines if "behind origin/" in line]
+        self.assertEqual(behind, [], "the existing behind line printed after a fast-forward: %r" % behind)
+
+    def test_two_startup_runs_in_a_row_move_once(self):
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        fresh = self.origin_moves_ahead(commits=3)
+        first = self.run_startup()
+        self.assertEqual(len(self.ff_lines(first)), 1,
+                         "want one fast-forward line on the first startup run, got %r" % first)
+        second = self.run_startup()
+        self.assertEqual(self.ff_lines(second), [], "the second startup run moved the checkout again: %r" % second)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not end at origin/main after two runs")
+
+    def test_a_clean_checkout_already_at_origin_main_prints_no_fast_forward_line(self):
+        before = self.head_sha()
+        self.assertEqual(self.origin_tip(), before, "scope: origin's main is not at the checkout's HEAD")
+        lines = self.run_startup()
+        self.assertEqual(self.ff_lines(lines), [], "a checkout already at origin/main printed a fast-forward line: %r" % lines)
+        self.assert_no_move(before, "already up to date")
+
+    def test_a_dirty_tracked_file_is_not_fast_forwarded_and_says_uncommitted_changes(self):
+        self.origin_moves_ahead(commits=3)
+        self.put(os.path.join(self.primary, "f.txt"), "edited in place\n")
+        self.assertNotEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the checkout is clean")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "uncommitted changes")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout that was not fast-forwarded changed")
+
+    def test_an_untracked_file_is_not_fast_forwarded_and_says_uncommitted_changes(self):
+        self.origin_moves_ahead(commits=3)
+        self.put(os.path.join(self.primary, "scratch.txt"), "untracked draft\n")
+        self.assertIn("?? scratch.txt", vcs(self.primary, "status", "--porcelain").stdout, "scope: no untracked file")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "uncommitted changes")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout that was not fast-forwarded changed")
+
+    def test_commits_ahead_of_origin_main_are_not_fast_forwarded_and_say_commits_ahead(self):
+        self.commit("local work not pushed")
+        self.assertEqual(self.origin_tip(), self.resolve("HEAD^"), "scope: origin's main is not the checkout's parent")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "commits ahead")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with commits ahead changed")
+
+    def test_a_diverged_checkout_is_not_fast_forwarded_and_says_diverged(self):
+        self.commit("local work not pushed")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "diverged")
+        self.assertEqual(self.checkout_state(self.primary), before, "a diverged checkout changed")
+
+    def test_a_merge_cherry_pick_or_revert_in_progress_is_not_fast_forwarded_and_says_merge_or_rebase(self):
+        self.origin_moves_ahead(commits=3)
+        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            with self.subTest(marker=marker):
+                path = os.path.join(self.primary, ".git", marker)
+                self.put(path, self.head_sha() + "\n")
+                try:
+                    self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "",
+                                     "scope: the checkout is dirty with %s set" % marker)
+                    before = self.checkout_state(self.primary)
+                    lines = self.run_startup()
+                    self.assert_one_not_ff(lines, "merge or rebase in progress")
+                    self.assertEqual(self.checkout_state(self.primary), before, "a checkout with %s set changed" % marker)
+                finally:
+                    os.remove(path)
+
+    def test_a_rebase_in_progress_is_not_fast_forwarded_and_says_merge_or_rebase(self):
+        self.origin_moves_ahead(commits=3)
+        for folder in ("rebase-merge", "rebase-apply"):
+            with self.subTest(folder=folder):
+                path = os.path.join(self.primary, ".git", folder)
+                os.makedirs(path)
+                try:
+                    before = self.checkout_state(self.primary)
+                    lines = self.run_startup()
+                    self.assert_one_not_ff(lines, "merge or rebase in progress")
+                    self.assertEqual(self.checkout_state(self.primary), before, "a checkout with %s present changed" % folder)
+                finally:
+                    os.rmdir(path)
+
+    def test_a_detached_head_is_not_fast_forwarded_and_says_detached_head(self):
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "HEAD",
+                         "scope: the checkout is still on a branch")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "detached HEAD")
+        self.assertEqual(self.checkout_state(self.primary), before, "a detached checkout changed")
+
+    def test_a_checkout_on_another_branch_is_not_fast_forwarded_and_says_not_on_main(self):
+        self.checkout_lane()
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "lane-x",
+                         "scope: the checkout is not on lane-x")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "not on main")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout on another branch changed")
+
+    def test_an_agent_worktree_is_not_fast_forwarded_and_says_another_agents_worktree(self):
+        # The primary checkout leaves main, so an agent worktree can hold main. Main is the reason the agent check must win.
+        self.checkout_lane()
+        agent = os.path.join(self.primary, ".claude", "worktrees", "agent-ff1")
+        vcs(self.primary, "worktree", "add", "-q", agent, "main")
+        self.assertEqual(vcs(agent, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
+                         "scope: the agent worktree is not on main")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(agent)
+        lines = self.run_startup(session_cwd=agent)
+        self.assert_one_not_ff(lines, "another agent's worktree")
+        self.assertEqual(self.checkout_state(agent), before, "an agent worktree changed")
+
+    def assert_failed_refresh_moves_nothing(self, folder, label):
+        fresh = self.origin_tip()
+        stale = self.resolve("origin/main")
+        self.assertNotEqual(stale, fresh, "scope: origin/main is already fresh")
+        before = self.head_sha()
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "fetch")
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line (%s), got %r" % (label, lines))
+        self.assertEqual(self.ff_lines(lines) + self.not_ff_lines(lines), [],
+                         "a failed refresh printed a fast-forward line (%s): %r" % (label, lines))
+        self.assert_no_move(before, "failed refresh, %s" % label)
+        self.assertEqual(self.resolve("origin/main"), stale, "a failed refresh moved origin/main (%s)" % label)
+
+    def test_a_failed_refresh_moves_nothing_and_prints_only_the_did_not_run_line(self):
+        self.origin_moves_ahead(commits=3)
+        with self.subTest(fetch="refused"):
+            folder = self.make_git_stub("refused-fetch-shim", 'if [ "$1" = fetch ]; then exit 1; fi')
+            self.assert_failed_refresh_moves_nothing(folder, "refused")
+        with self.subTest(fetch="killed"):
+            self.assert_failed_refresh_moves_nothing(self.make_fetch_killed_shim(), "killed")
+
+    def test_a_resume_or_compact_start_moves_nothing_even_when_clean_and_behind(self):
+        self.origin_moves_ahead(commits=3)
+        self.assertNotEqual(self.origin_tip(), self.head_sha(), "scope: origin's main is not ahead of the checkout")
+        before = self.head_sha()
+        for source in ("resume", "compact"):
+            with self.subTest(source=source):
+                lines = self.run_checked(source=source)
+                self.assertEqual(self.ff_lines(lines), [], "a %s start printed a fast-forward line: %r" % (source, lines))
+                self.assert_no_move(before, "%s start" % source)
 
 
 if __name__ == "__main__":
