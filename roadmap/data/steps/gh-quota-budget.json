@@ -10,5 +10,5 @@
  "why": "Real incident, Nov 13: the owner's GitHub REST quota hit 0 of 15,000 at 12:54 CST (reset 13:10 CST), stalling every runner and lane for about 16 minutes (retro read; unmeasured by triage).",
  "source": "retrospective 12:54 CST Nov 13",
  "note": "Todo, a real incident. Retro's cause guess (unconfirmed): its two audit workflows, about 770 agent tool calls with many gh reads, took a large share; 33 or more live sessions poll too. Proposed: the merge tool and the CI wait read the `X-RateLimit-Remaining` header they already get; when it runs low they say so and back off. Audit briefs prefer local git reads over gh. A cost line, measured, not a fixed limit (owner R37: no hard fixed numbers). Needs a measure first: which callers spent the quota (log read on demand, no new log). A guard or check change: a build lane.",
- "updatedAt": "2026-11-13T12:54:52-06:00"
+ "updatedAt": "2026-11-13T13:11:54-06:00"
 }
