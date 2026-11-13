@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 11:32 CST Nov 13, asked why the batch runner does not delegate PR closes and lint runs. The model-per-role table (agent-model-cap) names no role for either, so no agent can be briefed for them under the rules.",
  "source": "owner 11:32 CST Nov 13 via the coordinator 11:33 CST",
- "note": "Add a role, or name an existing one, for a PR close pass and a lint run in agent-model-cap, with its model and effort. Weigh: a close only ever runs from the evidence ledger (step bulk-close-needs-ledger); the 11:27 CST bulk close shows an agent with no ledger closes too much. A change to the role table is a rule change, so a lane with a reviewer.",
- "updatedAt": "2026-11-13T11:34:14-06:00"
+ "note": "Add a role, or name an existing one, for a PR close pass and a lint run in agent-model-cap, with its model and effort. Weigh: a close only ever runs from the evidence ledger (step bulk-close-needs-ledger); the 11:27 CST bulk close shows an agent with no ledger closes too much. A change to the role table is a rule change, so a lane with a reviewer. Related step operating-model-role-handoffs (owner 11:34 CST Nov 13) writes what each role hands to agents; this step names the role in the model table. Do them in one lane or in order: role table first.",
+ "updatedAt": "2026-11-13T11:36:37-06:00"
 }

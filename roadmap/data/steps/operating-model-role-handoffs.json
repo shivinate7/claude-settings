@@ -1,0 +1,14 @@
+{
+ "id": "operating-model-role-handoffs",
+ "title": "The batch runner, coordinator and triage role texts say what each hands to agents",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:34 CST Nov 13 (relayed by the retrospective 11:35 CST): \"that shd probably be in its original briefs of how they operate then, no?\", about the batch runner doing closes and merge-tool runs itself instead of through agents. Filed from lane role-texts-match-rulings.",
+ "source": "owner 11:34 CST Nov 13 via the retrospective; lane role-texts-match-rulings 11:35 CST",
+ "note": "In skills/project-ops/templates/operating-model.md, each of the three role texts says what it hands to agents: closes come from the evidence ledger, each with its comment; `merge --lane-lint` runs per lane in parallel; long reads (`merge --reviewed --root`, job minutes) go to agents; the runner keeps only the merge itself (the merge lock serializes it). Cite rule roles-orchestrator-never-builds by name. Gap: agent-model-cap names no agent role for a close or a lint run (general-purpose defaults to Sonnet), see step close-lint-agent-role. Stack on #3138 or start after it merges (same file, the OM Batch runner bullet). PR #3138 (head 175215e5f) is reviewed and handed in; do not reopen it.",
+ "updatedAt": "2026-11-13T11:36:37-06:00"
+}
