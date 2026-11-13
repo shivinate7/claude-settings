@@ -39,10 +39,15 @@
 # At 3 or more counted new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops the
 # child, shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
 # stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
+# Noise off: the own-boot path only, right after `simctl boot` and its record, it runs `xcrun simctl spawn UDID launchctl
+# disable user/foreground/LABEL` for each label of bin/sim-noise-services (beside this script; one label per line, `#`
+# comments and blank lines skipped). iOS 27.1 simulators crash those Siri, intelligence, Mail and Spotlight daemons on
+# every boot; chronod and AppIntentsLiveEntityService stay on. Best effort: a failed spawn changes no exit code, prints
+# nothing and stops no loop. A missing list file is a silent no-op. The reuse path runs no spawn.
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
+# processes (take, give) and one more simctl list; one xcrun spawn per label of the list on an own boot, writing nothing; a waiting take costs one sysctl and one ps per poll there, and writes
 # leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
 # the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
@@ -102,6 +107,21 @@ record_boot() {
   [ -n "$recorded" ] && return 0
   recorded=1
   python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
+}
+
+# noise_off: disable each label of bin/sim-noise-services on the device this run booted. Every label is tried; a failed
+# spawn, or a missing list file, is silent and changes nothing.
+noise_off() {
+  local label list
+  list="$(dirname "$0")/sim-noise-services"
+  [ -f "$list" ] || return 0
+  while IFS= read -r label || [ -n "$label" ]; do
+    label=${label#"${label%%[![:space:]]*}"}
+    label=${label%%[[:space:]]*}
+    case $label in ''|'#'*) continue ;; esac
+    xcrun simctl spawn "$booted_by_me" launchctl disable "user/foreground/$label" >/dev/null 2>&1 </dev/null || true
+  done < "$list"
+  return 0
 }
 
 # Order: stop the child, shut down my simulator, then free the lock, so no run sees the lock free while a simulator of
@@ -217,6 +237,7 @@ if [ -z "$udid" ]; then
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
+    noise_off
   fi
 fi
 echo "sim-test: using $udid"
