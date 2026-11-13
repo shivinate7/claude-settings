@@ -203,14 +203,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
-17. **Run each suite once per batch.** The batch PR run is the proof for its tree. Rulings: R61, macOS
-    once per batch; R62, Linux and Windows once per batch; R63, install.sh tests on Linux and macOS.
-    The push to main starts no suite on a tree that a green batch PR run tested. If main's head
-    already has a green run, the nightly run skips. The no-merge-onto-red-main gate reads that
-    PR run. A macOS job runs only the tests whose subject is macOS. Windows keeps its full guard and
-    merge shards, once, in the batch PR run. Dropping them to a tagged slice is held (R62 part 4). A lane's touched-tests macOS leg runs only for files whose subject is macOS. The
-    install.sh tests run on both Linux and macOS. Steps: ci-mac-once-per-batch, ci-linux-windows-once.
-    Child repos adopt this later (R64).
+17. **CI runs once per batch.** The integration PR run is the proof for its tree. Rulings: R61 (macOS
+    CI once per batch), R62 (Linux and Windows CI once per batch), R63 (install.sh tests on Linux
+    and macOS). The push to main starts no macOS job. It starts no suite on a tree that a green
+    integration PR run tested. If main's head already has a green run, the nightly run skips. The
+    no-merge-onto-red-main check reads that run. The macOS jobs `checks-macos` and `checks-macos-b`
+    run a mac-tagged slice, not full guard shards. A lane's touched-tests macOS leg runs only for
+    files whose subject is macOS. Windows keeps its full guard and merge shards, once, in the
+    integration PR run. Dropping them to a tagged slice is held (R62 part 4). The install.sh tests
+    run on both Linux and macOS. Steps: ci-mac-once-per-batch (macOS side) and
+    ci-linux-windows-once (Linux and Windows side). Child repos adopt this later (R64, the rule goes
+    into this skill first).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
