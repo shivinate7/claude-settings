@@ -327,7 +327,7 @@ def explore_off_model(tool, args):
     A model above Sonnet is the ceiling, which an override lifts, as in guard.py."""
     if tool != "Agent" or str(args.get("subagent_type")).strip().lower() != "explore":
         return False
-    model = str(args.get("model") or "").lower()
+    model = str(args.get("model") or "").strip().lower()
     return not model or "haiku" in model
 
 
