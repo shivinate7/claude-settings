@@ -3227,7 +3227,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
         not_green = head_not_green(state)
         if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
-            raise Stop(f"{not_green}. Nothing was claimed or pushed.")
+            raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
         if not_green:
             raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
         if base != cfg["defaultBranch"]:
