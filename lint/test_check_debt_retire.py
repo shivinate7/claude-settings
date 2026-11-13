@@ -620,6 +620,17 @@ class CiEntry(Case):
         self.assertIn("names no runnable check", got.stdout, "a null PR body did not read as no cite")
         self.assertEqual(got.returncode, 1, got.stdout + got.stderr)
 
+    def test_c4_off_ci_a_prose_close_with_no_event_file_exits_0_and_reads_unknown(self):
+        self.closed_prose()
+        got = self.cli(env={"CI": ""})  # the local read: no event file, and no CI
+        self.assertEqual(got.returncode, 0, "off CI, a prose close with no event file must exit 0 (the lenient local read): " + got.stdout + got.stderr)
+        self.assertIn("UNKNOWN", got.stdout, "a prose close with no event file did not read UNKNOWN: " + got.stdout)
+
+    def test_c5_on_ci_a_prose_close_with_no_event_file_exits_1(self):
+        self.closed_prose()
+        got = self.cli(env={"CI": "true"})
+        self.assertEqual(got.returncode, 1, "on CI, a prose close with no event file must exit 1, since an unknown read is red: " + got.stdout + got.stderr)
+
 
 class CiWorkflow(unittest.TestCase):
     """checks.yml runs the Retire check on a pull request, so a debt close is judged in CI and not only when merge runs."""
