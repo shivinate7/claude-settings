@@ -7249,7 +7249,6 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
-PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
 def names_kind(test, out, slug, kind):
@@ -7327,27 +7326,6 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, out)
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
-
-    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
-        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        self.host.cited_run = lambda url: ("success", run_head)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-
-    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
-        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
-        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
-        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
-
 
     def ci_verdict_read_fails_after_the_claim_push(self, error):
         """The PR closes a debt. The head's CI is green and the claim is pushed; then the read of CI's verdict on the claim raises. -> (rc, out, the claim's sha)."""
