@@ -2521,10 +2521,18 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 
 
 # HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
-# `commit (merge)`. A replay the agent resolved or chose: a hand-resolved cherry-pick, a revert, and a
-# rebase step that is no plain pick. A plain cherry-pick, rebase pick or `am` copies a commit someone
-# else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
-ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
+# `commit (merge)`, and the merge commit git makes itself (`merge <x>: Merge made by ...`, `pull ...: Merge made
+# by ...`): a `-X` or `-s` strategy settles a hunk with no conflict to show it, so the agent chose that result.
+# own_changes measures such a commit against git's own merge, so a clean merge adds nothing. A replay the agent
+# resolved or chose: a hand-resolved cherry-pick, a revert, and a rebase step that is no plain pick. A plain
+# cherry-pick, rebase pick or `am` copies a commit someone else made, and a reset, checkout, fast-forward or
+# pull that makes no merge commit hands the agent other people's commits: none is read. A pull that names its
+# source by URL or `src:dst` refspec holds colons before `: Merge made by`, so the merge pattern takes any text
+# there, and a `Fast-forward` subject still never matches. A `merge`/`pull` entry own_changes cannot measure
+# (more than two parents, or no merge-tree answer) is skipped and logged unread: one commit git made itself
+# must not hide the agent's other commits and its working tree from the check.
+ENTRY_OWN = re.compile(r"^(?:commit(?: \((?:initial|amend|merge)\))?|(?:merge|pull)\b.*(?=: Merge made by\b)):")
+ENTRY_MERGE_MADE = re.compile(r"^(?:merge|pull)\b")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
@@ -2644,8 +2652,13 @@ def own_changes(root: str, top: str = ""):
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
-        still holds, against its first parent. A merge commit is measured against git's own merge of
-        its parents, so only what the agent resolved or added counts;
+        still holds, against its first parent, and each merge git committed itself (`merge <x>` or
+        `pull ...` with `Merge made by`). A merge commit is measured against git's own merge of its
+        parents, so only what the agent resolved, added, or a `-X`/`-s` strategy changed counts: a clean
+        merge equals git's own and adds nothing. A `merge`/`pull` entry of more than two parents, or one
+        merge-tree cannot answer, is skipped and logged `role-diff-unread`: every other entry and the
+        working tree are still judged. A `commit (merge)` of more than two parents, or one merge-tree
+        cannot answer, is unknown, never clear;
       - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
         HEAD and MERGE_HEAD.
     NOTED (logged, never refused): a replay the agent resolved or chose (a hand-resolved cherry-pick, a
@@ -2653,8 +2666,8 @@ def own_changes(root: str, top: str = ""):
     KEPT (logged only): a path a held rebase replayed that holds the rebase start's bytes again, as the
     builder left it during the rebase. A write of those bytes after the rebase finished is its own change:
     the working tree or a commit of its own carries it, and that is refused.
-    A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
-    people's commits, and are not read.
+    A plain cherry-pick or rebase pick, a fast-forward, a reset, a checkout and a pull that makes no
+    merge commit are other people's commits, and are not read.
     `top` is the checkout's top, where untracked files are listed. A caller that already read it passes
     it, so no git call is added; it defaults to `root`."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
@@ -2663,11 +2676,13 @@ def own_changes(root: str, top: str = ""):
     if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
         return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
-    kinds = {}
+    kinds, git_made = {}, set()
     for sha, subject in entries:
         kind = entry_kind(subject)
-        if kind in (OWN, NOTED):
-            kinds.setdefault(sha, kind)
+        if kind in (OWN, NOTED) and sha not in kinds:
+            kinds[sha] = kind
+            if kind == OWN and ENTRY_MERGE_MADE.match(subject):
+                git_made.add(sha)
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
@@ -2683,13 +2698,14 @@ def own_changes(root: str, top: str = ""):
         if parents is None or parents.returncode != 0:
             return None
         parents = parents.stdout.split()
-        if len(parents) > 2:
-            return None
         conflicts = ()
-        if len(parents) == 2:
-            merged = merge_tree(root, *parents)
-            if merged is None:
-                return None
+        merged = merge_tree(root, *parents) if len(parents) == 2 else None
+        if len(parents) > 2 or (len(parents) == 2 and merged is None):
+            if sha in git_made:
+                record("own_changes", "noted", "role-diff-unread", "merge entry " + sha[:12])
+                continue
+            return None
+        if merged is not None:
             old, conflicts = merged
         else:
             old = parents[0] if parents else ""
