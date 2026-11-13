@@ -1,5 +1,7 @@
 # section 12965
 FAMILY = "hook-bypass"
+FAMILIES["argv"] = "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass"
+FAMILIES["hook-bypass"] = "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption"
 HOOK_BYPASS = "hook-bypass"
 
 # (1) The key on the command line, for each verb that runs hooks.

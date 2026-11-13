@@ -1,5 +1,6 @@
 # section 4342
 FAMILY = "two-worktrees-one-branch"
+FAMILIES["two-worktrees-one-branch"] = "a checkout, switch or worktree add that would take a branch another worktree of the clone holds is refused; the forms that take no such branch, and the holder's own checkout, pass"
 #
 # Rule two-worktrees-one-branch (the decision of the same name): the guard refuses a git command that
 # checks out a branch another worktree of the clone already holds. The forms are `checkout -B` and
@@ -11,6 +12,10 @@ FAMILY = "two-worktrees-one-branch"
 # creates one, a plain checkout that git refuses itself, and the holder's own checkout all stay
 # allowed. The worktree list is read only for the forms above.
 TWO_RULE = "two-worktrees-one-branch"
+# The two-worktrees-one-branch remedy names `git switch -c <new-branch> <start>`: a branch of the
+# caller's own. The forbidden target is the held branch's checkout, not that create form. The check
+# matches a fragment as text, so this one entry permits `git switch` as a whole in this rule's reason.
+REASON_MAY_NAME[TWO_RULE] = (VCS + " switch",)
 
 
 def _sh_quote(text):

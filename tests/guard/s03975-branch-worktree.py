@@ -1,5 +1,6 @@
 # section 3975
 FAMILY = "branch-worktree"
+FAMILIES["branch-worktree"] = "branch delete and worktree remove/prune"
 #
 # The three git forms the machine-wide janitor plan named as a safety hole in this rule: `git branch
 # -d/-D`, `git worktree remove`, `git worktree prune`. Each is judged on the STATE OF ITS SUBJECT,

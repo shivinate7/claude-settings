@@ -1,6 +1,10 @@
 # section 37949
 FAMILY = "handoff-unread"
+FAMILIES["handoff-unread"] = "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override"
 HU_RULE = "handoff-unread"
+# The refusal names the handoff the session must read: under the config folder, which is ROOT here
+# and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
+REASON_MAY_NAME["handoff-unread"] = (ROOT, slash(ROOT), ".claude")
 HU_SID = "3c6e1f2a-0000-4000-8000-00000000c0de"   # the main session in these cases
 HU_AGENT = "a7f3c9e10b2d4e58"                     # an agent's id on the payload
 HU_TEXT = "# Handoff\n"

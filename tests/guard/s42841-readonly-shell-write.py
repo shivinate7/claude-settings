@@ -1,5 +1,6 @@
 # section 42841
 FAMILY = "readonly-shell-write"
+FAMILIES["readonly-shell-write"] = "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass"
 # A read-only agent's shell write. An agent whose agent_type is in READ_ONLY (hooks/agent_brief.py, the one home of the
 # read-only roles, read here by import and never typed) is refused a write in its shell call: a redirect (>, >>, 2>file,
 # &>) to a target that is not a null device and not under the calling session's own scratchpad; tee to a file other than

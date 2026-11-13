@@ -1,5 +1,6 @@
 # section 16334
 FAMILY = "scratchpad-message"
+FAMILIES["scratchpad-message"] = "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass"
 #
 # `scratchpad-commit-msg-owner`. An agent's `git commit -F <file>` is refused when the file sits in ANY
 # session's scratchpad. The agents of a session share that folder, so the file may hold another agent's

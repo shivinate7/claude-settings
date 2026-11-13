@@ -1,5 +1,6 @@
 # section 26314
 FAMILY = "uniform-pick"
+FAMILIES["uniform-pick"] = "the page writer: a pick never names an option that widens a shared tool"
 #
 # Decision uniform-over-variants (topic t18): an option that widens what a shared tool accepts
 # carries `widens: true`, and the item's `pick` never names it. The writer is refused.

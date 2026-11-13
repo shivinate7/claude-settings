@@ -1,5 +1,6 @@
 # section 23264
 FAMILY = "builder-refuse"
+FAMILIES["builder-refuse"] = "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed"
 TEST_A = "tests/test_a.py"
 # The test-author's five cases, added to main's test file on the lane branch.
 LANE_FUNCS = ["def test_lane_%d():\n    assert %d\n\n" % (n, n) for n in range(1, 6)]

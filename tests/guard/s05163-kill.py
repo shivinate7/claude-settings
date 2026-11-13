@@ -1,5 +1,7 @@
 # section 5163
 FAMILY = "kill"
+FAMILIES["kill"] = "machine-wide kills and detached launches"
+FAMILIES["rm-var"] = "every case named rm-var, wherever it sits"
 
 sh("kill: pkill by pattern denies", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wide-kill", cwd=NOGIT)

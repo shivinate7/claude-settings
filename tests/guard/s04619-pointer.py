@@ -1,5 +1,6 @@
 # section 4619
 FAMILY = "pointer"
+FAMILIES["pointer"] = "the pointer HEAD checkout"
 #
 # The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the guards
 # every session on this machine runs. Its HEAD stays `main`.

@@ -1,5 +1,6 @@
 # section 21304
 FAMILY = "diff"
+FAMILIES["diff"] = "the diff judged at commit, push and stop"
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
     "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",
@@ -391,7 +392,7 @@ def author_mutant_no_log_case():
     return True, "a mutation test logs no author-diff line"
 
 
-LOG_CHECKS_EXTRA = _TaggedLogs([
+LOG_CHECKS_EXTRA.extend([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check refuses a builder's test change and logs a test-author's diff", diff_refusal_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",

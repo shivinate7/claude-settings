@@ -1,5 +1,6 @@
 # section 8727
 FAMILY = "push-delete"
+FAMILIES["push-delete"] = "push and delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"

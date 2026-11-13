@@ -85,6 +85,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 import mutate_guard  # noqa: E402  REPORT_TARGETS, and the mode entry points once built
 import mutate_shared  # noqa: E402
 import rule_audit  # noqa: E402  SECTION_DIR's one ast reader (lint/rule_audit.py)
+import test_guard_tables  # noqa: E402  the one home of the guard tables' scan (lint/test_guard_tables.py)
 from test_mutate_js import git, unique_line  # noqa: E402  the one home of these helpers
 from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  the one home of the fixture writers
 
@@ -1912,15 +1913,19 @@ def guard_exempt():
 
 
 def guard_family_names():
-    """The keys of FAMILIES in hooks/test_guard.py, read from its source by ast. The file runs its cases on import, so it is
-    never imported here."""
-    with open(os.path.join(HERE, "test_guard.py"), encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "FAMILIES"
-                                                for target in node.targets):
-            return set(ast.literal_eval(node.value))
-    raise AssertionError("hooks/test_guard.py has no FAMILIES dict")
+    """The family names hooks/test_guard.py holds: each key of its FAMILIES literal, and each `FAMILIES["<name>"]` row that
+    the runner and its section files set when they run. Read from their source by ast, with the scan that
+    lint/test_guard_tables.py makes. The runner runs its cases on import, so it is never imported here."""
+    tables = test_guard_tables
+    if tables.literal_of(tables.module_tree(REPO, tables.RUNNER), "FAMILIES") is None:
+        raise AssertionError("hooks/test_guard.py has no FAMILIES dict")
+    strings = tables.module_strings(REPO)
+    names = set()
+    for rel in [tables.RUNNER] + tables.section_rels(REPO):
+        for table, key, _ in tables.placed_rows_in(tables.module_tree(REPO, rel), strings):
+            if table == "FAMILIES":
+                names.add(key)
+    return names
 
 
 def guard_modules_on_disk(folder):

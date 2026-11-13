@@ -1,5 +1,6 @@
 # section 15303
 FAMILY = "message-time-matches-clock"
+FAMILIES["message-time-matches-clock"] = "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes"
 #
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
 # with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
@@ -13,6 +14,9 @@ FAMILY = "message-time-matches-clock"
 # transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
 # lane that lane-one-topic allows.
 MTC_RULE = "message-time-matches-clock"
+# The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
+# is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
+REASON_MAY_NAME["message-time-matches-clock"] = (".claude",)
 MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
 MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
 MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair

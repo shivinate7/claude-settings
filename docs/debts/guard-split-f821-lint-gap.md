@@ -1,6 +1,0 @@
-# The guard split turns off F821 lint and leaves central tables clashing
-
-- **What.** After the guard split, `ruff` reads each section file alone. The names a section uses bind in the runner at exec time, so F821 (undefined name) is off for `hooks/test_guard.py` and `tests/guard/`, and a misspelled name in a section passes lint. The central tables still clash in merges: `FAMILIES` (13 of 49 conflict hunks since 2026-10-20), `LOG_CHECKS` and `LOG_CHECKS_EXTRA` (about 8), and `REASON_MAY_NAME` (3). 14 hunks sit inside one family and stay.
-- **Where.** `ruff.toml`, the F821 per-file-ignore. The tables: `FAMILIES` and `LOG_CHECKS` in `hooks/test_guard.py`; `LOG_CHECKS_EXTRA` and `REASON_MAY_NAME` in `tests/guard/`.
-- **Decision.** `batch-freeze-lane-set` (a batch's lane set freezes when its build starts).
-- **Retire.** Two steps. (1) A ruff step over the section files joined in section order, then F821 comes off the per-file-ignore. (2) Hoist each family's `FAMILIES` row and its `LOG_CHECKS` rows into that family's section file. `REASON_MAY_NAME` is on the clash list, with no move designed yet. Closed when the joined-order ruff step runs in CI, the per-file-ignore is gone, and no family row remains in a central table. The fix PR names the test file that shows each step closed.

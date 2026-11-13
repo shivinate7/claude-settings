@@ -1,5 +1,6 @@
 # section 35642
 FAMILY = "fail-closed"
+FAMILIES["fail-closed"] = "a missing sibling module refuses the call, and never allows it"
 
 
 def _guard_siblings(folder):

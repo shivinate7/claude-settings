@@ -1,5 +1,6 @@
 # section 17500
 FAMILY = "conflict-markers"
+FAMILIES["conflict-markers"] = "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed"
 # Marker lines are assembled, so this file never holds one at the start of a line.
 CM_START = "<" * 7 + " HEAD\n"
 CM_MID = "=" * 7 + "\n"

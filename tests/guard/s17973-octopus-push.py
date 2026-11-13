@@ -1,5 +1,6 @@
 # section 17973
 FAMILY = "octopus-push"
+FAMILIES["octopus-push"] = "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask"
 OCT_RULE = "octopus-push"
 OCT_TARGET_WORD = "octopus"                       # the forbidden target, as a remedy would name it
 OCT_THREE = os.path.join(ROOT, "oct-three")       # topic: a commit, a merge of x and y (three parents), a commit

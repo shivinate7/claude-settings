@@ -1,5 +1,6 @@
 # section 41900
 FAMILY = "simulator"
+FAMILIES["simulator"] = "the simulator boot and hold rules"
 #
 # Owner rulings. A boot is an `xcodebuild -destination` that names a shut-down simulator, or the
 # simulator MCP control tool's `launch` naming a shut-down device. The cap and twin rules judge only

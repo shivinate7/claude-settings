@@ -1,5 +1,6 @@
 # section 26657
 FAMILY = "command-in-item"
+FAMILIES["command-in-item"] = "the page writer: a task step never sends the owner to a file for a command"
 #
 # A waiting task's steps never send the owner to a file for a command: the owner would open the file
 # and copy the command out. The steps are judged joined, since the two halves can sit in separate

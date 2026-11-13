@@ -1,5 +1,6 @@
 # section 19834
 FAMILY = "ask-alone"
+FAMILIES["ask-alone"] = "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks"
 #
 # A command the guard would ASK on, chained with other commands (`&&`, `||`, `;`, `|`, newline), denies to
 # the agent, and the remedy says to run that command alone or drop it (CHAIN_ASK and ALONE, near sh()).
