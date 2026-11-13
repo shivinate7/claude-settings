@@ -9,7 +9,8 @@ no cs-step tag; a step off the record branch with no Step trailer on main; or a 
 not landed on main. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and exits 1. It
 takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and
 no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never reads
-as an empty one.
+as an empty one. A session whose id is in keepSessions prints no line and is not counted; a keepSessions that is not a
+list, or whose entry has no id, reads as unknown, never as an empty keep list.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -75,9 +76,12 @@ class IdleLanesCli(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, sessions, read_at=None):
-        """Write the --live file. Its readAt is five minutes old by default."""
+    def publish(self, sessions, read_at=None, keep=None):
+        """Write the --live file. Its readAt is five minutes old by default. `keep` is the file's keepSessions value, written
+        only when given, so a case can name a value that is not a list."""
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
+        if keep is not None:
+            value["keepSessions"] = keep
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
     def run_merge(self, *argv, extra_env=None):
@@ -214,6 +218,59 @@ class IdleLanesCli(unittest.TestCase):
         self.assertRegex(out, r"(?m)^hold \(step c3 ", "a doing step under a completed lane printed no hold line: %r" % out)
         self.assertEqual(out.splitlines(), [DOING_HOLD % ("c3", "session_a"), HELD_ONE],
                          "the hold line is not the pinned text: %r" % out)
+
+    def test_a_kept_idle_lane_prints_no_line_and_is_not_counted(self):
+        # The control is the same idle lane with no keep list: it is listed, and the summary counts it. Then keepSessions
+        # names it: no line for it, and the summary counts no lane to archive.
+        self.publish([lane("session_a", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before it is kept: %r" % before)
+        self.publish([lane("session_a", "c1")], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a kept idle lane printed a line or was counted: %r" % out)
+
+    def test_a_kept_hold_lane_prints_no_hold_line_and_is_not_counted_as_held(self):
+        # The control is a lane with no cs-step tag: it prints a hold line and the summary counts one held lane. Then
+        # keepSessions names it: no hold line, and no held lane in the summary.
+        self.publish([lane("session_nostep", None)])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [HELD_ONE], "scope: session_nostep is not held before it is kept: %r" % before)
+        self.publish([lane("session_nostep", None)], keep=[{"id": "session_nostep", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a kept hold lane printed a hold line or was counted as held: %r" % out)
+
+    def test_a_kept_idle_lane_is_skipped_and_a_non_kept_idle_lane_beside_it_still_prints(self):
+        # The control lists both idle lanes: the summary counts two. Then keepSessions names session_a only: session_c still
+        # prints, and the summary counts one lane to archive.
+        self.publish([lane("session_a", "c1"), lane("session_c", "c2")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertRegex(before.splitlines()[-1], r"^merge: 2 lanes to archive\.", "scope: both lanes are not idle: %r" % before)
+        self.publish([lane("session_a", "c1"), lane("session_c", "c2")], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual([line.split(" ", 1)[0] for line in lines[:-1]], ["session_c"], "a kept lane printed, or session_c did not: %r" % out)
+        self.assertEqual(lines[-1:], [SUMMARY_ONE], "the summary counts a kept lane: %r" % out)
+
+    def test_malformed_keep_list_reads_as_unknown_not_as_an_empty_keep_list(self):
+        # The control is the same idle lane with no keepSessions: it is listed and the command exits 0. Then keepSessions is
+        # not a list, or an entry has no id. Either reads as unknown: one unknown line, no lane line, no summary, exit 1.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-1:]), (0, [SUMMARY_ONE]), "scope: session_a is not listed before the keep list: %r" % out)
+        for keep in ("session_a", [{"reason": "no id"}]):
+            with self.subTest(keep=keep):
+                self.publish([lane("session_a", "c1")], keep=keep)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                lines = out.splitlines()
+                self.assertTrue(any(line.startswith("unknown (") for line in lines),
+                                "a malformed keepSessions printed no unknown line: out %r, err %r" % (out, err))
+                self.assertFalse(any(line.startswith("session_a") for line in lines),
+                                 "a malformed keepSessions read as an empty keep list: %r" % out)
+                self.assertEqual(code, 1, "a malformed keepSessions exits %d, so a caller reads the list as read: %s" % (code, err))
+                self.assertNotRegex(out, SUMMARY_LINE)
 
 
 if __name__ == "__main__":
