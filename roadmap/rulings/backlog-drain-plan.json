@@ -6,5 +6,8 @@
  "quote": "Yeah approved A",
  "source": "owner chat with the retrospective 10:45 CST Nov 13, relayed 10:46 CST",
  "status": "open",
- "step": "backlog-drain"
+ "step": "backlog-drain",
+ "aliases": [
+  "R66"
+ ]
 }

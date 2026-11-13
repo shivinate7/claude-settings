@@ -6,5 +6,8 @@
  "quote": "A is fine and I mean new work can be fine if we can catulally track and land it, which those fixes themselves haven't yet landed so let's hold off on sheer new work and just do A for right now | 10:54 CST: \"yo fast track that too can you just think for a fucking second about how i said already my rulings are being read too strictly\" | 10:56 CST: \"fast track all of those\"",
  "source": "owner chat with the retrospective 10:50 CST Nov 13, relayed 10:51 CST",
  "status": "open",
- "step": "backlog-drain"
+ "step": "backlog-drain",
+ "aliases": [
+  "R67"
+ ]
 }

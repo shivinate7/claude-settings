@@ -1,0 +1,14 @@
+{
+ "id": "ci-hygiene-upkeep",
+ "title": "A subagent keeps skills/ci-hygiene/SKILL.md current, one pass after each CI lane merges",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL1WXmYVfDJzyg9FpMj",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:39 CST Nov 13 via runner 10 (coordinator 11:40 CST): a subagent owns keeping skills/ci-hygiene/SKILL.md current.",
+ "source": "owner 11:39 CST Nov 13 via runner 10; coordinator 11:40 CST",
+ "note": "Standing. A pass after each CI lane merges: read what the lane changed in .github/workflows and the CI scripts, and bring skills/ci-hygiene/SKILL.md in line (one home per fact; cite ids, not paths). Lane session_013NEJL1WXmYVfDJzyg9FpMj. Runner 11 does the same CI efficiency audit for the child repos (owner 11:39 CST). The skill is a rule file: a change to it goes through a lane with a reviewer.",
+ "updatedAt": "2026-11-13T11:41:57-06:00"
+}
