@@ -1,358 +1,358 @@
 # Lost-lanes audit rows, read 09:55 CST Nov 13 (main 7dd44c41c). Plan R66 input; the lost-work-sweep ledger replaces this file.
-# Columns: group PR record step lane_session commit_age_h. Group A done record at head, B record open/bad/stale, C no record.
-A 1520 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 139
-A 1536 nolint notes-fix-page 013NEJKzjkypcToggneCjJN8 138
-A 1509 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 138
-A 1555 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 138
-A 1598 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 137
-A 1732 nolint handoff-per-agent 013NEJKz785dJ3UKyxpvQuZu 134
-A 1760 nolint record-post-runs-lane-lint 013NEJKz26y1pT4XskPQbQbz 131
-A 1813 nolint merge-passes-settings-dir 013NEJKzeYTAqv5GuuSXY1ru 129
-A 1829 nolint fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 128
-A 1848 nolint runner-repos-in-parallel 013NEJKzGm25T6yUwjjibfGN 126
-A 1839 nolint fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 126
-A 1873 nolint fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 126
-A 1417 nolint ready-checks-use-pinned-tools 013NEJL1MUZiHTf89ikYeMTX 126
-A 1461 nolint lane-lint-runs-local-tools 013NEJL1N3YkCMouc1pELXyu 126
-A 1897 nolint draft-pr-guard-heredoc 013NEJKzzx35nAWSwPacHRXt 125
-A 1836 nolint lane-lint-runs-local-tools 013NEJL1N3YkCMouc1pELXyu 125
-A 1892 nolint fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 124
-A 1951 nolint fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 124
-A 1789 nolint review-rounds-rework 013NEJKzfcSeBe5Ym9pCtxHn 123
-A 1900 nolint runner-repos-in-parallel 013NEJKzGm25T6yUwjjibfGN 123
-A 1552 nolint review-rounds-rework 013NEJKzfcSeBe5Ym9pCtxHn 123
-A 1692 nolint sim-lease-gaps 013NEJKzSDXuw4rJESuzdw1Y 123
-A 1748 nolint lane-finds-triage 013NEJL3ixw3qjVWMvVLFtg5 123
-A 1517 nolint notes-fix-guard-2 013NEJL4JCSmBupBJbVWwRUE 122
-A 1916 nolint lane-lint-hook-suites 013NEJL3JoPTyn7Ny4jUb88L 122
-A 1871 nolint process-held-end-to-end 013NEJL3VS6pwMdVzvbdxQ9J 122
-A 2026 nolint notes-fix-report 013NEJL2qBDyNbgXYNEhpSrf 121
-A 1987 nolint notes-fix-guard-2 013NEJL4JCSmBupBJbVWwRUE 121
-A 2017 nolint lane-lint-cloud-time-limit 013NEJL1PUcS4Dxhd9Rr1sk2 120
-A 1706 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 120
-A 2146 nolint pr-review-range-check 013NEJL2Rd7tasVqys45cgDA 119
-A 2115 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 119
-A 2129 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 119
-A 1758 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 119
-A 1835 nolint stall-watch-quiet-lint 013NEJL2LYXQpmabnoQqYgNv 119
-A 1861 nolint idle-lane-steps-unknown 013NEJL1VtpMs3Aw5JLtyvVD 119
-A 2167 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 118
-A 2063 nolint record-claim-cites-code 013NEJL33wvLc6xtDnBTJDAw 118
-A 1314 nolint mcp-merge-unguarded 013NEJL3XjWoVXFLZP2Lfwy4 118
-A 1844 nolint lane-lint-hook-suites 013NEJL3JoPTyn7Ny4jUb88L 117
-A 2262 nolint ste-lint-run-exit-codes 013NEJKys31F9TckFXjRxWER 116
-A 2226 nolint draft-pr-guard-text-false-alarm 013NEJL232Ko7dmr4v3fmrvF 116
-A 2300 nolint notes-fix-page 013NEJKzjkypcToggneCjJN8 114
-A 2195 nolint past-ruling-on-send 013NEJL3ZtjRrvWWB5nAzQiv 114
-A 2148 nolint merge-lock-expired-delete-race 013NEJL2sZ68ECc62SiwfqPk 113
-A 2234 nolint guard-relative-write-escape 013NEJKzJxDxuXzuwNe7fhYn 113
-A 2322 nolint builder-diff-auto-merge-reflog 013NEJL3mV1216ziTuNnhQyH 112
-A 1147 nolint timing-tests 013NEJL1jPC89ae6X6Pa4jmf 94
-A 1958 nolint timing-tests 013NEJL1jPC89ae6X6Pa4jmf 94
-A 2002 nolint timing-tests 013NEJL1jPC89ae6X6Pa4jmf 94
-A 2081 done timing-tests 013NEJL1jPC89ae6X6Pa4jmf 94
-A 2440 nolint review-record-provenance 013NEJKzUe9U19voH62VbCNA 94
-A 2083 nolint commit-refuses-conflict-markers 013NEJKzXJPDWrSRe3i1fGJd 81
-A 2052 nolint notes-fix-large-1 013NEJL4DPEKRiC91yHkQV7m 81
-A 2171 nolint notes-fix-large-1 013NEJL4DPEKRiC91yHkQV7m 81
-A 1751 nolint review-record-provenance 013NEJKzUe9U19voH62VbCNA 81
-A 2200 nolint review-record-past-head 013NEJL2WYHwGu4KngBLPUaF 81
-A 2277 nolint review-record-past-head 013NEJL2WYHwGu4KngBLPUaF 81
-A 2500 nolint close-replaced-at-open 013NEJL2ESvfj9vmLqdMhDQk 81
-A 2365 nolint review-record-past-head 013NEJL2WYHwGu4KngBLPUaF 81
-A 2144 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 80
-A 1971 nolint pr-backlog-clear 013NEJL2GCahFnLKLzmw1JAM 79
-A 2123 nolint pr-backlog-clear 013NEJL2GCahFnLKLzmw1JAM 79
-A 1707 nolint notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 78
-A 2527 nolint item-cite-carries-name 013NEJL3ttjVfExjpp5nLDcz 77
-A 2463 nolint lane-push-frozen-in-batch 013NEJL24NSUGQwdDXK4sqrb 73
-A 2347 nolint notes-fix-page 013NEJKzjkypcToggneCjJN8 73
-A 1849 nolint resume-msg-role-check 013NEJL3bvXbg7UQvaKpwwq9 72
-A 2549 nolint artifact-guard-matcher-names 013NEJL44p2pd4nwYgCQXqTg 72
-A 2164 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 68
-A 2276 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 68
-A 2301 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 68
-A 2321 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 68
-A 1975 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 67
-A 2015 nolint bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 67
-A 1805 nolint resume-msg-role-check 013NEJL3bvXbg7UQvaKpwwq9 62
-A 2708 done pr-template-not-guard-path 013NEJKz3XYDCqNt8Jyi2hcj 26
-A 2681 done question-form-task-context 013NEJL1Uh9UFZkoS1uNp7Y8 26
-A 2675 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 26
-A 2720 done fan-code-waiting-page 013NEJL3preQpR1zdQ3z1WR8 26
-A 2727 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 26
-A 2677 done fan-code-handoffs 013NEJL1yBtihFeuHoX5et11 26
-A 2751 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 26
-A 2752 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 25
-A 2735 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 25
-A 2766 done fan-prose-small-homes 013NEJL3nndRkp9oKiaEurhn 25
-A 2758 done fan-code-guard-2 013NEJL3e9j8esdUiNqEEpGG 25
-A 2700 done fan-code-lint-1 013NEJL4ULPbZnqEEaLZi9q3 25
-A 2783 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 25
-A 2779 done records-page-ready-reads-pr-repo 013NEJL22ogf2vC2FjT8dHgS 24
-A 2696 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2749 done fan-code-guard-2 013NEJL3e9j8esdUiNqEEpGG 24
-A 2684 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2756 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2693 done agent-asks-become-refusals 013NEJL1SnHytvPFQsRypupi 24
-A 2791 done fan-code-guard-2 013NEJL3e9j8esdUiNqEEpGG 24
-A 2712 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2750 done fan-code-handoffs 013NEJL1yBtihFeuHoX5et11 24
-A 2774 done fan-code-handoffs 013NEJL1yBtihFeuHoX5et11 24
-A 2723 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2744 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2729 done fan-prose-unmapped-1 013NEJL3nz3ETqgU4E5fN9TJ 24
-A 2757 done fan-prose-debts 013NEJL2sLSUxXeyk4U7PB2x 24
-A 2753 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 24
-A 2800 done fan-prose-small-homes 013NEJL3nndRkp9oKiaEurhn 24
-A 2801 done guard-tables-per-section 013NEJL3A3HSZUXgD2FPr4fZ 23
-A 2813 done fan-code-guard-2 013NEJL3e9j8esdUiNqEEpGG 23
-A 2811 done fan-prose-handoffs 013NEJL2x8vsS7agCiTdu1LU 23
-A 2667 done fan-prose-unmapped-1 013NEJL3nz3ETqgU4E5fN9TJ 23
-A 2678 done fan-prose-unmapped-1 013NEJL3nz3ETqgU4E5fN9TJ 22
-A 2945 nolint install-hash-skips-pycache 013NEJL1eZiamYduyKb3aU3Y 22
-A 2826 done fan-prose-unmapped-4 013NEJL1rreXGu8xv7m6nN3h 22
-A 2837 done batch-build-stop-group 013NEJL3cewDruVFEQKC8Nu1 22
-A 2885 done md-midline-comment-gap 013NEJKzTUCXSwPzoGsro2Xb 22
-A 2824 nolint fan-code-handoffs 013NEJL1yBtihFeuHoX5et11 22
-A 2828 done ruling-parts-cite-steps 013NEJL3a1RyJAfiRCDjHB1C 22
-A 2832 nolint lint-config-guard-paths 013NEJL4Lz882iMUAfLywbvd 21
-A 2845 done pr-state-is-on-the-pr 013NEJL1G57xow8mxCJeGMgp 21
-A 2852 done global-claude-md-scope-audit 013NEJKzRnzW9oYuFZAxseXz 21
-A 2872 nolint sweep-lock-age 013NEJKytJu8HptjTzNqopMT 21
-A 2886 done md-midline-comment-gap 013NEJKzTUCXSwPzoGsro2Xb 21
-A 2863 done time-limits-end-hangs-only 013NEJL1Lr7RHEZ96mkhKnnJ 20
-A 2869 done pr-ledger-round-ages 013NEJKyyBbKpddy7P4E8zBf 20
-A 2909 nolint batch-freeze-lane-set-enforce 013NEJL2YMSgMt9QbTnAKiN8 20
-A 2914 done review-fix-check-round 013NEJL14ysfQUFFZcFfWrpP 20
-A 2859 done review-record-parse-warn 013NEJL3VT6bqpNH7vBLMmSN 20
-A 2927 nolint artifact-guard-matcher-names 013NEJL3MTsrgkbccEjnK2Lf 20
-A 2931 nolint scratchpad-commit-msg-owner 013NEJKykCjigZjwM32DMEvg 20
-A 2892 done base-hash-on-base 013NEJKyrMqGGt4eRzJmrKwn 20
-A 2871 done batch-label-setter 013NEJKz9DMAhnNimZfuBt2L 20
-A 2905 done records-page-before-ready 013NEJL4HeTSHd6oUJxPt5Ci 19
-A 2906 nolint answered-sections-by-repo 013NEJL3fCEUUibxozV7CUtJ 19
-A 2940 done review-record-usage-line 013NEJKzp9u8s25scRwbZ3Y6 19
-A 2943 done coordinator-session-board 013NEJL3bD7WV2R2WrMqh5Xz 19
-A 2971 done answers-session-write-guard 013NEJL2bk5JjA6fXmQ5SooN 19
-A 2683 done cost-line-has-reader 013NEJL2kVC8YJi3BaQYqf3W 19
-A 2902 done merge-batch-split-and-pipeline 013NEJL3fiyt8tFcp1gd64g9 19
-A 2989 done step-pick-claims-match-page 013NEJL2fcki9bzsEepYP2EL 18
-A 2980 done ci-split-checks-family 013NEJL12ERsRGRS2aoyXgQt 18
-A 2737 done fan-code-workflows 013NEJL11UY3p6jnSXrTspmu 18
-A 2851 done pass-claim-cites-verdict 013NEJKzT3Q2wV34EZTGF4mX 18
-A 2993 done merge-flow-after-anthropic 013NEJL2oxYMVKoXseeKacVG 18
-A 2920 done fan-code-workflows 013NEJL11UY3p6jnSXrTspmu 17
-A 2997 nolint item-cite-carries-name 013NEJL4GnN1oNVu2jqgyMhu 17
-A 2937 done lane-sim-hold-path 013NEJL12Q75RbHgFdGCCzkn 17
-A 3024 done guard-paths-agents 013NEJKyr5xnj2HqyAYTjW17 16
-A 3014 done merge-path-same-everywhere 013NEJL2wQ2Pw7ozZ57fWSWZ 16
-A 3023 done standing-role-model-rows 013NEJKzYpAVhp5MdKD5Cvfe 16
-A 3047 done mutate-timeout-crashed 013NEJKzHF38B9VCXKRVp1Ru 14
-A 3021 done ci-linux-windows-once 013NEJL3q82Z6A8yHbNvQ5Nf 13
-A 3050 done git-apply-test-path-write 013NEJL1D2KbhtSuqpNvJViz 13
-A 3026 done agent-worktree-add-in-tool-dir 013NEJL1yzX8T8GnRQrrKaPF 12
-A 3071 done session-start-pin-skip-log 013NEJKzJctqRVkdURWYQ3ZT 12
-A 3059 done pointer-checkout-edit 013NEJL1xN2nGvUxowmqV5uk 12
-A 2915 done prose-tending-contract 013NEJL3ebkkPacdNS1qZVrk 12
-A 3004 done ci-hygiene-once-per-batch 013NEJL3MapHQTT2ptee4wkg 12
-A 3072 done review-record-parses-at-handin 013NEJL4Sndj2V8AvR1sXFef 12
-A 3074 done role-model-explore-veto-offer 013NEJL3zR7xTtnHVF9EGr1j 12
-A 3068 done claim-vs-main-needs-read 013NEJL1D4J39Z3Xqh1gfQag 12
-A 2860 nolint red-job-wakes-runner 013NEJL1VH7P58pzBjQ5Tj2y 12
-A 2838 nolint blame-on-finished-red-job 013NEJKzzqqpnCFLtG3BUNif 12
-A 3076 done inbox-skip-bash-echo 013NEJL3SYDj6heP7qVVAD8k 12
-A 3042 done ci-linux-windows-once 013NEJL3q82Z6A8yHbNvQ5Nf 11
-A 3073 done guards-read-origin-main-config 013NEJL3e5VxTvDHtfBupKfs 11
-A 3063 done ci-wait-stop-needs-checkin 013NEJL3EWfheBvW9owqKcFK 11
-A 3065 done local-page-publish-route 013NEJKz3Gu5cUvB8yjeQtoQ 10
-A 3084 done consultant-role-placement 013NEJL26r2BLU4DH1Ma3FYk 10
-A 3090 done one-build-per-session-wording 013NEJL1zV2hRJHc43LVM8Sy 10
-A 3088 done ci-linux-windows-once 013NEJL3q82Z6A8yHbNvQ5Nf 10
-A 3102 done fix-branch-merge-main-deny-2 013NEJL3Fq3KUGQfJvmJWwRq 10
-A 2818 done merge-flow-after-anthropic 013NEJL2oxYMVKoXseeKacVG 10
-A 2996 done prose-tending-contract 013NEJL3ebkkPacdNS1qZVrk 10
-A 3086 done ios-apps-test-shapes 013NEJL32DjpWSN8KkRiC69i 9
-A 3092 done ios-apps-test-shapes 013NEJL32DjpWSN8KkRiC69i 9
-A 3003 done prose-tending-contract 013NEJL3ebkkPacdNS1qZVrk 9
-A 3111 done lane-start-tags-cs-step 013NEJKzfCtPE5tJddZ2xR7A 9
-A 3109 done record-before-next-push 013NEJL1JMo5JoUeT8C3QedR 9
-A 3110 done cloud-precompact-handoff-stale 013NEJL34URk7P9AdEH62S3i 8
-A 3108 done merge-runs-idle-lanes 013NEJL4FB8BtH7dCW8fakp5 7
-B 1631 open notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 137
-B 1632 open notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 137
-B 1618 open notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 137
-B 1647 open notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 136
-B 1636 bad guard-path-expand-forms 013NEJL1HRER1fc7nQ4BtSVb 135
-B 1784 open export-after-page-write 013NEJL1JwGYbs71pjwKZCfb 131
-B 1714 open handoff-per-agent 013NEJKz785dJ3UKyxpvQuZu 130
-B 1715 open mutate-sweep-control 013NEJKyoqH7Pdyv1k1rK8bE 126
-B 1743 bad silent-undo-reads-retire-run 013NEJL4TDRWqka4aSU2Bv7L 126
-B 1753 bad silent-undo-reads-retire-run 013NEJL4TDRWqka4aSU2Bv7L 126
-B 1869 bad silent-undo-checks-pr-base 013NEJL1Umc5vUUPV286bXnV 126
-B 1771 open coordinator-pick-needs-record 013NEJL2WHAcHrb2a1N5E29K 126
-B 1863 open draft-pr-guard-heredoc 013NEJKzzx35nAWSwPacHRXt 125
-B 1881 open fail-record-ancestor-head 013NEJKzYhDtNPLcEdeVFEVe 125
-B 1935 bad silent-undo-reads-retire-run 013NEJL4TDRWqka4aSU2Bv7L 124
-B 1938 open lane-lint-runs-local-tools 013NEJL1N3YkCMouc1pELXyu 124
-B 1733 open notes-fix-page 013NEJKzjkypcToggneCjJN8 124
-B 1964 open notes-fix-page 013NEJKzjkypcToggneCjJN8 123
-B 1585 open notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 122
-B 2030 open notes-fix-report 013NEJL2qBDyNbgXYNEhpSrf 122
-B 2033 open sim-lease-gaps 013NEJKzSDXuw4rJESuzdw1Y 121
-B 2067 open process-held-end-to-end 013NEJL3VS6pwMdVzvbdxQ9J 121
-B 2061 open sim-lease-gaps 013NEJKzSDXuw4rJESuzdw1Y 120
-B 1708 open merge-lock-expired-delete-race 013NEJL2sZ68ECc62SiwfqPk 119
-B 1729 open merge-lock-expired-delete-race 013NEJL2sZ68ECc62SiwfqPk 119
-B 1826 open notes-fix-guard-2 013NEJL4JCSmBupBJbVWwRUE 118
-B 1811 stale runner-repos-in-parallel 013NEJKzGm25T6yUwjjibfGN 118
-B 2230 open report-guard-spawn-model 013NEJKzacZeiWBs4yJ82HvC 117
-B 2196 open cite-range-symbol-match 013NEJL34KjkQwzUueKThXhM 116
-B 1687 open mcp-tools-in-guard-matcher 013NEJL1BcjeYCubrQhUmWKz 116
-B 1561 stale pr-state-is-on-the-pr 013NEJL1yXEvUDdtXJ7QhYRE 80
-B 2024 stale notes-fix-page 013NEJKzjkypcToggneCjJN8 80
-B 2099 stale git-write-after-failed-cd 013NEJL1Eaa8LA5StpPbWgvA 79
-B 1722 stale notes-fix-large-3 013NEJL1rKuNDSwMxwArjXHb 78
-B 1616 stale fix-check-after-notes-commit 013NEJKysbEmRBBB3QEfDm2H 74
-B 2156 stale bg-tail-loses-verdict 013NEJL3ZjZdzrS8tBezxY85 69
-B 2778 open fan-prose-unmapped-2 013NEJL3KVZKNS952nwDExqY 25
-B 2692 open agent-asks-become-refusals 013NEJL1SnHytvPFQsRypupi 24
-B 2691 open agent-asks-become-refusals 013NEJL1SnHytvPFQsRypupi 24
-B 2714 open agent-asks-become-refusals 013NEJL1SnHytvPFQsRypupi 24
-B 2857 bad writer-lists-awaiting-threads 013NEJL3xt6pvdeobzwsPMSq 21
-B 2709 stale lane-finds-triage 013NEJL21czTzrjwzb45n36w 20
-B 2768 stale fan-code-guard-2 013NEJL3e9j8esdUiNqEEpGG 20
-B 1432 bad one-home-check 013NEJKzbDHRpreufhWY48Vb 20
-B 2948 open express-pass-owner-quotes 013NEJKygJbMN4tsZrzb9rkH 19
-B 2748 bad fan-prose-unmapped-5 013NEJL3y5kzHLeSuCU1GriT 19
-B 2833 bad fan-prose-unmapped-5 013NEJL3y5kzHLeSuCU1GriT 19
-B 2873 bad merge-subst-paren 013NEJL3GTFJLwXVvpL2kzcN 19
-B 2913 bad fan-prose-unmapped-5 013NEJL3y5kzHLeSuCU1GriT 18
-B 2733 open fan-code-workflows 013NEJL11UY3p6jnSXrTspmu 18
-B 2839 open ci-wait-cap-55 013NEJL2NX6qLaRYDtpAqpZx 18
-B 2770 open fan-code-workflows 013NEJL11UY3p6jnSXrTspmu 17
-B 2875 open fan-code-workflows 013NEJL11UY3p6jnSXrTspmu 17
-B 3008 bad batch-ci-merge-guard 013NEJL4PiLXe6cU4vuSbeoa 17
-B 3011 bad sim-tool-lease-check 013NEJL2VvLJhuXxraazzfNX 17
-B 2979 open record-before-fix-push 013NEJL419X64MWpu8fiDyB7 15
-B 2970 bad ci-batch-mac-runner 013NEJL1Pg1yXejPVGo7aocY 12
-B 2904 stale owner-health-tab 013NEJL4QMYAUC7dm23GmXbx 12
-B 3100 open session-messages-status-line 013NEJL1DRP6iuAWdxmWVKib 10
-C 1034 norecord craft-book 013NEJL3Gr4BUfpANg25fSsX 261
-C 1315 norecord ste-lint-diff-fail-closed 013NEJL1DSd9D3Fftt6Rgch4 165
-C 1349 norecord watcher-builtin-hook-survey 013NEJKyzGL3yZ2cjQt9Jbj9 161
-C 1377 norecord challenger-page-against 013NEJL3Z48gxyFumeJZGMHp 161
-C 1386 norecord export-after-page-write 013NEJKzXneQD9Ua2o3ww8hJ 158
-C 1619 norecord notes-sightings-expiry 013NEJL2vaREMqJHVJ16kbQf 137
-C 1779 norecord roadmap-blank-pages 013NEJKyqU19UoQgbHWPzXBz 131
-C 1831 norecord lane-lint-unshallow 013NEJKzk1MsAcMP53yRaVu1 128
-C 2001 norecord lane-lint-guard-suite-install 013NEJKzoJ3vzUKGDk62Hr6K 122
-C 1995 norecord runner-repos-in-parallel 013NEJKzGm25T6yUwjjibfGN 122
-C 2055 norecord export-check-writer-page 013NEJKzjZ5GyfuZwVjJyTQL 121
-C 2097 norecord guard-relative-write-escape 013NEJKzJxDxuXzuwNe7fhYn 121
-C 2071 norecord runner-repos-in-parallel 013NEJKzGm25T6yUwjjibfGN 118
-C 2197 norecord guard-relative-write-escape 013NEJKzJxDxuXzuwNe7fhYn 118
-C 2173 norecord option-tradeoff-pushback 013NEJL38w4WDs3n4aTNNHkB 118
-C 2297 norecord live-stream-monitor-allowed 013NEJL47tLSmUKDXddQy9Pf 115
-C 2491 norecord merge-route-author-paths 013NEJL1NByCSpoZkrQEnyu8 86
-C 2688 norecord fan-prose-find-copies 013NEJKzfH6ZvGHiANaTszuk 26
-C 2732 norecord fan-code-waiting-page 013NEJL3preQpR1zdQ3z1WR8 26
-C 2807 norecord stale-cites-tree-clean 013NEJL2QqjuMHFXtid3QVoP 24
-C 2805 norecord stale-cites-tree-clean 013NEJL2QqjuMHFXtid3QVoP 24
-C 2804 norecord stale-cites-tree-clean 013NEJL2QqjuMHFXtid3QVoP 24
-C 2803 norecord stale-cites-tree-clean 013NEJL2QqjuMHFXtid3QVoP 24
-C 2823 norecord outbox-notes-land 013NEJL1WxZbpnc5SKQrh7Vu 22
-C 2820 norecord batch-build-log-kept 013NEJL3zeWnjihGXaU7aKYE 22
-C 2844 norecord ruling-challenge-passes 013NEJL24eof56PM2RAz6pr5 22
-C 2836 norecord stop-checks-one-message 013NEJL4QKJEXCPFKNChi3mB 21
-C 3033 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 21
-C 2856 norecord handoff-agent-write 013NEJL1JNXobe23MsLjrU1N 21
-C 2806 norecord fan-code-handoffs 013NEJL1yBtihFeuHoX5et11 21
-C 2858 norecord one-term-warn-lint 013NEJL32XbRdWaA6Nf7jubJ 21
-C 2865 norecord waiting-export-miss-cloud 013NEJKzM4ywhg82unReWfRc 21
-C 3035 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 21
-C 2854 norecord stood-pick-needs-review 013NEJL2c98rNLBG6EyLYefM 21
-C 2874 norecord review-rounds-rework 013NEJL1VU2ZKfNGkQ1nUmUA 21
-C 2879 norecord waiting-export-miss-cloud 013NEJKzM4ywhg82unReWfRc 21
-C 2877 norecord msg-claims-vs-git 013NEJL2GesEFYxFM4NrLLsj 21
-C 2880 norecord agent-git-reset-refused 013NEJL46PYA75fwZfWCFZ2k 20
-C 2887 norecord sim-boot-screen-check 013NEJL1Lig4ktvop4WSuEDo 20
-C 2894 norecord both-session-starts-judged 013NEJL36rYhtALFcXCMgJm9 20
-C 2876 norecord stamp-guard-send-message 013NEJL2w2TGYjZFexEa6uyw 20
-C 2895 norecord repo-typecheck-hook 013NEJL4Hzo9q8JWrXewpwZn 20
-C 2890 norecord mailbox-all-messages 013NEJKysjgGZZveHbcJLZXR 20
-C 3030 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 20
-C 2883 norecord debt-retire-red-on-birth 013NEJL2aszZyqEG4K9Ue77v 20
-C 2907 norecord waiting-export-miss-cloud 013NEJKzM4ywhg82unReWfRc 20
-C 2870 norecord pick-reaches-page 013NEJL4M2MdWXUDjYUVC9Cf 20
-C 2918 norecord ask-alone-push-not-force 013NEJKziJAoTManBBvBmHKR 20
-C 2919 norecord page-usage-counters 013NEJL3FiqXo4K73sAQvJTU 20
-C 2893 norecord two-drop-leaves-queue 013NEJKzyJKNjy9HjM9PBiXJ 20
-C 2930 norecord guard-run-slow-long-command 013NEJKyhwpBmsKUD7sNXM6b 20
-C 2864 norecord stop-checks-one-message 013NEJL4QKJEXCPFKNChi3mB 20
-C 2900 norecord express-pass-owner-quotes 013NEJKygJbMN4tsZrzb9rkH 20
-C 2933 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 20
-C 2923 norecord artifact-guard-matcher-names 013NEJL3MTsrgkbccEjnK2Lf 20
-C 2924 norecord artifact-guard-matcher-names 013NEJL3MTsrgkbccEjnK2Lf 20
-C 2925 norecord artifact-guard-matcher-names 013NEJL3MTsrgkbccEjnK2Lf 20
-C 2926 norecord artifact-guard-matcher-names 013NEJL3MTsrgkbccEjnK2Lf 20
-C 2847 norecord lane-lint-once-fail-fast 013NEJL1GDo9M4LUHh6W7GiA 20
-C 2949 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 20
-C 2944 norecord brief-reads-owner-rulings 013NEJL16gZbEWWpzAFUa6zA 20
-C 2952 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 19
-C 2953 norecord page-wakes-and-relays 013NEJL2bhraKVrHgFRGTdBk 19
-C 2955 norecord page-wakes-and-relays 013NEJL2bhraKVrHgFRGTdBk 19
-C 2958 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 19
-C 2942 norecord ci-merge-install-split 013NEJL2f2X9djC8H2WDPV8f 19
-C 2946 norecord subagent-handback-skipped 013NEJKz3tct1ZrNTFgaMh68 19
-C 2956 norecord guard-pr-runs-windows-shards 013NEJL1wir1gAvUGR8icyMx 19
-C 2960 norecord notes-1796-fix-lines 013NEJL3wKqWLbdyQ3Vo58Zv 19
-C 2982 norecord page-narrow-word-breaks 013NEJKz7J11azn1cv25bJnA 19
-C 2962 norecord agent-commit-file-scope 013NEJL3b3SsMkH5JgD9EkGY 19
-C 2965 norecord page-feedback-to-template 013NEJKz1uomZF2kLUaSau16 19
-C 2967 norecord agent-commit-file-scope 013NEJL3b3SsMkH5JgD9EkGY 19
-C 2938 norecord challenger-page-against 013NEJKyzxWH4raRC2uJ8w6Z 19
-C 2968 norecord run-dir-unclosed-tail 013NEJL1q8DiVxUkdLtZZJfH 19
-C 2972 norecord busy-file-stacked-batches 013NEJL2dnN9V67hMqGyZnGi 19
-C 2941 norecord guard-false-alarm-cull 013NEJL1zDA7EF7cqDccCwhe 19
-C 2959 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 19
-C 2977 norecord glossary-same-local-cloud 013NEJL1B3zYbEnWTPFokbyB 19
-C 2950 norecord orchestrator-mixed-merge-refused 013NEJL1oCt2U9LgL9z8VZHs 19
-C 2850 norecord owner-override-one-route 013NEJL1ymdMFYoj4wQG9oUR 19
-C 2975 norecord convert-time-pinned-tests 013NEJL4PjaEKZtDccHU8fNp 19
-C 2939 norecord batch-order-by-pr-number 013NEJL4BjGNdP7cqxacEeJh 19
-C 2973 norecord brief-says-owner-unread 013NEJL2aRhUfdNWhTUtdKUH 19
-C 2991 norecord gh-get-timeout-retry 013NEJL2UayGumX3LbxC3R4h 19
-C 2987 norecord challenger-page-against 013NEJKyzxWH4raRC2uJ8w6Z 18
-C 3036 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 18
-C 2981 norecord answer-kept-on-close 013NEJL2BN8bfXdv1Wcvuhe8 18
-C 2929 norecord widening-question-not-asked 013NEJKzNDgCKgjct5ZNZtN7 18
-C 2881 norecord habit-is-not-a-guard 013NEJL4HbEaurThYorsKFGD 18
-C 1533 norecord page-checks-reach-triage 013NEJL1hWKypxcXGkd6zWH5 18
-C 3001 norecord records-page-guard-derived-rows 013NEJL4SwoVeA1YEqmzm7s6 18
-C 2976 norecord filing-check-reads-page 013NEJKzzSH1qHLmMz7RZ81z 18
-C 3005 norecord unknown-reads-lint-linux-only 013NEJL1FmGQvNLgjrnoxD7B 18
-C 2983 norecord lane-start-checks-open-pr 013NEJKzPPsyrrhA9scdu94P 18
-C 3006 norecord page-wakes-and-relays 013NEJL2bhraKVrHgFRGTdBk 18
-C 3007 norecord review-record-merge-main-line 013NEJL41UsE1t6pdjB6txHg 18
-C 3018 norecord auto-merge-refused 013NEJL3sJVXCG9wJYPEN1Az 18
-C 3015 norecord fetch-head-shared-race 013NEJL3oLsFPYiqVnS23VHA 17
-C 2984 norecord repo-protected-paths 013NEJKz3gxQMF8KNxLMDjwX 17
-C 3020 norecord cloud-hooks-stale-copy 013NEJKzeHKvB14C6TLq5434 17
-C 3037 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 17
-C 3019 norecord lane-push-frozen-in-batch 013NEJL1jcpgHgrBHbJCjDnH 17
-C 3012 norecord stall-watch-clock-pins 013NEJKzGpEd7uzEyZovr5Ed 17
-C 3038 norecord page-wakes-and-relays 013NEJL2bhraKVrHgFRGTdBk 15
-C 3039 norecord notes-fix-reverify-small 013NEJKzkcpx9EGjr8ctAJbs 15
-C 3040 norecord page-wakes-and-relays 013NEJL2bhraKVrHgFRGTdBk 15
-C 3029 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 15
-C 3028 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 15
-C 3034 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 15
-C 3031 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 15
-C 3032 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 14
-C 3043 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 14
-C 3056 norecord guard-false-alarm-cull 013NEJL1y8fceJxUrwF8GxWY 13
-C 3057 norecord consultant-role-record 013NEJKzRMT3wY4q7PXYMjLM 13
-C 3053 norecord ruled-step-coordinator-queue 013NEJL4N5Mcp2TbdftjWeCa 13
-C 3061 norecord decision-watch-finds-transcript 013NEJL1SWvL24cv7TG6nxAT 13
-C 3058 norecord child-repo-gap 013NEJL2DzPjsc2YdSpi9ZxQ 12
+# Tab-separated columns: group PR record step lane_session commit_age_h reason. Group A done record at head, B record open/bad/stale, C no record.
+A	1520	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	139	no lane-lint PASS names this head. Run `merge --lane-lint 1520`
+A	1536	nolint	notes-fix-page	013NEJKzjkypcToggneCjJN8	138	no lane-lint PASS names this head. Run `merge --lane-lint 1536`
+A	1509	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	138	no lane-lint PASS names this head. Run `merge --lane-lint 1509`
+A	1555	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	138	no lane-lint PASS names this head. Run `merge --lane-lint 1555`
+A	1598	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	137	no lane-lint PASS names this head. Run `merge --lane-lint 1598`
+A	1732	nolint	handoff-per-agent	013NEJKz785dJ3UKyxpvQuZu	134	no lane-lint PASS names this head. Run `merge --lane-lint 1732`
+A	1760	nolint	record-post-runs-lane-lint	013NEJKz26y1pT4XskPQbQbz	131	no lane-lint PASS names this head. Run `merge --lane-lint 1760`
+A	1813	nolint	merge-passes-settings-dir	013NEJKzeYTAqv5GuuSXY1ru	129	no lane-lint PASS names this head. Run `merge --lane-lint 1813`
+A	1829	nolint	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	128	no lane-lint PASS names this head. Run `merge --lane-lint 1829`
+A	1848	nolint	runner-repos-in-parallel	013NEJKzGm25T6yUwjjibfGN	126	no lane-lint PASS names this head. Run `merge --lane-lint 1848`
+A	1839	nolint	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	126	no lane-lint PASS names this head. Run `merge --lane-lint 1839`
+A	1873	nolint	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	126	no lane-lint PASS names this head. Run `merge --lane-lint 1873`
+A	1417	nolint	ready-checks-use-pinned-tools	013NEJL1MUZiHTf89ikYeMTX	126	no lane-lint PASS names this head. Run `merge --lane-lint 1417`
+A	1461	nolint	lane-lint-runs-local-tools	013NEJL1N3YkCMouc1pELXyu	126	no lane-lint PASS names this head. Run `merge --lane-lint 1461`
+A	1897	nolint	draft-pr-guard-heredoc	013NEJKzzx35nAWSwPacHRXt	125	no lane-lint PASS names this head. Run `merge --lane-lint 1897`
+A	1836	nolint	lane-lint-runs-local-tools	013NEJL1N3YkCMouc1pELXyu	125	no lane-lint PASS names this head. Run `merge --lane-lint 1836`
+A	1892	nolint	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	124	no lane-lint PASS names this head. Run `merge --lane-lint 1892`
+A	1951	nolint	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	124	no lane-lint PASS names this head. Run `merge --lane-lint 1951`
+A	1789	nolint	review-rounds-rework	013NEJKzfcSeBe5Ym9pCtxHn	123	no lane-lint PASS names this head. Run `merge --lane-lint 1789`
+A	1900	nolint	runner-repos-in-parallel	013NEJKzGm25T6yUwjjibfGN	123	no lane-lint PASS names this head. Run `merge --lane-lint 1900`
+A	1552	nolint	review-rounds-rework	013NEJKzfcSeBe5Ym9pCtxHn	123	no lane-lint PASS names this head. Run `merge --lane-lint 1552`
+A	1692	nolint	sim-lease-gaps	013NEJKzSDXuw4rJESuzdw1Y	123	no lane-lint PASS names this head. Run `merge --lane-lint 1692`
+A	1748	nolint	lane-finds-triage	013NEJL3ixw3qjVWMvVLFtg5	123	no lane-lint PASS names this head. Run `merge --lane-lint 1748`
+A	1517	nolint	notes-fix-guard-2	013NEJL4JCSmBupBJbVWwRUE	122	no lane-lint PASS names this head. Run `merge --lane-lint 1517`
+A	1916	nolint	lane-lint-hook-suites	013NEJL3JoPTyn7Ny4jUb88L	122	no lane-lint PASS names this head. Run `merge --lane-lint 1916`
+A	1871	nolint	process-held-end-to-end	013NEJL3VS6pwMdVzvbdxQ9J	122	no lane-lint PASS names this head. Run `merge --lane-lint 1871`
+A	2026	nolint	notes-fix-report	013NEJL2qBDyNbgXYNEhpSrf	121	no lane-lint PASS names this head. Run `merge --lane-lint 2026`
+A	1987	nolint	notes-fix-guard-2	013NEJL4JCSmBupBJbVWwRUE	121	no lane-lint PASS names this head. Run `merge --lane-lint 1987`
+A	2017	nolint	lane-lint-cloud-time-limit	013NEJL1PUcS4Dxhd9Rr1sk2	120	no lane-lint PASS names this head. Run `merge --lane-lint 2017`
+A	1706	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	120	no lane-lint PASS names this head. Run `merge --lane-lint 1706`
+A	2146	nolint	pr-review-range-check	013NEJL2Rd7tasVqys45cgDA	119	no lane-lint PASS names this head. Run `merge --lane-lint 2146`
+A	2115	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	119	no lane-lint PASS names this head. Run `merge --lane-lint 2115`
+A	2129	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	119	no lane-lint PASS names this head. Run `merge --lane-lint 2129`
+A	1758	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	119	no lane-lint PASS names this head. Run `merge --lane-lint 1758`
+A	1835	nolint	stall-watch-quiet-lint	013NEJL2LYXQpmabnoQqYgNv	119	no lane-lint PASS names this head. Run `merge --lane-lint 1835`
+A	1861	nolint	idle-lane-steps-unknown	013NEJL1VtpMs3Aw5JLtyvVD	119	no lane-lint PASS names this head. Run `merge --lane-lint 1861`
+A	2167	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	118	no lane-lint PASS names this head. Run `merge --lane-lint 2167`
+A	2063	nolint	record-claim-cites-code	013NEJL33wvLc6xtDnBTJDAw	118	no lane-lint PASS names this head. Run `merge --lane-lint 2063`
+A	1314	nolint	mcp-merge-unguarded	013NEJL3XjWoVXFLZP2Lfwy4	118	no lane-lint PASS names this head. Run `merge --lane-lint 1314`
+A	1844	nolint	lane-lint-hook-suites	013NEJL3JoPTyn7Ny4jUb88L	117	no lane-lint PASS names this head. Run `merge --lane-lint 1844`
+A	2262	nolint	ste-lint-run-exit-codes	013NEJKys31F9TckFXjRxWER	116	no lane-lint PASS names this head. Run `merge --lane-lint 2262`
+A	2226	nolint	draft-pr-guard-text-false-alarm	013NEJL232Ko7dmr4v3fmrvF	116	no lane-lint PASS names this head. Run `merge --lane-lint 2226`
+A	2300	nolint	notes-fix-page	013NEJKzjkypcToggneCjJN8	114	no lane-lint PASS names this head. Run `merge --lane-lint 2300`
+A	2195	nolint	past-ruling-on-send	013NEJL3ZtjRrvWWB5nAzQiv	114	no lane-lint PASS names this head. Run `merge --lane-lint 2195`
+A	2148	nolint	merge-lock-expired-delete-race	013NEJL2sZ68ECc62SiwfqPk	113	no lane-lint PASS names this head. Run `merge --lane-lint 2148`
+A	2234	nolint	guard-relative-write-escape	013NEJKzJxDxuXzuwNe7fhYn	113	no lane-lint PASS names this head. Run `merge --lane-lint 2234`
+A	2322	nolint	builder-diff-auto-merge-reflog	013NEJL3mV1216ziTuNnhQyH	112	no lane-lint PASS names this head. Run `merge --lane-lint 2322`
+A	1147	nolint	timing-tests	013NEJL1jPC89ae6X6Pa4jmf	94	no lane-lint PASS names this head. Run `merge --lane-lint 1147`
+A	1958	nolint	timing-tests	013NEJL1jPC89ae6X6Pa4jmf	94	no lane-lint PASS names this head. Run `merge --lane-lint 1958`
+A	2002	nolint	timing-tests	013NEJL1jPC89ae6X6Pa4jmf	94	no lane-lint PASS names this head. Run `merge --lane-lint 2002`
+A	2081	done	timing-tests	013NEJL1jPC89ae6X6Pa4jmf	94	round 3 is done, no guard or check changed
+A	2440	nolint	review-record-provenance	013NEJKzUe9U19voH62VbCNA	94	no lane-lint PASS names this head. Run `merge --lane-lint 2440`
+A	2083	nolint	commit-refuses-conflict-markers	013NEJKzXJPDWrSRe3i1fGJd	81	no lane-lint PASS names this head. Run `merge --lane-lint 2083`
+A	2052	nolint	notes-fix-large-1	013NEJL4DPEKRiC91yHkQV7m	81	no lane-lint PASS names this head. Run `merge --lane-lint 2052`
+A	2171	nolint	notes-fix-large-1	013NEJL4DPEKRiC91yHkQV7m	81	no lane-lint PASS names this head. Run `merge --lane-lint 2171`
+A	1751	nolint	review-record-provenance	013NEJKzUe9U19voH62VbCNA	81	no lane-lint PASS names this head. Run `merge --lane-lint 1751`
+A	2200	nolint	review-record-past-head	013NEJL2WYHwGu4KngBLPUaF	81	no lane-lint PASS names this head. Run `merge --lane-lint 2200`
+A	2277	nolint	review-record-past-head	013NEJL2WYHwGu4KngBLPUaF	81	no lane-lint PASS names this head. Run `merge --lane-lint 2277`
+A	2500	nolint	close-replaced-at-open	013NEJL2ESvfj9vmLqdMhDQk	81	no lane-lint PASS names this head. Run `merge --lane-lint 2500`
+A	2365	nolint	review-record-past-head	013NEJL2WYHwGu4KngBLPUaF	81	no lane-lint PASS names this head. Run `merge --lane-lint 2365`
+A	2144	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	80	no lane-lint PASS names this head. Run `merge --lane-lint 2144`
+A	1971	nolint	pr-backlog-clear	013NEJL2GCahFnLKLzmw1JAM	79	no lane-lint PASS names this head. Run `merge --lane-lint 1971`
+A	2123	nolint	pr-backlog-clear	013NEJL2GCahFnLKLzmw1JAM	79	no lane-lint PASS names this head. Run `merge --lane-lint 2123`
+A	1707	nolint	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	78	no lane-lint PASS names this head. Run `merge --lane-lint 1707`
+A	2527	nolint	item-cite-carries-name	013NEJL3ttjVfExjpp5nLDcz	77	no lane-lint PASS names this head. Run `merge --lane-lint 2527`
+A	2463	nolint	lane-push-frozen-in-batch	013NEJL24NSUGQwdDXK4sqrb	73	no lane-lint PASS names this head. Run `merge --lane-lint 2463`
+A	2347	nolint	notes-fix-page	013NEJKzjkypcToggneCjJN8	73	no lane-lint PASS names this head. Run `merge --lane-lint 2347`
+A	1849	nolint	resume-msg-role-check	013NEJL3bvXbg7UQvaKpwwq9	72	no lane-lint PASS names this head. Run `merge --lane-lint 1849`
+A	2549	nolint	artifact-guard-matcher-names	013NEJL44p2pd4nwYgCQXqTg	72	no lane-lint PASS names this head. Run `merge --lane-lint 2549`
+A	2164	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	68	no lane-lint PASS names this head. Run `merge --lane-lint 2164`
+A	2276	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	68	no lane-lint PASS names this head. Run `merge --lane-lint 2276`
+A	2301	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	68	no lane-lint PASS names this head. Run `merge --lane-lint 2301`
+A	2321	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	68	no lane-lint PASS names this head. Run `merge --lane-lint 2321`
+A	1975	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	67	no lane-lint PASS names this head. Run `merge --lane-lint 1975`
+A	2015	nolint	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	67	no lane-lint PASS names this head. Run `merge --lane-lint 2015`
+A	1805	nolint	resume-msg-role-check	013NEJL3bvXbg7UQvaKpwwq9	62	no lane-lint PASS names this head. Run `merge --lane-lint 1805`
+A	2708	done	pr-template-not-guard-path	013NEJKz3XYDCqNt8Jyi2hcj	26	round 1 passed
+A	2681	done	question-form-task-context	013NEJL1Uh9UFZkoS1uNp7Y8	26	round 3 is done, net value positive
+A	2675	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	26	round 3 is done, net value positive
+A	2720	done	fan-code-waiting-page	013NEJL3preQpR1zdQ3z1WR8	26	round 3 is done, net value positive
+A	2727	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	26	round 2 passed
+A	2677	done	fan-code-handoffs	013NEJL1yBtihFeuHoX5et11	26	round 3 is done, net value positive
+A	2751	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	26	round 2 passed
+A	2752	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	25	round 3 is done, net value zero
+A	2735	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	25	round 2 passed
+A	2766	done	fan-prose-small-homes	013NEJL3nndRkp9oKiaEurhn	25	round 3 is done, net value positive
+A	2758	done	fan-code-guard-2	013NEJL3e9j8esdUiNqEEpGG	25	round 3 is done, net value positive
+A	2700	done	fan-code-lint-1	013NEJL4ULPbZnqEEaLZi9q3	25	round 3 is done, net value positive
+A	2783	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	25	round 1 passed
+A	2779	done	records-page-ready-reads-pr-repo	013NEJL22ogf2vC2FjT8dHgS	24	round 3 is done, net value zero
+A	2696	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value positive
+A	2749	done	fan-code-guard-2	013NEJL3e9j8esdUiNqEEpGG	24	round 3 is done, net value zero
+A	2684	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value positive
+A	2756	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 2 passed
+A	2693	done	agent-asks-become-refusals	013NEJL1SnHytvPFQsRypupi	24	round 3 is done, net value positive
+A	2791	done	fan-code-guard-2	013NEJL3e9j8esdUiNqEEpGG	24	round 2 passed
+A	2712	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value zero
+A	2750	done	fan-code-handoffs	013NEJL1yBtihFeuHoX5et11	24	round 3 is done, net value positive
+A	2774	done	fan-code-handoffs	013NEJL1yBtihFeuHoX5et11	24	round 3 is done, net value positive
+A	2723	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value positive
+A	2744	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value positive
+A	2729	done	fan-prose-unmapped-1	013NEJL3nz3ETqgU4E5fN9TJ	24	round 3 is done, net value positive
+A	2757	done	fan-prose-debts	013NEJL2sLSUxXeyk4U7PB2x	24	round 3 is done, net value positive
+A	2753	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	24	round 3 is done, net value positive
+A	2800	done	fan-prose-small-homes	013NEJL3nndRkp9oKiaEurhn	24	docs-only change, no round owed
+A	2801	done	guard-tables-per-section	013NEJL3A3HSZUXgD2FPr4fZ	23	round 3 is done, net value positive
+A	2813	done	fan-code-guard-2	013NEJL3e9j8esdUiNqEEpGG	23	round 2 passed
+A	2811	done	fan-prose-handoffs	013NEJL2x8vsS7agCiTdu1LU	23	round 1 is FAIL, and the fix check passed
+A	2667	done	fan-prose-unmapped-1	013NEJL3nz3ETqgU4E5fN9TJ	23	round 3 is done, net value positive
+A	2678	done	fan-prose-unmapped-1	013NEJL3nz3ETqgU4E5fN9TJ	22	round 3 is done, net value zero
+A	2945	nolint	install-hash-skips-pycache	013NEJL1eZiamYduyKb3aU3Y	22	no lane-lint PASS names this head. Run `merge --lane-lint 2945`
+A	2826	done	fan-prose-unmapped-4	013NEJL1rreXGu8xv7m6nN3h	22	round 3 is done, net value positive
+A	2837	done	batch-build-stop-group	013NEJL3cewDruVFEQKC8Nu1	22	round 3 is done, net value positive
+A	2885	done	md-midline-comment-gap	013NEJKzTUCXSwPzoGsro2Xb	22	round 3 is done, net value positive
+A	2824	nolint	fan-code-handoffs	013NEJL1yBtihFeuHoX5et11	22	no lane-lint PASS names this head. Run `merge --lane-lint 2824`
+A	2828	done	ruling-parts-cite-steps	013NEJL3a1RyJAfiRCDjHB1C	22	round 3 is done, net value positive
+A	2832	nolint	lint-config-guard-paths	013NEJL4Lz882iMUAfLywbvd	21	no lane-lint PASS names this head. Run `merge --lane-lint 2832`
+A	2845	done	pr-state-is-on-the-pr	013NEJL1G57xow8mxCJeGMgp	21	round 1 passed
+A	2852	done	global-claude-md-scope-audit	013NEJKzRnzW9oYuFZAxseXz	21	round 3 is done, net value positive
+A	2872	nolint	sweep-lock-age	013NEJKytJu8HptjTzNqopMT	21	no lane-lint PASS names this head. Run `merge --lane-lint 2872`
+A	2886	done	md-midline-comment-gap	013NEJKzTUCXSwPzoGsro2Xb	21	round 3 is done, net value positive
+A	2863	done	time-limits-end-hangs-only	013NEJL1Lr7RHEZ96mkhKnnJ	20	round 3 is done, net value zero
+A	2869	done	pr-ledger-round-ages	013NEJKyyBbKpddy7P4E8zBf	20	round 1 is FAIL, and the fix check passed
+A	2909	nolint	batch-freeze-lane-set-enforce	013NEJL2YMSgMt9QbTnAKiN8	20	no lane-lint PASS names this head. Run `merge --lane-lint 2909`
+A	2914	done	review-fix-check-round	013NEJL14ysfQUFFZcFfWrpP	20	round 3 is done, net value zero
+A	2859	done	review-record-parse-warn	013NEJL3VT6bqpNH7vBLMmSN	20	round 3 is done, net value positive
+A	2927	nolint	artifact-guard-matcher-names	013NEJL3MTsrgkbccEjnK2Lf	20	no lane-lint PASS names this head. Run `merge --lane-lint 2927`
+A	2931	nolint	scratchpad-commit-msg-owner	013NEJKykCjigZjwM32DMEvg	20	no lane-lint PASS names this head. Run `merge --lane-lint 2931`
+A	2892	done	base-hash-on-base	013NEJKyrMqGGt4eRzJmrKwn	20	round 3 is done, net value positive
+A	2871	done	batch-label-setter	013NEJKz9DMAhnNimZfuBt2L	20	round 3 is done, net value zero
+A	2905	done	records-page-before-ready	013NEJL4HeTSHd6oUJxPt5Ci	19	round 3 is done, net value zero
+A	2906	nolint	answered-sections-by-repo	013NEJL3fCEUUibxozV7CUtJ	19	no lane-lint PASS names this head. Run `merge --lane-lint 2906`
+A	2940	done	review-record-usage-line	013NEJKzp9u8s25scRwbZ3Y6	19	round 3 is done, net value zero
+A	2943	done	coordinator-session-board	013NEJL3bD7WV2R2WrMqh5Xz	19	round 1 passed
+A	2971	done	answers-session-write-guard	013NEJL2bk5JjA6fXmQ5SooN	19	round 3 is done, net value positive
+A	2683	done	cost-line-has-reader	013NEJL2kVC8YJi3BaQYqf3W	19	round 3 is done, net value positive
+A	2902	done	merge-batch-split-and-pipeline	013NEJL3fiyt8tFcp1gd64g9	19	round 3 is done, net value zero; the head is the reviewed head plus cl
+A	2989	done	step-pick-claims-match-page	013NEJL2fcki9bzsEepYP2EL	18	round 3 is done, net value positive
+A	2980	done	ci-split-checks-family	013NEJL12ERsRGRS2aoyXgQt	18	round 3 is done, net value zero
+A	2737	done	fan-code-workflows	013NEJL11UY3p6jnSXrTspmu	18	round 2 passed
+A	2851	done	pass-claim-cites-verdict	013NEJKzT3Q2wV34EZTGF4mX	18	round 3 is done, net value positive
+A	2993	done	merge-flow-after-anthropic	013NEJL2oxYMVKoXseeKacVG	18	round 2 passed
+A	2920	done	fan-code-workflows	013NEJL11UY3p6jnSXrTspmu	17	round 3 is done, net value positive
+A	2997	nolint	item-cite-carries-name	013NEJL4GnN1oNVu2jqgyMhu	17	no lane-lint PASS names this head. Run `merge --lane-lint 2997`
+A	2937	done	lane-sim-hold-path	013NEJL12Q75RbHgFdGCCzkn	17	round 3 is done, net value positive
+A	3024	done	guard-paths-agents	013NEJKyr5xnj2HqyAYTjW17	16	round 3 is done, net value positive
+A	3014	done	merge-path-same-everywhere	013NEJL2wQ2Pw7ozZ57fWSWZ	16	round 3 is done, net value positive
+A	3023	done	standing-role-model-rows	013NEJKzYpAVhp5MdKD5Cvfe	16	round 1 passed
+A	3047	done	mutate-timeout-crashed	013NEJKzHF38B9VCXKRVp1Ru	14	round 1 passed
+A	3021	done	ci-linux-windows-once	013NEJL3q82Z6A8yHbNvQ5Nf	13	round 1 passed
+A	3050	done	git-apply-test-path-write	013NEJL1D2KbhtSuqpNvJViz	13	round 3 is done, net value positive
+A	3026	done	agent-worktree-add-in-tool-dir	013NEJL1yzX8T8GnRQrrKaPF	12	round 3 is done, net value zero
+A	3071	done	session-start-pin-skip-log	013NEJKzJctqRVkdURWYQ3ZT	12	round 2 passed
+A	3059	done	pointer-checkout-edit	013NEJL1xN2nGvUxowmqV5uk	12	round 3 is done, net value positive
+A	2915	done	prose-tending-contract	013NEJL3ebkkPacdNS1qZVrk	12	round 3 is done, net value zero
+A	3004	done	ci-hygiene-once-per-batch	013NEJL3MapHQTT2ptee4wkg	12	round 2 is FAIL, and the fix check passed
+A	3072	done	review-record-parses-at-handin	013NEJL4Sndj2V8AvR1sXFef	12	round 3 is done, net value positive
+A	3074	done	role-model-explore-veto-offer	013NEJL3zR7xTtnHVF9EGr1j	12	round 3 is done, net value zero
+A	3068	done	claim-vs-main-needs-read	013NEJL1D4J39Z3Xqh1gfQag	12	round 3 is done, net value positive
+A	2860	nolint	red-job-wakes-runner	013NEJL1VH7P58pzBjQ5Tj2y	12	no lane-lint PASS names this head. Run `merge --lane-lint 2860`
+A	2838	nolint	blame-on-finished-red-job	013NEJKzzqqpnCFLtG3BUNif	12	no lane-lint PASS names this head. Run `merge --lane-lint 2838`
+A	3076	done	inbox-skip-bash-echo	013NEJL3SYDj6heP7qVVAD8k	12	round 3 is done, net value zero
+A	3042	done	ci-linux-windows-once	013NEJL3q82Z6A8yHbNvQ5Nf	11	round 3 is done, net value zero
+A	3073	done	guards-read-origin-main-config	013NEJL3e5VxTvDHtfBupKfs	11	round 3 is done, net value positive
+A	3063	done	ci-wait-stop-needs-checkin	013NEJL3EWfheBvW9owqKcFK	11	round 3 is done, net value positive
+A	3065	done	local-page-publish-route	013NEJKz3Gu5cUvB8yjeQtoQ	10	round 2 passed
+A	3084	done	consultant-role-placement	013NEJL26r2BLU4DH1Ma3FYk	10	round 1 is FAIL, and the fix check passed
+A	3090	done	one-build-per-session-wording	013NEJL1zV2hRJHc43LVM8Sy	10	round 1 passed
+A	3088	done	ci-linux-windows-once	013NEJL3q82Z6A8yHbNvQ5Nf	10	round 3 is done, net value positive
+A	3102	done	fix-branch-merge-main-deny-2	013NEJL3Fq3KUGQfJvmJWwRq	10	round 3 is done, net value zero
+A	2818	done	merge-flow-after-anthropic	013NEJL2oxYMVKoXseeKacVG	10	round 3 is done, net value positive
+A	2996	done	prose-tending-contract	013NEJL3ebkkPacdNS1qZVrk	10	round 3 is done, net value positive
+A	3086	done	ios-apps-test-shapes	013NEJL32DjpWSN8KkRiC69i	9	round 1 is FAIL, and the fix check passed
+A	3092	done	ios-apps-test-shapes	013NEJL32DjpWSN8KkRiC69i	9	round 1 is FAIL, and the fix check passed
+A	3003	done	prose-tending-contract	013NEJL3ebkkPacdNS1qZVrk	9	round 3 is done, net value zero
+A	3111	done	lane-start-tags-cs-step	013NEJKzfCtPE5tJddZ2xR7A	9	round 1 passed
+A	3109	done	record-before-next-push	013NEJL1JMo5JoUeT8C3QedR	9	round 3 is done, net value zero
+A	3110	done	cloud-precompact-handoff-stale	013NEJL34URk7P9AdEH62S3i	8	round 3 is done, net value positive
+A	3108	done	merge-runs-idle-lanes	013NEJL4FB8BtH7dCW8fakp5	7	round 3 is done, net value positive
+B	1631	open	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	137	the fix check must run on sonnet, not haiku
+B	1632	open	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	137	the fix check must run on sonnet, not haiku
+B	1618	open	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	137	the fix check must run on sonnet, not haiku
+B	1647	open	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	136	the fix check must run on sonnet, not haiku
+B	1636	bad	guard-path-expand-forms	013NEJL1HRER1fc7nQ4BtSVb	135	the newest record does not parse
+B	1784	open	export-after-page-write	013NEJL1JwGYbs71pjwKZCfb	131	a guard or check change owes the final round and its net value after a
+B	1714	open	handoff-per-agent	013NEJKz785dJ3UKyxpvQuZu	130	the fix check must run on sonnet, not haiku
+B	1715	open	mutate-sweep-control	013NEJKyoqH7Pdyv1k1rK8bE	126	the fix check must run on sonnet, not haiku
+B	1743	bad	silent-undo-reads-retire-run	013NEJL4TDRWqka4aSU2Bv7L	126	the newest record does not parse
+B	1753	bad	silent-undo-reads-retire-run	013NEJL4TDRWqka4aSU2Bv7L	126	the newest record does not parse
+B	1869	bad	silent-undo-checks-pr-base	013NEJL1Umc5vUUPV286bXnV	126	the newest record does not parse
+B	1771	open	coordinator-pick-needs-record	013NEJL2WHAcHrb2a1N5E29K	126	the fix check must run on sonnet, not haiku
+B	1863	open	draft-pr-guard-heredoc	013NEJKzzx35nAWSwPacHRXt	125	a guard or check change owes the final round and its net value after a
+B	1881	open	fail-record-ancestor-head	013NEJKzYhDtNPLcEdeVFEVe	125	round 2 is not passed
+B	1935	bad	silent-undo-reads-retire-run	013NEJL4TDRWqka4aSU2Bv7L	124	the newest record does not parse
+B	1938	open	lane-lint-runs-local-tools	013NEJL1N3YkCMouc1pELXyu	124	the fix check must run on sonnet, not haiku
+B	1733	open	notes-fix-page	013NEJKzjkypcToggneCjJN8	124	the fix check must run on sonnet, not haiku
+B	1964	open	notes-fix-page	013NEJKzjkypcToggneCjJN8	123	round 1 is not passed
+B	1585	open	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	122	the fix check must run on sonnet, not haiku
+B	2030	open	notes-fix-report	013NEJL2qBDyNbgXYNEhpSrf	122	the fix check must run on sonnet, not haiku
+B	2033	open	sim-lease-gaps	013NEJKzSDXuw4rJESuzdw1Y	121	the fix check must run on sonnet, not haiku
+B	2067	open	process-held-end-to-end	013NEJL3VS6pwMdVzvbdxQ9J	121	the fix check must run on sonnet, not haiku
+B	2061	open	sim-lease-gaps	013NEJKzSDXuw4rJESuzdw1Y	120	the fix check must run on sonnet, not haiku
+B	1708	open	merge-lock-expired-delete-race	013NEJL2sZ68ECc62SiwfqPk	119	the fix check must run on sonnet, not haiku
+B	1729	open	merge-lock-expired-delete-race	013NEJL2sZ68ECc62SiwfqPk	119	the fix check must run on sonnet, not haiku
+B	1826	open	notes-fix-guard-2	013NEJL4JCSmBupBJbVWwRUE	118	the fix check must run on sonnet, not haiku
+B	1811	stale	runner-repos-in-parallel	013NEJKzGm25T6yUwjjibfGN	118	the record is for head dc4b89690
+B	2230	open	report-guard-spawn-model	013NEJKzacZeiWBs4yJ82HvC	117	the fix check must run on sonnet, not haiku
+B	2196	open	cite-range-symbol-match	013NEJL34KjkQwzUueKThXhM	116	the fix check must run on sonnet, not haiku
+B	1687	open	mcp-tools-in-guard-matcher	013NEJL1BcjeYCubrQhUmWKz	116	the fix check must run on sonnet, not claude-haiku-5-5
+B	1561	stale	pr-state-is-on-the-pr	013NEJL1yXEvUDdtXJ7QhYRE	80	the record is for head 944fb0626
+B	2024	stale	notes-fix-page	013NEJKzjkypcToggneCjJN8	80	the record is for head 1f7ef5519
+B	2099	stale	git-write-after-failed-cd	013NEJL1Eaa8LA5StpPbWgvA	79	the record is for head 80a60d2dc
+B	1722	stale	notes-fix-large-3	013NEJL1rKuNDSwMxwArjXHb	78	the record is for head b7d6de511
+B	1616	stale	fix-check-after-notes-commit	013NEJKysbEmRBBB3QEfDm2H	74	the record is for head ae120b26c
+B	2156	stale	bg-tail-loses-verdict	013NEJL3ZjZdzrS8tBezxY85	69	the record is for head ff50b3f10
+B	2778	open	fan-prose-unmapped-2	013NEJL3KVZKNS952nwDExqY	25	round 2 is not passed
+B	2692	open	agent-asks-become-refusals	013NEJL1SnHytvPFQsRypupi	24	a guard or check change owes the final round and its net value after a
+B	2691	open	agent-asks-become-refusals	013NEJL1SnHytvPFQsRypupi	24	a guard or check change owes the final round and its net value after a
+B	2714	open	agent-asks-become-refusals	013NEJL1SnHytvPFQsRypupi	24	a guard or check change owes the final round and its net value after a
+B	2857	bad	writer-lists-awaiting-threads	013NEJL3xt6pvdeobzwsPMSq	21	the newest record does not parse
+B	2709	stale	lane-finds-triage	013NEJL21czTzrjwzb45n36w	20	the record is for head 96bfacc6c
+B	2768	stale	fan-code-guard-2	013NEJL3e9j8esdUiNqEEpGG	20	the record is for head cdad664b7
+B	1432	bad	one-home-check	013NEJKzbDHRpreufhWY48Vb	20	the newest record does not parse
+B	2948	open	express-pass-owner-quotes	013NEJKygJbMN4tsZrzb9rkH	19	the fix check must run on sonnet, not claude-sonnet-5-5
+B	2748	bad	fan-prose-unmapped-5	013NEJL3y5kzHLeSuCU1GriT	19	the newest record does not parse
+B	2833	bad	fan-prose-unmapped-5	013NEJL3y5kzHLeSuCU1GriT	19	the newest record does not parse
+B	2873	bad	merge-subst-paren	013NEJL3GTFJLwXVvpL2kzcN	19	the newest record does not parse
+B	2913	bad	fan-prose-unmapped-5	013NEJL3y5kzHLeSuCU1GriT	18	the newest record does not parse
+B	2733	open	fan-code-workflows	013NEJL11UY3p6jnSXrTspmu	18	a guard or check change owes the final round and its net value after a
+B	2839	open	ci-wait-cap-55	013NEJL2NX6qLaRYDtpAqpZx	18	a guard or check change owes the final round and its net value after a
+B	2770	open	fan-code-workflows	013NEJL11UY3p6jnSXrTspmu	17	a guard or check change owes the final round and its net value after a
+B	2875	open	fan-code-workflows	013NEJL11UY3p6jnSXrTspmu	17	a guard or check change owes the final round and its net value after a
+B	3008	bad	batch-ci-merge-guard	013NEJL4PiLXe6cU4vuSbeoa	17	the newest record does not parse
+B	3011	bad	sim-tool-lease-check	013NEJL2VvLJhuXxraazzfNX	17	the newest record does not parse
+B	2979	open	record-before-fix-push	013NEJL419X64MWpu8fiDyB7	15	a guard or check change owes the final round and its net value after a
+B	2970	bad	ci-batch-mac-runner	013NEJL1Pg1yXejPVGo7aocY	12	the newest record does not parse
+B	2904	stale	owner-health-tab	013NEJL4QMYAUC7dm23GmXbx	12	the record is for head 7ca16a857
+B	3100	open	session-messages-status-line	013NEJL1DRP6iuAWdxmWVKib	10	the fix check passed, but no round is recorded
+C	1034	norecord	craft-book	013NEJL3Gr4BUfpANg25fSsX	261	
+C	1315	norecord	ste-lint-diff-fail-closed	013NEJL1DSd9D3Fftt6Rgch4	165	
+C	1349	norecord	watcher-builtin-hook-survey	013NEJKyzGL3yZ2cjQt9Jbj9	161	
+C	1377	norecord	challenger-page-against	013NEJL3Z48gxyFumeJZGMHp	161	
+C	1386	norecord	export-after-page-write	013NEJKzXneQD9Ua2o3ww8hJ	158	
+C	1619	norecord	notes-sightings-expiry	013NEJL2vaREMqJHVJ16kbQf	137	
+C	1779	norecord	roadmap-blank-pages	013NEJKyqU19UoQgbHWPzXBz	131	
+C	1831	norecord	lane-lint-unshallow	013NEJKzk1MsAcMP53yRaVu1	128	
+C	2001	norecord	lane-lint-guard-suite-install	013NEJKzoJ3vzUKGDk62Hr6K	122	
+C	1995	norecord	runner-repos-in-parallel	013NEJKzGm25T6yUwjjibfGN	122	
+C	2055	norecord	export-check-writer-page	013NEJKzjZ5GyfuZwVjJyTQL	121	
+C	2097	norecord	guard-relative-write-escape	013NEJKzJxDxuXzuwNe7fhYn	121	
+C	2071	norecord	runner-repos-in-parallel	013NEJKzGm25T6yUwjjibfGN	118	
+C	2197	norecord	guard-relative-write-escape	013NEJKzJxDxuXzuwNe7fhYn	118	
+C	2173	norecord	option-tradeoff-pushback	013NEJL38w4WDs3n4aTNNHkB	118	
+C	2297	norecord	live-stream-monitor-allowed	013NEJL47tLSmUKDXddQy9Pf	115	
+C	2491	norecord	merge-route-author-paths	013NEJL1NByCSpoZkrQEnyu8	86	
+C	2688	norecord	fan-prose-find-copies	013NEJKzfH6ZvGHiANaTszuk	26	
+C	2732	norecord	fan-code-waiting-page	013NEJL3preQpR1zdQ3z1WR8	26	
+C	2807	norecord	stale-cites-tree-clean	013NEJL2QqjuMHFXtid3QVoP	24	
+C	2805	norecord	stale-cites-tree-clean	013NEJL2QqjuMHFXtid3QVoP	24	
+C	2804	norecord	stale-cites-tree-clean	013NEJL2QqjuMHFXtid3QVoP	24	
+C	2803	norecord	stale-cites-tree-clean	013NEJL2QqjuMHFXtid3QVoP	24	
+C	2823	norecord	outbox-notes-land	013NEJL1WxZbpnc5SKQrh7Vu	22	
+C	2820	norecord	batch-build-log-kept	013NEJL3zeWnjihGXaU7aKYE	22	
+C	2844	norecord	ruling-challenge-passes	013NEJL24eof56PM2RAz6pr5	22	
+C	2836	norecord	stop-checks-one-message	013NEJL4QKJEXCPFKNChi3mB	21	
+C	3033	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	21	
+C	2856	norecord	handoff-agent-write	013NEJL1JNXobe23MsLjrU1N	21	
+C	2806	norecord	fan-code-handoffs	013NEJL1yBtihFeuHoX5et11	21	
+C	2858	norecord	one-term-warn-lint	013NEJL32XbRdWaA6Nf7jubJ	21	
+C	2865	norecord	waiting-export-miss-cloud	013NEJKzM4ywhg82unReWfRc	21	
+C	3035	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	21	
+C	2854	norecord	stood-pick-needs-review	013NEJL2c98rNLBG6EyLYefM	21	
+C	2874	norecord	review-rounds-rework	013NEJL1VU2ZKfNGkQ1nUmUA	21	
+C	2879	norecord	waiting-export-miss-cloud	013NEJKzM4ywhg82unReWfRc	21	
+C	2877	norecord	msg-claims-vs-git	013NEJL2GesEFYxFM4NrLLsj	21	
+C	2880	norecord	agent-git-reset-refused	013NEJL46PYA75fwZfWCFZ2k	20	
+C	2887	norecord	sim-boot-screen-check	013NEJL1Lig4ktvop4WSuEDo	20	
+C	2894	norecord	both-session-starts-judged	013NEJL36rYhtALFcXCMgJm9	20	
+C	2876	norecord	stamp-guard-send-message	013NEJL2w2TGYjZFexEa6uyw	20	
+C	2895	norecord	repo-typecheck-hook	013NEJL4Hzo9q8JWrXewpwZn	20	
+C	2890	norecord	mailbox-all-messages	013NEJKysjgGZZveHbcJLZXR	20	
+C	3030	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	20	
+C	2883	norecord	debt-retire-red-on-birth	013NEJL2aszZyqEG4K9Ue77v	20	
+C	2907	norecord	waiting-export-miss-cloud	013NEJKzM4ywhg82unReWfRc	20	
+C	2870	norecord	pick-reaches-page	013NEJL4M2MdWXUDjYUVC9Cf	20	
+C	2918	norecord	ask-alone-push-not-force	013NEJKziJAoTManBBvBmHKR	20	
+C	2919	norecord	page-usage-counters	013NEJL3FiqXo4K73sAQvJTU	20	
+C	2893	norecord	two-drop-leaves-queue	013NEJKzyJKNjy9HjM9PBiXJ	20	
+C	2930	norecord	guard-run-slow-long-command	013NEJKyhwpBmsKUD7sNXM6b	20	
+C	2864	norecord	stop-checks-one-message	013NEJL4QKJEXCPFKNChi3mB	20	
+C	2900	norecord	express-pass-owner-quotes	013NEJKygJbMN4tsZrzb9rkH	20	
+C	2933	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	20	
+C	2923	norecord	artifact-guard-matcher-names	013NEJL3MTsrgkbccEjnK2Lf	20	
+C	2924	norecord	artifact-guard-matcher-names	013NEJL3MTsrgkbccEjnK2Lf	20	
+C	2925	norecord	artifact-guard-matcher-names	013NEJL3MTsrgkbccEjnK2Lf	20	
+C	2926	norecord	artifact-guard-matcher-names	013NEJL3MTsrgkbccEjnK2Lf	20	
+C	2847	norecord	lane-lint-once-fail-fast	013NEJL1GDo9M4LUHh6W7GiA	20	
+C	2949	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	20	
+C	2944	norecord	brief-reads-owner-rulings	013NEJL16gZbEWWpzAFUa6zA	20	
+C	2952	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	19	
+C	2953	norecord	page-wakes-and-relays	013NEJL2bhraKVrHgFRGTdBk	19	
+C	2955	norecord	page-wakes-and-relays	013NEJL2bhraKVrHgFRGTdBk	19	
+C	2958	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	19	
+C	2942	norecord	ci-merge-install-split	013NEJL2f2X9djC8H2WDPV8f	19	
+C	2946	norecord	subagent-handback-skipped	013NEJKz3tct1ZrNTFgaMh68	19	
+C	2956	norecord	guard-pr-runs-windows-shards	013NEJL1wir1gAvUGR8icyMx	19	
+C	2960	norecord	notes-1796-fix-lines	013NEJL3wKqWLbdyQ3Vo58Zv	19	
+C	2982	norecord	page-narrow-word-breaks	013NEJKz7J11azn1cv25bJnA	19	
+C	2962	norecord	agent-commit-file-scope	013NEJL3b3SsMkH5JgD9EkGY	19	
+C	2965	norecord	page-feedback-to-template	013NEJKz1uomZF2kLUaSau16	19	
+C	2967	norecord	agent-commit-file-scope	013NEJL3b3SsMkH5JgD9EkGY	19	
+C	2938	norecord	challenger-page-against	013NEJKyzxWH4raRC2uJ8w6Z	19	
+C	2968	norecord	run-dir-unclosed-tail	013NEJL1q8DiVxUkdLtZZJfH	19	
+C	2972	norecord	busy-file-stacked-batches	013NEJL2dnN9V67hMqGyZnGi	19	
+C	2941	norecord	guard-false-alarm-cull	013NEJL1zDA7EF7cqDccCwhe	19	
+C	2959	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	19	
+C	2977	norecord	glossary-same-local-cloud	013NEJL1B3zYbEnWTPFokbyB	19	
+C	2950	norecord	orchestrator-mixed-merge-refused	013NEJL1oCt2U9LgL9z8VZHs	19	
+C	2850	norecord	owner-override-one-route	013NEJL1ymdMFYoj4wQG9oUR	19	
+C	2975	norecord	convert-time-pinned-tests	013NEJL4PjaEKZtDccHU8fNp	19	
+C	2939	norecord	batch-order-by-pr-number	013NEJL4BjGNdP7cqxacEeJh	19	
+C	2973	norecord	brief-says-owner-unread	013NEJL2aRhUfdNWhTUtdKUH	19	
+C	2991	norecord	gh-get-timeout-retry	013NEJL2UayGumX3LbxC3R4h	19	
+C	2987	norecord	challenger-page-against	013NEJKyzxWH4raRC2uJ8w6Z	18	
+C	3036	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	18	
+C	2981	norecord	answer-kept-on-close	013NEJL2BN8bfXdv1Wcvuhe8	18	
+C	2929	norecord	widening-question-not-asked	013NEJKzNDgCKgjct5ZNZtN7	18	
+C	2881	norecord	habit-is-not-a-guard	013NEJL4HbEaurThYorsKFGD	18	
+C	1533	norecord	page-checks-reach-triage	013NEJL1hWKypxcXGkd6zWH5	18	
+C	3001	norecord	records-page-guard-derived-rows	013NEJL4SwoVeA1YEqmzm7s6	18	
+C	2976	norecord	filing-check-reads-page	013NEJKzzSH1qHLmMz7RZ81z	18	
+C	3005	norecord	unknown-reads-lint-linux-only	013NEJL1FmGQvNLgjrnoxD7B	18	
+C	2983	norecord	lane-start-checks-open-pr	013NEJKzPPsyrrhA9scdu94P	18	
+C	3006	norecord	page-wakes-and-relays	013NEJL2bhraKVrHgFRGTdBk	18	
+C	3007	norecord	review-record-merge-main-line	013NEJL41UsE1t6pdjB6txHg	18	
+C	3018	norecord	auto-merge-refused	013NEJL3sJVXCG9wJYPEN1Az	18	
+C	3015	norecord	fetch-head-shared-race	013NEJL3oLsFPYiqVnS23VHA	17	
+C	2984	norecord	repo-protected-paths	013NEJKz3gxQMF8KNxLMDjwX	17	
+C	3020	norecord	cloud-hooks-stale-copy	013NEJKzeHKvB14C6TLq5434	17	
+C	3037	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	17	
+C	3019	norecord	lane-push-frozen-in-batch	013NEJL1jcpgHgrBHbJCjDnH	17	
+C	3012	norecord	stall-watch-clock-pins	013NEJKzGpEd7uzEyZovr5Ed	17	
+C	3038	norecord	page-wakes-and-relays	013NEJL2bhraKVrHgFRGTdBk	15	
+C	3039	norecord	notes-fix-reverify-small	013NEJKzkcpx9EGjr8ctAJbs	15	
+C	3040	norecord	page-wakes-and-relays	013NEJL2bhraKVrHgFRGTdBk	15	
+C	3029	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	15	
+C	3028	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	15	
+C	3034	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	15	
+C	3031	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	15	
+C	3032	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	14	
+C	3043	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	14	
+C	3056	norecord	guard-false-alarm-cull	013NEJL1y8fceJxUrwF8GxWY	13	
+C	3057	norecord	consultant-role-record	013NEJKzRMT3wY4q7PXYMjLM	13	
+C	3053	norecord	ruled-step-coordinator-queue	013NEJL4N5Mcp2TbdftjWeCa	13	
+C	3061	norecord	decision-watch-finds-transcript	013NEJL1SWvL24cv7TG6nxAT	13	
+C	3058	norecord	child-repo-gap	013NEJL2DzPjsc2YdSpi9ZxQ	12	
