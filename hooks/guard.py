@@ -6711,8 +6711,8 @@ def readonly_write_hit(command: str, cwd: str, session: str, remote: bool = Fals
 COORDINATOR_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo", "records-index", "design", "scorecard")
 COORDINATOR_SCOPE_REASON = (
     "Rule (Roles) coordinator-scope: a coordinator briefs lanes and writes records. It does not change a repository's "
-    "code, settings or instructions itself (decision session-tiers, a coordinator stays in its tier and a guard "
-    "enforces it). Remedy: brief a lane session to make this change, with the files and the check that proves it. "
+    "code, settings or instructions itself (decision session-tiers, a coordinator stays in its session role and a guard "  # glossary-ok: session-tiers is the decision's file name
+    "enforces it). Remedy: brief a lane to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
 # The agent types a coordinator may spawn, compared exactly. Plan, Explore and claude-code-guide gather facts and the
@@ -6720,13 +6720,13 @@ COORDINATOR_SCOPE_REASON = (
 COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide", REFUTER_ROLE)
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles) coordinator-scope: a coordinator briefs lanes and runs no build or review agent of its own "
-    "(decision session-tiers: a spawn of any type but Plan, Explore, claude-code-guide and refuter is refused). "
-    "Remedy: brief a lane session to do this work, with the files and the check that proves it."
+    "(decision session-tiers: a spawn of any type but Plan, Explore, claude-code-guide and refuter is refused). "  # glossary-ok: session-tiers is the decision's file name
+    "Remedy: brief a lane to do this work, with the files and the check that proves it."
 )
 COORDINATOR_MERGE_REASON = (
     "Rule (Roles) coordinator-scope: in a coordinator build only the batch runner merges "
-    "(decision session-tiers, only the batch runner runs a merge in a coordinator build). "
-    "Remedy: hand the branch, head and PR to the batch runner, or brief a lane session to do it."
+    "(decision session-tiers, only the batch runner runs a merge in a coordinator build). "  # glossary-ok: session-tiers is the decision's file name
+    "Remedy: hand the branch, head and PR to the batch runner, or brief a lane to do it."
 )
 # The host's tools that merge for a coordinator: the merge tool, and the one that arms a merge to land later. The arming
 # tool stays out of MERGE_TOOLS, so merge-checks does not judge it.
@@ -6843,7 +6843,7 @@ def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:
         return False
 
 
-def _own_tag_tier(transcript) -> str:
+def _own_tag_role(transcript) -> str:
     """'coordinator' when the session's own cs-build tag names it, else '': the tags of the newest get_session result
     for the session's own id plus what the session's own later set_session_tags calls added, read from the transcript in
     one pass. A transcript with neither reads '' (the /clear gap; debt coordinator-tag-tier-fails-open)."""
@@ -6877,7 +6877,7 @@ def _cloud_coordinator(payload) -> bool:
     if key not in _COORDINATOR_ROLE:
         recorded = read_recorded_role()
         _COORDINATOR_ROLE[key] = (recorded == "coordinator" if recorded is not None
-                                  else _own_tag_tier(transcript) == "coordinator")
+                                  else _own_tag_role(transcript) == "coordinator")
     return _COORDINATOR_ROLE[key]
 
 

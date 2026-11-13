@@ -1137,19 +1137,19 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
     allow rule has no classifier behind it and the guard-wide crash path fails open."""
     for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+        role = role_call_of(segment) if segment.strip() else None
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if role in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + role in tags:
                     continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
