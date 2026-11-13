@@ -1787,13 +1787,16 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
         return CROSS_REPO_UPDATE_REASON if "checked_with" in data else None
     if _WAITING_PAGE_DIR not in sys.path:
         sys.path.append(_WAITING_PAGE_DIR)
-    from stale_pages import REPO_NAME
+    try:
+        from stale_pages import REPO_NAME
+    except ImportError:  # a checkout with no skills/waiting-page folder: the owner/name shape is unread, the compares below still run
+        REPO_NAME = None
     repo = data.get("repo")
     own = "Add `repo`: \"%s\" for a question on this page's own repo, or the repo the question is about." % page_repo \
         if page_repo else "Add `repo` (owner/name): the repo the question is about."
     if not repo:
         return "`repo` is missing. " + own
-    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and not repo.lower().endswith(".git")):
+    if not (isinstance(repo, str) and (REPO_NAME is None or REPO_NAME.fullmatch(repo)) and not repo.lower().endswith(".git")):
         return "`repo` is not owner/name. " + own
     if not page_repo or repo.lower() == page_repo.lower():
         return None

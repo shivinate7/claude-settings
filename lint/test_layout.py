@@ -1659,5 +1659,54 @@ class MockupHomes(Tree):
         self.refuses("docs/design")
 
 
+class WaitingCollections(Tree):
+    """The waiting page's collections have one home: export_page.COLLECTIONS (skill waiting-page). layout.py reads that
+    tuple and holds no copy of it, so a collection added there reaches the layout and the export together. guard.py
+    imports layout on every tool call, so the read is lazy: importing layout reads no skill file, and a missing skill
+    folder is a LayoutError on the read that names the folder."""
+
+    def copy_layout_only(self):
+        """A tree whose lint/ holds layout.py and its JSON, and no skills folder."""
+        os.makedirs(os.path.join(self.tree, "lint"), exist_ok=True)
+        for name in ("layout.py", "layout.json"):
+            shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
+        return os.path.join(self.tree, "lint", "layout.py")
+
+    def isolate_skill_import(self):
+        """No earlier import answers for export_page, and sys.path names no waiting-page folder: the lazy import can
+        only find what the layout itself names. Both patches stop at cleanup."""
+        modules = mock.patch.dict(sys.modules)
+        modules.start()
+        self.addCleanup(modules.stop)
+        sys.modules.pop("export_page", None)
+        path = mock.patch.object(sys, "path", [p for p in sys.path if "waiting-page" not in p])
+        path.start()
+        self.addCleanup(path.stop)
+        self.assertIsNone(importlib.util.find_spec("export_page"), "scope: export_page is still importable here")
+
+    def test_layout_waiting_collections_is_the_export_pages_tuple(self):
+        layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        skill = os.path.join(LINT, "..", "skills", "waiting-page")
+        with mock.patch.dict(sys.modules), mock.patch.object(sys, "path", [skill] + sys.path):
+            sys.modules.pop("export_page", None)
+            import export_page  # noqa: E402  the one home of the collection list
+            self.assertIs(layout.WAITING_COLLECTIONS, export_page.COLLECTIONS,
+                          "lint/layout.py WAITING_COLLECTIONS is a copy of the list, not export_page.COLLECTIONS")
+
+    def test_a_missing_skill_folder_is_a_layout_error_on_the_lazy_read(self):
+        path = self.copy_layout_only()
+        self.isolate_skill_import()
+        layout = load("layout_lazy_under_test", path)
+        with self.assertRaises(layout.LayoutError) as caught:
+            layout.WAITING_COLLECTIONS
+        self.assertIn("waiting-page", str(caught.exception), "the LayoutError does not name the skill folder")
+
+    def test_importing_layout_reads_no_skill_file(self):
+        path = self.copy_layout_only()
+        self.isolate_skill_import()
+        load("layout_import_under_test", path)
+        self.assertNotIn("export_page", sys.modules, "importing layout.py read the skill's export_page.py")
+
+
 if __name__ == "__main__":
     unittest.main()
