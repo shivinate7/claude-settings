@@ -463,8 +463,13 @@ def _first_body_line(text):
     """The first line after the header block, cleaned and cut to BODY_LIMIT. Message text is another session's, and it
     lands in this session's context: control, C1 and direction characters become spaces so the line stays one plain line,
     and a double quote becomes a single quote so the text cannot close the quotes the wake line puts around it."""
-    body = text.partition("\n\n")[2]
-    line = next((row for row in body.splitlines() if row.strip()), "")
+    # splitlines() treats LF, CRLF and CR alike, so a message saved with Windows line endings still has its blank row
+    # and no CR reaches the wake line.
+    rows = iter(text.splitlines())
+    for row in rows:
+        if not row.strip():
+            break
+    line = next((row for row in rows if row.strip()), "")
     line = re.sub(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]", " ", line).replace('"', "'")
     return line.strip()[:BODY_LIMIT]
 
