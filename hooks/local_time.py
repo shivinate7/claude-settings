@@ -10,6 +10,7 @@ Modes:
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
+- PostToolUse: After an AskUserQuestion call, saves the owner's answer to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: YYYY-MM-DD 21:40 CDT (UTC-05:00) Later times: run ~/.claude/bin/now-central, never from memory."
 The pointer follows the time line on the same line. The inbox stamp and `line()` carry no pointer. The helper bin/now-central prints later times from this module's clock.
@@ -27,6 +28,14 @@ After a save, capture writes `<session_id>.inbox.repo` once, when the payload cw
 repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
 one small file per session.
+A PostToolUse payload on stdin (hook_event_name PostToolUse, no flag) is the question box: for an AskUserQuestion
+call the owner's answers, cut from the tool's result on the exact question strings of tool_input.questions with the
+question text left out, are saved as one block like a typed message (the same fence, stamp and repo sidecar), with
+no time line. A trailing `user notes:` is kept with its answer. An empty result and any other tool save nothing; a
+result that does not hold each question's answer is not saved and the session is told. A relay of the
+owner's words from another session is not saved: it arrives in the `<cross-session-message` frame a peer's own
+send uses, and no marker tells the two apart. Cost: one process start per AskUserQuestion call (this file, from
+its PostToolUse entry in settings.json); the capture itself starts no further process.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
 messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
@@ -337,6 +346,170 @@ def page_note(raw):
             "additionalContext": not_saved("page note", "; ".join(failures))}}))
 
 
+NOTES_WORD = "user notes:"  # the words that open the owner's own notes after an answer in the box's result
+
+
+def _questions(hook):
+    """The question texts of an AskUserQuestion call, in order, from its tool_input.questions."""
+    inp = hook.get("tool_input")
+    found = inp.get("questions") if isinstance(inp, dict) else None
+    return [q["question"] for q in found if isinstance(q, dict) and isinstance(q.get("question"), str)
+            and q["question"]] if isinstance(found, list) else []
+
+
+NOTES_OPEN = re.compile(r'"[.,]?\s*' + re.escape(NOTES_WORD))  # the answer's closing quote, then the owner's notes
+
+
+def _answer_in(span):
+    """The answer in one question's span of the result, the text after its `"<question>"="`: the span runs to the
+    answer's closing quote, then the tool's own words (`", ` or a closing sentence). Those are dropped, except the
+    owner's notes, from NOTES_WORD on. The notes are the owner's words and may hold quotes, so when they follow the
+    closing quote the cut is at that quote and the notes are kept whole. Else the cut is at the span's last quote.
+    None when the span holds no closing quote."""
+    opened = NOTES_OPEN.search(span)
+    if opened:
+        return span[:opened.start()] + "\n" + span[span.index(NOTES_WORD, opened.start()):].rstrip(" ,")
+    cut = span.rfind('"')
+    return None if cut < 0 else span[:cut]
+
+
+def _cut_on_questions(text, questions):
+    """The answers in `text`, cut on the exact `"<question>"="` string of each question in order, so an answer or a
+    question that holds `", "` or `"="` is never cut inside. None when a question's string is not in the text."""
+    marks, at = [], 0
+    for q in questions:
+        mark = '"%s"="' % q
+        start = text.find(mark, at)
+        if start < 0:
+            return None
+        at = start + len(mark)
+        marks.append((start, at))
+    answers = []
+    for n, (_, begin) in enumerate(marks):
+        answer = _answer_in(text[begin:marks[n + 1][0] if n + 1 < len(marks) else len(text)])
+        if answer is None:
+            return None
+        answers.append(answer)
+    return answers
+
+
+def _cut_on_marks(text):
+    """The answers in `text` cut at each `"="` alone, for a one-question result that does not hold the payload's question
+    string. A bandaid: an answer that holds `"="` is cut wrong here. None when the text holds no `"="`."""
+    parts = text.split('"="')
+    if len(parts) < 2:
+        return None
+    answers = []
+    for n, part in enumerate(parts[1:], 1):
+        if n < len(parts) - 1:
+            cut = part.rfind('", "')
+            if cut >= 0:
+                answers.append(part[:cut])
+        else:
+            answer = _answer_in(part)
+            if answer is not None:
+                answers.append(answer)
+    return answers
+
+
+def _answer_value(value):
+    """One answer of the dict form as text: a string, an object with a string `answer` field, or a list of those
+    (a multi-select) joined by `, `. None when it is none of these."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("answer"), str):
+        return value["answer"]
+    if isinstance(value, (list, tuple)):
+        parts = [_answer_value(v) for v in value]
+        if None not in parts:
+            return ", ".join(parts)
+    return None
+
+
+def _key_of(question, given, questions):
+    """The key of `given` that answers `question`: the exact text, else the one other key that differs only by
+    surrounding whitespace, when no second key or question makes that match ambiguous. None when there is none."""
+    if question in given:
+        return question
+    same = [k for k in given if k not in questions and k.strip() == question.strip()]
+    twins = [q for q in questions if q.strip() == question.strip()]
+    return same[0] if len(same) == 1 and len(twins) == 1 else None
+
+
+def answers_of(hook):
+    """`(answers, unread)` for an AskUserQuestion result: one answer text per question, and the count of answers in a
+    form that could not be read. `answers` is None when the result holds none. The result is a dict `{"answers": {<question>: <answer>}}`, or text that holds `"<question>"="<answer>"` per question.
+    Text is cut on the exact question strings of tool_input.questions (_cut_on_questions); a trailing `user notes:`
+    is the owner's own words and is kept with its answer. The question text is the session's words, never kept."""
+    response, questions = hook.get("tool_response"), _questions(hook)
+    if isinstance(response, dict) and isinstance(response.get("answers"), dict):
+        given = response["answers"]
+        keys = [_key_of(q, given, questions) for q in questions]
+        keys = [k for k in keys if k is not None]
+        if not keys:
+            keys = list(given)
+        answers = [_answer_value(given[k]) for k in keys]
+        stray = [k for k in given if k not in keys]  # an answer under a key that is no question: announced, not dropped
+        unread = answers.count(None) + sum(1 for k in stray if _answer_value(given[k]) != "")
+        return [a for a in answers if a is not None and a.strip()], unread
+    texts = list(_strings(response))
+    # The `"="` cut only for one question or none: with two or more, a cut inside a question's `", "` would save its words.
+    cuts = ([lambda t: _cut_on_questions(t, questions)] if questions else []) + (
+        [_cut_on_marks] if len(questions) <= 1 else [])
+    for cut in cuts:
+        for text in texts:
+            answers = cut(text)
+            if answers is not None:
+                return [a for a in answers if a.strip()], 0
+    return None, 0
+
+
+def question_answer(hook):
+    """PostToolUse on AskUserQuestion: saves the owner's answers as one inbox block, like a typed message
+    (decision owner-feedback-inbox, R27). Only the answers are saved, never the question text. An empty answer
+    saves nothing. A result in a form it cannot read is not saved, and the session is told so."""
+    paths = inbox_paths(hook.get("session_id"))
+    response = hook.get("tool_response")
+    holds_answers = isinstance(response, dict) and bool(response.get("answers")) and isinstance(
+        response["answers"], dict)  # an answer with no string in it still must be saved or announced
+    if paths is None or not (holds_answers or any(s.strip() for s in _strings(response))):
+        return
+    answers, unread = answers_of(hook)
+    if answers is None:
+        err = "the result did not hold each question's answer"
+    elif unread:  # save the readable answers, and still tell the session that some were not
+        err = "%d of the answers were in a form it cannot read" % unread
+        if answers:
+            err = save_message(paths[0], line()[len("Local time: "):], "\n".join(answers)) or err
+    elif not answers:
+        return
+    else:
+        err = save_message(paths[0], line()[len("Local time: "):], "\n".join(answers))
+    if err is not None:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                                 "additionalContext": not_saved("question answer", err)}}))
+        return
+    try:
+        bind_repo(hook.get("session_id"), hook.get("cwd"))
+    except (OSError, ValueError) as e:
+        print("local_time: repo sidecar: %s" % e, file=sys.stderr)
+
+
+def tool_result(raw):
+    """The hook object of a PostToolUse payload in `raw`, else None: the payload alone says this is no prompt."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return None
+    return hook if isinstance(hook, dict) and hook.get("hook_event_name") == "PostToolUse" else None
+
+
+def question_box(hook):
+    """Saves the answer of an AskUserQuestion call; any other tool's result saves nothing."""
+    if hook.get("tool_name") == "AskUserQuestion":
+        question_answer(hook)
+
+
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
@@ -395,18 +568,22 @@ def main(argv):
         if "--page-note" in argv:
             page_note(sys.stdin.buffer.read())
             return 0
-        now = clock()
-        stamp = text = line(lambda: now)
-        text += NOW_CENTRAL_POINTER
         # `--subagent` is the flag's old name, kept until OLD_FLAG_ENDS for a session that read its
         # hook list before the rename. Delete it on that day.
         agent = "--agent" in argv or "--subagent" in argv
+        raw = b"" if agent else sys.stdin.buffer.read()
+        result = tool_result(raw)
+        if result is not None:  # a PostToolUse payload: the question box's answer, no time line
+            question_box(result)
+            return 0
+        now = clock()
+        stamp = text = line(lambda: now)
+        text += NOW_CENTRAL_POINTER
         if agent:
             text = json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                                       "additionalContext": text}})
         print(text)
         if not agent:
-            raw = sys.stdin.buffer.read()
             try:
                 capture(raw, stamp[len("Local time: "):])
             except Exception as e:  # a capture error never stops the grant

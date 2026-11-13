@@ -88,6 +88,7 @@ FS_NAME_CHAR = re.compile(r"[A-Za-z0-9_.\-]")
 
 HOME_RE = re.compile(r"^\s*[-*]?\s*home:\s*(.+?)\s*$", re.IGNORECASE)
 PROCESS_ONLY = "process-only"
+MAIN_REFS = ("refs/heads/main", "refs/remotes/origin/main")  # the refs that count as "on main"
 
 REMEDY = (
     "Each written section needs a home: line, plain text, in the section body: "
@@ -384,46 +385,60 @@ def _list_refs(cwd):
     return [line for line in run.stdout.splitlines() if line.strip()]
 
 
-def _resolve_value(cwd, refs, git_path):
-    """True when ANY ref's tree holds a blob (never a tree/directory) at `git_path`.
+def _holding_refs(cwd, refs, git_path):
+    """The refs, in order, whose tree holds a blob (never a tree/directory) at `git_path`.
 
     One `git cat-file --batch-check=%(objecttype)` call answers for every ref at once, fed
     `<ref>:<path>` lines on stdin, rather than one process per ref (the performance fix this
-    exists for). The custom format prints the bare type (`blob`, `tree`, ...) and nothing else
-    for a found object, so a whole-line `== "blob"` test is exact. Plain `--batch-check`
-    prints `<ref>:<path> missing` for a missing object, echoing the input verbatim -- a value
-    like `nothere blob` would then put `blob` in that ECHOED text, and splitting the line by
-    whitespace and reading field [1] would misread that as a resolved blob. The custom format
-    still echoes `<input> missing` for a miss, so the same value still ends a line in
-    `... missing`, never in the four bare letters `blob` alone; only a real found blob does.
-    A non-zero exit, or an object of any type but `blob` or missing outright, reads as "this
-    value does not resolve" -- never a stand-down: see the module docstring.
+    exists for). It prints one line per input line, in order, so line n is ref n. The custom
+    format prints the bare type (`blob`, `tree`, ...) and nothing else for a found object, so a
+    whole-line `== "blob"` test is exact. Plain `--batch-check` prints `<ref>:<path> missing` for
+    a missing object, echoing the input verbatim -- a value like `nothere blob` would then put
+    `blob` in that ECHOED text, and splitting the line by whitespace and reading field [1] would
+    misread that as a resolved blob. The custom format still echoes `<input> missing` for a miss,
+    so the same value still ends a line in `... missing`, never in the four bare letters `blob`
+    alone; only a real found blob does. A non-zero exit, or an object of any type but `blob` or
+    missing outright, reads as "this value does not resolve" -- never a stand-down: see the
+    module docstring.
     """
     if not refs:
-        return False
+        return []
     stdin_text = "".join("%s:%s\n" % (ref, git_path) for ref in refs)
     run = _run_git(cwd, ["cat-file", "--batch-check=%(objecttype)"], input_text=stdin_text)
     if run.returncode != 0:
-        return False
-    return any(line.strip() == "blob" for line in run.stdout.splitlines())
+        return []
+    return [ref for ref, line in zip(refs, run.stdout.splitlines()) if line.strip() == "blob"]
 
 
-def value_resolves(value, cwd):
-    """True when a home: value resolves. See the module docstring for what counts."""
-    if value == PROCESS_ONLY:
-        return True
+def _resolve_value(cwd, refs, git_path):
+    """True when ANY ref's tree holds a blob at `git_path`. See _holding_refs."""
+    return bool(_holding_refs(cwd, refs, git_path))
+
+
+def value_refs(value, cwd, ref_lists=None):
+    """The refs whose tree holds the home value as a blob; [] when none does or the value is refused.
+    The same two git reads as value_resolves, so a caller that also needs to know which refs hold it
+    (the feedback log's close: "on main") starts no further process. `ref_lists` is a dict the caller
+    keeps for one run, {cwd: refs}: the refs are listed once per repo, not once per value."""
     if os.path.isabs(value):
-        return False  # every absolute path is refused, briefs included
+        return []  # every absolute path is refused, briefs included
     normalized = os.path.normpath(value)
-    if normalized in (".", ".."):
-        return False
-    if normalized.startswith(".." + os.sep):
-        return False  # leaves the repository tree
+    if normalized in (".", "..") or normalized.startswith(".." + os.sep):
+        return []  # leaves the repository tree
     if not cwd or not os.path.isdir(cwd) or not is_git_work_tree(cwd):
-        return False
+        return []
     git_path = normalized.replace(os.sep, "/")
-    refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
-    return _resolve_value(cwd, refs, git_path)
+    refs = None if ref_lists is None else ref_lists.get(cwd)
+    if refs is None:
+        refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
+        if ref_lists is not None:
+            ref_lists[cwd] = refs
+    return _holding_refs(cwd, refs, git_path)
+
+
+def value_resolves(value, cwd, ref_lists=None):
+    """True when a home: value resolves. See the module docstring for what counts. `ref_lists`: see value_refs."""
+    return value == PROCESS_ONLY or bool(value_refs(value, cwd, ref_lists))
 
 
 # ------------------------------------------------------------------ per-file check

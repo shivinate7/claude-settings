@@ -565,7 +565,8 @@ def run_reorient_cleared(payload):
 
 def inbox_note(session_id):
     """The owner feedback inbox's "After compaction" line (decision owner-feedback-inbox): the open
-    item ids (ruling, task, standing) from <session_id>.inbox.md. "" when there is nothing to say.
+    item ids (ruling, task, standing) from <session_id>.inbox.md that still need work: a ruling or task
+    whose file home main holds is left out. "" when there is nothing to say. It writes no file.
     Never raises: the reorient message must still print."""
     try:
         import feedback_guard
@@ -573,11 +574,17 @@ def inbox_note(session_id):
         paths = local_time.inbox_paths(session_id)
         if paths is None or not os.path.exists(paths[0]):
             return ""
-        with open(paths[0], encoding="utf-8") as f:
-            ids = feedback_guard.open_ids(feedback_guard.parse(f.read()))
+        with open(paths[0], encoding="utf-8", newline="") as f:
+            text = f.read()
+        ids = feedback_guard.open_ids(feedback_guard.parse(text))
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
         return ""
+    try:  # an item whose home main holds is settled: it needs no work, so the note leaves it out (R27)
+        homes = feedback_guard.Homes(None, feedback_guard.session_repo(session_id))
+        ids = feedback_guard.needs_work_ids(homes, text)
+    except Exception as e:  # unread homes show every open id, never fewer
+        sys.stderr.write("precompact_handoff: settled items not read: %s\n" % e)
     if not ids:
         return ""
     return (" Open feedback items: %s. Keep each standing item in the handoff, and give"

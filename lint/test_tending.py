@@ -25,6 +25,8 @@ Shapes this file assumes, pinned in one place (the adapter `verdicts_of`, and th
   - command line: python3 lint/tending.py --point P [--store S] [--root R]. Exit 1 for a live store with a stale
     item that its close step cannot fix, or for a malformed contract. Exit 0 otherwise.
 """
+import ast
+import builtins
 import contextlib
 import importlib.util
 import io
@@ -281,6 +283,52 @@ class ContractTests(unittest.TestCase):
                 external = where.startswith("external:") and len(where) > len("external:")
                 self.assertTrue(where in kinds or external,
                                 "store %s: where %r is neither a layout kind nor external:<name>" % (store, where))
+
+
+FEEDBACK_LINES = (  # the real line forms of a feedback-log item (hooks/feedback_guard.py, decision owner-feedback-inbox)
+    ("- fb-0958-1 [ruling] -> decisions/a-ruling.md", "fb-0958-1"),
+    ("- fb-0958-2 [task] -> debts/a-task.md repeats roadmap:wheel-speed", "fb-0958-2"),
+    ("- fb-0958-3 [ruling] -> decisions/a-ruling.md [closed]", "fb-0958-3"),
+    ("- fb-0958-4 [task] -> step:wheel-speed", "fb-0958-4"),
+)
+
+
+class FeedbackLogContractTests(unittest.TestCase):
+    """The feedback log is the first live store (plan prose-tending-contract, step feedback-log-tends-itself, R27)."""
+
+    def feedback_entry(self):
+        entry = layout_data().get("tending", {}).get("feedback-log")
+        self.assertIsNotNone(entry, "lint/layout.json's tending key has no feedback-log entry")
+        return entry
+
+    def test_feedback_log_is_live(self):
+        state = self.feedback_entry().get("state")
+        self.assertEqual(state, "live", "the feedback-log store is %r, not live: no call point runs it" % state)
+
+    def test_feedback_log_runs_from_stop_and_compact(self):
+        points = sorted(self.feedback_entry().get("runs-from", []))
+        self.assertEqual(points, ["compact", "stop"],
+                         "the feedback-log store runs from %r, not from stop and compact" % points)
+
+    def test_feedback_log_item_regex_reads_the_real_line_form(self):
+        item = self.feedback_entry().get("item", "")
+        for line, want in FEEDBACK_LINES:
+            with self.subTest(line=line):
+                found = re.search(item, line)
+                got = found.group(1) if found and found.groups() else None
+                self.assertEqual(got, want, "the item regex reads %r as %r, not %r" % (line, got, want))
+
+
+class FeedbackLogCommandLineTests(unittest.TestCase):
+    """The runner's command line reads the feedback log at stop and at compact: the caller supplies its text."""
+
+    def test_feedback_log_is_read_at_stop_and_compact(self):
+        root = make_git_repo({"README.md": "x\n"})
+        for point in ("stop", "compact"):
+            with self.subTest(point=point):
+                result = run_cli(make_tree(), root, point=point, store="feedback-log")
+                self.assertIn("tending: unknown feedback-log: caller supplies text", result.stdout,
+                              "at %s the runner printed %r, not the caller-supplies line" % (point, result.stdout))
 
 
 # ---- Runner: the verdicts, the close step, the command line, and the cost. --------------------------------
@@ -701,6 +749,49 @@ class ResolverAgreementTests(unittest.TestCase):
                 got = verdicts_of(runner, entry("home-held"), "- P1 a path. Home: %s\n" % value, sub)
                 self.assertEqual(got, {"P1": expected}, "Home: %s from a subfolder: the runner says %r, the resolver "
                                  "says %r" % (value, got.get("P1"), expected))
+
+
+def settling_names(path, name):
+    """The names a module-level `name` is built from, read with ast: each Name and Attribute in its value, builtins
+    left out. None when the module assigns no `name` at its top level."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            used = {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+            used |= {n.attr for n in ast.walk(value) if isinstance(n, ast.Attribute)}
+            return used - set(dir(builtins))
+    return None
+
+
+class SettlingKindsOneHomeTests(unittest.TestCase):
+    """Ruling: the kinds that settle on their file home have one home. feedback_guard's SETTLING_PREFIXES (the Stop's
+    `[kind]` prefixes) and the runner's SETTLING_KINDS (the bare kind words) name the same kinds, and one of the two is
+    built from the other, or both are built from one shared name. Two literal lists agree until one of them is edited."""
+
+    def test_the_two_lists_name_the_same_kinds(self):
+        feedback, runner = hook_module("feedback_guard"), load_runner()
+        self.assertTrue(feedback.SETTLING_PREFIXES, "scope: feedback_guard.SETTLING_PREFIXES is empty")
+        prefixes = tuple(p.strip("[]") for p in feedback.SETTLING_PREFIXES)
+        self.assertEqual(prefixes, tuple(runner.SETTLING_KINDS),
+                         "settling kinds: the Stop's prefixes name %r, the runner's kinds name %r"
+                         % (prefixes, tuple(runner.SETTLING_KINDS)))
+
+    def test_one_list_is_built_from_the_other_or_both_from_one_source(self):
+        kinds = settling_names(runner_path(), "SETTLING_KINDS")
+        prefixes = settling_names(hook_module("feedback_guard").__file__, "SETTLING_PREFIXES")
+        self.assertIsNotNone(kinds, "scope: lint/tending.py assigns no module-level SETTLING_KINDS")
+        self.assertIsNotNone(prefixes, "scope: hooks/feedback_guard.py assigns no module-level SETTLING_PREFIXES")
+        one_names_the_other = "SETTLING_PREFIXES" in kinds or "SETTLING_KINDS" in prefixes
+        self.assertTrue(one_names_the_other or bool(kinds & prefixes),
+                        "two literal homes: lint/tending.py SETTLING_KINDS and hooks/feedback_guard.py "
+                        "SETTLING_PREFIXES are not built from each other or from one shared name")
 
 
 class RuleHomeTests(unittest.TestCase):

@@ -198,8 +198,19 @@ Page note: hooks/local_time.py `--page-note`, a mode of the same file. A PostToo
   else saves, and a call that saves nothing writes no file. The mode prints no time line. A failed
   save prints one PostToolUse hookSpecificOutput JSON that says the note was not saved.
 
+Closing (R27, decision owner-feedback-inbox): the Stop closes an open ruling or task item whose home holds on
+  main, by appending ` [closed]` to its line in the same rewrite that marks a repeat. A question, a standing
+  item, an unresolved home and a closed line are left as they are. The close goes through lint/tending.close,
+  which the probe can log (FG_TENDING_LOG) or make a no-op (FG_TENDING_NOOP). The standing-id refusal names
+  `[closed]` as a way out. The reorient note lists only items that still need work.
+Question box: a PostToolUse on AskUserQuestion saves the owner's answer as one inbox block, like a typed
+  message. The payload alone picks the path: a Bash result and an empty answer save nothing.
+Relay: no case. A relay arrives in the `<cross-session-message` frame, the same frame as a peer's own send,
+  and no tag tells the two apart (see the owner question in the report).
+
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -3146,11 +3157,49 @@ class CountingPopen(subprocess.Popen):
         if log and argv and argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower() in ("git", "git.exe"):
             with open(log, "a", encoding="utf-8") as f:
                 f.write(" ".join(argv) + "\n")
+        every = os.environ.get("FG_ALL_STARTS")  # every process start, git or not, as a JSON argv per line
+        if every and argv:
+            with open(every, "a", encoding="utf-8") as f:
+                f.write(json.dumps(argv) + "\n")
         super().__init__(args, *rest, **kwargs)
 
 
 subprocess.Popen = CountingPopen
 decision_watch.invoke_model = stub
+if os.environ.get("FG_TENDING_LOG") or os.environ.get("FG_APPEND_AFTER_READS"):
+    # Each close the guard makes through lint/tending.close is logged with its store's `where`. With
+    # FG_TENDING_NOOP the close returns the text unchanged, so a close made any other way still shows.
+    sys.path.insert(1, os.path.join(sys.argv[1], "..", "lint"))
+    import tending
+    real_close, real_tend = tending.close, tending.tend
+
+    def logged_close(entry, text, verdicts):
+        if os.environ.get("FG_TENDING_LOG"):
+            with open(os.environ["FG_TENDING_LOG"], "a", encoding="utf-8") as f:
+                f.write(json.dumps({"where": entry.get("where")}) + "\n")
+        if os.environ.get("FG_TENDING_NOOP"):
+            return text
+        return real_close(entry, text, verdicts)
+
+    tending.close = logged_close
+    if os.environ.get("FG_APPEND_AFTER_READS"):
+        # FG_APPEND_AFTER_READS = [inbox path, block text, marker path]. The Stop's git reads run before tend
+        # returns, and its close writes after that. The block is appended once, right after tend, so it lands
+        # in the window between the reads and the write. The marker shows the window was reached.
+        append_inbox, append_block, append_marker = json.loads(os.environ["FG_APPEND_AFTER_READS"])
+        appended = []
+
+        def tend_then_append(*args, **kwargs):
+            rows = real_tend(*args, **kwargs)
+            if not appended:
+                appended.append(True)
+                with open(append_inbox, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(append_block)
+                with open(append_marker, "w", encoding="utf-8") as f:
+                    f.write("fired")
+            return rows
+
+        tending.tend = tend_then_append
 sys.argv = [sys.argv[2]] + sys.argv[3:]
 runpy.run_path(sys.argv[0], run_name="__main__")
 """
@@ -4284,6 +4333,708 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+# --------------------------------------------------------------------------- closing, refusals, compaction, question box (R27)
+
+HELD_RULING = "- fb-0958-1 [ruling] -> decisions/a-ruling.md"  # a decision the fixture repo tracks on main
+HELD_TASK = "- fb-0958-2 [task] -> debts/a-task.md"  # a debt the fixture repo tracks on main
+UNHELD_RULING = "- fb-0958-2 [ruling] -> decisions/not-yet.md"  # no branch tracks this file
+CLOSED = " [closed]"
+FULL_ITEMS = 40  # a full inbox: one block that holds this many open items
+FIXED_NS = 978307200 * 10 ** 9  # 2001-01-01T00:00:00Z: a sentinel mtime, so a rewrite shows in mtime_ns
+HOME_READS = ("rev-parse", "for-each-ref", "cat-file")  # the git reads a ruling or task home check makes
+GIT_NAMES = ("git", "git.exe")
+
+
+def close_run(cfg, sid, items, handoff_ids=(), extra_env=None, text="settled items", cwd=None):
+    """Jots one message of `items`, writes a handoff that holds `handoff_ids` as standing ids, then runs one Stop."""
+    write_file(inbox_of(cfg, sid), render_block(text, items=items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s standing\n" % i for i in handoff_ids))
+    return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
+
+
+def case_stop_closes_a_ruling_and_a_task_whose_home_holds():
+    cfg, sid = new_cfg(), "close-held"
+    p = close_run(cfg, sid, (HELD_RULING, HELD_TASK))
+    check("close held: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close held: the ruling line gains [closed] and nothing else",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close held: the task line gains [closed] and nothing else",
+          inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED, inbox_line(cfg, sid, "fb-0958-2"))
+
+
+def case_stop_closes_a_held_item_after_its_repeat_mark():
+    """The mark goes before [closed], as MARKED reads it: one rewrite carries both."""
+    root = make_repo("close-repeat", tracked=("docs/decisions/wheel.md",), extras=ROLLED_OUT)
+    put_ref(root, STEP_REF, {STEP_DIR + "wheel-speed.json": STEP_JSON})
+    cfg, sid = new_cfg(), "close-repeat"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    item = "- fb-0958-1 [ruling] -> docs/decisions/wheel.md"
+    add_item(cfg, sid, item)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("close repeat: the repeat is judged in one model call", len(calls) == 1, len(calls))
+    check("close repeat: the home holds, so the block does not name the home",
+          "home is not" not in (block_reason(p) or "") and "not a tracked" not in (block_reason(p) or ""), p.desc())
+    check("close repeat: the line holds the repeat mark, then [closed]",
+          inbox_line(cfg, sid, ITEM_ID) == item + MARKED + CLOSED, inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_stop_closes_only_a_home_that_main_holds():
+    """R27 says `on main`. A home that only a lane branch tracks is not closed, though the blocking check passes it."""
+    lane = make_repo("close-lane", tracked=("decisions/x.md",))
+    lane_file(lane, "decisions/lane-only.md")
+    cfg, sid = new_cfg(), "close-lane"
+    main_held = "- fb-0958-1 [ruling] -> decisions/x.md"
+    lane_only = "- fb-0958-6 [ruling] -> decisions/lane-only.md"
+    p = close_run(cfg, sid, (main_held, lane_only), cwd=lane)
+    check("close main: the ruling main holds is closed", inbox_line(cfg, sid, "fb-0958-1") == main_held + CLOSED,
+          inbox_line(cfg, sid, "fb-0958-1"))
+    check("close main: the ruling only a lane holds keeps its line",
+          inbox_line(cfg, sid, "fb-0958-6") == lane_only, inbox_line(cfg, sid, "fb-0958-6"))
+    check("close main: the lane-only ruling raises no home refusal", "fb-0958-6" not in (block_reason(p) or ""),
+          p.desc())
+
+
+def case_stop_leaves_an_item_whose_home_does_not_resolve_open():
+    cfg, sid = new_cfg(), "close-unresolved"
+    p = close_run(cfg, sid, (HELD_RULING, UNHELD_RULING))
+    check("close unresolved: the held ruling beside it is closed",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close unresolved: the item whose home does not resolve keeps its line",
+          inbox_line(cfg, sid, "fb-0958-2") == UNHELD_RULING, inbox_line(cfg, sid, "fb-0958-2"))
+    expect_block("close unresolved: the unresolved home still blocks", p, named=("fb-0958-2",),
+                 unnamed=("fb-0958-1",))
+
+
+def case_stop_closes_only_ruling_and_task_items():
+    cfg, sid = new_cfg(), "close-kinds"
+    question = "- fb-0958-3 [question] -> answered"
+    standing = "- fb-0958-5 [standing] -> handoff"
+    note = "- fb-0958-4 [note] -> decisions/a-ruling.md"  # a file home that holds, on a kind the close does not cover
+    p = close_run(cfg, sid, (HELD_RULING, question, note, standing), handoff_ids=("fb-0958-5",))
+    check("close kinds: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close kinds: the held ruling is closed",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close kinds: a question line is not closed by this", inbox_line(cfg, sid, "fb-0958-3") == question,
+          inbox_line(cfg, sid, "fb-0958-3"))
+    check("close kinds: a note line whose file home holds is not closed by this",
+          inbox_line(cfg, sid, "fb-0958-4") == note, inbox_line(cfg, sid, "fb-0958-4"))
+    check("close kinds: a standing line is not closed by this", inbox_line(cfg, sid, "fb-0958-5") == standing,
+          inbox_line(cfg, sid, "fb-0958-5"))
+
+
+def case_stop_leaves_an_already_closed_item_alone():
+    cfg, sid = new_cfg(), "close-already"
+    closed_end = HELD_RULING + CLOSED
+    closed_mid = "- fb-0958-3 [ruling] -> decisions/a-ruling.md [closed] see the handoff"
+    p = close_run(cfg, sid, (closed_end, closed_mid, HELD_TASK))
+    check("close already: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close already: a line closed at its end gains no second [closed]",
+          inbox_line(cfg, sid, "fb-0958-1") == closed_end, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close already: a line closed mid-line is untouched", inbox_line(cfg, sid, "fb-0958-3") == closed_mid,
+          inbox_line(cfg, sid, "fb-0958-3"))
+    check("close already: the open task beside them is closed",
+          inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED, inbox_line(cfg, sid, "fb-0958-2"))
+
+
+def case_stop_closes_every_held_item_of_a_full_inbox():
+    """Full size: FULL_ITEMS held items in one block, every one closed. Empty: an inbox with no open item is not rewritten."""
+    items = []
+    for n in range(1, FULL_ITEMS + 1):
+        kind, home = ("ruling", "decisions/a-ruling.md") if n % 2 else ("task", "debts/a-task.md")
+        items.append("- fb-0958-%d [%s] -> %s" % (n, kind, home))
+    cfg, sid = new_cfg(), "close-full"
+    p = close_run(cfg, sid, items)
+    marked = [ln for ln in read_or_empty(inbox_of(cfg, sid)).split("\n") if ln.startswith("- fb-")]
+    check("close full: the inbox holds all %d items" % FULL_ITEMS, len(marked) == FULL_ITEMS, len(marked))
+    check("close full: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close full: every held item gains [closed]", all(ln.endswith(CLOSED) for ln in marked),
+          [ln for ln in marked if not ln.endswith(CLOSED)][:3])
+    cfg2, sid2 = new_cfg(), "close-empty"
+    write_file(inbox_of(cfg2, sid2), render_block("settled items"))
+    write_file(handoff_of(cfg2, sid2), "# Handoff\n")
+    os.utime(inbox_of(cfg2, sid2), ns=(FIXED_NS, FIXED_NS))
+    guard(cfg2, sid2)
+    check("close empty: an inbox with no open item is not rewritten by its Stop",
+          os.stat(inbox_of(cfg2, sid2)).st_mtime_ns == FIXED_NS, os.stat(inbox_of(cfg2, sid2)).st_mtime_ns)
+
+
+def case_stop_path_closes_through_the_shared_runner():
+    """The Stop calls lint/tending.close for the feedback-log store. With that close made a no-op, nothing
+    closes: no second closer sits in the guard."""
+    cfg, sid = new_cfg(), "close-runner"
+    log = os.path.join(os.path.dirname(cfg), "tending-close.log")
+    close_run(cfg, sid, (HELD_RULING,), extra_env={"FG_TENDING_LOG": log})
+    calls = [json.loads(ln) for ln in read_or_empty(log).splitlines() if ln.strip()]
+    check("close runner: the Stop calls lint/tending.close for the feedback-log store",
+          any(c.get("where") == "external:feedback-log" for c in calls), calls)
+    cfg2, sid2 = new_cfg(), "close-runner-noop"
+    close_run(cfg2, sid2, (HELD_RULING,), extra_env={"FG_TENDING_LOG": os.path.join(os.path.dirname(cfg2), "log"),
+                                                     "FG_TENDING_NOOP": "1"})
+    check("close runner: with the runner's close made a no-op, the held item stays open",
+          inbox_line(cfg2, sid2, "fb-0958-1") == HELD_RULING, inbox_line(cfg2, sid2, "fb-0958-1"))
+
+
+def logged_starts(path):
+    """Each process start the probe logged to `path` (FG_ALL_STARTS), as its argv."""
+    return [json.loads(ln) for ln in read_or_empty(path).splitlines() if ln.strip()]
+
+
+def git_verb(argv):
+    """The git subcommand of a logged argv, past its global options (`-C <dir>`, `-c <name=value>`, `--...`)."""
+    words = list(argv)[1:]
+    while words and words[0].startswith("-"):
+        words = words[2:] if words[0] in ("-C", "-c") else words[1:]
+    return words[0] if words else ""
+
+
+def case_closing_adds_no_process_and_rewrites_the_inbox_only_when_it_closes():
+    cfg, sid = new_cfg(), "close-cost"
+    write_file(inbox_of(cfg, sid), render_block("two held items", items=(HELD_RULING, HELD_TASK)))
+    # The turn state judged both ids already: the Stop makes no model call and no roadmap read, so only the home check runs.
+    write_file(os.path.join(cfg, turns_rel(sid)),
+               json.dumps({"seen": 1, "burst": [], "judged": ["fb-0958-1", "fb-0958-2"]}))
+    log = os.path.join(os.path.dirname(cfg), "all-starts.log")
+    env = {"FG_ALL_STARTS": log}
+    before = snapshot(cfg)
+    guard(cfg, sid, extra_env=env)
+    closing = logged_starts(log)
+    check("close cost: the closing Stop closes both held items",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED
+          and inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED,
+          [inbox_line(cfg, sid, "fb-0958-1"), inbox_line(cfg, sid, "fb-0958-2")])
+    check("close cost: the home check starts git, so the start log is live", len(closing) > 0, closing)
+    check("close cost: every process the closing Stop starts is git",
+          all(os.path.basename(a[0]) in GIT_NAMES for a in closing), closing)
+    verbs = sorted({git_verb(a) for a in closing})
+    check("close cost: the closing Stop reads git only as the home check does", set(verbs) <= set(HOME_READS),
+          verbs)
+    changed = sorted(written_between(before, snapshot(cfg)))
+    check("close cost: the closing Stop writes the inbox and the turn state, nothing else",
+          set(changed) <= {inbox_rel(sid), turns_rel(sid)}, changed)
+    os.utime(inbox_of(cfg, sid), ns=(FIXED_NS, FIXED_NS))
+    mid, mark = snapshot(cfg), len(logged_starts(log))
+    guard(cfg, sid, extra_env=env)
+    quiet = logged_starts(log)[mark:]
+    check("close cost: a Stop with nothing left to close starts as many processes",
+          len(quiet) == len(closing), "closing=%d quiet=%d" % (len(closing), len(quiet)))
+    rewritten = sorted(written_between(mid, snapshot(cfg)))
+    check("close cost: a Stop with nothing left to close rewrites no inbox",
+          set(rewritten) <= {turns_rel(sid)}, rewritten)
+
+
+REF_ITEMS = (HELD_RULING, HELD_TASK, "- fb-0958-3 [ruling] -> decisions/not-yet.md")  # three open items, one repo
+
+
+def case_refs_are_listed_once_per_repo_not_per_item():
+    """Three open ruling and task items name homes in one repo. The Stop's home check and the compaction note each list
+    the repo's refs with one for-each-ref, not one per item, so the count of starts does not grow with the items."""
+    cfg, sid = new_cfg(), "refs-once"
+    write_file(inbox_of(cfg, sid), render_block("three open items", items=REF_ITEMS))
+    # The turn state judged all three ids, so the Stop makes no model call and its only starts are the home check's.
+    write_file(os.path.join(cfg, turns_rel(sid)),
+               json.dumps({"seen": 1, "burst": [], "judged": ["fb-0958-1", "fb-0958-2", "fb-0958-3"]}))
+    stop_log = os.path.join(os.path.dirname(cfg), "refs-stop.log")
+    guard(cfg, sid, extra_env={"FG_ALL_STARTS": stop_log})
+    stop_lists = [a for a in logged_starts(stop_log) if git_verb(a) == "for-each-ref"]
+    check("refs once: the Stop lists the repo's refs once for three items", len(stop_lists) == 1,
+          "for-each-ref starts=%d: %s" % (len(stop_lists), stop_lists))
+    write_file(inbox_of(cfg, sid), render_block("three open items", items=REF_ITEMS))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    note_log = os.path.join(os.path.dirname(cfg), "refs-note.log")
+    reorient_counted(cfg, sid, note_log)
+    note_lists = [a for a in logged_starts(note_log) if git_verb(a) == "for-each-ref"]
+    check("refs once: the compaction note lists the repo's refs once for three items", len(note_lists) == 1,
+          "for-each-ref starts=%d: %s" % (len(note_lists), note_lists))
+
+
+def case_handoff_refusal_names_closed_as_a_way_out():
+    """The standing-id refusal names `[closed]` in the same message as the handoff entry it asks for."""
+    cfg, sid = new_cfg(), "refusal-closed"
+    items = ("- fb-0958-2 [standing] -> handoff", "- fb-0958-3 [standing] -> handoff")
+    write_file(inbox_of(cfg, sid), render_block("two settled standing items", items=items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    reason = block_reason(p) or ""
+    expect_block("refusal closed: standing ids missing from the handoff block", p,
+                 named=("fb-0958-2", "fb-0958-3"))
+    check("refusal closed: the same message names [closed] as a way out", "[closed]" in reason, reason)
+
+
+COMPACT_ITEMS = (
+    "- fb-0958-1 [ruling] -> decisions/a-ruling.md",  # held on main: left out
+    "- fb-0958-2 [task] -> debts/a-task.md",  # held on main: left out
+    "- fb-0958-3 [ruling] -> decisions/not-yet.md",  # no branch holds it: listed
+    "- fb-0958-4 [ruling] -> decisions/a-ruling.md [closed]",  # closed: left out
+    "- fb-0958-5 [standing] -> handoff",  # standing: listed, it still needs the handoff
+)
+COMPACT_LISTED = ["fb-0958-3", "fb-0958-5"]
+
+
+def listed_ids(p):
+    """The ids of the reorient note's `Open feedback items:` list, in order; None when the note is absent."""
+    found = re.search(r"Open feedback items: ([^.\n]*)\.", p.out)
+    return None if found is None else [i.strip() for i in found.group(1).split(",") if i.strip()]
+
+
+def reorient_counted(cfg, sid, log):
+    """reorient() run through the probe, so each process start it makes is logged to `log` (FG_ALL_STARTS)."""
+    return run(probe_path(), payload({"hook_event_name": "SessionStart", "session_id": sid,
+                                      "source": "compact", "cwd": cfg}), cfg,
+               args=(HERE, PRECOMPACT_PATH, "--reorient"), extra_env={"FG_ALL_STARTS": log})
+
+
+def case_reorient_leaves_out_items_whose_home_holds():
+    cfg, sid = new_cfg(), "reo-held"
+    write_file(inbox_of(cfg, sid), render_block("compaction items", items=COMPACT_ITEMS))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient held (%s): the message prints" % tag,
+              p.code == 0 and p.out.count("Context was compacted") == 1, p.desc())
+        check("reorient held (%s): only items that still need work are listed, in file order" % tag,
+              listed_ids(p) == COMPACT_LISTED, listed_ids(p))
+    log = os.path.join(os.path.dirname(cfg), "reorient-starts.log")
+    before = snapshot(cfg)
+    reorient_counted(cfg, sid, log)
+    starts = logged_starts(log)
+    check("reorient cost: the reorient starts git for the home check, and no other process",
+          len(starts) > 0 and all(os.path.basename(a[0]) in GIT_NAMES for a in starts), starts)
+    verbs = sorted({git_verb(a) for a in starts})
+    check("reorient cost: the reorient reads git only as the home check does", set(verbs) <= set(HOME_READS),
+          verbs)
+    written = sorted(written_between(before, snapshot(cfg)))
+    check("reorient cost: the reorient writes no file", written == [], written)
+
+
+def case_reorient_names_no_item_when_every_item_is_settled():
+    cfg, sid = new_cfg(), "reo-none"
+    write_file(inbox_of(cfg, sid), render_block("settled", items=(HELD_RULING, HELD_TASK, COMPACT_ITEMS[3])))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient settled (%s): the message prints" % tag,
+              p.code == 0 and p.out.count("Context was compacted") == 1, p.desc())
+        check("reorient settled (%s): no item id is listed" % tag, not re.search(r"fb-\d{4}-\d", p.out), p.desc())
+
+
+QUESTION_ANSWER = 'The user answered: "Which way should the cap go?"="Option B". Continue.'
+QUESTION_AT = "2026-01-15T18:04:00+00:00"  # 12:04 CST: the clock the hook reads through LOCAL_TIME_NOW
+
+
+def question_hook(cfg, sid, response, tool="AskUserQuestion", starts=None, cwd=None, questions=None):
+    """Runs the capture as PostToolUse fires after a tool call. The payload alone says what the call was: the
+    owner's words come back as the question box's result, not as a prompt. `starts` (a log path) runs it through
+    the probe, which logs each process start it makes. `cwd` is the payload's folder, the config folder by default.
+    `questions` is the box's tool_input.questions, one question by default."""
+    if questions is None:
+        questions = [{"question": "Which way should the cap go?",
+                      "options": [{"label": "Option A"}, {"label": "Option B"}]}]
+    raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool,
+                   "tool_input": {"questions": questions},
+                   "tool_response": response, "cwd": cwd or cfg})
+    if starts is None:
+        return run(LT_PATH, raw, cfg, extra_env={"LOCAL_TIME_NOW": QUESTION_AT})
+    return run(probe_path(), raw, cfg, args=(HERE, LT_PATH),
+               extra_env={"LOCAL_TIME_NOW": QUESTION_AT, "FG_ALL_STARTS": starts})
+
+
+def case_question_box_answer_is_saved_like_a_typed_message():
+    """The positive case is first. The two negatives sit beside it: a Bash result and an empty answer save nothing."""
+    cfg, sid = new_cfg(), "question-box"
+    starts = os.path.join(os.path.dirname(cfg), "question-starts.log")
+    p = question_hook(cfg, sid, QUESTION_ANSWER, starts=starts)
+    check("question box: the hook exits 0", p.code == 0, p.desc())
+    check("question box cost: the capture starts no process", logged_starts(starts) == [], logged_starts(starts))
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("question box: the answer is saved as one inbox block", len(blocks) == 1, blocks)
+    if blocks:
+        check("question box: the block is stamped with its Central time", blocks[0]["header"] == PAGE_HEADER,
+              blocks[0]["header"])
+        check("question box: the owner's answer is saved verbatim", "Option B" in (blocks[0]["text"] or ""),
+              blocks[0]["text"])
+    expect_silent("question box: a lone short answer needs no items, so the Stop passes", guard(cfg, sid))
+    cfg2, sid2 = new_cfg(), "question-box-other"
+    question_hook(cfg2, sid2, "fb: a shell line the owner did not type", tool="Bash")
+    check("question box other tool: a Bash result is not saved", not os.path.exists(inbox_of(cfg2, sid2)),
+          captured_texts(cfg2, sid2))
+    cfg3, sid3 = new_cfg(), "question-box-empty"
+    question_hook(cfg3, sid3, "")
+    check("question box empty: an empty answer saves nothing", not os.path.exists(inbox_of(cfg3, sid3)),
+          captured_texts(cfg3, sid3))
+
+
+# --------------------------------------------------------------------------- question box: answer-only saves, per-line close proof, the close window, the remedy
+
+QUESTION_TEXT = "Approve and publish the settings.json ruling now?"
+LATER_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
+REMEDY_MARK = "The check reads the feedback log"  # the block refusal's remedy starts here
+
+
+def case_question_box_saves_the_answer_and_never_the_question():
+    """A question with a grant word and an act word, answered No. Only the answer is saved, so a ruling jotted under
+    it, to a tracked settings.json, is refused as no grant. Saved with the question, it would pass as granted."""
+    repo = make_repo("qbox-settings", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "qbox-answer-only"
+    p = question_hook(cfg, sid, 'The user answered: "%s"="No". Continue.' % QUESTION_TEXT, cwd=repo,
+                      questions=box_questions(QUESTION_TEXT))
+    check("question answer only: the hook exits 0", p.code == 0, p.desc())
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("question answer only: the answer is saved as one block", len(blocks) == 1, blocks)
+    text = (blocks[0]["text"] or "") if blocks else ""
+    check("question answer only: the saved block holds the owner's answer", re.search(r"\bNo\b", text) is not None,
+          text)
+    check("question answer only: the saved block holds no part of the question",
+          "Approve" not in text and "publish" not in text, text)
+    add_item(cfg, sid, "- fb-0958-1 [ruling] -> settings.json")
+    expect_block("question answer only: a ruling to settings.json under the answer is refused, not granted",
+                 guard(cfg, sid, cwd=repo), named=("fb-0958-1",))
+
+
+def case_refused_ruling_is_not_closed_by_a_grant_of_its_path_in_another_block():
+    """Close proof is per item line, not per (kind, path). Another block's grant validates settings.json on main; a
+    plain ruling to the same path is still refused, so the Stop keeps it open and the compaction note keeps it."""
+    repo = make_repo("grant-path", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "grant-path"
+    granted = "- fb-0958-1 [ruling] -> settings.json"
+    plain = "- fb-0958-2 [ruling] -> settings.json"
+    original = (render_block("Approved: merge PR 12 now", items=(granted,))
+                + render_block("a settings note, no grant", header=LATER_HEADER, items=(plain,)))
+    write_file(inbox_of(cfg, sid), original)
+    p = guard(cfg, sid, cwd=repo)
+    check("grant path: the granted ruling, whose home main holds, closes",
+          inbox_line(cfg, sid, "fb-0958-1") == granted + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("grant path: the refused ruling to the same path keeps its line",
+          inbox_line(cfg, sid, "fb-0958-2") == plain, inbox_line(cfg, sid, "fb-0958-2"))
+    expect_block("grant path: the refused ruling still blocks", p, named=("fb-0958-2",), unnamed=("fb-0958-1",))
+    write_file(inbox_of(cfg, sid), original)
+    write_file(sidecar_of(cfg, sid), repo)
+    listed = listed_ids(reorient(cfg, sid)) or []
+    check("grant path: the compaction note keeps the refused ruling", "fb-0958-2" in listed, listed)
+    check("grant path: the compaction note leaves out the granted ruling whose home holds", "fb-0958-1" not in listed,
+          listed)
+
+
+def case_close_rewrite_keeps_a_block_appended_after_the_reads():
+    """The close re-reads the inbox right before it writes. A block the owner's capture appends between the Stop's
+    git reads and that write survives, as mark_items keeps it. The probe appends it once, after tend returns."""
+    cfg, sid = new_cfg(), "close-append"
+    inbox = inbox_of(cfg, sid)
+    marker = os.path.join(os.path.dirname(cfg), "append-fired")
+    typed = render_block("owner words typed during the close", header=LATER_HEADER)
+    write_file(inbox, render_block("a held ruling", items=(HELD_RULING,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid, extra_env={"FG_APPEND_AFTER_READS": json.dumps([inbox, typed, marker])})
+    check("close append: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close append: the window ran, the Stop reached the close", os.path.exists(marker), p.desc())
+    check("close append: the held ruling is closed", inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED,
+          inbox_line(cfg, sid, "fb-0958-1"))
+    check("close append: the block appended during the close survives",
+          "owner words typed during the close" in captured_texts(cfg, sid), captured_texts(cfg, sid))
+
+
+def case_same_id_on_two_lines_settles_each_line_alone():
+    """Two lines share one id: one held on main, one open. Only the held line closes. The compaction note keeps the
+    open line's id, so settled ids go by line, never by id."""
+    cfg, sid = new_cfg(), "same-id"
+    held = "- fb-0958-1 [ruling] -> decisions/a-ruling.md"
+    open_line = "- fb-0958-1 [ruling] -> decisions/not-yet.md"
+    original = render_block("one id, two lines", items=(held, open_line))
+    write_file(inbox_of(cfg, sid), original)
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    lines = [ln for ln in read_or_empty(inbox_of(cfg, sid)).split("\n") if ln.startswith("- fb-0958-1 ")]
+    check("same id: the held line closes", lines[:1] == [held + CLOSED], lines)
+    check("same id: the open line keeps its text", lines[1:] == [open_line], lines)
+    expect_block("same id: the open line still blocks", p, named=("fb-0958-1",))
+    write_file(inbox_of(cfg, sid), original)
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    listed = listed_ids(reorient(cfg, sid))
+    check("same id: the compaction note keeps the open line's id", listed == ["fb-0958-1"], listed)
+
+
+def case_block_refusal_remedy_names_closed_beside_the_handoff():
+    """The block's remedy sentence, the one that asks for the handoff, also names [closed] as a way out."""
+    cfg, sid = new_cfg(), "remedy"
+    write_file(inbox_of(cfg, sid), render_block("a settled standing item", items=("- fb-0958-2 [standing] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    reason = block_reason(p) or ""
+    expect_block("block remedy: the standing id refusal blocks", p, named=("fb-0958-2",))
+    remedy = reason.split(REMEDY_MARK, 1)[1] if REMEDY_MARK in reason else ""
+    check("block remedy: the refusal carries its remedy sentence", remedy != "", reason)
+    check("block remedy: the remedy names the handoff", "handoff" in remedy, remedy)
+    check("block remedy: the remedy names [closed] as a way out, beside the handoff", "[closed]" in remedy, remedy)
+
+
+# --------------------------------------------------------------------------- question box shapes, and a lone CR in the inbox
+
+SHIP_QUESTION = "Ship the cap change?"
+MULTI_QUESTION = 'Do I have approval to merge "PR 1", "PR 2" now?'
+LONE_CR_TEXT = "\r".join(["Approved: merge PR 12 now", "one", "two", "three", "four", "five", "six"])  # six lone CRs
+
+
+def box_questions(*texts):
+    """The question box's tool_input.questions: one entry per question text, two options each."""
+    return [{"question": t, "options": [{"label": "Yes"}, {"label": "No"}]} for t in texts]
+
+
+def saved_text(cfg, sid):
+    """The text of the one block the box saved, or an empty string when none or several were saved."""
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    return (blocks[0]["text"] or "") if len(blocks) == 1 else ""
+
+
+def case_multi_question_box_saves_only_the_answers():
+    """Two questions. The second's text holds `", "` and quoted words. Only the answers are saved, so a ruling jotted
+    under the box, to a tracked settings.json, is refused. Saved with the question's words, the box would read as an
+    approval to merge and pass the ruling as granted."""
+    repo = make_repo("qbox-multi", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "qbox-multi"
+    response = 'The user answered: "%s"="No", "%s"="No". Continue.' % (SHIP_QUESTION, MULTI_QUESTION)
+    p = question_hook(cfg, sid, response, cwd=repo, questions=box_questions(SHIP_QUESTION, MULTI_QUESTION))
+    check("question multi: the hook exits 0", p.code == 0, p.desc())
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("question multi: the answers are saved as one block", len(blocks) == 1, blocks)
+    text = saved_text(cfg, sid)
+    check("question multi: the saved block holds both answers", text.count("No") == 2, text)
+    check("question multi: no words of the second question are saved",
+          "approval" not in text and "PR 1" not in text, text)
+    add_item(cfg, sid, "- fb-0959-1 [ruling] -> settings.json")
+    expect_block("question multi: a ruling to settings.json under the answers is refused, not granted",
+                 guard(cfg, sid, cwd=repo), named=("fb-0959-1",))
+
+
+def case_one_question_answer_keeps_its_quote_marks_whole():
+    """A one-question box whose answer holds `", "` and `"="`. The answer is saved whole: a cut at either mark keeps a
+    fragment of it, and a fragment is not what the owner said. The answer with `", "` alone is the control, saved whole
+    already."""
+    cfg, sid = new_cfg(), "qbox-quotes"
+    answer = 'Merge "PR 1", "PR 2" and keep "a"="b"'
+    p = question_hook(cfg, sid, 'The user answered: "%s"="%s". Continue.' % (SHIP_QUESTION, answer),
+                      questions=box_questions(SHIP_QUESTION))
+    check("question quotes: the hook exits 0", p.code == 0, p.desc())
+    check("question quotes: an answer with `\", \"` and `\"=\"` is saved whole", saved_text(cfg, sid) == answer,
+          saved_text(cfg, sid))
+    cfg2, sid2 = new_cfg(), "qbox-comma"
+    question_hook(cfg2, sid2, 'The user answered: "%s"="Merge "PR 1", "PR 2"". Continue.' % SHIP_QUESTION,
+                  questions=box_questions(SHIP_QUESTION))
+    check("question quotes control: an answer with `\", \"` alone is saved whole",
+          saved_text(cfg2, sid2) == 'Merge "PR 1", "PR 2"', saved_text(cfg2, sid2))
+
+
+def case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string():
+    """Two result shapes. A dict of answers keyed by question is saved as the answer alone. A string with a trailing
+    `user notes:` keeps the owner's notes in the saved text, not only the answer."""
+    cfg, sid = new_cfg(), "qbox-dict"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: "Option B"}}, questions=box_questions(SHIP_QUESTION))
+    check("question dict: the hook exits 0", p.code == 0, p.desc())
+    check("question dict: the answer is saved", "Option B" in saved_text(cfg, sid), saved_text(cfg, sid))
+    check("question dict: the question is not saved", SHIP_QUESTION not in saved_text(cfg, sid), saved_text(cfg, sid))
+    cfg2, sid2 = new_cfg(), "qbox-notes"
+    question_hook(cfg2, sid2, 'The user answered: "%s"="Yes". user notes: only merge after the check passes.'
+                  % SHIP_QUESTION, questions=box_questions(SHIP_QUESTION))
+    check("question notes: the answer is saved", "Yes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+    check("question notes: the owner's notes are saved with the answer",
+          "only merge after the check passes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+
+
+NOT_SAVED_ANSWER = "question answer was not saved"  # the words of the box's line when an answer cannot be saved
+OPTION_B = "Option B"
+
+
+def case_box_answer_as_an_object_is_saved_as_its_text():
+    """A box answer may be an object with an `answer` field, keyed by question. It is saved as its answer text, as a
+    string answer is, and the question is not saved."""
+    cfg, sid = new_cfg(), "qbox-object"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"answer": OPTION_B}}},
+                      questions=box_questions(SHIP_QUESTION))
+    check("question object: the hook exits 0", p.code == 0, p.desc())
+    check("question object: the answer's text is saved", saved_text(cfg, sid) == OPTION_B, saved_text(cfg, sid))
+
+
+def case_box_answer_list_of_objects_is_saved_as_its_texts():
+    """A multi-select answer may come as a list of objects. The answer text of each object is saved."""
+    cfg, sid = new_cfg(), "qbox-object-list"
+    p = question_hook(cfg, sid, {"answers": {MULTI_QUESTION: [{"answer": "Opt A"}, {"answer": "Opt C"}]}},
+                      questions=box_questions(MULTI_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question object list: the hook exits 0", p.code == 0, p.desc())
+    check("question object list: the first object's answer is saved", "Opt A" in text, text)
+    check("question object list: the second object's answer is saved", "Opt C" in text, text)
+
+
+def case_box_answer_that_cannot_be_read_is_never_silent():
+    """An answer the hook cannot save must not vanish: the box saves it or prints the `not saved` line. A readable
+    answer beside an unreadable one is still saved. The empty answers dict is the control: no answer saves nothing and
+    prints nothing."""
+    cfg, sid = new_cfg(), "qbox-unreadable"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: {"choice": 2}}}, questions=box_questions(SHIP_QUESTION))
+    check("question unreadable: the answer is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p.out or saved_text(cfg, sid) != "", p.desc())
+    cfg2, sid2 = new_cfg(), "qbox-partial"
+    p2 = question_hook(cfg2, sid2, {"answers": {SHIP_QUESTION: "Yes", MULTI_QUESTION: {"choice": 2}}},
+                       questions=box_questions(SHIP_QUESTION, MULTI_QUESTION))
+    check("question partial: the readable answer beside an unreadable one is saved",
+          "Yes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+    check("question partial: the unreadable answer beside a readable one is announced or saved, never silent",
+          NOT_SAVED_ANSWER in p2.out or saved_text(cfg2, sid2) != "Yes", p2.desc())
+    cfg3, sid3 = new_cfg(), "qbox-no-answers"
+    p3 = question_hook(cfg3, sid3, {"answers": {}}, questions=box_questions(SHIP_QUESTION))
+    check("question no answers: an empty answers dict saves nothing and prints nothing",
+          not os.path.exists(inbox_of(cfg3, sid3)) and p3.out.strip() == "", p3.desc())
+
+
+def case_box_note_with_inner_quotes_is_saved_whole():
+    """A trailing `user notes:` is the owner's own words, quote marks included. The cut at the span's last quote, the one
+    after `CI`, keeps `Yes". user notes: only merge if "CI` and drops ` is green.`. The note is saved whole."""
+    cfg, sid = new_cfg(), "qbox-note-quotes"
+    note = 'only merge if "CI" is green.'
+    p = question_hook(cfg, sid, 'The user answered: "%s"="Yes". user notes: %s' % (SHIP_QUESTION, note),
+                      questions=box_questions(SHIP_QUESTION))
+    text = saved_text(cfg, sid)
+    check("question note quotes: the hook exits 0", p.code == 0, p.desc())
+    check("question note quotes: the answer is saved first", text.startswith("Yes"), text)
+    check("question note quotes: the owner's note is saved whole, its inner quotes included", note in text, text)
+
+
+def case_close_proof_counts_only_the_session_repo():
+    """Homes(cwd=B, worked_in=A). The session worked in repo A, and the Stop runs from repo B, which alone holds
+    docs/decisions/x.md on main. The close proof counts the session's own repo, so B's copy proves nothing: the verdict
+    is unknown, and the ruling stays in the compaction note. Controls: a Stop run from A reads the same unknown, and a
+    home that the session's repo holds on main closes from another cwd."""
+    mod = guard_module()
+    rel = "docs/decisions/x.md"
+    session = make_repo("qclose-session", tracked=("README.md",), extras=ROLLED_OUT)
+    stop = make_repo("qclose-stop", tracked=(rel,), extras=ROLLED_OUT)
+    held = make_repo("qclose-held", tracked=(rel,), extras=ROLLED_OUT)
+    scope = tuple(bool(mod.ruling_home.value_refs(rel, where)) for where in (session, stop, held))
+    check("close scope: main holds the home in the Stop's repo and the held repo, not in the session's repo",
+          scope == (False, True, True), scope)
+    text = render_block("the rule is settled", items=("- fb-0958-1 [ruling] -> %s" % rel,))
+
+    def verdict(cwd, worked_in):
+        """(the item's verdict from tend, whether the compaction note still lists it) for a Stop from cwd."""
+        rows, _ = mod.tend_text(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        listed = "fb-0958-1" in mod.needs_work_ids(mod.Homes(cwd=cwd, worked_in=worked_in), text)
+        return {ident: got for _, ident, got in rows}.get("fb-0958-1"), listed
+
+    crossed, crossed_listed = verdict(stop, session)
+    check("close proof: a home only the Stop's repo holds does not close a session bound to another repo",
+          crossed == "unknown", "verdict %r" % (crossed,))
+    check("close proof: that ruling stays in the compaction note", crossed_listed, "listed %r" % (crossed_listed,))
+    own, _ = verdict(session, session)
+    check("close proof control: a Stop run from the session's own repo reads the same unknown",
+          own == "unknown", "verdict %r" % (own,))
+    mirror, _ = verdict(session, held)
+    check("close proof control: a home the session's repo holds on main closes from another cwd",
+          mirror == "stale", "verdict %r" % (mirror,))
+
+
+def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
+    """A grant block whose text holds six lone CRs, a granted ruling under it, and a plain block's refused ruling to
+    the same path below. The Stop reads the inbox with universal newlines, which split at each CR, so the granted line
+    sits six lines lower in its read than in the close's. The Stop's proof for the granted line is keyed by that lower
+    index. The plain block's text is one line longer, so the refused line lands on that same index in the close's
+    read. The refused ruling must stay open, and its line must not change."""
+    repo = make_repo("lone-cr", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "lone-cr"
+    granted = "- fb-0960-1 [ruling] -> settings.json"
+    refused = "- fb-0960-2 [ruling] -> settings.json"
+    write_file(inbox_of(cfg, sid), render_block(LONE_CR_TEXT, items=(granted,))
+               + render_block("a settings note,\nno grant", header=LATER_HEADER, items=(refused,)))
+    p = guard(cfg, sid, cwd=repo)
+    check("lone CR: the granted ruling, whose home main holds, closes",
+          inbox_line(cfg, sid, "fb-0960-1") == granted + CLOSED, inbox_line(cfg, sid, "fb-0960-1"))
+    check("lone CR: the refused ruling keeps its line, unclosed",
+          inbox_line(cfg, sid, "fb-0960-2") == refused, inbox_line(cfg, sid, "fb-0960-2"))
+    expect_block("lone CR: the refused ruling still blocks", p, named=("fb-0960-2",), unnamed=("fb-0960-1",))
+
+
+# --------------------------------------------------------------------------- the remedy names [closed] only where a close settles the item
+
+def case_unsent_page_or_repo_refusal_does_not_name_closed():
+    """An unsent page item and an unsent repo item are refused for their sends. The refusal must not offer `[closed]` as
+    a way out: a page or repo item is not settled by the mark, so the owner's answer or message would never be sent."""
+    p = page_run(new_cfg(), "page-remedy", [("98: a", (PAGE_ITEM,))], [owner_rec("98: a"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("page remedy: the unsent page item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("page remedy: the refusal names the page item", "fb-0958-7" in reason, reason)
+    check("page remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+    p = page_run(new_cfg(), "repo-remedy", [("rename", (REPO_ITEM,))], [owner_rec("rename"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("repo remedy: the unsent repo item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("repo remedy: the refusal names the repo item", REPO_ID in reason, reason)
+    check("repo remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+
+
+def case_standing_refusal_still_names_closed():
+    """The control: the refusal for an open standing id still names `[closed]`, the one refusal the mark settles. The
+    ruling refusal is case_ruling_refusal_for_an_unresolved_home_does_not_name_closed."""
+    cfg, sid = new_cfg(), "closed-control-standing"
+    write_file(inbox_of(cfg, sid), render_block("standing id missing from the handoff",
+                                                items=("- fb-0958-4 [standing] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    reason = block_reason(guard(cfg, sid)) or ""
+    check("closed control: the standing refusal blocks", "fb-0958-4" in reason, reason)
+    check("closed control: the standing refusal names [closed]", "[closed]" in reason, reason)
+
+
+# --------------------------------------------------------------------------- the remedy: [closed] for a standing id only; a dict key that is not the question; one home
+
+UNRESOLVED_RULING = "- fb-1 [ruling] -> NO HOME YET"  # a ruling whose home resolves in no repo
+UNRESOLVED_CLOSED = UNRESOLVED_RULING + " [closed]"  # the same line with the mark typed on it
+
+
+def case_ruling_refusal_for_an_unresolved_home_does_not_name_closed():
+    """Typing `[closed]` on a ruling whose home resolves nowhere does not clear its refusal, so the refusal must not offer
+    the mark. The line with the mark still blocks, as case_guard_ruling_homed_to_handoff_blocks pins."""
+    p = homed(new_cfg(), "r-unresolved", (UNRESOLVED_RULING,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling: the refusal blocks", p, named=("fb-1",))
+    reason = block_reason(p) or ""
+    check("unresolved ruling: the refusal does not name [closed]", "[closed]" not in reason, reason)
+    p = homed(new_cfg(), "r-unresolved-closed", (UNRESOLVED_CLOSED,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling typed [closed]: the block still holds", p, named=("fb-1",))
+
+
+def case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped():
+    """A dict answer keyed by a text that is not exactly the question's (a trailing space) is not dropped silently: the
+    answers are saved, or the box prints the `not saved` line."""
+    cfg, sid = new_cfg(), "qbox-key-mismatch"
+    p = question_hook(cfg, sid, {"answers": {"A?": "answer for A", "B? ": "answer for B"}},
+                      questions=box_questions("A?", "B?"))
+    text = saved_text(cfg, sid)
+    lines = text.split("\n") if text else []
+    check("question key mismatch: the hook exits 0", p.code == 0, p.desc())
+    check("question key mismatch: each answer is saved, or the not-saved line prints, never silence",
+          NOT_SAVED_ANSWER in p.out or sorted(lines) == ["answer for A", "answer for B"], p.desc() + " saved=" + text)
+
+
+def case_problems_tests_the_settling_kinds_by_their_one_home():
+    """The ruling and task branch of problems() names the settling kinds through SETTLING_PREFIXES, not a literal copy of
+    the tuple. Read with ast, the language's own parser: a copy is red even while it agrees with the one home."""
+    with open(GUARD_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), GUARD_PATH)
+    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "problems"]
+    check("one home: feedback_guard.py defines problems()", len(defs) == 1, "found %d" % len(defs))
+    if len(defs) != 1:
+        return
+    literal, named = False, False
+    for call in ast.walk(defs[0]):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "startswith" and call.args):
+            continue
+        arg = call.args[0]
+        words = [e.value for e in getattr(arg, "elts", []) if isinstance(e, ast.Constant)]
+        literal = literal or words == ["[ruling]", "[task]"]
+        named = named or any(isinstance(n, ast.Name) and n.id == "SETTLING_PREFIXES" for n in ast.walk(arg))
+    check("one home: problems() repeats the settling prefixes as a literal tuple", not literal,
+          "problems() has its own (\"[ruling]\", \"[task]\") tuple")
+    check("one home: problems() tests the settling kinds with SETTLING_PREFIXES", named,
+          "no startswith in problems() takes SETTLING_PREFIXES")
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4478,6 +5229,39 @@ CASES = (
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
     case_page_form_undone_wake_passes,
+    case_stop_closes_a_ruling_and_a_task_whose_home_holds,
+    case_stop_closes_a_held_item_after_its_repeat_mark,
+    case_stop_closes_only_a_home_that_main_holds,
+    case_stop_leaves_an_item_whose_home_does_not_resolve_open,
+    case_stop_closes_only_ruling_and_task_items,
+    case_stop_leaves_an_already_closed_item_alone,
+    case_stop_closes_every_held_item_of_a_full_inbox,
+    case_stop_path_closes_through_the_shared_runner,
+    case_closing_adds_no_process_and_rewrites_the_inbox_only_when_it_closes,
+    case_handoff_refusal_names_closed_as_a_way_out,
+    case_reorient_leaves_out_items_whose_home_holds,
+    case_reorient_names_no_item_when_every_item_is_settled,
+    case_question_box_answer_is_saved_like_a_typed_message,
+    case_question_box_saves_the_answer_and_never_the_question,
+    case_refused_ruling_is_not_closed_by_a_grant_of_its_path_in_another_block,
+    case_close_rewrite_keeps_a_block_appended_after_the_reads,
+    case_same_id_on_two_lines_settles_each_line_alone,
+    case_block_refusal_remedy_names_closed_beside_the_handoff,
+    case_multi_question_box_saves_only_the_answers,
+    case_one_question_answer_keeps_its_quote_marks_whole,
+    case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string,
+    case_box_answer_as_an_object_is_saved_as_its_text,
+    case_box_answer_list_of_objects_is_saved_as_its_texts,
+    case_box_answer_that_cannot_be_read_is_never_silent,
+    case_box_note_with_inner_quotes_is_saved_whole,
+    case_close_proof_counts_only_the_session_repo,
+    case_unsent_page_or_repo_refusal_does_not_name_closed,
+    case_standing_refusal_still_names_closed,
+    case_ruling_refusal_for_an_unresolved_home_does_not_name_closed,
+    case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped,
+    case_problems_tests_the_settling_kinds_by_their_one_home,
+    case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
+    case_refs_are_listed_once_per_repo_not_per_item,
 )
 
 

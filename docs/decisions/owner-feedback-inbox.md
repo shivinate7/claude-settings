@@ -25,6 +25,17 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
   start per `ArtifactData` call (unmeasured). Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
+- **Question box.** A PostToolUse hook on `AskUserQuestion` (`local_time.py`, told apart by its payload) saves the
+  owner's answers as one block like a typed message (owner R27, 2026-11-11). It cuts them from the tool's result on the
+  exact question strings of `tool_input.questions`, with the question text left out. A dict result
+  `{"answers": {<question>: <answer>}}` is read too: an answer is a string, an object with an `answer` field, or a list
+  of those. A trailing `user notes:` stays with its answer, quotes inside the notes included (the cut is at the
+  answer's closing quote). An empty answer and any other tool save nothing. A result that holds no
+  `"<question>"="<answer>"` pair, or an answer in a form it cannot read, is not saved, and the session is told. The
+  readable answers beside an unreadable one are still saved. Cost: one `local_time.py` process start per `AskUserQuestion` call
+  (the start itself is unpinned), from its PostToolUse
+  entry; the capture starts no further process (pinned by `hooks/test_feedback_inbox.py`, "question box cost"). A relay of the owner's words from another session is
+  not saved: it comes in the `<cross-session-message` frame that a peer's own send uses, and no marker tells them apart.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
   `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
@@ -160,17 +171,31 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
   home holds it for good. An item is closed by `[closed]` as a whole token after the home, with trailing
   text allowed, or by `[closed]` at the line end. The guard stops asking for a closed standing id in the
-  handoff. A closed note
-  needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on
+  handoff. The Stop closes a settled item itself (owner R27, 2026-11-11): a `ruling` or `task` item whose home is a
+  file under its kind's paths that main holds (`refs/heads/main` or `refs/remotes/origin/main`) gains ` [closed]`
+  through `lint/tending.close`, the shared close step. That step is the feedback-log entry of `lint/layout.json` (state live,
+  runs from stop and compact, test `open-until-home-on-main`). A `step:<slug>` home never closes an item, as the step is
+  the open work. A question, standing, page, repo or note item is left as it is, and so is a home only a lane branch
+  holds. The proof is kept per item line, from the home check's own reads, so a grant in one block never settles a
+  plain ruling to the same path in another. It counts main only in the session's own repo (where the session worked,
+  else the Stop's cwd): a repo the Stop merely runs in may pass the home check but never closes the item. The kinds that
+  settle (`ruling`, `task`) have one home, `feedback_guard.SETTLING_PREFIXES`; `lint/tending.SETTLING_KINDS` is built from it. Cost: the close adds no read of its own. The home check it rides on starts
+  one `cat-file` per open or closed ruling or task item it checks. It also starts one `rev-parse` per repo and per absolute home, and
+  one `for-each-ref` per repo. All of them run inside the Stop process that already runs. A line judged earlier in the same Stop costs nothing
+  more. The inbox is read at most twice and written at most once, only when a line changed. The close re-reads it right before the
+  write, so a message captured during the reads is kept. A refusal for a standing id missing from the handoff names `[closed]` as a way out. The refusal for a ruling or task whose home does not resolve does not: `[closed]` on that open line leaves the block in place, so the home is the way out. The refusal for an unsent page or repo item does not either: the send is the way out. A closed note
+  needs a home: a file some branch tracks, `step:<slug>` (a step file on
   some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` and
   `process-only` are no home for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88
   (a closed item with no step, record or answer behind it) is the related incident, not a measured one.
-  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, `git rev-parse`, `git for-each-ref` and
-  `git cat-file`, inside the Stop process. No file written. When the folder is in no repo, the check
+  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, one `git cat-file`, with the one
+  `git rev-parse` and `git for-each-ref` per repo that the Stop shares, inside the Stop process. No file written. When the folder is in no repo, the check
   passes and a systemMessage names the closed note homes.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand.
-- **Compaction.** The compact hook lists open item ids.
+- **Compaction.** The compact hook lists the open item ids that still need work. A `ruling` or `task` line whose
+  file home main holds is left out, by line, so another line of the same id stays. It writes no file. Cost: one `git cat-file`
+  per open ruling or task item, and one `rev-parse` and one `for-each-ref` per repo, started in the reorient process.
 
 Kind: process
 Home: hooks/local_time.py
