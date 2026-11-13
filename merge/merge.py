@@ -1174,10 +1174,6 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
-    def comment_rows(self, since, seen=None):
-        """-> the review log and lane-lint rows updated since `since`: the module's comment_rows of this host."""
-        return comment_rows(self, since, seen)
-
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since` (comment_rows, grouped by comment_groups).
         records is {PR number: [(body, created_at, updated_at) of each review log comment, oldest first]}: a body counts only when the review log
@@ -4387,14 +4383,25 @@ def iso_secs(text):
 def iso_stamp(secs):
     return datetime.datetime.fromtimestamp(secs, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def overlap_stamp(text):
+    """-> the ISO time REVIEWED_OVERLAP_SECS before the ISO time `text`, where an incremental read starts, or None when `text` is no time or one
+    iso_stamp cannot write that far back (year 1, or before 1970 on a platform whose clock stops there)."""
+    secs = iso_secs(text) if isinstance(text, str) else None
+    if secs is None:
+        return None
+    try:
+        return iso_stamp(secs - REVIEWED_OVERLAP_SECS)
+    except (ValueError, OverflowError, OSError):
+        return None
+
 def comment_rows(h, since, seen=None):
     """-> [{id, issue, kind, body, created, updated}] of the repo's review log and lane-lint comments updated since `since`, in the list's order
     (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is ROW_LOG when the review log marker is the whole
     first line, or ROW_LINT when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
     gets the (id, updated_at) of every comment the read returned, rows or not: the newest updated_at is a safe cursor, and an id with no row is a comment
     edited so it is no row any more. A failed read is a Stop.
-    The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it. A function of the host, not only a
-    Host method: a test fake borrows issue_comments and has only `pages`."""
+    The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it. A module function, not a Host
+    method: a test fake borrows issue_comments and has only `pages`."""
     rows = []
     for c in h.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
         if seen is not None:
@@ -4424,8 +4431,9 @@ def valid_cache_row(r):
             and all(r.get(k) is None or isinstance(r.get(k), str) for k in ("created", "updated")))
 
 def valid_reviewed_cache(c):
-    """True when `c` is a whole reviewed cache: every field of its type. One bad row makes it invalid, and an invalid cache is read in full instead."""
-    return (isinstance(c, dict) and all(isinstance(c.get(k), str) and iso_secs(c[k]) is not None for k in ("floor", "cursor"))
+    """True when `c` is a whole reviewed cache: every field of its type, and floor and cursor times an incremental read can start from (overlap_stamp).
+    One bad row makes it invalid, and an invalid cache is read in full instead."""
+    return (isinstance(c, dict) and all(overlap_stamp(c.get(k)) is not None for k in ("floor", "cursor"))
             and isinstance(c.get("full_at"), (int, float)) and not isinstance(c.get("full_at"), bool)
             and isinstance(c.get("rows"), list) and all(valid_cache_row(r) for r in c["rows"]))
 
@@ -4484,7 +4492,7 @@ def reviewed_rows(h, floor):
     warm = valid_reviewed_cache(cache) and floor_s is not None and iso_secs(cache["floor"]) <= floor_s and 0 <= now - cache["full_at"] <= REVIEWED_FULL_REREAD_SECS
     if warm:
         merged = {r["id"]: r for r in cache["rows"]}
-        fresh = comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)
+        fresh = comment_rows(h, overlap_stamp(cache["cursor"]), seen)
         for cid, _updated in seen:
             merged.pop(cid, None)  # the comment came back: its new row replaces this one, or it is no row now
         merged.update({r["id"]: r for r in fresh})
@@ -4689,7 +4697,8 @@ def reviewed_roots(roots, hosts, config):
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
     --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    request and other open pull request on the base, and one compare per done pull request against the base; no new process or timer, and one
+    write of the state file per root (reviewed_lines)."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)

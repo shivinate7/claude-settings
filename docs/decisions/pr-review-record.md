@@ -98,7 +98,7 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 
 Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments updated since a stored cursor (`merge-role.json`, key `reviewed_cursor`), so it pages only the comments since the last run. It reads every comment since the oldest open PR when the cache is missing or invalid, when an older PR reopens, and when the last full read is more than 30 minutes old. Each run writes that file at most once. The merge gates read all comments every time.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - The lane-lint comment (record `lanes-run-no-full-ci-job`) rides the same list read, so `--reviewed` makes no extra call for it. The batch runner's join adds one paged read of that list. `merge --lane-lint <pr>` adds one POST on a PASS, and, for a lane PR (never a batch integration PR), one read of the head's check runs, which judges the draft's Windows and macOS runs (`merge --batch-build` adds the same one read per lane, on a new build and on `--ready`).
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
