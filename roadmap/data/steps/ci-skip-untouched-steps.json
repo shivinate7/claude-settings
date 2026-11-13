@@ -1,0 +1,14 @@
+{
+ "id": "ci-skip-untouched-steps",
+ "title": "CI skips whole jobs, and the checks job's unflagged pull_request lint steps, when a change touches nothing they read",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3hpjg5FJKuEAqUdvm",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 11:20 CST Nov 13, relayed by runner 10 and the coordinator: a prose-only batch still starts about 19 jobs and runs the lint steps. Ruled by decisions test-strategy-reset (\"Each CI job runs only when a file that its suites read changes\") and ci-cut-in-steps (item 31), never built.",
+ "source": "owner 11:20 CST Nov 13 via runner 10; coordinator 11:21 CST; retrospective 11:19 CST",
+ "note": "Scope: whole jobs, and the unflagged pull_request lint steps in the checks job (.github/workflows/checks.yml about lines 445 to 564), skipped when the change touches no file they read. Caveat from steps guard-pr-runs-windows-shards and rollup-needs-all-shards: a job-level skip needs the all-jobs-passed rollup to accept a skipped job; the coordinator's 14:25 CST Nov 12 pick gates by step instead. Overlaps lane ci-mac-once-per-batch (same file, checks.yml). First measure: runner 10's job minutes for batch 133. Express (ruling drain-first-hold part 4: a CI fix). Lane started by the coordinator 11:21 CST Nov 13.",
+ "updatedAt": "2026-11-13T11:22:04-06:00"
+}

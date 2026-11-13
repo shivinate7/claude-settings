@@ -1,7 +1,7 @@
 {
  "id": "lint-fixture-mail-auth",
  "title": "Lane lint's feedback inbox fixtures fail when the machine's mail auth fails",
- "status": "todo",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane batch-label-setter, 11:08 CST Nov 13: the \"Feedback inbox fixture suite\" in the lane lint fails in a container where hooks/mail.py prints \"mail unknown: auth\"; every hook-ran case sees the extra line, so a lane lint can FAIL from the machine, not the diff. Unmeasured on main.",
  "source": "lane batch-label-setter (session_013NEJKz9DMAhnNimZfuBt2L) 11:08 CST Nov 13",
- "note": "The fixtures run with mail stubbed or ignore the mail status line, so the verdict depends only on the diff. Red case: a container with no mail auth. Express (ruling drain-first-hold part 4: a lint that fails for the wrong reason stops lanes landing).",
- "updatedAt": "2026-11-13T11:10:51-06:00"
+ "note": "The fixtures run with mail stubbed or ignore the mail status line, so the verdict depends only on the diff. Red case: a container with no mail auth. Express (ruling drain-first-hold part 4: a lint that fails for the wrong reason stops lanes landing). Already fixed on main (lane lint-fixture-mail-auth 11:20 CST Nov 13, triage read of commit ee1c0dc04 11:25 CST): hooks/test_feedback_inbox.py, test_local_time.py, test_shared_names.py and lint/test_now_central.py scrub MAILBOX_REPO and MAILBOX_CACHE, with a red run on 2deb827ad. No PR needed. #2871 (head cdbb04d40) lacks it: merge main into that stack.",
+ "updatedAt": "2026-11-13T11:22:04-06:00"
 }
