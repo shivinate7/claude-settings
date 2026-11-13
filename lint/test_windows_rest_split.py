@@ -21,7 +21,7 @@ REST_PREFIX = "checks-windows-rest"
 ALL_JOBS_PASSED = "all-jobs-passed"
 CI_DONE = "ci-done"
 PROVISIONAL_CAP = 60
-# The Windows full shards the brief holds. None may be dropped: the owner's worry is untagged cases.
+# The Windows full shards that must stay in checks.yml. The held-shard case fails if one is dropped, which would leave its untagged cases unrun.
 HELD_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
                "checks-windows-merge-4", "checks-windows-merge-5")
 

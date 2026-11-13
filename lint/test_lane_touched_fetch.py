@@ -17,7 +17,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LANE = os.environ.get("LANE_YML") or os.path.join(ROOT, ".github", "workflows", "lane-touched-tests.yml")
-MAX_DEPTH = 50  # the bound the brief asks for ("small"); the builder's depth must sit inside it
+MAX_DEPTH = 50  # the largest fetch-depth that still counts as shallow; a checkout fetching more than this fails the depth case
 MASK = "::add-mask::"
 MASKED_VARIABLE = re.compile(r"::add-mask::\$\{?\w")
 USE_IN_ARGV = re.compile(r"extraheader=\$\{?auth")  # the fetch argv carries the credential as the git header
