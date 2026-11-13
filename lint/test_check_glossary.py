@@ -253,6 +253,17 @@ class CodeNameTests(Fixture):
         code, out = self.change(rel, text)
         self.assertEqual(code, 0, out)
 
+    RECORD_ROW = "| mailbox | A git store for messages. | `rule:one-rule` | `inbox (this sense)` |\n"
+    # The mark: the row's meaning holds the id, then ` stays`. The row is the one whose "not" name the id holds.
+    MARKED_ROW = ("| mailbox | A git store for messages. Its slug `owner-feedback-inbox` stays. "
+                  "| `rule:one-rule` | `inbox (this sense)` |\n")
+
+    def base_with_record(self, row=RECORD_ROW):
+        """Commit a tree whose decision record has an id that holds a tagged "not" word, with `row` as its glossary row."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA + row)
+        self.put("docs/decisions/owner-feedback-inbox.md", "# Feedback\n")
+        self.base_repo()
+
     # Identifiers
 
     def test_python_identifier_with_not_name_fails(self):
@@ -373,6 +384,49 @@ class CodeNameTests(Fixture):
 
     def test_unticked_hyphen_prose_passes(self):
         self.green("docs/notes.md", "A bundle-of-lanes phrase, and a handover-style note.\n")
+
+    def test_cite_of_a_record_id_marked_in_its_row_is_not_flagged(self):
+        """A prose line that cites a record by its id passes when the record's row marks that id with ` stays`.
+        The base holding the record does not pass it: the mark does."""
+        self.base_with_record(self.MARKED_ROW)
+        self.assertIn("docs/decisions/owner-feedback-inbox.md", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertNotIn("slug owner-feedback-inbox", out, out)
+        self.assertEqual(code, 0, out)
+
+    def test_cite_of_a_held_record_its_row_does_not_mark_is_still_flagged(self):
+        """The base holds the record, but its row does not mark the id: the cite is a new name and stays flagged."""
+        self.base_with_record()
+        self.assertIn("docs/decisions/owner-feedback-inbox.md", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("slug owner-feedback-inbox uses 'inbox'; the glossary name is 'mailbox'", out)
+
+    def test_cite_of_an_unmarked_id_with_no_record_is_still_flagged(self):
+        """No record on the base and no mark: a new name, so it stays flagged."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA + self.RECORD_ROW)
+        self.base_repo()
+        self.assertNotIn("owner-feedback-inbox", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("slug owner-feedback-inbox uses 'inbox'", out)
+
+    def test_a_non_record_slug_beside_a_marked_record_cite_is_still_flagged(self):
+        """The pass is per id: a marked record id passes, and a slug beside it with no mark stays flagged."""
+        self.base_with_record(self.MARKED_ROW)
+        self.assertIn("docs/decisions/owner-feedback-inbox.md", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`, see `handover-notes-record`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("slug handover-notes-record uses 'handover'", out)
+        self.assertNotIn("slug owner-feedback-inbox", out, out)
 
     # Hook messages
 
@@ -757,6 +811,31 @@ class KeptNameTests(Fixture):
         self.assertEqual(code, 1, out)
         self.assertIn("merge/merge_probe.py:1", out)
         self.assertIn("merge/merge_probe.py:2", out)
+
+    # The seven record ids the real glossary flags when cited: each row marks its id, so a cite passes
+
+    FLAGGED_IDS = ("owner-feedback-inbox", "inbox-saves-other-notices", "inbox-send-window-unbounded",
+                   "workflow-args-shape-check", "debate-model-tiers", "local-triage-tier-proof",
+                   "review-record-model-not-served")
+    # The "not" names these ids hit, read from the real rows: a deleted name would pass the ids for the wrong reason.
+    SCOPE = (("mailbox", "inbox (this sense)"), ("session role", "shape (this sense)"),
+             ("session role", "tier"), ("review log", "review record"))
+
+    def test_each_flagged_record_id_passes_by_the_real_glossary(self):
+        """Each of the seven record ids passes when cited, once the real glossary's row marks it with ` stays`.
+        The control, a slug no row marks, is still flagged, so the file was read."""
+        self.maxDiff = None  # the failure names every id still flagged, not a cut-off list
+        self.real_glossary()
+        with open(os.path.join(os.path.dirname(HERE), "GLOSSARY.md"), encoding="utf-8") as f:
+            rows_ = {term: list(names) for term, _homes, names in load_check().rows(f.read())}
+        for term, name in self.SCOPE:
+            self.assertIn(name, rows_.get(term, []), "scope: the %s row lacks '%s'" % (term, name))
+        cites = "".join("Cited: `%s`.\n" % rid for rid in self.FLAGGED_IDS)
+        _code, out = self.change("docs/notes.md", cites + "Control: `handover-notes-record`.\n")
+        self.assertEqual(
+            self.problems_of(out, "docs/notes.md"),
+            ["docs/notes.md:8: slug handover-notes-record uses 'handover'; the glossary name is 'handoff'"],
+            "a cited record id is flagged: its glossary row does not mark it with ` stays`")
 
 
 class MovedLineTests(Fixture):
