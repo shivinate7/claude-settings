@@ -366,8 +366,11 @@ def case_settings_json():
     check("settings: autoCompactWindow is 500000",
           settings.get("autoCompactWindow") == 500000, "settings: %r" % settings)
     env = settings.get("env", {})
-    check("settings: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is gone -- autoCompactWindow replaces it",
-          "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in env, "env: %r" % env)
+    # R40, the owner's compaction ruling (13:21 CST, Nov 11, "compaction: A"), sets the
+    # compaction trigger to 92 in the settings env.
+    check("settings: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is \"92\" (R40)",
+          env.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "92",
+          "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: %r" % env.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"))
 
     hooks = settings.get("hooks", {})
 
