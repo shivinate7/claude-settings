@@ -288,8 +288,10 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   A lane whose only holders are stale drafts reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane
   <session id>)`, and the row counts it. A stale draft is a draft over 12 h old at `readAt`, not held, with no review log,
-  a `head` sha (a draft with none gives no joint line) not in the default branch, and no doing step named in its branch
-  or title. The lane's session row needs `idle_since` (ISO time with a zone) over 12 h before `readAt` and
+  a full 40-hex `head` sha (a draft with none, or a short one, gives no joint line) not in the default branch, on no
+  branch another live lane's row holds, and no doing step named in its branch or title. Any step still doing under the
+  lane, even one a merged pull marks landed, holds the joint line, and so does an open pull on a `lane/<slug>-*` branch
+  (the archive guard counts it as the lane's own). The lane's session row needs `idle_since` (ISO time with a zone) over 12 h before `readAt` and
   `unarchived_epoch` the JSON int 0 (not false, 0.0 or text). One open pull whose title or branch holds the word
   `records` stops every joint line. The batch runner pushes each branch to `archive/<branch>`, closes each draft, then
   archives the lane. The joint pass reads rows already loaded: no process, file or log of its own.
