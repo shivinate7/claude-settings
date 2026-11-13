@@ -302,7 +302,7 @@ Other tools, in `judge` order:
                        write deletes the file's record) and a read pass. A refused write leaves the record with the first
                        writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
-  coordinator-scope    deny. A cloud coordinator's own call (no `agent_id`, CLAUDE_CODE_REMOTE true, tier
+  coordinator-scope    deny. A cloud coordinator's own call (no `agent_id`, CLAUDE_CODE_REMOTE true, role
                        `coordinator`: the role file for the environment's session id, else the session's own
                        cs-build tag and its own later tag calls) that
                        writes a repository path outside the record homes (the kinds of COORDINATOR_KINDS at the
@@ -311,7 +311,7 @@ Other tools, in `judge` order:
                        tool. A path in no repository passes. Or that spawns an agent (Agent, Task or a Workflow
                        agent() call) whose type is not one of COORDINATOR_AGENT_ROLES, an empty or missing type
                        included. Or that merges: `gh pr merge` or the host's merge or auto-merge tool. The
-                       reasons name no target. The tier is read last, only for a call that would be refused.
+                       reasons name no target. The role is read last, only for a call that would be refused.
                        An override lifts it. (session-tiers, roles-orchestrator-never-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -6699,7 +6699,7 @@ def readonly_write_hit(command: str, cwd: str, session: str, remote: bool = Fals
 # repo's legacy-repos path, then the layout path), or a record-branch folder of a checkout that stands on the record branch
 # (with RECORD_DATA in it). A GitHub MCP write is judged by the repo the call names, not the checkout it runs in
 # (`named_candidates`) unless the checkout's origin is that repo, then by the checkout's own `candidates`.
-# The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose tier is `coordinator`:
+# The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose role is `coordinator`:
 # the role file when it names this session, else the cs-build tag of the session's own get_session record plus its own
 # later set_session_tags calls (own_session_read with `applied`). An owner override lifts the rule: it is not in never_lifted.
 # What a shell call writes: the words `_shell_write_hit` reads (a `cp` counts by its destination, an `mv` source counts
@@ -6717,7 +6717,7 @@ COORDINATOR_SCOPE_REASON = (
 )
 # The agent types a coordinator may spawn, compared exactly. Plan, Explore and claude-code-guide gather facts and the
 # refuter argues against a plan (decision coordinator-spawns-refuter); none builds or reviews.
-COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide", REFUTER_ROLE)
+COORDINATOR_AGENT_ROLES = ("Plan", EXPLORE_ROLE, "claude-code-guide", REFUTER_ROLE)
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles) coordinator-scope: a coordinator briefs lanes and runs no build or review agent of its own "
     "(decision session-tiers: a spawn of any type but Plan, Explore, claude-code-guide and refuter is refused). "  # glossary-ok: session-tiers is the decision's file name
@@ -6846,7 +6846,7 @@ def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:
 def _own_tag_role(transcript) -> str:
     """'coordinator' when the session's own cs-build tag names it, else '': the tags of the newest get_session result
     for the session's own id plus what the session's own later set_session_tags calls added, read from the transcript in
-    one pass. A transcript with neither reads '' (the /clear gap; debt coordinator-tag-tier-fails-open)."""
+    one pass. A transcript with neither reads '' (the /clear gap; debt coordinator-tag-role-fails-open)."""
     try:
         import override
         import own_session
@@ -6867,8 +6867,8 @@ def _cloud_own_call(payload) -> bool:
 
 
 def _cloud_coordinator(payload) -> bool:
-    """True for a cloud session's own call whose tier is `coordinator`. The role file decides when it names this session.
-    When it does not, the tier is the session's own cs-build tag. The answer is kept for one session id, config folder and
+    """True for a cloud session's own call whose role is `coordinator`. The role file decides when it names this session.
+    When it does not, the role is the session's own cs-build tag. The answer is kept for one session id, config folder and
     transcript, so the two coordinator checks share one role-file read and at most one transcript read."""
     if not _cloud_own_call(payload):
         return False
@@ -6889,7 +6889,7 @@ def _coordinator_type_refused(agent_type) -> bool:
 
 def coordinator_act_hit(payload, tool: str, tool_input: dict):
     """Rule coordinator-scope, the acts: (reason, matched) when a cloud coordinator's own call spawns an agent outside
-    COORDINATOR_AGENT_ROLES, runs a Workflow with such an agent() call, or merges; else ("", ""). The tier is read last,
+    COORDINATOR_AGENT_ROLES, runs a Workflow with such an agent() call, or merges; else ("", ""). The role is read last,
     only for a call that would be refused, so a lane's spawn of its own builder reads no role file and no transcript."""
     is_workflow = tool == "Workflow" and isinstance(tool_input.get("script"), str)
     if tool not in SPAWN_TOOLS and tool not in COORDINATOR_MERGE_TOOLS and tool not in SHELL_TOOLS and not is_workflow:
@@ -6921,7 +6921,7 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
 
 def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path that is no
-    record home and not its scratchpad, else ''. The tier is read last, only for a call that writes such a path, so a
+    record home and not its scratchpad, else ''. The role is read last, only for a call that writes such a path, so a
     lane's or a solo session's ordinary call reads no role file and no transcript. The detail is a log field, so a path
     in it is shortened from its head (log_path) after its label: a raw path would be cut from the tail by
     `record`, and a long temporary root would take the file name with it."""
@@ -7063,7 +7063,7 @@ def judge(payload) -> None:
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
     # 0, coordinator-scope. A cloud coordinator's own write goes only to records, its scratchpad or a path in no
-    # repository, and its own spawns and merges stay in its tier. An override lifts it, and it is not in
+    # repository, and its own spawns and merges stay in its role. An override lifts it, and it is not in
     # never_lifted: the owner may mean the call.
     scope_hit = coordinator_scope_hit(payload, tool, tool_input, cwd)
     if scope_hit:

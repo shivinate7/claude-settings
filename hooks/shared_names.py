@@ -154,7 +154,7 @@ def config_dir() -> str:
     )
 
 
-# The one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges. The merge tool and the
+# The one role that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges. The merge tool and the
 # guard's coordinator-scope rule read the same role file for the same session, so the reader lives here once.
 MERGE_ROLES = {"batch-runner"}
 
@@ -165,7 +165,7 @@ def role_path():
 
 
 def read_recorded_role() -> Optional[str]:
-    """The role string this session's own role file records, any tier, or None: no session id, no file, unreadable or
+    """The role string this session's own role file records, any role, or None: no session id, no file, unreadable or
     malformed, another session's, or a role that is no string. The id is the environment's
     CLAUDE_CODE_REMOTE_SESSION_ID (cse_<id>), never a hook payload's session_id."""
     import json
@@ -184,7 +184,7 @@ def read_recorded_role() -> Optional[str]:
 
 def read_merge_role() -> Optional[str]:
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's,
-    or a tier outside MERGE_ROLES. Every failure is None, so the check fails closed. An absent id never equals an
+    or a role outside MERGE_ROLES. Every failure is None, so the check fails closed. An absent id never equals an
     absent record."""
     role = read_recorded_role()
     return role if role in MERGE_ROLES else None
