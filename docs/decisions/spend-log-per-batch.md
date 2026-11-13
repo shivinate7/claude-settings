@@ -25,8 +25,8 @@ A log needs a named reader (the rule that a log needs a named reader, `outcomes-
 
 Each batch merge costs:
 
-- One `get_session` read per session. It runs inside the batch runner's merge run, a process already running.
-- One line per session on the record branch.
+- One `get_session` read per session (no test pins this count yet). It runs inside the batch runner's merge run, a process already running.
+- One line per session on the record branch (no test pins this count yet).
 - No timer, no new process, no watcher.
 - The token cost of one read: unmeasured.
 
