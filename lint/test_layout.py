@@ -563,6 +563,7 @@ class DefaultBranchPage(GitTree):
     URL_LOCAL = "https://claude.ai/artifact/fromlocal"
     URL_TRUNK = "https://claude.ai/artifact/fromtrunk"
     URL_NEW = "https://claude.ai/artifact/fromnew"
+    FORK_BRANCH = "fork-roadmap"  # the record branch a fork checkout sets for itself
     REMOTE = "https://github.com/owner/fixture.git"
     BRIEF = {"briefs/a.md": "# Brief\n"}
 
@@ -637,6 +638,16 @@ class DefaultBranchPage(GitTree):
             json.loads(self.git("show", "refs/remotes/origin/main:" + EXTRAS))  # scope: the blob does not parse
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
                          "an origin/main blob that does not parse made the guard read fail or lose the checkout's page")
+
+    def test_guard_read_keeps_the_checkouts_own_record_branch_and_page_the_blob_lacks(self):
+        """A fork checkout sets its own record branch and waiting page. origin/main's blob lacks both, so the guard reads
+        keep the checkout's values: the blob wins only for the keys it holds."""
+        fork = {"kinds": {}, "record-branch": self.FORK_BRANCH, "waiting-page": self.URL_LOCAL}
+        self.stale_checkout(json.dumps(fork), json.dumps({"kinds": {}}))
+        self.assertEqual(self.layout.record_branch(self.tree), self.FORK_BRANCH,
+                         "the guard read dropped the checkout's record branch, which origin/main's blob lacks")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "waiting_page did not read the checkout's page")
 
     def test_writer_set_waiting_page_reads_the_checkouts_extras_file_not_origin_main(self):
         self.stale_checkout(self.registry(self.URL_LOCAL), self.registry(self.URL_MAIN))
@@ -743,6 +754,7 @@ class GithubGuardRead(GitTree):
     OLD = "old/repo"
     NEW = "new/repo"
     ORIGIN = "https://github.com/new/repo.git"
+    FORK = "fork/repo"  # the repo a fork checkout names for itself
 
     def setUp(self):
         super().setUp()
@@ -796,6 +808,12 @@ class GithubGuardRead(GitTree):
         _, starts = self.git_starts(self.git_reads.github_repo, self.tree)
         self.assertFalse([argv for argv in starts if "fetch" in argv], "the guard read ran git fetch")
         self.assertEqual(self.working_extras(), before, "the guard read wrote the checkout's extras file")
+
+    def test_github_repo_keeps_the_checkouts_own_repo_the_blob_lacks(self):
+        """A fork checkout names its own GitHub repo. origin/main's blob names none, so the guard read keeps the checkout's."""
+        self.stale_checkout(self.extras(self.FORK), json.dumps({"kinds": {}}))
+        self.assertEqual(self.git_reads.github_repo(self.tree), self.FORK,
+                         "github_repo did not keep the checkout's own repo, which origin/main's blob lacks")
 
 
 class SetWaitingPage(Tree):

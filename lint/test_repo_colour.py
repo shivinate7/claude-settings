@@ -365,25 +365,19 @@ class Drift(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertEqual(len(out.stdout.strip().splitlines()), 2, out.stdout)
 
-    def test_cost_at_most_one_git_start_and_no_file_write(self):
-        # The cost: at most one git start (the origin/main blob read), no file is written, and it reads on demand.
+    def test_cost_reads_only_no_process_no_write(self):
+        # The docstring's cost: no process starts and no file is written; it reads on demand.
         from unittest import mock
         co = self.banchi("#ff0000")
-        modes, starts, real_open, real_popen = [], [], open, subprocess.Popen
+        modes, real_open = [], open
 
         def watch(path, mode="r", *a, **k):
             modes.append(mode)
             return real_open(path, mode, *a, **k)
-
-        def count(*a, **k):
-            starts.append(list(a[0] if a else k["args"]))
-            return real_popen(*a, **k)
         with mock.patch("builtins.open", watch), \
-                mock.patch("subprocess.Popen", side_effect=count), \
+                mock.patch("subprocess.Popen", side_effect=AssertionError("process started")), \
                 mock.patch("os.system", side_effect=AssertionError("process started")):
             self.assertEqual(self.rc.main(["repo_colour.py", "drift", co.root]), 1)
-        git = [argv for argv in starts if argv and os.path.basename(str(argv[0])) == "git"]
-        self.assertLessEqual(len(git), 1, "the drift read started %d git processes: %s" % (len(git), git))
         self.assertTrue(modes)
         self.assertTrue(all(set(m) <= set("rbt") for m in modes), modes)
 
