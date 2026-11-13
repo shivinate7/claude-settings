@@ -2734,6 +2734,27 @@ def case_challenged_decision_form():
                         {"kind": "decision", "context": base["context"]}, None)
     challenged_decision("an update with a pick and a context, and no kind, passes", "update",
                         {"pick": "a", "context": base["context"]}, None)
+    # `recommended` names the pick now, and `pick` is its old name: each case above holds for it too.
+    challenged_decision("a set with a recommended key and no Against line is refused", "set",
+                        page_item(against=None, pick=None, recommended="a"), CHALLENGED_REFUSAL)
+    challenged_decision("a set with a recommended key and a well formed Against line passes", "set",
+                        page_item(pick=None, recommended="a"), None)
+    challenged_decision("a stood recommended key passes with no Against line", "set",
+                        page_item(against=None, pick=None, recommended="a", stands=True), None)
+    challenged_decision("a port recommended key passes with no Against line", "set",
+                        page_item(against=None, pick=None, recommended="a", port=True), None)
+    challenged_decision("an update of kind decision and a recommended key, with a context and no line, is refused",
+                        "update", {"kind": "decision", "recommended": "a", "context": base["context"]},
+                        CHALLENGED_REFUSAL)
+    challenged_decision("an update of kind decision and a recommended key, with a context and the line, passes",
+                        "update", {"kind": "decision", "recommended": "a", "context": page_item()["context"]}, None)
+    challenged_decision("an update of kind decision and a recommended key, with no context, passes", "update",
+                        {"kind": "decision", "recommended": "a"}, None)
+    challenged_decision("a set with a recommended list of two keys and no Against line is refused", "set",
+                        page_item(against=None, pick=None, recommended=["a", "b"],
+                                  options=copy.deepcopy(ITEM92["options"])), CHALLENGED_REFUSAL)
+    challenged_decision("a set with a recommended list of two keys and a well formed Against line passes", "set",
+                        page_item(pick=None, recommended=["a", "b"], options=copy.deepcopy(ITEM92["options"])), None)
 
 
 def challenged_page(name, op, data, want):
@@ -2743,6 +2764,8 @@ def challenged_page(name, op, data, want):
 def case_challenged_item_hit():
     challenged_page("a page decision with a pick and no Against line is refused", "set", page_item(against=None),
                     CHALLENGED_REFUSAL)
+    challenged_page("a page decision with a recommended key and no Against line is refused", "set",
+                    page_item(against=None, pick=None, recommended="a"), CHALLENGED_REFUSAL)
     challenged_page("a Departs from line missing, with no Against line, is refused as question-departs", "set",
                     page_item(against=None, departs=None), (DEPARTS_RULE, "Departs"))
     challenged_page("an empty Against line is refused", "set", page_item(against="Against the pick (sonnet):"),
