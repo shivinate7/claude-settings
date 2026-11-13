@@ -925,26 +925,42 @@ def defined_line(text, name):
     return min((n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name), default=0)
 
 
+def symbol_line(text, name):
+    """The one resolver of a cited symbol: the first line where `name` is defined in `text` (a def or class through the AST), else for a
+    non-Python file the first row that names it. 0 when `text` holds no such name."""
+    line = defined_line(text, name)
+    if line is None:  # not Python: the first row that names it
+        line = next((n for n, row in enumerate(text.split("\n"), 1) if re.search(r"\b%s\b" % re.escape(name), row)), 0)
+    return line
+
+
+READ_SYMBOL = re.compile(r"[\w./@+~-]::([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)")
+
+
 def cited_excerpt(cite, text, limit=40):
     """The numbered lines of a backing file's `text` that `cite` points at, at most `limit`: a `read path:N` or
-    `path:N-M` gives those lines, a `test path::name` gives the lines from where `name` is defined, and any other
-    cite with a backing path gives the top of the file. A cite with no backing path gives None. A prose judge sends
-    this beside the line, so the model reads what the line cites."""
+    `path:N-M` gives those lines, a `test path::name` or `read path::name` gives the lines from where `name` is defined
+    (`symbol_line`), and any other cite with a backing path gives the top of the file. A `read path::name` whose name
+    is not found gives one line that starts "unknown", never the top of the file. A cite with no backing path gives
+    None. A prose judge sends this beside the line, so the model reads what the line cites."""
     kind, rest = cite_kind(cite)
     if backing_path(kind, rest) is None:
         return None
-    rows = text.replace("\r\n", "\n").split("\n")
+    text = text.replace("\r\n", "\n")
+    rows = text.split("\n")
     first, last = 1, limit
     anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", rest) if kind == "read" else None
+    symbol = READ_SYMBOL.search(rest) if kind == "read" and not anchor else None
     if anchor:
         first = int(anchor.group(1))
         last = int(anchor.group(2) or first)
+    elif symbol:
+        name = symbol.group(1).rsplit("::", 1)[-1]
+        first = symbol_line(text, name)
+        if not first:
+            return "unknown: `%s` is not found in the cited file" % name
     elif kind == "test" and TEST_CITE.match(rest):
-        name = rest.rsplit("::", 1)[-1]
-        line = defined_line(text.replace("\r\n", "\n"), name)
-        if line is None:  # not Python: the first row that names it
-            line = next((n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % re.escape(name), row)), 0)
-        first = line or 1
+        first = symbol_line(text, rest.rsplit("::", 1)[-1]) or 1
     first = max(first, 1)
     last = min(max(last, first), first + limit - 1, len(rows))
     return "\n".join("%d: %s" % (n, rows[n - 1]) for n in range(first, last + 1))
