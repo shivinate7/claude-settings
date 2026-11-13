@@ -89,7 +89,7 @@ The review a changed head owes. The first three bullets are the owner's ruling o
   - it runs on Sonnet;
   - it reads the whole diff against main;
   - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
-- Post it with the lines the merge tool prints: the earlier round lines, the new round 3 line, and no `Fix check` line. After a record that skipped round 2 (rounds 1 and 3 beside a PASS `Fix check` line), a fresh review at a moved head posts a real round 2 line, because the 1-to-3 skip needs the Fix check line. A lane posts no fix-verifier-only record before round 3: the one record holding a round 1 FAIL, round 3 and the PASS Fix check line is posted after round 3.
+- Post it with the lines the merge tool prints: the earlier round lines, the new round 3 line, and no `Fix check` line. After a record that skipped round 2 (rounds 1 and 3 beside a PASS `Fix check` line), a fresh review at a moved head posts a real round 2 line, because the 1-to-3 skip needs the Fix check line. A guard or check change posts no fix-verifier-only record before round 3: the one record holding a round 1 FAIL, round 3 and the PASS Fix check line is posted after round 3.
 - Free text goes only below `---`. A record is never edited or deleted.
 - A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
 - A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
