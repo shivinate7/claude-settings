@@ -424,7 +424,7 @@ MUTATIONS = [
      '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
      '    except Exception:\n        return False',
      '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
-     '    except Exception:\n        return True', "guard", 'an oversize refspec source'),
+     '    except Exception:\n        return True', "guard", 'a refspec source with a NUL byte'),
     ("push-needs-review-record: a merge whose second parent is off main is read as clean",
      'if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):',
      'if len(parents) != 2 or not tree:', "merge",

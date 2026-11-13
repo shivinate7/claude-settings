@@ -15,10 +15,10 @@ PFR_MERGE_PR = 1480                                  # the PR whose head branch 
 PFR_MERGE_BRANCH = "notes-merge-fix"                 # that PR's head branch, the push's destination
 PFR_MERGE_PUSH = VCS + " push origin HEAD:" + PFR_MERGE_BRANCH
 PFR_MERGE_ABSENT = "0123456789abcdef0123456789abcdef01234567"   # a commit no fixture holds; the builder checks it
-# A refspec source longer than the OS takes in one argument: git cannot be started with it, so the walk's first read
-# raises (OSError) and the allow's exception arm refuses. A missing or corrupt object is no such case: git exits
-# non-zero, and the walk reads that as False, which never reaches the arm.
-PFR_RAISE_SOURCE = "a" * 300000
+# A refspec source with a NUL byte: no argument may hold one, so Python raises (ValueError) before git starts, on every
+# OS. The walk's first read raises, and the allow's exception arm refuses. A missing or corrupt object is no such case:
+# git exits non-zero, and the walk reads that as False, which never reaches the arm.
+PFR_RAISE_SOURCE = "a" * 40 + "\0"
 PFR_MERGE_NAMES = ("head", "c1", "c2", "plain", "pc", "mixed", "evil", "conflict", "side", "detour")
 PFR_MERGE_CLONE = {name: os.path.join(PFR_MERGE_DIR, "cl-" + name) for name in PFR_MERGE_NAMES}
 PFR_MERGE_SHALLOW = os.path.join(PFR_MERGE_DIR, "cl-shallow")   # a depth-1 clone: the parents of its tip are absent
@@ -62,11 +62,11 @@ def _pfm_is_ancestor(where, sha, tip):
     return run_vcs(where, "merge-base", "--is-ancestor", sha, tip).returncode == 0
 
 
-def _pfm_argument_refused(where):
-    """True when the OS refuses to start git with PFR_RAISE_SOURCE, so a read of it raises rather than exiting non-zero."""
+def _pfm_read_raises(where):
+    """True when a read of PFR_RAISE_SOURCE raises (a NUL byte in an argument), so it never exits non-zero."""
     try:
         run_vcs(where, "rev-parse", "--verify", "-q", PFR_RAISE_SOURCE + "^{commit}")
-    except OSError:
+    except ValueError:
         return True
     return False
 
@@ -154,9 +154,9 @@ def _build_pfm():
             "side": xs, "detour": d}
     for name in PFR_MERGE_NAMES:
         _pfm_clone(PFR_MERGE_CLONE[name], src, tips[name], m0)
-    # Scope before subject: the oversize source must make the read raise, or the case below never reaches the arm.
-    if not _pfm_argument_refused(PFR_MERGE_CLONE["head"]):
-        sys.exit("fixture setup failed: git started with the oversize refspec source, so its read does not raise")
+    # Scope before subject: the NUL source must make the read raise, or the case below never reaches the arm.
+    if not _pfm_read_raises(PFR_MERGE_CLONE["head"]):
+        sys.exit("fixture setup failed: git read the NUL-byte refspec source without raising, so the case misses the arm")
 
     # A depth-1 clone fetches each branch tip, so cm1 goes first: its tip c1 would be present. c1 stays in the source,
     # as c2's first parent, and m2 is no branch tip. So the tip c2 is present and its parents c1 and m2 are not.
@@ -217,9 +217,9 @@ pfr_fix_refuse("clean-merge: git cannot answer (a blind git on PATH), a read tha
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_CLONE["c1"], env_path=GITBLIND)
 pfr_fix_refuse("clean-merge: a parent the checkout lacks (a depth-1 clone), a read that cannot run, then the push",
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_SHALLOW)
-# The clean-merge read that raises: the OS will not start git with the oversize source, so the walk's first read raises
-# and the allow's exception arm refuses, with the same reason.
-pfr_fix_refuse("clean-merge: the walk's git read raises on an oversize refspec source, then the push to its PR head",
+# The clean-merge read that raises: Python will not start git with the NUL byte in the source, so the walk's first read
+# raises and the allow's exception arm refuses, with the same reason.
+pfr_fix_refuse("clean-merge: the walk's git read raises on a refspec source with a NUL byte, then the push to its PR head",
                VCS + " push origin " + PFR_RAISE_SOURCE + ":" + PFR_MERGE_BRANCH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH,
                cwd=PFR_MERGE_CLONE["head"])
 
