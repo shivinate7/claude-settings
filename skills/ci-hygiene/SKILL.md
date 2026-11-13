@@ -128,7 +128,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
    report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` (the full 40-hex head) on the handed-in
    lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
-   conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict. Route a PR only when the
+   conflict)` names a PR that conflicts with the new main, or, when it names `open batch`, with the head of an open batch (its PR
+   number and head sha). The check reads open batches on the PR's own base only, and not a batch stacked on another batch. A line that says `unknown` does not say there is a conflict. Route a PR only when the
    conflict is the line's only reason. A line that also says the log was edited needs the full review. A line that also says the log is not done follows the ledger's `lane round n`.
    The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
    needed. The owner's ruling holds the route after a PASS fix verifier (record `pr-review-record`, The review

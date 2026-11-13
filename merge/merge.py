@@ -76,10 +76,13 @@
                           --lint verdict (SHA is a full lowercase 40-hex head; a bare N:VERDICT, a short or upper-case SHA, or two for one N
                           is a usage error, exit 2) must be PASS or UNKNOWN-AT-CAP for the live head (none given, or a SHA that is not the
                           live head, is a FAIL; a PASS on UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`); `git merge-tree` of its head into the base tip
-                          must be clean; and a PR on a base other than the default branch needs the open PR whose head is that base in the same
-                          call, and that PR must pass. Takes no lock and no merge role, merges and pushes nothing; any session may run it.
-                          Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
-                          distinct base, one merge-tree per PR (tree objects, no ref), and a fetch of a PR head the clone lacks; no new
+                          must be clean; so must `git merge-tree` of its head into the head of each open batch (an open integration PR, draft or
+                          ready) on the same base, and a FAIL names that batch, its PR number and its head sha; an unread open list or batch
+                          head is `unknown`, never a pass; a batch stacked on another batch is not checked; and a PR on a base other than the
+                          default branch needs the open PR whose head is that base in the same call, and that PR must pass. Takes no lock and no merge role, merges and pushes nothing; any session may run it.
+                          Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one read of the open
+                          pull list (every page), one fetch per distinct base, one merge-tree per PR and open batch (tree objects, no ref),
+                          and a fetch of a PR or batch head the clone lacks; no new
                           process kept, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
@@ -4594,17 +4597,36 @@ def merge_reason(root, n, base, head, fetched):
             fetched[base] = unknown_reason(f"git fetch origin {base} failed: {e}")
     if fetched[base]:
         return fetched[base]
+    return missing_head(root, n, head) or merge_tree_reason(root, f"refs/remotes/origin/{base}", head, base)
+
+def missing_head(root, n, head, what="the head"):
+    """-> None when the commit `head` is in this clone, else the unknown reason. A head this clone lacks is fetched from the pull request n's own ref."""
     fetch_out = ""
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
         fetch_out = git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")[1]
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
-        return unknown_reason(f"the head {head[:9]} is not in this clone and could not be fetched: {fetch_out}")
-    c, out = git(root, "merge-tree", "--write-tree", f"refs/remotes/origin/{base}", head)
+        return unknown_reason(f"{what} {head[:9]} is not in this clone and could not be fetched: {fetch_out}")
+    return None
+
+def merge_tree_reason(root, into, head, target):
+    """-> None when merging `head` into `into` is clean, else the reason; `target` names `into` in it. See merge_reason for why only a CONFLICT line says conflict."""
+    c, out = git(root, "merge-tree", "--write-tree", into, head)
     if not c:
         return None
     if c == 1 and "CONFLICT" in out:
-        return f"the merge with {base} is not clean (merge conflict)"
+        return f"the merge with {target} is not clean (merge conflict)"
     return unknown_reason(f"git merge-tree exited {c}: {out}")
+
+def batch_merge_reason(root, head, bn, batch):
+    """-> None when merging `head` into the head of the open batch pull request bn is clean, else the reason. `batch` is {name, head, base}."""
+    target = f"open batch {batch['name']} (#{bn}, head {batch['head'][:9]})"
+    return (missing_head(root, bn, batch["head"], f"the head of open batch #{bn}")  # a batch head may be a commit only the batch pull request's ref holds
+            or merge_tree_reason(root, batch["head"], head, target))
+
+def open_batches(h):
+    """-> [(number, {name, head, base})] of the open integration pull requests, drafts too, from one read of the open list. A failed read is a Stop."""
+    rows = [(d["number"], {"branch": d["head"]["ref"], "body": d.get("body") or "", "head": d["head"]["sha"], "base": d["base"]["ref"]}) for d in h.open_pulls()]
+    return [(bn, {"name": parse_freeze(info["body"])["name"], "head": info["head"], "base": info["base"]}) for bn, info in rows if is_integration_pr(info)]
 
 def release_check(root, h, numbers, lints, root_why=None):
     """-> (lines, ok) of `merge --release-check`: one line per number in `numbers`, in order: `#N PASS`, or `#N FAIL: ` and the reasons joined by
@@ -4612,10 +4634,10 @@ def release_check(root, h, numbers, lints, root_why=None):
     number gets a line, so a missing line cannot read as a pass. `lints` maps a number to the (sha, verdict) of the lint the caller reports. The checks:
     the pull request is open; its newest review record is done at the live head
     (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
-    the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
+    the merge with the base tip is clean; the merge into the head of each open batch on the same base is clean (the open integration pull requests, drafts too, from one read of the open list; an unread list or head is an unknown, a batch stacked on another batch is not read); and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
-    Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
-    base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
+    Cost: one `pulls/N` read per number, one list read of the repo's comments since the oldest of them (every page), one read of the open pull list (every page),
+    one fetch per distinct base, one merge-tree per open number and open batch (it writes tree objects, never a ref), and a fetch of a pull request or batch head the clone lacks; no new
     process kept, file or timer."""
     numbers = list(dict.fromkeys(numbers))  # a number given twice gets one line, at its first position
     infos, own, fetched = {}, {}, {}
@@ -4640,6 +4662,12 @@ def release_check(root, h, numbers, lints, root_why=None):
         default, default_why = (default_branch(root) if live else None), None  # read only for an open number's base
     except RELEASE_READ_ERRORS as e:
         default, default_why = None, unknown_reason(e)
+    batches, batches_why = [], None
+    if live:
+        try:
+            batches = open_batches(h)
+        except RELEASE_READ_ERRORS as e:  # an unread list is not "no open batch"
+            batches_why = unknown_reason(e)
     for n, i in live.items():
         out = [records_why] if records_why else []
         if not records_why:
@@ -4669,6 +4697,17 @@ def release_check(root, h, numbers, lints, root_why=None):
             clash = unknown_reason(e)
         if clash:
             out.append(clash)
+        if batches_why:
+            out.append(batches_why)
+        for bn, batch in batches:
+            if batch["base"] != i["base"]:
+                continue  # a batch on another base is not where this pull request lands
+            try:
+                clash = batch_merge_reason(root, i["head"], bn, batch)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                clash = unknown_reason(e)
+            if clash:
+                out.append(clash)
         own[n] = out
 
     def reasons(n, trail=()):
