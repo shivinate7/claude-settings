@@ -4,10 +4,11 @@
 
 Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? Ruling: coordinator, 2026-11-07 12:26 CST, option 1a, answering owner ask `ask-mw6pwif5wv` (a past-ruling refusal that reached the owner).
 
-- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
+- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line, except a notes fix (R14; not built; step `notes-fix-no-owner-line`): one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
-- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. So does `hooks/call_judge.py`, a PreToolUse hook: a check that could not run prints `UNVETTED_REMEDY` with the `Unvetted:` marker, and a ruling found prints the facts-only text (coordinator pick, 2026-11-12 09:19 CST). The Stop text is unchanged. A Stop refusal shows only the miss that `departs_hit` names.
+- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. So does `hooks/call_judge.py`, a PreToolUse hook: a check that could not run prints `UNVETTED_REMEDY` with the `Unvetted:` marker, and a ruling found prints the facts-only text (coordinator pick, 2026-11-12 09:19 CST). `call_judge.py` leaves the Stop text as is. A Stop refusal shows only the miss that `departs_hit` names.
+- R14, the owner's ruling on notes fixes (2026-11-10 16:22 CST, "fixed my notes question: yes"): a Stop refusal about a session's own notes (feedback log, handoff) is fixed with no line to the owner, since the reply did not change. guard.log still records it. Not built yet. Step `notes-fix-no-owner-line` builds it. Its builder first confirms that a Stop can end with no text.
 
 ## Incident, risk and cost
 
@@ -173,8 +174,8 @@ Text: inline, in the main check.
 
 ## Shared tails
 
-- Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
+- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction, and post none for a fix to a session's own notes (not built; step `notes-fix-no-owner-line`; see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process
