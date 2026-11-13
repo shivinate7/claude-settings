@@ -1,0 +1,14 @@
+{
+ "id": "rulings-store-parses",
+ "title": "Each file in the rulings store must parse as JSON before it is committed",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "roadmap/rulings/mac-runner-token-scope.json held unescaped quotes from triage's commit b9713003c and did not parse, so every reader of the store either failed on it or skipped it unseen. Found 06:31 CST Nov 13 and fixed by triage.",
+ "source": "triage 06:31 CST Nov 13",
+ "note": "Fix: the record branch's pre-commit check (roadmap/build.py --check-staged) refuses a staged roadmap/rulings/*.json that does not parse. Check, red first: stage a broken ruling file and the commit is refused.",
+ "updatedAt": "2026-11-13T06:32:23-06:00"
+}

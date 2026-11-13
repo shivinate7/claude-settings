@@ -1,0 +1,14 @@
+{
+ "id": "fast-forward-clean-start",
+ "title": "A session fast-forwards its own clean checkout to main at start",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Ruling fast-forward-clean-start (owner 21:59 CST Nov 12) had no step that builds it. Its step field pointed at grants-read-from-main, which is about the grant warning and hook timeout (Degen D14 part a).",
+ "source": "retrospective Degen ledger audit 06:30 CST Nov 13",
+ "note": "Build the ruling's shape: only the session's own worktree; clean means no edits, no commits ahead, no merge or rebase in progress, and on the default branch; fast-forward only; only at session start or an owner prompt; one line printed. Ruling repointed to this step 06:32 CST.",
+ "updatedAt": "2026-11-13T06:32:23-06:00"
+}

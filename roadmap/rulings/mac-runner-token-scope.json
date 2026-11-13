@@ -2,7 +2,7 @@
  "id": "mac-runner-token-scope",
  "at": "2026-11-12T21:09:00-06:00",
  "title": "The Mac runner token keeps read access on all shivinate7 repos",
- "ruling": "Owner 21:09 CST Nov 12, answering the retrospective's 21:09 question (a: narrow the token to claude-settings; b: keep it as is): \"yes it's done and all repos and i alr told u the runner is ready too\". Pick b: secret MAC_RUNNER_READ_TOKEN is a read-only token on all shivinate7 repos, and it stays that wide. His "yes" answered a question that named Administration: read; the cloud cannot read secrets, so the first batch run's `mac-runner: runners read status` line confirms it. The Mac runner (label claude-settings-mac) is online.",
+ "ruling": "Owner 21:09 CST Nov 12, answering the retrospective's 21:09 question (a: narrow the token to claude-settings; b: keep it as is): \"yes it's done and all repos and i alr told u the runner is ready too\". Pick b: secret MAC_RUNNER_READ_TOKEN is a read-only token on all shivinate7 repos, and it stays that wide. His \"yes\" answered a question that named Administration: read; the cloud cannot read secrets, so the first batch run's `mac-runner: runners read status` line confirms it. The Mac runner (label claude-settings-mac) is online.",
  "quote": "yes it's done and all repos and i alr told u the runner is ready too",
  "source": "owner chat 21:09 CST Nov 12, relayed by the retrospective 21:10 CST; page item 649 act-mac-runner-register closed 21:11 CST",
  "status": "open",

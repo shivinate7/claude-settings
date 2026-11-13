@@ -1,7 +1,7 @@
 {
  "id": "words-probe-skips-kept-names",
  "title": "The Words probe reports only what the check would flag",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKz2meGZuyJTt3wG7RW",
@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "Degen ledger D26: the Words probe lists every tracked file, not the added lines the check flags, so its report is noise.",
  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D26",
- "note": "The Words probe reports added lines only, as the check does. This is the part with no owner call; the skip scope is an owner call (D26) and waits for it. Owner item words-probe-skip-names (n 678) posted 21:55 CST Nov 12 for the skip scope. Owner 21:59 CST Nov 12 (chat with the retrospective, relayed 22:01 CST): Q2 a, keep reading names; only the probe-scope fix ships (store entry words-probe-keep-names). Lane 23:19 CST Nov 12 read the fix as skipping kept names in paths with an extension (pr-review-record.md), in both probe and check. Triage 23:23 CST: that is option d of item 678, which the owner turned down (pick c, ruling words-probe-keep-names: names stay read). Only the probe scope ships: the probe reports exactly what the check would flag, through the check's own matcher and file filter. A child repo with no base: the lane names how it scopes and reports the noise left.",
- "updatedAt": "2026-11-12T23:23:30-06:00"
+ "note": "The Words probe reports added lines only, as the check does. This is the part with no owner call; the skip scope is an owner call (D26) and waits for it. Owner item words-probe-skip-names (n 678) posted 21:55 CST Nov 12 for the skip scope. Owner 21:59 CST Nov 12 (chat with the retrospective, relayed 22:01 CST): Q2 a, keep reading names; only the probe-scope fix ships (store entry words-probe-keep-names). Lane 23:19 CST Nov 12 read the fix as skipping kept names in paths with an extension (pr-review-record.md), in both probe and check. Triage 23:23 CST: that is option d of item 678, which the owner turned down (pick c, ruling words-probe-keep-names: names stay read). Only the probe scope ships: the probe reports exactly what the check would flag, through the check's own matcher and file filter. A child repo with no base: the lane names how it scopes and reports the noise left. 06:32 CST Nov 13: done. Retrospective's Degen ledger audit against main 9d360b2e7 found the PR's row closed (batches 122 and 125). #3070 rode in on stacked #3066.",
+ "updatedAt": "2026-11-13T06:32:23-06:00",
+ "pr": 3098
 }

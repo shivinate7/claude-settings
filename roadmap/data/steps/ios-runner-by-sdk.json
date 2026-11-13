@@ -1,7 +1,7 @@
 {
  "id": "ios-runner-by-sdk",
  "title": "iOS CI runner is pinned by the SDK the apps need",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3BfGbUeksPZw4D1Dh",
@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "Skill ios-apps pins CI to the macos-26 image, but Home says that image has Xcode 26.6 and no iOS 27.1 SDK, and Degen runs xcode-27 with no exemption record. Either the pin is stale or each app needs an exemption form.",
  "source": "retrospective 23:27 CST Nov 12; Degen ledger D29; Home triage 23:20 CST",
- "note": "Check first: the SDK claim (which Xcode and SDKs the macos-26 image holds) and the runner cost of a newer image. Then pin by the SDK the apps need, or name one exemption form in skill ios-apps. Unverified: the SDK claim.",
- "updatedAt": "2026-11-12T23:31:11-06:00"
+ "note": "Check first: the SDK claim (which Xcode and SDKs the macos-26 image holds) and the runner cost of a newer image. Then pin by the SDK the apps need, or name one exemption form in skill ios-apps. Unverified: the SDK claim. 06:32 CST Nov 13: done. Retrospective's Degen ledger audit against main 9d360b2e7 found the PR's row closed (batches 122 and 125). #3070 rode in on stacked #3066.",
+ "updatedAt": "2026-11-13T06:32:23-06:00",
+ "pr": 3105
 }

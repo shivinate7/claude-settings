@@ -3,7 +3,7 @@
  "at": "2026-11-12T21:59:00-06:00",
  "title": "A session fast-forwards its own clean checkout to main at start",
  "ruling": "Owner 21:59 CST Nov 12: At session start, a session fast-forwards its own clean checkout to origin/main. The owner asked for the nuance to be thought through; proposed shape (retrospective): only the session's own worktree, never one another live session shares; clean = no uncommitted or untracked edits, no commits ahead, no merge or rebase in progress, on the default branch; fast-forward only, else report; only at session start or an owner prompt, never while an agent or background command runs; print one line, moved X to Y, N commits. Home: step grants-read-from-main.",
- "quote": "Q6 B \u2014 but theres probs some nuance here ponder it!",
+ "quote": "Q6 B — but theres probs some nuance here ponder it!",
  "source": "owner chat with the retrospective 21:59 CST Nov 12, relayed 22:01 CST",
  "status": "open",
  "supersedes": [
@@ -12,5 +12,5 @@
    "ref": "owner ask on step grants-read-from-main: report, never move (for this case)"
   }
  ],
- "step": "grants-read-from-main"
+ "step": "fast-forward-clean-start"
 }

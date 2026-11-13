@@ -1,7 +1,7 @@
 {
  "id": "live-hooks-diff-probe",
  "title": "A compliance probe prints the diff of the live hooks against the clone",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1PPfHVQPG4ekXJ36Q",
@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "Degen ledger D24: live ~/.claude settings hooks drift from the clone and no check shows it.",
  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D24",
- "note": "Add a probe to lint/compliance_probes.py that prints the diff of the live ~/.claude settings hooks against the clone. It skips hooks.SessionStart, which a cloud install rewrites (install.sh:1019). Shares a root with session-start-pin-skip-log and cloud-hooks-stale-copy. Retrospective 23:27 CST Nov 12, Degen D24 (batch 3): the compliance check also names which copy it trusts (the live hooks or the clone).",
- "updatedAt": "2026-11-12T23:29:06-06:00"
+ "note": "Add a probe to lint/compliance_probes.py that prints the diff of the live ~/.claude settings hooks against the clone. It skips hooks.SessionStart, which a cloud install rewrites (install.sh:1019). Shares a root with session-start-pin-skip-log and cloud-hooks-stale-copy. Retrospective 23:27 CST Nov 12, Degen D24 (batch 3): the compliance check also names which copy it trusts (the live hooks or the clone). 06:32 CST Nov 13: done. Retrospective's Degen ledger audit against main 9d360b2e7 found the PR's row closed (batches 122 and 125). #3070 rode in on stacked #3066.",
+ "updatedAt": "2026-11-13T06:32:23-06:00",
+ "pr": 3095
 }

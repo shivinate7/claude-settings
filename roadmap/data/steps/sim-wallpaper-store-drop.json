@@ -1,7 +1,7 @@
 {
  "id": "sim-wallpaper-store-drop",
  "title": "Simulator wallpaper store stops growing without limit",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1RLjiPPk24Jqci2wc",
@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "The simulator wallpaper store grows without limit.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D12",
- "note": "One lane with sim-boot-noise-off, both in bin/sim-test. Ledger row D12. Started by coordinator 21:07 CST Nov 12. Shared lane, two PRs. Lane 21:09 CST Nov 12: a delete before every own boot departs from skill ios-apps (\"It deletes and erases nothing\"); the owner approved one delete on Duo 3553660D (20:44 CST). Page item 674 sim-wallpaper-auto-delete asks a (every boot, recommended) or b (the one approved delete only). The lane builds with a meanwhile.",
- "updatedAt": "2026-11-12T21:12:50-06:00"
+ "note": "One lane with sim-boot-noise-off, both in bin/sim-test. Ledger row D12. Started by coordinator 21:07 CST Nov 12. Shared lane, two PRs. Lane 21:09 CST Nov 12: a delete before every own boot departs from skill ios-apps (\"It deletes and erases nothing\"); the owner approved one delete on Duo 3553660D (20:44 CST). Page item 674 sim-wallpaper-auto-delete asks a (every boot, recommended) or b (the one approved delete only). The lane builds with a meanwhile. 06:32 CST Nov 13: done. Retrospective's Degen ledger audit against main 9d360b2e7 found the PR's row closed (batches 122 and 125). #3070 rode in on stacked #3066.",
+ "updatedAt": "2026-11-13T06:32:23-06:00",
+ "pr": 3066
 }
