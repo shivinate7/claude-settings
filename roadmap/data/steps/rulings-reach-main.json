@@ -1,7 +1,7 @@
 {
  "id": "rulings-reach-main",
  "title": "Each owner ruling reaches main soon after it is given, not only when its lane merges",
- "status": "todo",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -11,6 +11,6 @@
  ],
  "why": "Rulings stored in roadmap/rulings/ on the record branch are invisible to main's guards and to other repos until a lane writes each into a decision record on main (owner 22:03 CST Nov 12: \"but i thought roadmaps live on a branch that doesnt reach main? kinda odd?\").",
  "source": "owner chat with triage 22:03 CST Nov 12",
- "note": "Triage offered a small records-only PR per batch of rulings; owner 22:03 CST: \"doesnt sound like a bad idea, message retrospective im sure its transcript has my thoughts on this\". Asked the retrospective at 22:04 CST for his earlier words on where rulings live; the shape waits on its answer.",
- "updatedAt": "2026-11-12T22:04:36-06:00"
+ "note": "Triage offered a small records-only PR per batch of rulings; owner 22:03 CST: \"doesnt sound like a bad idea, message retrospective im sure its transcript has my thoughts on this\". Asked the retrospective at 22:04 CST for his earlier words on where rulings live; the shape waits on its answer. Closed 22:05 CST Nov 12: R59 already rules it (owner 14:28 and 15:05 CST Nov 12, \"ruling governs the guard right away\"), per the retrospective. Part 1 store: ruled-store-one-home (#2992, held: its record is for 8c837aa36, live head f30500427; round 4 waits on owner item 675). Part 3 guards: guard-reads-ruled-store, blocked on #2992. Part 5 records-only route: ruled-prose-express, done. Part 4 open-too-long check: new step ruled-entry-open-too-long. The seven 21:59 CST rulings govern no guard until #2992 merges.",
+ "updatedAt": "2026-11-12T22:05:22-06:00"
 }
