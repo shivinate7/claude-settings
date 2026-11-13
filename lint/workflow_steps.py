@@ -12,15 +12,16 @@ import sys
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
 
 
-def job_re(name):
-    """The pattern of one job: group 1 is the text from its `  name:` line to the next job line. `name` is a regex."""
-    return re.compile(rf"^  {name}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", re.M | re.S)
+def job_spans(text):
+    """Each job of a workflow as (name, header_start, body_start, end): the text from its `  name:` line to the next job line. A comment
+    after the colon is part of the header (drop_comment, the one comment reader), so `  checks:  # note` is the job `checks`."""
+    heads = [m for m in re.finditer(r"^  ([\w-]+):(.*)$", text, re.M) if not drop_comment(m.group(2)).strip()]
+    return [(m.group(1), m.start(), m.end(), heads[i + 1].start() if i + 1 < len(heads) else len(text)) for i, m in enumerate(heads)]
 
 
 def job_block(text, name):
     """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
-    m = job_re(re.escape(name)).search(text)
-    return m.group(1) if m else None
+    return next((text[body:end] for n, _, body, end in job_spans(text) if n == name), None)
 
 
 def job_workflow(top, job):
@@ -182,13 +183,14 @@ def gating_text(text):
     def disabled(own_value):
         return any(disables(key, own_value(key)) for key in GATING_KEYS if own_value(key) is not None)
 
-    def keep(job):
-        body = job.group(1)
+    def keep(start, body_start, end):
+        body = text[body_start:end]
         if disabled(lambda key: next((m.group(1) for m in re.finditer(rf"^    {key}:[ \t]*(.*?)[ \t]*$", body, re.M)), None)):
             return ""
         first = re.search(r"^      - ", body, re.M)
         if not first:
-            return job.group(0)
+            return text[start:end]
         live = "".join(s for s in step_blocks(body) if not disabled(lambda key: step_key(s, key)))
-        return job.group(0)[:job.start(1) - job.start(0)] + body[:first.start()] + live
-    return job_re(r"[\w-]+").sub(keep, text)
+        return text[start:body_start] + body[:first.start()] + live
+    spans = job_spans(text)
+    return text[:spans[0][1]] + "".join(keep(start, body, end) for _, start, body, end in spans) if spans else text

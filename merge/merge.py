@@ -962,17 +962,17 @@ class GhLock(Lock):
 PUSHED_HEAD_WAIT = "GitHub to show the pushed head"
 PUSHED_HEAD_WAIT_MINUTES = 5  # --lane-lint's bound on that wait; a push shows on GitHub in seconds, so a head still missing after this is not lag
 
-def wait_pushed_head(host, n, info, end, progress=None, want=None):
+def wait_pushed_head(host, n, info, end, progress=None, want=None, log=None):
     """The one wait for GitHub to show a pushed head: read pull request `n` again until its head is no longer the one in `info` (the head
     before the push), or `end` (a `host.now()` time) passes. With `want`, it ends only on that head, so a third head GitHub shows on the way
     does not end it. -> the fresh info, or None at `end`. wait_checks and fetch_pr_head call it.
-    With no `progress`, it prints one wait line."""
+    With no `progress`, it prints one wait line, through `log` (default `say`; the review record's lint passes say_err, so stdout holds the record alone)."""
     stale, said = info["head"], False
     while (info["head"] != want) if want else (info["head"] == stale):
         if progress:
             progress(PUSHED_HEAD_WAIT)
         elif not said:
-            say("merge: waiting on " + PUSHED_HEAD_WAIT)
+            (log or say)("merge: waiting on " + PUSHED_HEAD_WAIT)
             said = True
         if host.now() >= end:
             return None
@@ -2918,10 +2918,10 @@ def fetch_branch(root, branch, cite=""):
         raise Stop(f"git fetch origin {branch} failed: {out}{' ' + cite if cite else ''}")
     return git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
 
-def fetch_pr_head(root, info, base, host=None, n=None):
+def fetch_pr_head(root, info, base, host=None, n=None, log=None):
     """Fetch, and check that the head is the one gh named. -> `info`, or the fresh read of pull request `n` once GitHub showed the pushed head.
     Raises Stop on a head that differs. With `host`, a head that lags origin waits, bounded, for GitHub to show that head (wait_pushed_head),
-    and the base GitHub then shows must be the one read before the wait; with none, a lagging head refuses at once."""
+    and the base GitHub then shows must be the one read before the wait; with none, a lagging head refuses at once. `log` is the wait line's printer (wait_pushed_head)."""
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
@@ -2929,7 +2929,7 @@ def fetch_pr_head(root, info, base, host=None, n=None):
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"] and host is not None:
         stale = info["head"]
-        info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60, want=got)
+        info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60, want=got, log=log)
         if info is None:
             raise Stop(f"{got[:9]} is pushed to origin, but GitHub never showed it: after {PUSHED_HEAD_WAIT_MINUTES} minutes the pull request still did not read it "
                        f"(it first read {stale[:9]}). Run again. Nothing was claimed. {GREEN_CITE}")
@@ -3274,7 +3274,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         n = int(target)
         info = host.pr(n)
         base = info["base"]
-        info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
+        info = fetch_pr_head(root, info, base, host, n, log=out)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
         if want_head and head != want_head:
             raise Stop(f"the pull request head is {head[:9]}, not the reviewed {want_head[:9]}. Review the new head, then write its record. {REVIEW_CITE}")
@@ -3298,7 +3298,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         # already in the clone (lane_head_and_base read it), so that fetch never runs for 0; the lines name the head by its short sha, as the PR's do.
         why = merge_reason(root, int(target) if target.isdigit() else 0, base, head, fetched)
         if why is not None and is_unknown_reason(why):
-            raise Stop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: {why}", "Run again. " + LANE_LINT_REMEDY]))
+            raise Stop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: {why}", "Run again. " + remedy]))
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit():
@@ -3311,7 +3311,12 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
             elif draft != "pass" and not (fails or stop):
                 if not unknown_ok.strip():
-                    wait = "Wait for it, then run again. " if review_record else 'Wait for it, or run again with --lint-unknown-ok "<reason>". '
+                    if not review_record:
+                        wait = 'Wait for it, or run again with --lint-unknown-ok "<reason>". '
+                    elif draft == "wait":
+                        wait = "Wait for it, then run again. "
+                    else:  # an absent or skipped touched job is no run to wait for, and the record flag takes no --lint-unknown-ok
+                        wait = "A record needs a finished lane-touched-tests run on this head, as a draft gets. A skipped or absent job gives none, and no flag lifts it: push the head as a draft, let the run finish, then run again. "
                     raise (Stop if review_record else Liftable)("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass{no_record}", *draft_lines,
                                                                            wait + remedy]))
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
