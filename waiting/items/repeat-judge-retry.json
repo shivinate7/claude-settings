@@ -1,9 +1,15 @@
 {
   "added": "2026-11-12T23:04:00Z",
+  "closed": "2026-11-13T19:45:46Z",
   "context": "Goal: a message you repeat is never missed by the repeat checker, and never blocks a session for nothing.\nProblem (rule): when the model errors or answers in the wrong shape, the lane keeps the message unchecked so the next stop sends it again; no ruling covers this.\nBased on (read): main marks a message checked after one try, answer or not.\nDeparts from: main checks each message once \u2014 the change checks again at each stop until the model gives a usable answer.",
   "home": "step judge-replay-corpus",
   "id": "repeat-judge-retry",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T16:57:51.672Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
   "n": 664,
   "options": [
     {
@@ -25,9 +31,10 @@
   ],
   "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
   "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
+  "reply": "Filed 13:5x CST: your 664 a is ruling own-664-a-retry-each-stop. The lane builds to it.",
   "repo": "shivinate7/claude-settings",
   "short": "Repeat checker: retry on no answer",
-  "status": "open",
+  "status": "closed",
   "title": "When the repeat checker gets no answer about a message, does it try again at the next stop?",
   "why": "The lane took this pick; it stands unless you choose b."
 }

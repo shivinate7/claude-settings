@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-13T19:47:01Z",
+  "context": "Goal: the auto-mode \"Relayed Grant\" entry in settings.json says the same thing as your ruling and the checker.\nProblem (rule): settings.json line 56 still says a relayed grant never covers \"a closed item (except an arbiter overturn)\", and hooks/test_auto_mode_allow.py line 114 pins that clause. After your ruling own-748-b-rule-4, page_grant.py counts a routed closed item. So the entry and the checker disagree, and the classifier may refuse an act the checker counts (a false alarm, not a hole). The entry is yours to edit, so a lane cannot.\nBased on (ruling): own-748-b-rule-4 (your 748 b). Based on (read): lane of PR #3224 (step answered-leaves-page) found the clash; the coordinator relayed it 13:47 CST.\nDeparts from: main, where the entry excludes a closed item \u2014 option a edits the entry and its pinned test to match your 748 b; option b leaves both as they are.\nMeanwhile: PR #3224 is not blocked; the lane keeps working.",
+  "home": "ruling own-748-b-rule-4; step answered-leaves-page; PR #3224",
+  "id": "pick-relayed-grant-closed-item",
+  "kind": "decision",
+  "n": 753,
+  "options": [
+    {
+      "gain": "The entry says what you ruled, so the classifier stops refusing a counted routed act.",
+      "key": "a",
+      "label": "Edit the entry and its pinned test to match your 748 b (lane's pick, recommended)",
+      "lose": "You edit settings.json line 56 and the test at line 114 yourself, by the entry's owner rule."
+    },
+    {
+      "gain": "No edit to a guard entry.",
+      "key": "b",
+      "label": "Record the gap and leave the entry",
+      "lose": "The classifier may refuse a counted routed act until someone edits the entry."
+    }
+  ],
+  "owner": "lane of PR #3224 (session_013NEJKyqQmpj2FNxeZzDV7s) via coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 13:47 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Edit the Relayed Grant entry to match your 748 b?",
+  "status": "open",
+  "title": "Should the Relayed Grant auto-mode entry change to match your ruling that a routed closed item counts?",
+  "why": "The entry is owner-edited; it and the checker now disagree."
+}

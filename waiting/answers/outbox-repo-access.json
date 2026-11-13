@@ -1,6 +1,0 @@
-{
-  "at": "2026-11-13T17:06:38.138Z",
-  "item": "outbox-repo-access",
-  "n": 660,
-  "note": "yes allowed -- you can also now add home repo and degen repo again (which i'd said were doing work for a bit and to leave them out) -- ensure that batch runnner 11 updates its checkout on all those repos so its not stale on any fo them!"
-}

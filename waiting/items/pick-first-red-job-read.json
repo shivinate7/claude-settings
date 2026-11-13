@@ -25,6 +25,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 12:02 CST Nov 13, lane read of the Actions docs 11:59 CST",
+  "reply": "The tradeoff, in plain words. Today a waiting session looks at CI only at its timed check-ins. Route 1 (build now): at each check-in it asks GitHub which job is red, so it hears at the next check-in, not the second the job fails, and no CI file changes. Route 2 (later): each CI job gets a small extra job that runs when it fails and wakes the session, so the wake is instant, but it edits checks.yml (three other lanes edit it, so conflicts), costs extra runner minutes (unmeasured), and needs #2980 first. Speed against risk and cost. Triage opinion: a. Route 1 is small, touches no busy file, and does not block route 2: you lose nothing by having it first. The only cost is some work that route 2 may later make less needed.",
   "repo": "shivinate7/claude-settings",
   "short": "Learn of a red CI job: two routes",
   "shown": [

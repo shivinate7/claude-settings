@@ -25,6 +25,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "runner 11 via the coordinator, 11:39 CST Nov 13",
+  "reply": "The nuance, plainly. Two q_max rules are at stake. D-499 removed q_max's own tool guard and text sweep; the parent's guard plus a CI lint step replace them (you accepted that). D-833 makes a lane's `npm run lint` use the same style-lint version CI pins, so a lane sees what CI sees; it exists because PRs #1019 and #1101 went green in the lane and red in CI. If both end now (a), lane lint loses that lock before the stable branch exists, so the #1019 failure can come back. If they stay until the branch lands (b), nothing is lost, #1167 waits, and #1165 goes on; D-833 then gets rewritten to the new pin. No owner words end either rule yet. Triage opinion: b.",
   "repo": "shivinate7/claude-settings",
   "short": "q_max D-499 and D-833: end now?",
   "shown": [

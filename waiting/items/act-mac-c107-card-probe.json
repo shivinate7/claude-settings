@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-13T13:38:17-06:00",
+  "command": {
+    "mac": "Probe for step c107 (an orchestrator starts its lanes with no click). Run on this Mac, in the desktop app Code tab, in Bypass permissions mode. My typing this message is my ask in words for the test sessions below.\n\nFacts so far: the docs name no setting for `mcp__ccd_session__start_session`. Candidate causes: (a) the tool is flagged `_meta[\"anthropic/requiresUserInteraction\"]` (docs: prompts on every call, even in Bypass, and allow rules and PreToolUse \"allow\" do not skip it); (b) the open \"desktop actions\" clause of Bypass; (c) the `kind` value.\n\nDo these in order. Stop at the first step where no card shows. Before each start, say \"probe N\" and after it say \"card: yes/no\" from what I tell you or what the call returned. Ask me one line only: \"Did a card show for probe N? y/n\".\n\n0. Record: `claude --version` and the app version. Find the tool's entry (ToolSearch \"select:mcp__ccd_session__start_session\", or list the app MCP tools) and say whether its description or metadata shows `requiresUserInteraction`.\n1. Probe 1, as is: start one session, kind `user_asked`, prompt \"Reply ok and stop.\" Ask me about the card.\n2. Probe 2, allow rule: add `\"mcp__ccd_session__start_session\"` to `permissions.allow` in `~/.claude/settings.local.json` (back up the file first). Start another session the same way. Ask me.\n3. Probe 3, hook: add a PreToolUse hook in `~/.claude/settings.local.json` with matcher `mcp__ccd_session__start_session` that prints `{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}`. Start another. Ask me.\n4. Probe 4, a start call carrying `source_branch` and `branch_name`: check the new session is on that branch (the card has dropped it before).\n5. Restore `~/.claude/settings.local.json` from the backup. Never edit `~/.claude/settings.json`, `CLAUDE.md` or the claude-settings repo.\n\nReport (12 lines max): per probe, card yes/no and branch kept yes/no; the verdict, one of \"setting X removes the card\" (give the exact lines) or \"product limit: the tool always asks\" (cite step 0). If a setting works, the fix goes in the repo's settings.json through a draft PR by a lane, not by you. Send the report to the Coordinator session_013NEJL1gw6EdrSyvHkTUEx6.\nIf it is a product limit, the workaround stays as ruled: an orchestrator starts lanes as background Agent spawns with `isolation: 'worktree'` and uses start_session only on my words."
+  },
+  "context": "Goal: an orchestrator starts its lanes with no click from you (step c107).\nProblem (goal): starting a session always shows you a y/n card, so a coordinator cannot start lanes alone. The docs name no setting that removes it, and a test on your Mac is the only way to learn whether one exists; this cloud session cannot run it.\nBased on (read): lane c107 found the docs name no setting; your 744 b picked the probe (ruling own-744-b-start-both).\nDeparts from: main has no setting that skips the start card \u2014 the probe tests an allow rule, a hook and a flag check; any fix goes in settings.json by a draft PR from a lane.\nWhy yours: the test runs in your Mac desktop app and needs your y/n on each card; this session has no Mac (checked: list_computer_folders needs an online computer, and a probe of the card is the point).\nMeanwhile: the lanes keep starting as background agents; c107 stays ready until the probe reports.",
+  "home": "step c107 (ruling own-744-b-start-both)",
+  "id": "act-mac-c107-card-probe",
+  "kind": "task",
+  "n": 751,
+  "options": [
+    {
+      "gain": "Learns whether any setting removes the start card, so the coordinator can start lanes alone.",
+      "how": "Open the desktop app, a Code tab, set Bypass permissions mode, paste the command below, and answer its \"card y/n\" lines. Its report goes to the coordinator.",
+      "key": "a",
+      "label": "Run the probe on your Mac",
+      "lose": "About a dozen y/n answers in one Mac Code session."
+    },
+    {
+      "gain": "Nothing to do now.",
+      "key": "b",
+      "label": "Later",
+      "lose": "The coordinator keeps starting lanes as background agents; the click stays."
+    }
+  ],
+  "owner": "lane c107 (session_013NEJKyuJw2o7P39yhrng4r) via coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane c107 13:38 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Run the start-card probe on your Mac",
+  "status": "open",
+  "title": "Run a short probe on your Mac to see if any setting removes the start-session card",
+  "why": "Only a test on your Mac can show whether a setting skips the card."
+}

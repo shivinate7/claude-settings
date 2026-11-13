@@ -42,6 +42,7 @@
   "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
   "pick": "a",
   "ref": "your 10:57 CST answer on item 629; lane 11:01 CST with a blind agent",
+  "reply": "Triage opinion, 13:4x CST: pick a, not b, for now. Why: a closes the dash form that slipped through today and adds no new false-alarm risk. b would also catch lines like \"the builders broke X\", but nobody has counted how many role-subject lines are real admissions and how many are plain review findings (\"the reviewer found the builder's test wrong\"). A check that cries wolf gets ignored, and b rewrites your decision's Incident line. If you agree, I file a small step to count the last reports first, and bring you b only with that number. Answer a, b, or \"a, then count\".",
   "repo": "shivinate7/claude-settings",
   "short": "Guard line: blind agent beside lane",
   "shown": [

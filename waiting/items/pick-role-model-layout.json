@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-13T19:43:46Z",
+  "closed": "2026-11-13T19:53:59Z",
+  "context": "Goal: each role runs the least model that keeps it accurate.\nProblem (money): your layout puts the coordinator on Sonnet high, but the coordinator writes every lane brief and reads your rulings by meaning, and nothing checks a brief against the rulings until lane brief-from-step's judge lands. Its 12:07 \"close after merge\" brief was stricter than your Nov 9 words.\nYour layout (13:41 CST, via the retrospective): coordinator Sonnet high, arbiter Opus medium, consultant Opus medium, triage Sonnet high, guard and check lanes Sonnet high, product and design lanes Sonnet medium. Your question: any you would strongly argue need Opus that do not?\nTriage's answer: only the coordinator, and only until the brief judge exists. The blind role ranking put it first. Everything else in your layout reads fine to me; triage on Sonnet high matches how this session has run. Unmeasured.\nAlso unmapped: the batch runner and docs lanes. The retrospective suggests Sonnet medium for both.\nBased on (measured): the coordinator's 12:07 slip is that lane's red case. Based on (read): the blind ranking put the coordinator first.\nDeparts from: main, where the coordinator, triage and consultant take the main model (Opus) by the \"separate sessions\" row, the arbiter runs Opus high, and all lanes run Sonnet medium \u2014 your rows, plus guard lanes at high.\nMeanwhile: nothing changes until you pick; the rows land in decision agent-model-cap (home: step role-gaps-from-ranking). Past rulings not read by triage.",
+  "home": "decision agent-model-cap; step role-gaps-from-ranking",
+  "id": "pick-role-model-layout",
+  "kind": "decision",
+  "n": 752,
+  "options": [
+    {
+      "gain": "Briefs stay right while no check exists.",
+      "key": "a",
+      "label": "Your layout, but the coordinator runs Opus high until the brief judge goes red on a bad brief, then Sonnet high (recommended)",
+      "lose": "Opus cost on one session for that time."
+    },
+    {
+      "gain": "Lowest cost now.",
+      "key": "b",
+      "label": "Your layout as written",
+      "lose": "A brief that drops your words goes unchecked until the judge lands."
+    },
+    {
+      "gain": "Rare clash rulings get full depth.",
+      "key": "c",
+      "label": "Your layout, plus the arbiter at high",
+      "lose": "A small extra cost."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "owner 13:41 CST Nov 13, via retrospective",
+  "reply": "Closed 13:5x CST as a duplicate of item 747, where you answered (your 13:53 CST words, relayed by the retrospective): the layout is ruling own-747-role-layout, so the coordinator runs Sonnet high. It sets session rows only; agents keep their agent-model-cap rows (Explore, test-author, reviewer and record-writer Haiku xhigh; builder Sonnet high; Plan, designer, design-reviewer and refuter Opus high). The scope line goes in the record when the rows land.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Which model each role runs: your layout, with the coordinator on Opus for now?",
+  "status": "closed",
+  "title": "Which model should each role run, and should the coordinator stay on Opus until the brief check exists?",
+  "why": "Sets the model rows in decision agent-model-cap; the coordinator's choice changes cost and brief accuracy."
+}
