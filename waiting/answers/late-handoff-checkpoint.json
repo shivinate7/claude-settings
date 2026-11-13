@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-13T06:50:40.341Z",
+  "choice": "none",
+  "item": "late-handoff-checkpoint",
+  "n": 676,
+  "note": "is our setup script bad? i thought nudges to rewrite handoff trigger multiple times before compaction snd then theres snother trigger after compsction?"
+}

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T14:34:00Z",
+  "context": "Goal: a PR that ends up editing only docs, after a review round, can post its record and merge.\nProblem (rule): a docs-only record has zero rounds, so after an earlier round on the same PR the restart check reads zero as a lower top round and refuses it; allowing it changes two decisions, so it needs your word.\nBased on (read): decision pr-review-record refuses a record whose top round is below the earlier top round; the lane's test-author showed the refusal on main 8d7d36bd9.\nBased on (read): decision docs-only-prs-skip-review gives a docs-only PR zero review rounds.\nDeparts from: main refuses a docs-only record after any earlier round \u2014 option a lets it post when its kind is docs-only and no guard or check changed, and every changed file is a doc.",
+  "home": "step docs-only-record-after-round",
+  "id": "docs-only-record-after-round",
+  "kind": "decision",
+  "n": 686,
+  "options": [
+    {
+      "gain": "A PR that turns docs-only after a review posts and merges with no filler round.",
+      "how": "The review-record check accepts a docs-only record after an earlier round only when the record says no guard or check changed and the PR's diff touches docs alone. A lane builds it, red test first, and rewrites both decisions in place. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "id": "allow-docs-only-after-round",
+      "key": "a",
+      "label": "Allow a docs-only record after an earlier round",
+      "lose": "The shared check accepts a record it refuses today; a lane could try docs-only to step past a failed round, and only the docs-only diff check stops that.",
+      "widens": true
+    },
+    {
+      "gain": "The record rule stays one rule, and the check accepts nothing new.",
+      "how": "Nothing changes; the step closes. Such a PR posts a normal record with one more real round.",
+      "id": "keep-refusal",
+      "key": "b",
+      "label": "Keep the refusal (recommended)",
+      "lose": "One filler review round, with its tokens and wait, for a PR that only edits docs."
+    }
+  ],
+  "owner": "lane fix-verifier-stands-for-round-2 (session_013NEJKzx2Ao17sWsBeMCFr5)",
+  "ref": "lane 08:33 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Docs-only record after a review round",
+  "shown": [
+    {
+      "id": "allow-docs-only-after-round",
+      "key": "a",
+      "label": "Allow a docs-only record after an earlier round"
+    },
+    {
+      "id": "keep-refusal",
+      "key": "b",
+      "label": "Keep the refusal (recommended)"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "May a docs-only PR that already had a review round post a docs-only record and merge?",
+  "why": "It changes what the review record accepts, which two decisions set."
+}
