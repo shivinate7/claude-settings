@@ -5725,6 +5725,7 @@ DONE_STEP_NAMED = "> **Done** RECORDED abc1234 filed the note; its fix is step:f
 DONE_STEP_UNNAMED = "> **Done** RECORDED abc1234 filed the note\n> **Next** wait"
 DONE_PREFIX_ONLY = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha-two\n> **Next** wait"
 DONE_BUILT = "> **Done** BUILT abc1234 fixed the guard\n> **Next** wait"
+DEBT_STEP_TEXT = "# New gap\n\nWhat. A gap with a fix named.\n\nFix: step:fix-alpha\n"  # a new debt file's Fix line
 # Every fixture commit and turn carries a time, as a real commit and a real transcript do. The base is a day before
 # every turn, so it is never one of a turn's commits. A turn's start is its human message's stamp, in the transcript's form.
 BASE_AT = "2026-11-06T12:00:00+0000"
@@ -5845,6 +5846,24 @@ class NotesFixTests(unittest.TestCase):
         sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
         self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
 
+    def test_numbered_step_bullet_absent_from_done_blocks(self):
+        # A numbered bullet is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "1. new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_indented_step_bullet_absent_from_done_blocks(self):
+        # An indented bullet is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "  - new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_glued_step_bullet_absent_from_done_blocks(self):
+        # A dash glued to its word is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "-new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
     def test_step_named_in_done_passes(self):
         init_repo(self.repo, base=NOTES_BASE)
         sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
@@ -5893,6 +5912,40 @@ class NotesFixTests(unittest.TestCase):
         second = commit_notes(self.repo, None, "two", at=LATER_COMMIT_AT)
         self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED)
                                     + self.turn("two", second, DONE_STEP_UNNAMED, at=LATER_TURN_AT)))
+
+    def test_new_debt_file_step_fix_blocks_when_done_omits_the_step(self):
+        # A new debt file records a gap as a notes line does, so its step fix must be named in Done too.
+        init_repo(self.repo, base=NOTES_BASE)
+        write_file(os.path.join(self.repo, "docs", "debts", "new-gap.md"), DEBT_STEP_TEXT)
+        git_in(self.repo, "add", "-A")
+        commit_at(self.repo, "one", COMMIT_AT)
+        sha = git_out(self.repo, "rev-parse", "--short=7", "HEAD")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_new_debt_file_step_fix_named_in_done_passes(self):
+        # Control for the debt-file case: the same commit with its step named in Done is quiet.
+        init_repo(self.repo, base=NOTES_BASE)
+        write_file(os.path.join(self.repo, "docs", "debts", "new-gap.md"), DEBT_STEP_TEXT)
+        git_in(self.repo, "add", "-A")
+        commit_at(self.repo, "one", COMMIT_AT)
+        sha = git_out(self.repo, "rev-parse", "--short=7", "HEAD")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_NAMED)))
+
+    def test_typo_edit_to_a_line_that_already_names_its_step_passes(self):
+        # The step fix is on main already. This commit fixes a typo in that line and adds no step.
+        init_repo(self.repo, base=NOTES_BASE + STEP_NOTE)
+        sha = commit_notes(self.repo, NOTES_BASE + "- new-note: a gapp. Fix: step:fix-alpha\n", "one")
+        self.assertIn(NOTES_REL.replace(os.sep, "/"),
+                      git_out(self.repo, "show", "--name-only", "--format=", sha).splitlines())  # scope: the notes file
+        out = self.stop(self.turn("one", sha, DONE_STEP_UNNAMED))
+        self.assertIsNone(out, "a typo edit demanded Done name its step again: %s" % (out or {}).get("reason"))
+
+    def test_typo_edit_plus_a_new_step_line_still_blocks(self):
+        # Control for the typo case: a new step line in the same commit is still judged, so Done must name its step.
+        init_repo(self.repo, base=NOTES_BASE + STEP_NOTE)
+        sha = commit_notes(self.repo, NOTES_BASE + "- new-note: a gapp. Fix: step:fix-alpha\n"
+                           + "- other-note: a gap. Fix: step:fix-beta\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-beta")
 
 
 if __name__ == "__main__":
