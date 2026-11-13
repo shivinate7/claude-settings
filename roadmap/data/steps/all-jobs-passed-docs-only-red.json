@@ -10,5 +10,5 @@
  "why": "Every docs-only PR may fail the final check while main's same-shaped run passes, so merges stall, the red-main fix first.",
  "source": "Coordinator 16:42 CST Nov 13: runner 10's REST read at 16:41 CST (unverified by the coordinator) and the coordinator's own reading of check.sh on origin/main; unchecked by triage.",
  "note": "Filed 16:42 CST Nov 13 (express, blocks every merge). Facts: the docs-only PR run 43520492928 on #3280 (head ac3847a7e418) ended FAILURE at the all-jobs-passed step, while main's push run on ab27336489 (same shape: scope success, 28 skipped) read success. check.sh fails when any needed job is skipped (coordinator's reading). So #3280, the red-main fix, cannot merge on a green run. The lane measures the cause first, then fixes. A CI-file fix may need the owner's web merge, as #3278 did; the coordinator sends the measured cause and the lane's PR, and triage then posts an owner item. Relations: red-gate-reads-suite-run, push-skip-proven-tree, drop-nightly-schedule. A check change: test-author red case first, builder, reviewer. Past rulings not checked.",
- "updatedAt": "2026-11-13T16:42:53-06:00"
+ "updatedAt": "2026-11-13T16:44:56-06:00"
 }
