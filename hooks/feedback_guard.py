@@ -977,7 +977,8 @@ def page_form_problem(text, items, homes, pages, session):
 
 
 class Closable(str):
-    """A refusal that `[closed]` settles: the final reason names that mark only when one of these is in it."""
+    """A refusal that `[closed]` settles: the final reason names that mark only when one of these is in it. Only the
+    standing-id refusal is one; typing `[closed]` on a ruling or task line does not clear its home refusal."""
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
@@ -1007,10 +1008,10 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                 found = None if it[3] else repo_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
                 if found:
                     out.append(found)
-            elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
+            elif homes is not None and it[1].startswith(SETTLING_PREFIXES):
                 found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant, at - 1)
                 if found:
-                    out.append(Closable(found))
+                    out.append(found)
             elif homes is not None and it[3] and it[1].startswith("[note]"):
                 found = homes.closed_problem(it[0], it[1])
                 if found:

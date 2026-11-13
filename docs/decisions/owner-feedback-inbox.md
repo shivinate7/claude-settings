@@ -182,7 +182,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   one `cat-file` per open or closed ruling or task item it checks, one `rev-parse` per repo and per absolute home, and
   one `for-each-ref` per repo, inside the Stop process that already runs; a line judged earlier in the same Stop costs nothing
   more. The inbox is read twice and written once, only when a line changed; the close re-reads it right before the
-  write, so a message captured during the reads is kept. A refusal for a standing id missing from the handoff, or for a ruling or task whose home does not resolve, names `[closed]` as a way out. The refusal for an unsent page or repo item does not: the send is the way out. A closed note
+  write, so a message captured during the reads is kept. A refusal for a standing id missing from the handoff names `[closed]` as a way out. The refusal for a ruling or task whose home does not resolve does not: `[closed]` on that open line leaves the block in place, so the home is the way out. The refusal for an unsent page or repo item does not either: the send is the way out. A closed note
   needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on
   some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` and
   `process-only` are no home for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88

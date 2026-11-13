@@ -426,6 +426,16 @@ def _answer_value(value):
     return None
 
 
+def _key_of(question, given, questions):
+    """The key of `given` that answers `question`: the exact text, else the one other key that differs only by
+    surrounding whitespace, when no second key or question makes that match ambiguous. None when there is none."""
+    if question in given:
+        return question
+    same = [k for k in given if k not in questions and k.strip() == question.strip()]
+    twins = [q for q in questions if q.strip() == question.strip()]
+    return same[0] if len(same) == 1 and len(twins) == 1 else None
+
+
 def answers_of(hook):
     """`(answers, unread)` for an AskUserQuestion result: one answer text per question, and the count of answers in a
     form that could not be read. `answers` is None when the result holds none. The result is a dict `{"answers": {<question>: <answer>}}`, or text that holds `"<question>"="<answer>"` per question.
@@ -434,9 +444,14 @@ def answers_of(hook):
     response, questions = hook.get("tool_response"), _questions(hook)
     if isinstance(response, dict) and isinstance(response.get("answers"), dict):
         given = response["answers"]
-        keys = [q for q in questions if q in given] or list(given)
+        keys = [_key_of(q, given, questions) for q in questions]
+        keys = [k for k in keys if k is not None]
+        if not keys:
+            keys = list(given)
         answers = [_answer_value(given[k]) for k in keys]
-        return [a for a in answers if a is not None and a.strip()], answers.count(None)
+        stray = [k for k in given if k not in keys]  # an answer under a key that is no question: announced, not dropped
+        unread = answers.count(None) + sum(1 for k in stray if _answer_value(given[k]) != "")
+        return [a for a in answers if a is not None and a.strip()], unread
     texts = list(_strings(response))
     # The `"="` cut only for one question or none: with two or more, a cut inside a question's `", "` would save its words.
     cuts = ([lambda t: _cut_on_questions(t, questions)] if questions else []) + (
