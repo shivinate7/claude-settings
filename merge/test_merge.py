@@ -16055,6 +16055,25 @@ class ReviewFixNotesGap(ReviewEnv):
         self.assertIn(self.UNRELATED, host.commit_reads, "scope: the walk did not read the gap's commits, so the refusal below tests nothing")
         self.assert_refused(rc, out, err, "a fix check whose gap never reaches the Head was accepted")
 
+    def long_gap(self, n):
+        """n record-only gap commits, oldest first, each with its own record file: a chain as long as the walk's cap is."""
+        return [(f"{0x3000 + i:040x}", [self.record_file(i)]) for i in range(n)]
+
+    def test_a_gap_of_the_walk_cap_in_record_commits_is_recorded(self):
+        # full size: the walk reads REVIEW_MERGE_WALK commits, the most a walk may read, and every one is a record or notes commit
+        gap = self.long_gap(merge.REVIEW_MERGE_WALK)
+        host, fix = self.gap_host(gap)
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(gap[0][0], host.file_reads, "scope: the walk did not reach the commit after the Head, so the verdict below tests nothing")
+        self.assert_recorded(rc, out, err, f"a fix check over {merge.REVIEW_MERGE_WALK} record commits, the walk's cap, was refused")
+
+    def test_a_gap_one_commit_past_the_walk_cap_is_refused(self):
+        # one past full size: the walk stops at REVIEW_MERGE_WALK commits and never reaches the Head, so the fix check refuses
+        host, fix = self.gap_host(self.long_gap(merge.REVIEW_MERGE_WALK + 1))
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(fix, host.commit_reads, "scope: the walk did not read the reviewed head's parents, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, f"a fix check over {merge.REVIEW_MERGE_WALK + 1} gap commits, one past the walk's cap, was accepted")
+
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
