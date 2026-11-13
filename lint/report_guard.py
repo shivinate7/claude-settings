@@ -1227,8 +1227,9 @@ def question_problem(records, turn, text, hook):
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
+    keys = layout.repo_keys(root) if root else {}  # one read of the repo config, for the writer key and the page
     if not writer and root and not page_read_ran(records):
-        writer = layout.page_writer_key(root)
+        writer = layout.page_writer_key(root, keys)
         if writer:
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
@@ -1236,7 +1237,7 @@ def question_problem(records, turn, text, hook):
             delivered = delivered_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
-    page = layout.waiting_page(root) if root else "unknown"
+    page = layout.waiting_page(root, keys) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
         inp = u.get("input")

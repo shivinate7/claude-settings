@@ -389,11 +389,18 @@ def _page_in(root, keys, where):
     return "unknown" if found is None else _artifact_link(found, where)
 
 
-def waiting_page(root):
+def waiting_page(root, keys=None):
     """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
     "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. It reads the default branch's
     blob on origin (_default_branch_extras), else the checkout's own file. Cost: at most two git starts per call.
+    `keys` is the dict a caller already read with `repo_keys(root)`: no git start, and a registry that holds no page is
+    "unknown" whichever source it came from.
     "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
+    if keys is not None:
+        try:
+            return _page_in(root, keys, _extras(root))
+        except LayoutError:
+            return "unknown"
     held = _default_branch_extras(root)
     if held is not None:
         try:
@@ -459,11 +466,11 @@ PAGE_WRITER_KEY = "page-writer"  # the extras key: the session id of the page's 
 PARENT_TARGETS = frozenset({"@parent", "parent"})  # send targets that name the parent, never a session id
 
 
-def page_writer_key(root):
+def page_writer_key(root, keys=None):
     """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
     null, not a string, blank, padded with whitespace or a parent alias (PARENT_TARGETS). A session id is a
     claim, not checked past that."""
-    found = repo_keys(root).get(PAGE_WRITER_KEY)
+    found = (repo_keys(root) if keys is None else keys).get(PAGE_WRITER_KEY)
     if not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS:
         return None
     return found
