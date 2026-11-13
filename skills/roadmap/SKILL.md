@@ -284,8 +284,11 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   The live file's optional `keepSessions` (`[{id, reason}]`, the lanes the owner keeps) takes a session out of the row: it prints no lane line and
   no hold line and is not counted. An absent key keeps nothing.
-  After a landed batch merge, `merge --confirm` reads `roadmap/live/live.json` on origin's roadmap branch. A `readAt` later than the merge commit's
-  time prints this report; otherwise it prints one line saying the pass is owed because the file is stale or unread. The merge's exit code is unchanged.
+  A session row that is not archived and carries an int `unarchived_epoch` above 0 reads `hold (unarchived; ...)`, never a lane line. An absent or 0
+  value holds nothing. A bool, a value that is not an int, or a negative one reads the whole list unknown.
+  After a landed merge onto the default branch, `merge --confirm` reads `roadmap/live/live.json` on origin's roadmap branch. A `readAt` later than the merge commit's
+  time prints this report; otherwise it prints one line saying the pass is owed because the file is stale or unread (a failed fetch is unread). With no roadmap
+  branch on origin it prints nothing, and a merge onto another base prints nothing. The merge's exit code is unchanged.
 
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
@@ -299,6 +302,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - `readAt` is bad, over 60 minutes old or in the future;
   - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
   - the optional `keepSessions` is not a list, or an entry is not an object with a text `id`;
+  - a live lane row's `unarchived_epoch` is present and is a bool, not an int, or negative;
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
     are not counted, so only archived lanes, or no live lane rows, read an empty row;
   - main or its git log cannot be read;

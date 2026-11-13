@@ -773,7 +773,8 @@ def live_work(path, steps, slug=None):
                                          for t in r.get("tags") or []))
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
-                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
+                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None,
+                          **({"unarchived_epoch": r["unarchived_epoch"]} if "unarchived_epoch" in r else {})}
                          for r in sessions]
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
@@ -789,7 +790,7 @@ def live_work(path, steps, slug=None):
     if "keepSessions" in raw:
         rows = raw["keepSessions"]
         if isinstance(rows, list) and all(isinstance(r, dict) and text(r, "id") for r in rows):
-            keep_ids = [r["id"] for r in rows]
+            keep_ids = [r["id"].strip() for r in rows]  # a padded id still names its session
         else:
             keep_why = "unknown (the live file's keepSessions is not a list of {id, reason} rows)"
     page_items, items_why = None, None
@@ -1570,7 +1571,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session named in the live file's keepSessions prints no line (no lane line, no hold line); a keepSessions that
-    could not be read makes the whole list unknown.
+    could not be read makes the whole list unknown. A kept id is read stripped.
+
+    A session that is not archived and carries an int `unarchived_epoch` above 0 was unarchived by someone, so an idle one reads
+    `hold (unarchived; ...)`, never a lane line. An absent or 0 value holds nothing. A value that is a bool, not an int, or
+    negative makes the whole list unknown: a time that could not be read must not read as "never unarchived".
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
@@ -1610,12 +1615,20 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
         return ["unknown (no live lane session row carries a status_bucket enum name)"]
     kept = set(work.get("keepSessions") or [])
+    for row in live:
+        epoch = row.get("unarchived_epoch", 0)
+        if row["id"] not in kept and (isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0):
+            return ["unknown (session %s has an unarchived_epoch that is not an int of 0 or more: %r)" % (row["id"], epoch)]
     out = []
     for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
         if row["id"] in kept or row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
         sid = row["id"]
+        if row.get("unarchived_epoch", 0) > 0:
+            # Someone unarchived this session, so archiving it again undoes their act.
+            out.append("hold (unarchived; leave it unless its owner archives it again; lane %s)" % sid)
+            continue
         mine = sorted(step_tag_ids(tags))
         if not mine:
             # The archive guard (hooks/guard_merge.py) refuses a lane with no cs-step tag, so archiving is not the act.
