@@ -12,21 +12,23 @@ import subprocess
 import sys
 
 # The run statuses GitHub lists as not finished. A completed run has nothing left to cancel.
-ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "pending")
+ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 
 
 def pr_is_closed(state):
     return state == "closed"
 
 
-def _lists_pr(run, pr_number):
+def _lists_only_pr(run, pr_number):
+    # A run that lists several PRs is left: another of them may still be open.
     prs = run.get("pull_requests")
-    if not isinstance(prs, list):
+    if not isinstance(prs, list) or len(prs) != 1:
         return False
-    return any(isinstance(pr, dict) and pr.get("number") == pr_number for pr in prs)
+    return isinstance(prs[0], dict) and prs[0].get("number") == pr_number
 
 
-def _is_cancellable(run, pr_number, repo, default_branch):
+def _is_candidate(run, repo, default_branch):
+    """An unfinished pull_request run from this repo off the default branch, before its PR list is read."""
     if not isinstance(run, dict):
         return False
     run_id = run.get("id")
@@ -42,7 +44,11 @@ def _is_cancellable(run, pr_number, repo, default_branch):
     head_repo = run.get("head_repository")
     if not isinstance(head_repo, dict) or head_repo.get("full_name") != repo:
         return False
-    return _lists_pr(run, pr_number)
+    return True
+
+
+def _is_cancellable(run, pr_number, repo, default_branch):
+    return _is_candidate(run, repo, default_branch) and _lists_only_pr(run, pr_number)
 
 
 def select_runs(runs, pr_number, repo, default_branch):
@@ -50,6 +56,13 @@ def select_runs(runs, pr_number, repo, default_branch):
     if not isinstance(runs, list):
         return []
     return [run["id"] for run in runs if _is_cancellable(run, pr_number, repo, default_branch)]
+
+
+def count_no_pr_list(runs, repo, default_branch):
+    """How many runs select_runs leaves only because their pull_requests list is empty."""
+    if not isinstance(runs, list):
+        return 0
+    return sum(1 for run in runs if _is_candidate(run, repo, default_branch) and run.get("pull_requests") == [])
 
 
 class ReadError(Exception):
@@ -74,7 +87,7 @@ def list_active_runs(repo):
     runs = []
     for status in ACTIVE_STATUSES:
         # --jq prints one run per line across every page, where --paginate alone joins page objects into invalid JSON.
-        out = read_text(["--paginate", f"repos/{repo}/actions/runs", "-f", f"status={status}", "-f", "per_page=100",
+        out = read_text(["-X", "GET", "--paginate", f"repos/{repo}/actions/runs", "-f", f"status={status}", "-f", "per_page=100",
                          "--jq", ".workflow_runs[]"])
         for line in out.splitlines():
             if line.strip():
@@ -100,7 +113,16 @@ def main(argv):
         default_branch = read_text([f"repos/{repo}", "--jq", ".default_branch"]).strip()
         if not default_branch:
             raise ReadError("the default branch came back empty")
-        ids = select_runs(list_active_runs(repo), pr_number, repo, default_branch)
+        runs = list_active_runs(repo)
+        ids = select_runs(runs, pr_number, repo, default_branch)
+        skipped = count_no_pr_list(runs, repo, default_branch)
+        if skipped:
+            print(f"{skipped} run(s) skipped: no PR list", file=sys.stderr)
+        # A reopen during the list must stop the cancel, so the state is read again right before the loop.
+        state = read_text([f"repos/{repo}/pulls/{pr_number}", "--jq", ".state"]).strip()
+        if not pr_is_closed(state):
+            print(f"PR {pr_number} is {state or 'unreadable'}, not closed: nothing cancelled")
+            return 0
     except ReadError as e:
         print(f"nothing cancelled: {e}", file=sys.stderr)
         return 1

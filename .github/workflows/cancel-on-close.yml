@@ -2,8 +2,8 @@ name: cancel-on-close
 
 # A closed PR leaves its queued and running checks.yml jobs on the runner queue. This workflow cancels them when the
 # PR closes. It is not in checks.yml and not a required check. The script is read from the default branch, never from
-# the PR, so a PR cannot change what runs with the actions: write token. The script re-reads the PR state and cancels
-# nothing unless the PR is closed.
+# the PR, so a PR cannot change the script. A same-repo PR author can already write to the repo, and a fork's token is
+# read-only. The script re-reads the PR state and cancels nothing unless the PR is closed.
 on:
   pull_request:
     types: [closed]
