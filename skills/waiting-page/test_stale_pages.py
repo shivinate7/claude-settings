@@ -2161,6 +2161,36 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "triage", EARLY)]), "an answer on an item with no lane changed its line: " + out)
 
+    # A routed answer is the busy-lane path's: its item's lane and lastAnswer.at equal the answer's at, so the lane has it and no
+    # receipt is owed. Only that match skips the line. A lastAnswer at another time leaves the answer unread, and the line names the lane.
+
+    def test_an_answer_already_routed_to_its_lane_is_not_listed(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer already routed to its lane was listed again: " + out)
+
+    def test_a_lane_item_whose_last_answer_is_another_time_lists_its_answer_with_its_lane(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": ANSWERED})
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [lane_unread_line("colour-pick", 143, "ops", EARLY, LANE)]),
+                         "a lane item whose lastAnswer is another time did not list its unread answer with its lane: " + out)
+
+    def test_a_full_store_lists_each_lane_answer_not_yet_routed_and_no_routed_one(self):
+        count = 120  # every third lane answer is routed to its lane, and the rest are not
+        items, answers, expected = [], [], []
+        for i in range(count):
+            item_id, routed = "item-%03d" % i, i % 3 == 0
+            last_at = EARLY if routed else ANSWERED
+            items.append(item_entry(item_id, "open", n=i, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": last_at}))
+            answers.append(pick_answer_entry(item_id, EARLY))
+            if not routed:
+                expected.append(lane_unread_line(item_id, i, "ops", EARLY, LANE))
+        self.store(items=items, answers=answers)
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unrouted lane answer, and no routed one, in order: " + out[:300])
+
     def test_a_holding_item_with_no_lane_is_reported_as_lane_missing(self):
         cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS),
                  "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, lane="")}
@@ -2319,6 +2349,10 @@ def dropped(data, key):
     return {k: v for k, v in data.items() if k != key}
 
 
+# A routed lane item: the busy-lane path sent its answer to the lane, so lastAnswer.at is the answer's at. Only that match holds it open.
+ROUTED_LANE = {"lane": "batch-runner", "lastAnswer": {"choice": "a", "note": "Red please", "at": CLOSE_AT}}
+
+
 class CloseBatch(FolderCase):
     """The --close-batch mode. It prints one ArtifactData batch payload, {"writes": [...]}: the receipt set, the item close and the
     answer delete together, with the item and the answer each pinned to the version read. A refused read prints one unknown line,
@@ -2438,7 +2472,12 @@ class CloseBatch(FolderCase):
         self.assertEqual(len(writes), 3, "the reply close does not hold the receipt, the item close and the answer delete together: %r" % writes)
 
     def test_a_close_batch_refuses_an_item_on_a_lane_or_with_waits_until_the_act_is_told_done(self):
-        for case, extra in (("lane", {"lane": "batch-runner"}), ("waits", {"waits": WAITS})):
+        with self.subTest(case="plain lane"):  # a plain pick on a lane is not routed, so it closes without a done report
+            self.store(item=item_data(lane="batch-runner"))
+            item = self.write_for(self.good_payload(), "items")
+            self.assertIsNotNone(item, "the close of a plain-pick lane item has no single items write")
+            self.assertEqual(item.get("data", {}).get("status"), "closed", "the close of a plain-pick lane item does not close it: %r" % (item,))
+        for case, extra in (("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
             with self.subTest(case=case):
                 self.store(item=item_data(**extra))
                 r = self.close()
@@ -2448,7 +2487,7 @@ class CloseBatch(FolderCase):
                 self.assertNotIn('"writes"', r.stdout, "the refused close of a %s item printed a payload: %s" % (case, r.stdout))
 
     def test_a_close_batch_with_done_closes_an_item_on_a_lane_or_with_waits(self):
-        for case, extra in (("lane", {"lane": "batch-runner"}), ("waits", {"waits": WAITS})):
+        for case, extra in (("lane", {"lane": "batch-runner"}), ("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
             with self.subTest(case=case):
                 self.store(item=item_data(**extra))
                 item = self.write_for(self.good_payload("--done"), "items")
@@ -2456,18 +2495,26 @@ class CloseBatch(FolderCase):
                 self.assertEqual(item.get("data", {}).get("status"), "closed", "the --done close of a %s item does not close it: %r" % (case, item))
 
     def test_a_closed_item_on_a_lane_or_with_waits_closes_without_done_and_the_open_one_still_waits(self):
-        for case, extra in (("lane", {"lane": "batch-runner"}), ("waits", {"waits": WAITS})):
+        for case, extra in (("lane", {"lane": "batch-runner"}), ("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
             with self.subTest(case=case):
                 self.store(item=item_data(status="closed", **extra))  # a chat answer closed it, so no done report is owed
                 item = self.write_for(self.good_payload(), "items")
                 self.assertIsNotNone(item, "the close of a closed %s item has no single items write" % case)
                 self.assertEqual(item.get("data", {}).get("status"), "closed",
                                  "the close of a closed %s item without --done does not keep it closed: %r" % (case, item))
+        for case, extra in (("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
                 self.store(item=item_data(**extra))  # the same item, open: it still waits for the done report
                 r = self.close()
                 self.assertEqual(r.returncode, 2, "the close of an open %s item exited %d, want 2 without --done: %s" % (case, r.returncode, r.stdout + r.stderr))
                 self.assertTrue(any(line.startswith("unknown: item waits for a done report") for line in output_lines(r.stdout)),
                                 "the refusal of an open %s item does not say it waits for a done report: %r" % (case, r.stdout))
+        with self.subTest(case="open plain lane"):  # an open plain pick on a lane is not routed, so it closes without --done
+            self.store(item=item_data(lane="batch-runner"))
+            item = self.write_for(self.good_payload(), "items")
+            self.assertIsNotNone(item, "the close of an open plain-pick lane item has no single items write")
+            self.assertEqual(item.get("data", {}).get("status"), "closed",
+                             "the close of an open plain-pick lane item without --done does not close it: %r" % (item,))
 
     def test_a_close_with_no_version_known_says_unpinned_on_stderr_and_pinned_false_in_the_payload(self):
         self.write_doc("item.json", item_data(), None)
