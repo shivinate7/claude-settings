@@ -1,7 +1,7 @@
 {
  "id": "plan-rulings-to-records",
  "title": "File each live R-ruling of the restart plan as a decision record or roadmap ruling, so lanes cite a record, not the plan",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "R55 and the plan's R-rulings live only on the retrospective's branch restart-plan, so lanes cite rulings no repo record holds.",
  "source": "Retrospective 14:30 CST Nov 13 (its own gap).",
- "note": "Filed 14:33 CST Nov 13. Owner: the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ). Source: plans/restart-plan.md on its branch restart-plan. Work: for each live R-ruling file a decision record or roadmap ruling and cite those ids. Unread by triage.",
- "updatedAt": "2026-11-13T14:33:35-06:00"
+ "note": "Filed 14:33 CST Nov 13. Owner: the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ). Source: plans/restart-plan.md on its branch restart-plan. Work: for each live R-ruling file a decision record or roadmap ruling and cite those ids. Unread by triage. WITHDRAWN 14:34 CST Nov 13 (retro 14:34; owner 14:33 \"how can you be so certain that's the fix?\"): R55 and 65 r-numbered rulings are in the store (origin/roadmap roadmap/rulings/), so the lane's \"no repo record\" claim was wrong; it looked only at main. Real fault: lanes do not know the store exists. Folded into brief-from-step. Triage filed the first version without checking the store (note said \"unread by triage\").",
+ "updatedAt": "2026-11-13T14:34:47-06:00"
 }

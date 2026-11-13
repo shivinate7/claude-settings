@@ -1,0 +1,14 @@
+{
+ "id": "push-skip-partial-run-record",
+ "title": "The shared push skip covers a scope-narrowed PR run: the PR run records what it ran, and the push skips only the suites it covered",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Banchi PR 1094 ran 44 of 64 specs and the push re-ran all 64 (14 min 46 s); the shared skip (draft #3217) skips only after a full run.",
+ "source": "Lane push-skip-proven-tree 14:32 CST Nov 13 answering the question left open on banchi item 736 (owner: \"claude-settings always wins unless there's a cited exception\"; R44; 729 a).",
+ "note": "Filed 14:34 CST Nov 13. Lane's finding (unread by triage): the shared skip (#3217, stacked on #3042) skips only when the merged PR's run was full: all-jobs-passed, every suite job green, no suite step skipped; a narrowed run makes the push run all suites, so banchi adopting the shared form changes nothing for D215-narrowed runs. Idea: the PR run records what it ran, and the push skips only the suites it covered. Nothing built. Triage told the owner on item 736 that this step would exist if the shared skip does not cover a partial run; the owner has not been asked whether to start it. Past rulings not checked (D215 is banchi's own).",
+ "updatedAt": "2026-11-13T14:34:47-06:00"
+}

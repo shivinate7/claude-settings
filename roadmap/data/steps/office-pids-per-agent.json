@@ -1,0 +1,14 @@
+{
+ "id": "office-pids-per-agent",
+ "title": "Agents end only the Office processes they started: a hook records new EXCEL, POWERPNT and WINWORD PIDs per agent; cleanup refuses any other PID",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Agents left 8 hidden EXCEL.EXE for 1-2 hours on excel-ui-kit; one cleanup sent Quit to an Excel it did not start (pid 66412).",
+ "source": "Owner-pasted report on excel-ui-kit (Nov 13) via the retrospective 14:34 CST; rule shared-trees-no-machine-wide-kill.",
+ "note": "Filed 14:34 CST Nov 13. Retro's design (unread by triage): a PreToolUse and PostToolUse hook diffs EXCEL.EXE, POWERPNT.EXE and WINWORD.EXE around each Bash or PowerShell call, records new PIDs with start time against the agent id; at SubagentStop end only recorded PIDs whose start time matches; never end one with a visible window (report it); a cleanup refuses any PID not in the agent's record. Notes: COM-started Office has DcomLaunch as parent, so a process-tree check cannot attribute it, hence the diff; parallel agents can race in the diff window, so a PID two diffs both saw is reported, never ended; the refusal belongs in the existing kill-only-yours guard (one home); Windows only. Home: claude-settings hooks. Cost must be stated (process starts per tool call) with a test, per outcomes-mechanize-rules; red proof on a scratch agent leaving a hidden Excel. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:34:47-06:00"
+}
