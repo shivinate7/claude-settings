@@ -5482,21 +5482,29 @@ class GhHalf(Env):
         red, pending, _ = merge.Host.classify({"checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
         self.assertEqual((red, pending), ([], ["checks"]))
 
-    def test_a_skipped_head_with_a_run_in_progress_waits_for_the_run(self):
-        # B1: the skipped rows are old. The checks run is still in progress with no job rows, so the wait holds.
+    def test_a_skipped_head_with_a_run_in_progress_refuses_at_once(self):
+        # B1: the skipped rows are old. The checks run is still in progress with no job rows: the head is pending, so it is refused at once.
+        before = self.head()
         self.set(checks_seq=[[("checks", "skipping", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "skipped")]])
         rc, out = self.go()
-        self.assertGreaterEqual(self.paused.count(60), 1, out)
         self.assertEqual(rc, 1, out)
-        self.assertIn("no check ran on this head", out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "a pending head waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
 
-    def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
-        # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
+    def test_the_remedy_run_in_progress_beside_old_skipped_rows_refuses_at_once(self):
+        # B1: the remedy's own run. Old skipped rows and a run in progress refuse the head at once; the pass that follows is never read.
+        before = self.head()
         self.set(checks_seq=[[("checks", "skipping", "")], [("checks", "pass", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "a pending head waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
 
     def test_an_older_run_still_in_progress_holds_the_wait_under_a_newer_success(self):
         # B2: gh lists the newest run first. The older in-progress run is read as pending before the dedup.
@@ -5589,13 +5597,18 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn(60, self.paused)  # the run did not hold a minute
 
-    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_the_wait(self):
-        # The folder defines the required job `checks`, so its pending run holds the wait until the next read sees it complete.
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_refuses_at_once(self):
+        # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
+        before = self.head()
         self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertIn("merge: waiting on workflow checks", out, "the pending run of the workflow that defines the required job did not hold the wait")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "the pending run of the workflow that defines the required job waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
 
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
