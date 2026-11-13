@@ -1,14 +1,14 @@
 {
  "id": "main-red-windows-ci-scope",
  "title": "Main is red: the express-path tests fail on Windows because ci-scope.sh exits 1",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJKzMndrATd5V4pyEZoB",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Push run 43348145389 on main 36807ad19 (batch 113, #3041) failed 5 Windows merge jobs: the merge/test_merge.py ExpressPath tests (from #2985, step ruled-prose-express), where .github/scripts/ci-scope.sh exits 1 on Windows. The batch PR run passed. Runner 10 holds merges until main is green.",
  "source": "coordinator 20:37 CST Nov 12",
- "note": "Fix lane session_013NEJKzMndrATd5V4pyEZoB, express. Open question: the batch PR run passed while the push run on main failed, so PR and push runs may gate different jobs. A batch can then merge green and turn main red. Find which Windows merge jobs the PR run skipped, and why; if the gating differs, file the gap as its own step. Coordinator 21:03 CST Nov 12: cause found. A PR runs only the Windows slice of the merge suite, so ExpressPath passed batch 113 and failed on main. Fix #3052. Process gap filed as step pr-windows-slice-misses-merge, settled by R62 part 3. Coordinator 23:44 CST Nov 12: #3052 merged in batch 119 (a11bafe09, about 23:41 CST). Main push run 43373657343 is the Windows proof; runner 10 reads it to its end. Closes when that run is green.",
- "updatedAt": "2026-11-12T23:45:19-06:00"
+ "note": "Fix lane session_013NEJKzMndrATd5V4pyEZoB, express. Open question: the batch PR run passed while the push run on main failed, so PR and push runs may gate different jobs. A batch can then merge green and turn main red. Find which Windows merge jobs the PR run skipped, and why; if the gating differs, file the gap as its own step. Coordinator 21:03 CST Nov 12: cause found. A PR runs only the Windows slice of the merge suite, so ExpressPath passed batch 113 and failed on main. Fix #3052. Process gap filed as step pr-windows-slice-misses-merge, settled by R62 part 3. Coordinator 23:44 CST Nov 12: #3052 merged in batch 119 (a11bafe09, about 23:41 CST). Main push run 43373657343 is the Windows proof; runner 10 reads it to its end. Closes when that run is green. Closed 00:31 CST Nov 13: main push run 43373657343 at a11bafe09 (batch 119, #3080, carrying #3052) ended success at 00:20 CST, read by triage from GitHub; the five Windows merge shards pass. Main was red from 19:53 CST, about 4 h 27 min (coordinator 00:30 CST).",
+ "updatedAt": "2026-11-13T00:29:33-06:00"
 }
