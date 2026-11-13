@@ -1,7 +1,7 @@
 {
  "id": "batch-runner-start-names-idle-lanes",
  "title": "The batch runner's session-start text names `merge --idle-lanes` after each merge",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzCV3NzW5wxzNQ6fWU",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The batch runner 10 brief (feedback item fb-2243-2) left out `merge --idle-lanes`, and 31 lanes sat idle through 16 merges.",
  "source": "coordinator 09:43 CST Nov 12",
- "note": "Prose, merge tool session-start text for the batch runner role. Its --live file: roadmap/livework/README.md on the record branch. Ready, no lane.",
- "updatedAt": "2026-11-12T10:25:00-06:00"
+ "note": "Prose, merge tool session-start text for the batch runner role. Its --live file: roadmap/livework/README.md on the record branch. Ready, no lane. Done 10:39 CST Nov 13: #2816 (branch runner-start-idle-lanes) merged in batch 132, main fccff95e6 (#3135).",
+ "updatedAt": "2026-11-13T10:40:34-06:00"
 }
