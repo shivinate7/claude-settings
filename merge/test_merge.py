@@ -12953,6 +12953,23 @@ class RedMainBrake(Env):
         self.merged(rc, out, self.NOT_CLEARED)
         self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
 
+    def test_a_failed_read_of_the_reverts_on_the_base_is_unknown_and_refuses_the_clear(self):
+        # the revert is on main, so only the failed log read keeps the clear from running. A failed read is unknown, never red
+        # and never a clear: a red verdict here would name the run without saying the read failed
+        rev = self.revert_of(self.RED_SHA)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), rev, "the revert is not on origin/main, so the case proves nothing")
+        real = merge.git
+        def git(cwd, *a, **k):  # only the read of the base's reverts fails: every other git call runs for real
+            if a[:1] == ("log",) and "--grep=This reverts commit" in a:
+                return 128, "fatal: injected by the test: the log of the base cannot be read"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            rc, out, before = self.go(*self.red_only())
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the reverts is not unknown")
+        self.assertIn("the read failed", out, "the refusal does not say the read failed")
+        self.assertIn("reading the reverts on origin/main failed", out, "the refusal does not name the failed read")
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
