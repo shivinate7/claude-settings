@@ -38,9 +38,9 @@ jobs:
   # The 03:17 nightly's skip job (R61, owner pick b, Nov 12; decision test-strategy-reset). It says skip when main's head already has a
   # green push run of checks.yml and the newest completed schedule run is green (.github/scripts/nightly-skip.py). Scope waits on it,
   # so a skip reaches every job through needs and the run is a visible success: nothing is cancelled, since a cancelled run reads
-  # UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. Schedule only; no other event runs it.
+  # UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. The job itself starts on every event and
+  # its steps run on a schedule only: a job-level `if` would leave it skipped, and a skipped ancestor skips every job behind scope.
   nightly-skip:
-    if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes one runs read.
     timeout-minutes: 5
@@ -51,11 +51,13 @@ jobs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ github.event_name == 'schedule' }}
         with:
           persist-credentials: false
 
       - name: Decide whether the nightly can skip
         id: decide
+        if: ${{ github.event_name == 'schedule' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
