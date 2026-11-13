@@ -7,10 +7,12 @@ PR	verdict	kind	step	head	reason
 1377	close	code	challenger-page-against	8acf4c399891	older design (against field + refute_item.py); owner may want its auto-refuter script instead of "spawn one Sonnet agent" in SKILL
 1386	rebuild	code	export-after-page-write	db0b51cec69d	rebuild promise-guard-only (promise_problem); drop label half
 1417	close	code	ready-checks-use-pinned-tools	71b0be6a71c0	ancestor of 1938 (lane-lint-runs-local-tools rebuild, itself pending owner pick on design vs main's --pinned)
+1432	fresh	-	one-home-check	8005e3943ee1	fresh: runner 10 (under 48 h, not reviewed)
 1461	close	code	lane-lint-runs-local-tools	0d0c650b5778	inside 1938; fold into 1938 rebuild
 1509	close	code	notes-fix-large-3	8de06735b541	script-file test-write reader on main (8705f9a93)
 1517	close	code	notes-fix-guard-2	145b081dd0e6	subset of 1826
 1520	close	code	notes-fix-large-3	42f0a5a0e522	inside 1618
+1533	fresh	-	page-checks-reach-triage	ddb8659b56e2	fresh: runner 10 (under 48 h, not reviewed)
 1536	keep	code	notes-fix-page	c904ea4d0f2b	SOURCE_RE/artifact_id fixes; 1 conflict hunk; rerun guard suites at rebase
 1552	close	code	review-rounds-rework	5cb4cfe59cc5	on main already (review_guard_marked etc); close after 1789 rebuilt without its "lands with PR #1552" line
 1555	close	code	notes-fix-large-3	4e868978469a	inside 1618
@@ -120,6 +122,7 @@ PR	verdict	kind	step	head	reason
 2301	close	code	bg-tail-loses-verdict	c02058d87e6b	ancestor of 2015
 2321	close	code	bg-tail-loses-verdict	87503213fb02	ancestor of 2015
 2322	rebuild	code	builder-diff-auto-merge-reflog	b7a2e2912792	take only top 8 commits 7ac111a39..b7a2e2912 (6 files), not the 1943-commit batch-66d stack; rewrite own_changes for merge_tree() tuple (tree, conflicts); move 307 test lines to tests/guard/s23264-builder-refuse.py; recount Measure line; re-point notes cites; debt builder-diff-auto-merge-reflog still open
+2326	rebuild	code	review-record-stack	9efd6bbc4776	replay of old 1440/1575/1828/1957; keep WIDE verdict, round-3 holds, fix FAIL counts as next round (owner items 347a 356a 362b 363b); drop round floor and hard-coded fix model; do not close
 2347	close	code	notes-fix-page	cd80faefeea3	ancestor of 2982 (outside group, rebuild: re-shard 5-leg shoot job vs main's checks-waiting-page split); 2982 carries it
 2365	rebuild	code	review-record-past-head	e195c38be405	cumulative stack incl 1951 lineage; rebuild core only on main: open_fail_on_ancestor, one decision paragraph, tests; drop counted-FAIL/WIDE, fix-check chain, REVIEW_FIX_GUARD_MODEL, ~25 debt notes
 2440	rebuild	code	review-record-provenance	c028c1926176	64 conflict hunks/25 files; main has own live_review_state/REVIEW_CHECK_BUDGET 70 vs PR's shared 28 budget; MCP merge + draft guard already on main; rebuild core provenance (REVIEW_STAMP_SALT, cutover read, edit-route/GraphQL review-record guard, comment-post guard); maybe carry 1751's 2 extra commits (hit->bypass rename, comment reword)
@@ -132,11 +135,16 @@ PR	verdict	kind	step	head	reason
 2675	close	code	fan-prose-handoffs	8ee3cb28d733	superseded by 2696
 2677	keep	code	fan-code-handoffs	f3161bcdbfaa	promise guard; merges clean; trim 16 of 21 notes already on main
 2678	keep	code	fan-prose-unmapped-1	25a3c5b6b8dc	shared branch-sweep workflow (cloud branch delete, restart-plan scope k); merges clean
+2681	keep	code	question-form-task-context	27ab34a988fb	needs main merged (question-form.md 15-21); guard change
+2683	keep	code	ci-unknown-is-red	c610abe13bba	needs main merged (checks.yml:312 keep both); check change needs fix verifier
 2684	keep	code	fan-prose-handoffs	a1ebb982b450	artifact-cite refusal in triage push; rebase: ci-scope.sh shoot list
+2688	fresh	-	fan-prose-find-copies	70dcfe0af79d	fresh: runner 10 (under 48 h, not reviewed)
 2691	keep	code	agent-asks-become-refusals	0ad3b6b0c151	relative shell write escape guard; rebase: guard.py keep both blocks (readonly-shell-write); merges clean with 2692/2693/2886
 2692	keep	code	agent-asks-become-refusals	e28b83cbdc8b	commit-trailer-model deny rule; merges clean
 2693	close	code	agent-asks-become-refusals	b5579108d978	ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-write)
 2696	keep	code	fan-prose-handoffs	db1785021be1	superset of 2675; fixes UNKNOWN on failed install; merges clean
+2700	keep	code	lane-lint-timeout	8e1810d1e2c4	needs main merged (guard.py:611 import list, keep both names)
+2708	keep	code	template-copies-byte-equal	e7673f6f4e88	needs main merged (take 2708 deletion; check prose check does not flag the line)
 2709	keep	code	lane-finds-triage	56fc4ded2980	brief names roles (Coordinator, Triage, Batch runner), no session id (R22 point 3); only conflict session-tiers.md Cost lines; check cost-mark lint
 2712	keep	code	fan-prose-handoffs	7ede2542073b	agent-end reap by process marker; regenerate docs/catalog.md after rebase
 2714	close	code	agent-asks-become-refusals	7ed66f06a1e0	ancestor of 2885 (stands only if 2885 stays keep)
@@ -162,9 +170,12 @@ PR	verdict	kind	step	head	reason
 2768	keep	code	fan-code-guard-2	4597afcb1754	archive guard ScopeStop; merges clean
 2770	close	code	fan-code-workflows	63e51f3107e2	ancestor of 2920
 2774	keep	code	fan-code-handoffs	d08e55b9a8d5	fed-write carry; conflicts hooks/guard.py, guard_env.py, builders-cannot-edit-tests.md; merge main in; merge after 2824
+2778	fresh	-	fan-prose-unmapped-2	94353be46360	fresh: runner 10 (under 48 h, not reviewed)
+2779	fresh	-	records-page-ready-reads-pr-repo	2d3d938c94e8	fresh: runner 10 (under 48 h, not reviewed)
 2783	close	code	fan-prose-debts	200cea832768	ancestor of 2872 (outside group, 1 conflict); becomes keep if 2872 closes
 2791	keep	code	fan-code-guard-2	d09baa344fdf	branch-slug-no-git guard; merges clean
 2800	keep	code	fan-prose-small-homes	86424f2e4c0b	stall_beat.py one home for STALL_WATCH_BEAT; merges clean
+2801	keep	code	guard-tables-per-section	66b9b1581e3c	needs main merged plus hand work: move readonly-shell-write rows into their sections
 2803	keep	prose	stale-cites-tree-clean	a77d54fdee9c	plans folder cites (-68 STALE003); fix docs/plans/refusal-vs-rule.md line 81 first; merges clean
 2804	keep	prose	stale-cites-tree-clean	071d2bf493d1	13 decision records cites; merges clean
 2805	keep	prose	stale-cites-tree-clean	ee9ad636c439	4 debts + 2 design docs cites; merges clean
@@ -173,48 +184,136 @@ PR	verdict	kind	step	head	reason
 2811	keep	prose	fan-prose-handoffs	997bb9270a3c	2 debts + 15 notes; merge after 2753, 2712, 2684, 2756 or reword "not yet on main" lines
 2813	keep	code	fan-code-guard-2	7b840c442bfc	python -c / PowerShell call-operator reads; merges clean
 2818	keep	code	merge-flow-after-anthropic	464ed817a1d9	merge-reads-ruleset step; one adjacent-line conflict pr-review-record.md; hand-merge keeps both
+2820	fresh	-	batch-build-log-kept	c730fe6febfd	fresh: runner 10 (under 48 h, not reviewed)
+2823	fresh	-	outbox-notes-land	9985719e87b0	fresh: runner 10 (under 48 h, not reviewed)
 2824	keep	code	fan-code-handoffs	9cb7972829c6	draft-pr carry + heredoc fixes; one import-line conflict in hooks/guard.py; land first
+2826	rebuild	code	carry-pre-existing-needs-main-run	acd041e5e3bc	three steps in one 131-commit carry, 7 files conflict; redo as three PRs from main
+2828	fresh	-	ruling-parts-cite-steps	743c949b7088	fresh: runner 10 (under 48 h, not reviewed)
+2832	fresh	-	lint-config-guard-paths	4463f44c4266	fresh: runner 10 (under 48 h, not reviewed)
 2833	close	code	fan-prose-unmapped-5	a80ddb7f5a91	inside 2913
 2836	close	code	stop-checks-one-message	f0a531b7411a	contained in 2864
+2837	fresh	-	batch-build-stop-group	1fdc86c5af35	fresh: runner 10 (under 48 h, not reviewed)
+2838	fresh	-	blame-on-finished-red-job	555956875967	fresh: runner 10 (under 48 h, not reviewed)
+2839	fresh	-	ci-wait-cap-55	8fb862ce2618	fresh: runner 10 (under 48 h, not reviewed)
+2844	fresh	-	ruling-challenge-passes	f1172142286f	fresh: runner 10 (under 48 h, not reviewed)
 2845	close	code	pr-state-is-on-the-pr	0df3d8f3629c	ancestor of 2869 and 2871 (siblings); close holds only while one of 2869/2871 is keep; else 2845 becomes keep. 2871 adds --lane-lint --integration, which the Nov 10 01:07 ruling rules out: ruling check before merge
+2847	fresh	-	lane-lint-once-fail-fast	bfe0cc7a51f7	fresh: runner 10 (under 48 h, not reviewed)
+2850	fresh	-	owner-override-one-route	50a2c2c9f7b2	fresh: runner 10 (under 48 h, not reviewed)
+2851	keep	code	pass-claim-cites-verdict	682b6200b1cd	needs main merged (4 one-hunk conflicts); guard verdicts change so review owed after rebase
+2852	keep	code	claude-md-section-moves	ff4e0c12752e	merges clean; edits CLAUDE.md so owner rule-file gate applies
+2854	fresh	-	stood-pick-needs-review	4b0ad663e184	fresh: runner 10 (under 48 h, not reviewed)
+2856	fresh	-	handoff-agent-write	4fd8fc80679c	fresh: runner 10 (under 48 h, not reviewed)
+2857	fresh	-	writer-lists-awaiting-threads	8817212faa63	fresh: runner 10 (under 48 h, not reviewed)
+2858	fresh	-	one-term-warn-lint	0bfbaf4eae13	fresh: runner 10 (under 48 h, not reviewed)
+2859	keep	code	review-record-parse-warning	95f1a00d61ba	needs main merged (6 hunks); check verdict change owes review
+2860	fresh	-	red-job-wakes-runner	e5da4fcbc9c1	fresh: runner 10 (under 48 h, not reviewed)
+2863	keep	code	time-limits-end-hangs-only	88ed6f7e7b05	needs main merged (prose conflicts) plus re-point checks.yml comments
 2864	keep	code	stop-checks-one-message	911211b196aa	one-message Stop change + draft-carry; one conflict checks.yml (keep both suite steps); cites owner pick b on R32 part 2 (2026-11-12 13:18 CST)
 2865	keep	code	waiting-export-miss-cloud	435856d12960	cloud writer-label match in export_check; merge before 2907
+2869	fresh	-	pr-ledger-round-ages	dc2595b34563	fresh: runner 10 (under 48 h, not reviewed)
+2870	fresh	-	pick-reaches-page	8607d91f02a5	fresh: runner 10 (under 48 h, not reviewed)
+2871	fresh	-	batch-label-setter	cdbb04d40772	fresh: runner 10 (under 48 h, not reviewed)
+2872	fresh	-	sweep-lock-age	9a688d7cd4c8	fresh: runner 10 (under 48 h, not reviewed)
+2873	fresh	-	merge-subst-paren	4fa768953610	fresh: runner 10 (under 48 h, not reviewed)
 2874	keep	prose	review-rounds-rework	05dafe8f8c4b	new draft docs/decisions/review-rounds-measure.md for owner; merges clean; changes no rule
 2875	close	code	fan-code-workflows	3bc86940a228	ancestor of 2920
+2876	fresh	-	stamp-guard-send-message	aac56e806584	fresh: runner 10 (under 48 h, not reviewed)
+2877	fresh	-	msg-claims-vs-git	cd1b4adeed1f	fresh: runner 10 (under 48 h, not reviewed)
 2879	keep	code	waiting-export-miss-cloud	8be73cc8a633	stale_pages.py --lag; merges clean
+2880	fresh	-	agent-git-reset-refused	c227944472d7	fresh: runner 10 (under 48 h, not reviewed)
+2881	fresh	-	habit-is-not-a-guard	236931bb67f9	fresh: runner 10 (under 48 h, not reviewed)
+2883	fresh	-	debt-retire-red-on-birth	42db1abd32ab	fresh: runner 10 (under 48 h, not reviewed)
 2885	keep	code	md-midline-comment-gap	8a9834c073a2	agent terse-line check (TERSE_LINE); merges clean; owner-picked (decision agent-output-terse-line); 2714 close stands
 2886	close	code	md-midline-comment-gap	9aec08d67c14	superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-decision protocol); if owner wants spawn-time refusal, keep (merges clean; add rule-list entry); 2693 close stands with it
+2887	fresh	-	sim-boot-screen-check	ffe48c64d089	fresh: runner 10 (under 48 h, not reviewed)
+2890	fresh	-	mailbox-all-messages	170cc9e558f3	fresh: runner 10 (under 48 h, not reviewed)
+2892	rebuild	code	carry-pre-existing-needs-main-run	3273c15ff1ef	same carry as 2826 (question-form, silent-undo body, pre-existing check); one lane for both, split in three
+2893	fresh	-	two-drop-leaves-queue	251ede9e6342	fresh: runner 10 (under 48 h, not reviewed)
+2894	fresh	-	both-session-starts-judged	fedc42d4b3d3	fresh: runner 10 (under 48 h, not reviewed)
+2895	fresh	-	repo-typecheck-hook	99d725594ae7	fresh: runner 10 (under 48 h, not reviewed)
 2900	keep	prose	express-pass-owner-quotes	850d8e2b3ed4	decision docs-only-prs-skip-review Express pass owner-quote text (part 1); merges clean; files owner-quote wording so needs reviewer read
+2902	fresh	-	merge-batch-split-and-pipeline	ac55fdeba755	fresh: runner 10 (under 48 h, not reviewed)
+2904	fresh	-	owner-health-tab	f1d8622c725c	fresh: runner 10 (under 48 h, not reviewed)
+2905	fresh	-	records-page-before-ready	e96dda0682fd	fresh: runner 10 (under 48 h, not reviewed)
+2906	fresh	-	answered-sections-by-repo	bd7f9b88f3af	fresh: runner 10 (under 48 h, not reviewed)
 2907	keep	code	waiting-export-miss-cloud	8f9d4a7c7265	check_waiting_copy_backup.py; merge after 2865; cites decision waiting-page-one-store which has no home (dangling)
+2909	fresh	-	batch-freeze-lane-set-enforce	8f4f8ea6c467	fresh: runner 10 (under 48 h, not reviewed)
 2913	keep	code	fan-prose-unmapped-5	8675e90e9efd	report-sha-missing + message-ref-missing guards; merges clean with main (tests not run)
+2914	fresh	-	review-fix-check-round	15b1d5ce5843	fresh: runner 10 (under 48 h, not reviewed)
 2915	close	code	prose-tending-contract	95ce08d6f18b	ancestor of 3003
+2918	fresh	-	ask-alone-push-not-force	8e41c162ea5a	fresh: runner 10 (under 48 h, not reviewed)
+2919	fresh	-	page-usage-counters	ca41e6abe618	fresh: runner 10 (under 48 h, not reviewed)
 2920	keep	code	fan-code-workflows	e81bfdb34179	stacked superset of 2733/2770/2875; rebase: merge/merge.py both constants, lanes-run-no-full-ci-job.md carry main's sentence; owner item 463a ruling for mutation-test exception unverified
 2923	close	code	artifact-guard-matcher-names	1ac8c1e7a45a	commit 1 of 5, superseded by 2927
 2924	close	code	artifact-guard-matcher-names	9b29b68bd974	commits 1-2 of 5, superseded by 2927
 2925	close	code	artifact-guard-matcher-names	df186746935e	commits 1-3 of 5, superseded by 2927
 2926	close	code	artifact-guard-matcher-names	793d26ba0ac4	commits 1-4 of 5, superseded by 2927
 2927	keep	code	artifact-guard-matcher-names	3a5ed02c604a	top of 5-commit stack, 20h, needs rebase (conflicts guard.py, shared_names.py, settings.json); fold in 2549 gaps: Mac call without url, db_str_replace unknown keys; use main COMMENTS_TOOL
+2929	fresh	-	widening-question-not-asked	d0ec648fae93	fresh: runner 10 (under 48 h, not reviewed)
+2930	fresh	-	guard-run-slow-long-command	a2e1b152e9ae	fresh: runner 10 (under 48 h, not reviewed)
+2931	fresh	-	scratchpad-commit-msg-owner	e544e9b317cc	fresh: runner 10 (under 48 h, not reviewed)
 2933	keep	code	convert-time-pinned-tests	8597d3eba7e9	fake clock for sleep; merges clean
+2937	fresh	-	lane-sim-hold-path	05326e10b405	fresh: runner 10 (under 48 h, not reviewed)
 2938	close	code	challenger-page-against	33dca4c3e5bb	inside 2987
+2939	fresh	-	batch-order-by-pr-number	ddb1d8b8b945	fresh: runner 10 (under 48 h, not reviewed)
+2940	keep	code	review-record-fix-check-reads	664aafccd233	needs main merged plus hand-resolve merge.py; overlaps 3072 (fold into one home)
 2941	close	code	guard-false-alarm-cull	f932b3627115	superseded by 3036
+2942	fresh	-	ci-merge-install-split	91e051e4f081	fresh: runner 10 (under 48 h, not reviewed)
+2943	keep	code	coordinator-session-board	98e847bbd507	needs main merged, 3 hunks, union of keys
+2944	fresh	-	brief-reads-owner-rulings	a86c4ea32e9f	fresh: runner 10 (under 48 h, not reviewed)
+2945	fresh	-	install-hash-skips-pycache	950ab7b0df5d	fresh: runner 10 (under 48 h, not reviewed)
+2946	fresh	-	subagent-handback-skipped	fc321cea4017	fresh: runner 10 (under 48 h, not reviewed)
 2948	keep	code	express-pass-owner-quotes	205747a52cac	merge tool part 2 (--quotes-matched, kind_misfits decision check, retires debt ruling-pr-kind-unchecked); 2 trivial conflicts (merge.py review_round_model line, test_merge.py import); also supersedes 2727 (fan-prose-debts close stands)
 2949	keep	code	convert-time-pinned-tests	0a0186050db7	growth ratio; merges clean
+2950	fresh	-	orchestrator-mixed-merge-refused	dad2aa8aa8f8	fresh: runner 10 (under 48 h, not reviewed)
 2952	keep	code	convert-time-pinned-tests	a7e9f634e54e	pinned clocks; merges clean
 2953	keep	code	page-wakes-and-relays	e7c607ed6f1d	R18 item 1 only page writer watches page; merge first
 2955	rebuild	code	page-wakes-and-relays	2f738dabf875	wakes field never added to page.html itemFields; rebuild on top of 2953
+2956	fresh	-	guard-pr-runs-windows-shards	f4caf08ecce3	fresh: runner 10 (under 48 h, not reviewed)
 2958	keep	code	convert-time-pinned-tests	25c05532449c	CPU-time ratio; merges clean
 2959	keep	code	convert-time-pinned-tests	fbe24129ec2f	stamp watchdog; merges clean
+2960	fresh	-	notes-1796-fix-lines	0a180312895e	fresh: runner 10 (under 48 h, not reviewed)
 2962	keep	code	agent-commit-file-scope	8261779a4906	silent-undo note row-edit check (edited_notes); one test-file conflict (keep both classes); check verdict change owes review
+2965	fresh	-	page-feedback-to-template	aeecb81be46f	fresh: runner 10 (under 48 h, not reviewed)
 2967	keep	code	agent-commit-file-scope	5b9a56806c7e	brief-scope rule (agent commit/push refuses file brief does not name); merges clean; guard verdict change owes review
+2968	fresh	-	run-dir-unclosed-tail	88f9b52c2307	fresh: runner 10 (under 48 h, not reviewed)
+2970	fresh	-	ci-batch-mac-runner	92e4c76e22b3	fresh: runner 10 (under 48 h, not reviewed)
+2971	fresh	-	answers-session-write-guard	1d7e54cdf12f	fresh: runner 10 (under 48 h, not reviewed)
+2972	fresh	-	busy-file-stacked-batches	193e8906a5fa	fresh: runner 10 (under 48 h, not reviewed)
+2973	fresh	-	brief-says-owner-unread	ecaa92e6f248	fresh: runner 10 (under 48 h, not reviewed)
 2975	keep	code	convert-time-pinned-tests	264cae524616	time-pinned-ok marker; merges clean
+2976	fresh	-	filing-check-reads-page	3a5ddf4d2e5b	fresh: runner 10 (under 48 h, not reviewed)
+2977	fresh	-	glossary-same-local-cloud	bcd88602fbef	fresh: runner 10 (under 48 h, not reviewed)
+2979	fresh	-	record-before-fix-push	7d9315123134	fresh: runner 10 (under 48 h, not reviewed)
+2980	keep	code	ci-split-checks-family	472da99ece13	needs main merged, 3 checks.yml hunks; Linux split only
+2981	fresh	-	answer-kept-on-close	a91005a70a71	fresh: runner 10 (under 48 h, not reviewed)
+2982	fresh	-	page-narrow-word-breaks	6c01123efbb0	fresh: runner 10 (under 48 h, not reviewed)
+2983	fresh	-	lane-start-checks-open-pr	2ce83361f02e	fresh: runner 10 (under 48 h, not reviewed)
+2984	fresh	-	repo-protected-paths	6492c26e5963	fresh: runner 10 (under 48 h, not reviewed)
 2987	rebuild	code	challenger-page-against	5b8ca9f176ed	v2 "Against the pick" context line; main renamed item field pick->recommended (RECOMMENDED_FIELDS) so guard would never judge; rebuild reading recommended with old pick; re-point SKILL steps/tests; may land guard and page as two PRs
+2989	fresh	-	step-pick-claims-match-page	f7150831953d	fresh: runner 10 (under 48 h, not reviewed)
+2991	fresh	-	gh-get-timeout-retry	80a2e21f1419	fresh: runner 10 (under 48 h, not reviewed)
 2993	keep	prose	merge-flow-after-anthropic	ed87d763f364	files owner rulings for per-lane merge cutover (4 new records + ~16 edits); 2 mechanical conflicts; cites R42 part 2 and R55 missing on main plan; state "target, not live"; files an owner ruling so needs reviewer read
 2996	close	code	prose-tending-contract	9eab18aabb49	ancestor of 3003
 2997	keep	code	item-cite-carries-name	435d838e0f00	bare_item_cite + handoff_cite_hit guard; merges clean; no test for triage "stalled step: item 7" line (unknown)
+3001	fresh	-	records-page-guard-derived-rows	917fa5701b25	fresh: runner 10 (under 48 h, not reviewed)
 3003	keep	code	prose-tending-contract	64111cfe4345	tending runner + feedback-log hooks + move-stores plan; superset of 2915/2996; one-line rebase in ci-scope.sh shoot list; tests not run
+3004	fresh	-	ci-hygiene-once-per-batch	70e0ede78c6e	fresh: runner 10 (under 48 h, not reviewed)
+3005	fresh	-	unknown-reads-lint-linux-only	8b950b6aa13d	fresh: runner 10 (under 48 h, not reviewed)
 3006	rebuild	code	page-wakes-and-relays	cb9376c59885	R18 item 3 vs R60 conflict (chat reply form); blocked on owner/coordinator pick: "on the page, item N" only (R18) or "Page item: <id>" + option lines (R60/main)
+3007	fresh	-	review-record-merge-main-line	eeceb7c9ceef	fresh: runner 10 (under 48 h, not reviewed)
+3008	fresh	-	batch-ci-merge-guard	d82fba8d5bf0	fresh: runner 10 (under 48 h, not reviewed)
+3011	fresh	-	sim-tool-lease-check	32b283e0d512	fresh: runner 10 (under 48 h, not reviewed)
+3012	fresh	-	stall-watch-clock-pins	9e3693ea1fdc	fresh: runner 10 (under 48 h, not reviewed)
+3014	keep	code	merge-path-same-everywhere	f8e7d7e5390d	needs main merged (4 hunks by hand); guard verdict change owes round 3 net-value test
+3015	fresh	-	fetch-head-shared-race	4c26022f90e5	fresh: runner 10 (under 48 h, not reviewed)
+3018	fresh	-	auto-merge-refused	b56ad9a1464a	fresh: runner 10 (under 48 h, not reviewed)
 3019	keep	code	lane-push-frozen-in-batch	7f112970889f	push-batch-held rule; merges clean; has tests s22670
+3020	fresh	-	cloud-hooks-stale-copy	bc0b812ec521	fresh: runner 10 (under 48 h, not reviewed)
 3021	close	code	ci-linux-windows-once	72d112d72b24	subset of 3088
+3023	keep	prose	standing-role-model-rows	9468678779fa	needs main merged (agent-model-cap.md:10); record must say Guard or check yes
+3024	keep	code	guard-paths-agents	c7415fead496	needs main merged (pr-review-record.md:115); step guard-paths-agents-narrow waits on it
+3026	fresh	-	agent-worktree-add-in-tool-dir	369657dc746a	fresh: runner 10 (under 48 h, not reviewed)
 3028	keep	code	guard-false-alarm-cull	601424fea2f1	deletes Recovered/Handoff-gave report-line check; hunks fit main
 3029	keep	code	guard-false-alarm-cull	a516a55fd306	question-form guard cull; one small conflict in question_form.py docstring
 3030	keep	code	guard-false-alarm-cull	6ea9e087568e	builder plain test run via _test_temp.run_folder not refused
@@ -226,10 +325,34 @@ PR	verdict	kind	step	head	reason
 3036	keep	code	guard-false-alarm-cull	9853d78517ee	narration example-id fix; page item 630 (owner pick b it cites) unverified: if it says otherwise keep 2941, close 3036
 3037	keep	code	guard-false-alarm-cull	21ad144f8f7a	frozen-path read-only forms; no overlap with 3030
 3038	keep	code	page-wakes-and-relays	5a074b4104d2	relay-grant-words rule; anchors intact; independent
+3039	fresh	-	notes-fix-reverify-small	1ee95ce1d12e	fresh: runner 10 (under 48 h, not reviewed)
 3040	keep	prose	page-wakes-and-relays	3c957137d942	2 debts + note about 3038; trivial rebase of notes.md; close if 3038 closes
 3042	close	code	ci-linux-windows-once	c877d12e5f6f	subset of 3088
 3043	keep	code	guard-false-alarm-cull	a2f593dfc82e	debt-retire accepts wrong-refusal notes line; merge before 3056
+3047	keep	code	mutate-guard-timeout-crashed	8b74987b3987	needs main merged (one adjacent insert in mutate_guard.py)
+3050	fresh	-	git-apply-test-path-write	36cebe0502fe	fresh: runner 10 (under 48 h, not reviewed)
+3053	fresh	-	ruled-step-coordinator-queue	a04d3d9b2cb4	fresh: runner 10 (under 48 h, not reviewed)
 3056	keep	prose	guard-false-alarm-cull	37675a604e3a	records side of cull; merge after 3043, 3028, 3029; fix item 13 "Until cull-report-guard merges" at batch time; duplicates 3028 note removals
+3057	fresh	-	consultant-role-record	dc541d27682b	fresh: runner 10 (under 48 h, not reviewed)
+3058	fresh	-	child-repo-gap	419ca9c13e49	fresh: runner 10 (under 48 h, not reviewed)
+3059	fresh	-	pointer-checkout-edit	a5e5b7521b36	fresh: runner 10 (under 48 h, not reviewed)
+3061	fresh	-	decision-watch-finds-transcript	e21fcef07f0f	fresh: runner 10 (under 48 h, not reviewed)
+3063	fresh	-	ci-wait-stop-needs-checkin	ebdf7d0976c4	fresh: runner 10 (under 48 h, not reviewed)
+3065	fresh	-	local-page-publish-route	457012fbce6d	fresh: runner 10 (under 48 h, not reviewed)
+3068	fresh	-	claim-vs-main-needs-read	ed3d6c95863a	fresh: runner 10 (under 48 h, not reviewed)
+3071	fresh	-	session-start-pin-skip-log	ef3d56bad18e	fresh: runner 10 (under 48 h, not reviewed)
+3072	keep	code	review-record-lane-lint-newest	ebb50b247e0b	needs main merged (3 files); check verdict change owes review; overlaps 2940
+3073	keep	code	guards-read-origin-main-config	0153df4cb77d	needs main merged; rewrites a decision, part waits on owner ruling D14 (unknown if it exists); re-measure cost pins
+3074	fresh	-	role-model-explore-veto-offer	1875f76e0767	fresh: runner 10 (under 48 h, not reviewed)
+3076	fresh	-	inbox-skip-bash-echo	fb17ed7a820c	fresh: runner 10 (under 48 h, not reviewed)
+3084	fresh	-	consultant-role-placement	d050c33d79eb	fresh: runner 10 (under 48 h, not reviewed)
 3086	keep	prose	ios-apps-test-shapes	4ff5805759a3	Test shapes section in ios-apps SKILL.md; merges clean; merge before or with 3092
 3088	keep	code	ci-linux-windows-once	600ee184e229	R61/R62 + nightly drop; one-hunk rebase checks.yml (Git mailbox wait suite step); lint/test_windows_split.py pins may need re-shape; nightly drop should land before next cron fire (17 3 * * *)
+3090	keep	prose	ios-apps-one-build	5a73d06fba2a	needs main merged (SKILL.md Boot path bullet)
 3092	keep	code	ios-apps-test-shapes	14cfeb60012c	UITestSupport.swift.tmpl helpers + test; merges clean; new test unrun
+3100	fresh	-	session-messages-status-line	5c8239a904b8	fresh: runner 10 (under 48 h, not reviewed)
+3102	fresh	-	fix-branch-merge-main-deny-2	808f69aaf1e1	fresh: runner 10 (under 48 h, not reviewed)
+3108	keep	code	merge-idle-lanes-after-merge	aad93cd46059	needs main merged (skills/roadmap/build.py)
+3109	keep	code	push-needs-review-record	74915b66a5d8	merges clean; same step as 3102, order of the two needs a pick
+3110	keep	code	handoff-late-checkpoint	1276503fcbeb	needs main merged (precompact-handoff.md item 2 reworded; re-apply sentence)
+3111	keep	code	lane-start-settings	2a7bd5e80794	needs main merged (guard.py import line, keep both); guard verdict change owes reviewer read
