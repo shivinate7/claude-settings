@@ -3118,9 +3118,10 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def owner_sessions(root, head, base):
+def lane_sessions(root, head, base):
     """-> (sorted distinct Claude-Session ids on the commits of origin/<base>..head, "") or (None, why) when git cannot read the range.
-    Only a real trailer counts, so a session id quoted in a message body is no owner. A commit with no trailer names no session."""
+    Only a real trailer counts, so a session id quoted in a message body is no lane session. A commit with no trailer names no session.
+    A merge commit with no trailer stays uncounted (a known limit): a lane merges base into itself with an ordinary merge commit, which names no session of its own."""
     c, out = git(root, "log", "--format=%(trailers:key=Claude-Session,valueonly,separator=%x0a)", f"origin/{base}..{head}")
     if c:
         return None, f"git log origin/{base}..{head[:9]} failed: {' '.join(out.split())[:200]}"
@@ -3274,12 +3275,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
             if not is_integration_pr(info):  # an integration PR holds many lanes' commits by design
-                owners, why_owner = owner_sessions(root, head, base)
-                if owners is None:
-                    raise Stop(f"the owner check of {head[:9]} is unknown, not a pass: {why_owner}. Run again. {LANE_LINT_REMEDY}")
-                if len(owners) > 1:
-                    fails.append(f"its commits name {len(owners)} sessions ({', '.join(owners)}), so more than one session worked this PR. "
-                                 f"One PR has one owner: hand the other session's commits to the owner, or open a new PR for them.")
+                sessions, why_sessions = lane_sessions(root, head, base)
+                if sessions is None:  # unknown, but the FAIL blocks already collected stay in the one refusal
+                    unread = f"the session check of {head[:9]} is unknown, not a pass: {why_sessions}."
+                    stop = f"{stop}\n{unread}" if stop else f"{unread} Run again. {LANE_LINT_REMEDY}"
+                elif len(sessions) > 1:
+                    fails.append(f"its commits name {len(sessions)} sessions ({', '.join(sessions)}), so more than one session worked this PR. "
+                                 f"A PR has one session, the lane's session: rebuild the lane as one new PR in one session.")
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none.
             draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
