@@ -26,7 +26,7 @@ Limits on every grant: the machine-load brake is not busy (decision machine-load
 The queue is strict FIFO across devices: only its head is granted, so a later take never passes an earlier one. A free pro
   waits behind a queued duo head.
 Known gap: the device list and the FIFO queue still limit simulators beyond the load brake. sims-load-brake-only settles
-  the direction: a queue per device, then devices made on demand, limited by the load brake only. A follow-up step holds it.
+  the direction: a queue per device, then devices made on demand, limited by the load brake only. step:sims-on-demand holds it.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
 Brake: hooks/guard.py, loaded by path on the first read of a call. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,

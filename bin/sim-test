@@ -12,7 +12,7 @@
 # on load. Known gap: two limits beyond the brake still hold. The lock below serializes sim-test runs on the Mac. The
 # lease grants only the three known devices of SLOT_UDID in bin/sim-lease, in strict FIFO order. sims-load-brake-only
 # settles the direction: a queue and a lock per device, then devices made on demand, limited by the load brake only.
-# A follow-up step holds it. A simctl list that fails exits 1 with no boot.
+# step:sims-on-demand holds it. A simctl list that fails exits 1 with no boot.
 # Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
 # a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
 # and a hold too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is
