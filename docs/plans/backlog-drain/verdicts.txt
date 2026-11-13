@@ -50,7 +50,7 @@ PR	verdict	kind	step	head	reason
 1805	keep	code	resume-msg-role-check	baecdac7739d	message-role-scope receiver-name lookup + verbs; re-home cases to tests/guard; recount rule_audit 61; drop dup matcher test; may owe round-3 net-value test
 1811	keep	code	runner-repos-in-parallel	3b46a73e067a	per-root gh cost tests; rebase (5 doc-text conflicts); drop brief.md lines
 1813	rebuild	code	merge-passes-settings-dir	f6f1ca00c434	per-step CLAUDE_SETTINGS_DIR; drop worktree pin machinery, reuse main's pin_tree; keep ste-lint local; port settings_pins reader if wanted; competing design on main (--pinned); pick with 1938/2001 lane-lint pinning decision; item 714 b (owner 11:53 CST Nov 13): lane lint follows the pinned trees, so proceed
-1826	rebuild	code	notes-fix-guard-2	daa81094bac3	session_start.sh TMPDIR block; product merges clean; thread 4 params through main's hook_launch in hooks/test_session_start.py, drop PREPEND_FAKE
+1826	close	code	notes-fix-guard-2	daa81094bac3	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3179 is open (read on GitHub, head 12027d0df); lane notes-fix-guard-2 commented "Replaced by #3179"; close it, keep the branch; reopen if the replacer is dropped; old reason: session_start.sh TMPDIR block; product merges clean; thread 4 params through main's hook_launch in hooks/test_session_start.py, drop PREPEND
 1829	close	code	same group	f812874cde31	superseded by 1951
 1831	close	code	lane-lint-unshallow	936092ed5402	carried by 1916 rebuild (1916 contains 1831 head via merge commit 86a899f60); closes only because 1916 carries it - main lacks unshallow_for_lint
 1835	close	code	stall-watch-quiet-lint	593a9c5e6745	same change rebuilt in 2800 (keep, fan-prose-small-homes)
@@ -76,7 +76,7 @@ PR	verdict	kind	step	head	reason
 1964	rebuild	code	notes-fix-page	04c7d3ab18c7	keep layout.py set-waiting-page fix + build_parser; redo records-page redirect half on main's strip_redirections
 1971	close	code	pr-backlog-clear	d37a95d84ebb	inside 2123
 1975	close	code	bg-tail-loses-verdict	76daeb155dab	ancestor of 2015
-1987	rebuild	code	notes-fix-guard-2	9f8799a97d2c	ENTRY_WRITES/ENTRY_AMEND amend guard; re-point 178 test lines into tests/guard section file red then green; redo Cost/Measure lines; must retire builders-amend-ff-pull-refused; guard change owes round 3 net-value test; close instead if owner reads "rare and harmless" as final
+1987	close	code	notes-fix-guard-2	9f8799a97d2c	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3179 is open (read on GitHub, head 12027d0df); lane notes-fix-guard-2 commented "Replaced by #3179"; close it, keep the branch; reopen if the replacer is dropped; old reason: ENTRY_WRITES/ENTRY_AMEND amend guard; re-point 178 test lines into tests/guard section file red then green; redo Cost/Measure lines; must re
 1995	close	code	runner-repos-in-parallel	7ae031d80470	superseded by 2071 rebuild
 2001	close	code	lane-lint-guard-suite-install	b1b4d7dd0479	earlier layers on main in other form; new guard-suite-in-lane-lint layer contradicts main (job scope is linted job only; GUARD_SHARD jobs; touched-tests HEAVY); closing loses debts lane-lint-guard-browser-skip + notes: re-file against main design if wanted
 2002	close	prose+code	timing-tests	fd0d55ad11fd	into #3167 (rebuilt P5 ruling), not 2081; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3167 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
@@ -255,12 +255,13 @@ PR	verdict	kind	step	head	reason
 2819	keep	code	merge-flow-after-anthropic	af7c78e18ef3	WAVE (reopened): 22 commits; HELD: must not merge before act 1 (stable branch, sweep fix, ruleset on stable); round 3 PASS | needs-home: docs/plans/r42-part2-design.md (commit 402613631)
 2820	fresh	-	batch-build-log-kept	c730fe6febfd	fresh: runner 10 (under 48 h, not reviewed)
 2821	keep	prose	no-undo-brief-rule-sentence	592bf895f51d	WAVE (reopened): one CLAUDE.md sentence on top of 2812; merge stack in order 2734 2812 2821; owner sees the CLAUDE.md edit at merge | flag: owner-pick attribution unverified
-2822	rebuild	prose	notes-204-ponytail-drop	9b516c2dc47e	WAVE (reopened): carry the ponytail drop (note line plus two settings.json hunks); drop the two notes that cite 2801 files
+2822	close	prose	notes-204-ponytail-drop	9b516c2dc47e	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3198 is open (read on GitHub, head f294d8878); body of #3198 says "Rebuild of #2822"; close it, keep the branch; reopen if the replacer is dropped; old reason: WAVE (reopened): carry the ponytail drop (note line plus two settings.json hunks); drop the two notes that cite 2801 files
 2823	fresh	-	outbox-notes-land	9985719e87b0	fresh: runner 10 (under 48 h, not reviewed)
 2824	keep	code	fan-code-handoffs	9cb7972829c6	draft-pr carry + heredoc fixes; one import-line conflict in hooks/guard.py; land first
 2826	rebuild	code	carry-pre-existing-needs-main-run	acd041e5e3bc	three steps in one 131-commit carry, 7 files conflict; redo as three PRs from main; lane pre-existing-needs-main-run declined (context): fresh lane
 2827	keep	code	open-asks-listed-at-wake	70fa14e8dfeb	WAVE (reopened): 20 commits; 2699 is an ancestor: close 2699 as subset | needs-home: process ruling only in step note
 2828	fresh	-	ruling-parts-cite-steps	743c949b7088	fresh: runner 10 (under 48 h, not reviewed)
+2829	close	prose	page-data-one-store	5de318ce507d	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3212 is open (read on GitHub, head d87df76c3); body of #3212: "Replaces #2829"; #2829 holds open owner question item 730 (runner 10 13:38 CST), so the question moves to #3212 or stays on the page; close it, keep the branch; reopen if the replacer is dropped
 2831	keep	code	tier-boundaries-carry	1d52904ae56a	WAVE (reopened): 11 commits; clean; round 3 PASS net positive
 2832	fresh	-	lint-config-guard-paths	4463f44c4266	fresh: runner 10 (under 48 h, not reviewed)
 2833	close	code	fan-prose-unmapped-5	a80ddb7f5a91	inside 2913
@@ -445,3 +446,4 @@ PR	verdict	kind	step	head	reason
 3110	keep	code	handoff-late-checkpoint	1276503fcbeb	needs main merged (precompact-handoff.md item 2 reworded; re-apply sentence)
 3111	keep	code	lane-start-settings	2a7bd5e80794	needs main merged (guard.py import line, keep both); guard verdict change owes reviewer read
 3167	keep	prose	time-pinned-p5-ruling	3a97b6e430	new: rebuilt P5 ruling (owner words 2026-11-07 13:00 CST paraphrased from #1177); round 2 PASS; lane lint running
+3177	close	code	ci-cancel-on-close	2778bc3d706e	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3216 is open (read on GitHub, head 8a3f89d87); body of #3216: replaces #3177, which is parked (Coordinator ruling 12:34 CST Nov 13); close it, keep the branch; reopen if the replacer is dropped
