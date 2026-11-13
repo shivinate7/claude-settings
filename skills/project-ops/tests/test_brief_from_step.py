@@ -81,6 +81,11 @@ SRC_UNNAMED = "page item 12"
 SRC_PARA = "page item 13"
 SRC_LONG = "page item 14"
 SRC_DASH = "page item 15"
+Q_R9 = "Owner: rule nine holds for every lane."
+Q_R55 = "Owner: rule fifty-five holds for every lane."
+Q_EXACT_ALIAS = "Owner: the exact alias governs the drain."
+Q_ALIAS_CAP = "Owner: the capital alias governs the drain."
+Q_ALIAS_LOW = "Owner: the lowercase alias governs the drain."
 Q_RELAYED = "Owner words relayed by the coordinator: keep the drain small."
 AT_RELAYED = "2026-11-12T17:17:00-06:00"
 RELAYED = "relayed by lane bg-tail-loses-verdict, 11:51 CST Nov 13; not a direct owner quote"
@@ -311,6 +316,46 @@ class RulingLines(BriefCase):
         self.assertIn(Q_ID, out, "the ruling the note names by id is missing")
         self.assertIn(Q_ALIAS, out, "the ruling the note names by alias R66 is missing")
         self.assertNotIn(Q_UNNAMED, out, "a ruling the note does not name is shown")
+
+    def test_capital_ruling_id_in_note_prints_the_lowercase_entry(self):
+        note = "Express under R55; see R9 here. Governed by drain-first-hold."
+        repo = self.make_repo(step=step_doc(note=note), rulings={
+            "drain-first-hold": fixture.entry("drain-first-hold", step="other-step", quote=Q_ID, at=AT_ID,
+                                              source=SRC_ID),
+            "r55": fixture.entry("r55", step="other-step", quote=Q_R55),
+            "r9": fixture.entry("r9", step="other-step", quote=Q_R9),
+        })
+        self.assertEqual(self.store_state(repo), "ok", "control: the store does not read as ok")
+        out = self.build(repo)
+        self.assertIn(Q_ID, out, "control: an exact-case id named in the note does not print its ruling")
+        missing = [quote for quote in (Q_R55, Q_R9) if quote not in out]
+        self.assertEqual(missing, [], "a ruling id written in capitals in a note does not print its lowercase entry")
+
+    def test_alias_written_in_another_case_than_the_stored_alias_matches(self):
+        repo = self.make_repo(step=step_doc(note="Governed by R88, r66 and R77."), rulings={
+            "exact-alias-plan": fixture.entry("exact-alias-plan", step="other-step", aliases=["R88"],
+                                              quote=Q_EXACT_ALIAS),
+            "backlog-drain-plan": fixture.entry("backlog-drain-plan", step="other-step", aliases=["R66"],
+                                                quote=Q_ALIAS_CAP),
+            "lower-alias-plan": fixture.entry("lower-alias-plan", step="other-step", aliases=["r77"],
+                                              quote=Q_ALIAS_LOW),
+        })
+        self.assertEqual(self.store_state(repo), "ok", "control: the store does not read as ok")
+        out = self.build(repo)
+        self.assertIn(Q_EXACT_ALIAS, out, "control: an alias named in the note as stored does not print its ruling")
+        missing = [quote for quote in (Q_ALIAS_CAP, Q_ALIAS_LOW) if quote not in out]
+        self.assertEqual(missing, [], "an alias written in another case than its stored value is not matched")
+
+    def test_id_inside_a_longer_id_or_word_is_not_shown(self):
+        repo = self.make_repo(step=step_doc(note="Governed by R99, r9x and drain-first-hold."), rulings={
+            "drain-first-hold": fixture.entry("drain-first-hold", step="other-step", quote=Q_ID, at=AT_ID,
+                                              source=SRC_ID),
+            "r9": fixture.entry("r9", step="other-step", quote=Q_R9),
+        })
+        self.assertEqual(self.store_state(repo), "ok", "control: the store does not read as ok")
+        out = self.build(repo)
+        self.assertIn(Q_ID, out, "control: an exact-case id named in the note does not print its ruling")
+        self.assertNotIn(Q_R9, out, "the ruling r9 prints for a note that names only R99 and r9x, longer ids or words")
 
     def test_clean_pass_every_quote_is_a_verbatim_substring(self):
         repo = self.make_repo(step=step_doc(), rulings={
