@@ -567,7 +567,7 @@ while True:
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
-            rm_delete_hit,
+            rm_delete_hit, SUBST_OPEN, _in_group,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -586,8 +586,8 @@ while True:
         )
         _loading = "guard_env"
         from guard_env import (
-            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-            substitution_commands,
+            ENV_ADVICE, ENV_RUNNER_VALUE_FLAGS, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal,
+            is_env, substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -601,7 +601,7 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
             background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
@@ -2040,8 +2040,18 @@ WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
 WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
 # Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
 WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+# pytest's own value flags (`pytest -k expr F`, `-m mark`, `-c cfg`, `-p plugin`), read only when the runner is
+# pytest: `bash -k F` and `bash -p F` take no value, so F is their script.
+WORKFLOW_PYTEST_VALUE_FLAGS = {"-k", "-m", "-p", "-c", "--rootdir", "--deselect", "--ignore", "--ignore-glob",
+                               "--confcutdir", "--basetemp", "--junitxml", "--maxfail", "--durations", "--tb",
+                               "--import-mode", "--cache-dir"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
+# Not so for pytest, whose `-m` and `-c` take a value (`python -m pytest -m mark F`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
+# The word a runner takes before its script (`uv run F`, `npx tsx F`), and the module `python -m` hands its
+# arguments to as scripts (`python -m pytest F`). Read only for a caller that names the runner.
+WORKFLOW_RUNNER_VERBS = {"uv": ("run",), "bun": ("run",), "deno": ("run",), "npx": ("tsx", "ts-node")}
+WORKFLOW_RUNNER_MODULES = ("pytest",)
 WORKFLOW_DISABLE_STEP = re.compile(
     r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
 
@@ -2059,17 +2069,31 @@ def workflow_path(token: str) -> str:
     return token
 
 
-def workflow_script_index(args):
+def workflow_script_index(args, runner=None):
     """The index in `args` (the tokens after an interpreter) of the script it runs: the first token past the
-    interpreter's flags and their values, or None when a `-c` or `-m` runs a command or module instead."""
+    interpreter's flags and their values, or None when a `-c` or `-m` runs a command or module instead.
+    `runner`, the command word, also reads the words that stand between a runner and its script:
+    `uv run`, `bun run`, `deno run`, `npx tsx` (WORKFLOW_RUNNER_VERBS) and `python -m pytest`
+    (WORKFLOW_RUNNER_MODULES). A caller that passes none reads the interpreters alone."""
+    verbs = WORKFLOW_RUNNER_VERBS.get(runner, ()) if runner else ()
+    pytest = runner in ("pytest", "py.test")
     index = 0
-    while index < len(args) and args[index].startswith("-"):
-        if args[index] == "--":
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
             index += 1
             break
-        if args[index] in WORKFLOW_NO_PATH_FLAGS:
-            return None
-        index += 2 if args[index] in WORKFLOW_VALUE_FLAGS else 1
+        if arg in verbs:
+            index += 1
+        elif runner and arg == "-m" and args[index + 1:index + 2] and args[index + 1] in WORKFLOW_RUNNER_MODULES:
+            index += 2
+            pytest = True
+        elif arg.startswith("-"):
+            if arg in WORKFLOW_NO_PATH_FLAGS and not pytest:
+                return None
+            index += 2 if arg in WORKFLOW_VALUE_FLAGS or (pytest and arg in WORKFLOW_PYTEST_VALUE_FLAGS) else 1
+        else:
+            break
     return index if index < len(args) else None
 
 
@@ -6018,6 +6042,7 @@ SCRATCHPAD_OVERWRITE_REASON = (
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
+SCRATCHPAD_NESTING = 3        # `bash -c` inside `bash -c`, at most this deep
 
 
 def scratchpad_agent(payload) -> str:
@@ -6026,14 +6051,58 @@ def scratchpad_agent(payload) -> str:
     return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
 
 
+REDIRECT_WORD = re.compile(r"(?:\d*[<>]+&?|&>>?)")
+
+
+def scratchpad_copies(command: str, cwd: str):
+    """[(verb, source, destination)] for each `cp` and `mv` of the shell text, as absolute paths: the
+    destination of each source (a folder destination takes the source's name), with `-t DIR` read too. A flag
+    is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss."""
+    found, ends = [], []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        where = dir_before_segment(segments, number, cwd, ends)
+        for word, args in scratchpad_command_words(tokens):
+            verb = basename(word)
+            if verb not in ("cp", "mv"):
+                continue
+            plain, target, take, skip = [], "", False, False
+            for arg in args:
+                if skip:
+                    skip = False
+                elif take:
+                    target, take = arg, False
+                elif arg in ("-t", "--target-directory"):
+                    take = True
+                elif arg.startswith("--target-directory="):
+                    target = arg.split("=", 1)[1]
+                elif REDIRECT_WORD.match(arg):
+                    skip = bool(REDIRECT_WORD.fullmatch(arg))   # `2> f` names its file in the next word
+                elif not arg.startswith("-") or arg == "-":
+                    plain.append(arg)
+            dest, sources = (target, plain) if target else ((plain[-1], plain[:-1]) if len(plain) > 1 else ("", []))
+            full = shell_abs(dest, where) if dest else ""
+            for source in sources:
+                source_full = shell_abs(source, where)
+                if not full or not source_full:
+                    continue
+                folder = dest.endswith(("/", os.sep)) or os.path.isdir(full)
+                found.append((verb, source_full, os.path.join(full, os.path.basename(source.rstrip("/\\"))) if folder else full))
+    return found
+
+
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
-    """(agent, session, the scratchpad files this call writes, those of them a remover verb names): the Write
-    family's targets and the shell write targets `_shell_write_hit` reads. `agent` is '' for a call with no
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names, the `mv`
+    destinations with the source each one moves): the Write family's targets and the shell write targets
+    `_shell_write_hit` reads, and the destination of each `cp` and `mv`. `agent` is '' for a call with no
     `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
-    files, removed = [], set()
+    files, removed, moved = [], set(), {}
     if not session:
-        return agent, session, files, removed
+        return agent, session, files, removed, moved
     try:
         if tool in WRITE_TOOLS:
             for target in write_targets(tool_input):
@@ -6043,10 +6112,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
         elif tool in SHELL_TOOLS:
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
-                return agent, session, files, removed
+                return agent, session, files, removed, moved
             command, found = strip_heredoc_bodies(command), {}
 
-            def in_scratchpad(word, at, verb):
+            def in_scratchpad(word, at, verb=None):
+                if verb is None:   # `_copy_reads` asks with two arguments, about the `cp` target: no, so the sources are only read; `scratchpad_copies` judges the destination
+                    return False
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
                     found[word] = (full, verb in SCRATCHPAD_REMOVERS)
@@ -6060,21 +6131,50 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                 files.append(found[hit][0])
                 if found[hit][1]:
                     removed.add(found[hit][0])
+            # A `cp` or `mv` destination is a file this call writes. An `mv` is judged as a removal above, and its
+            # destination is recorded too: it carries the record of its source.
+            for verb, source, dest in scratchpad_copies(_resolve_vars(command), cwd):
+                if SCRATCHPAD_WORD in dest and under_session_scratchpad(dest, session):
+                    if dest not in files:
+                        files.append(dest)
+                    removed.discard(dest)   # written here, though a later `mv` names it as its source
+                    if verb == "mv":
+                        moved[dest] = source
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
-    return agent, session, files, removed
+    return agent, session, files, removed, moved
 
 
 def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
-    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
-    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
-    agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
+    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an
+    `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
+    the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
+    rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
+    other rules passed."""
+    agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
+    after = {}   # the writer each recorded file gets, read before any record changes
+
+    def writer_after(full, seen=()):
+        # A source this same call writes (`cat > x.tmp <<EOF && mv x.tmp x.py`) has no record yet: the call's own
+        # writer carries over, or the one its own source gets (`cp a b && mv b c`).
+        if full in moved and under_session_scratchpad(moved[full], session):
+            source = moved[full]
+            if source not in files or source in removed:   # a removed source is only moved: its record stays
+                return scratchpad_writer_of(source, session)
+            return agent if source in seen else writer_after(source, seen + (full,))
+        return agent
+
+    for full in files:
+        after[full] = writer_after(full)
     if not agent:
         for full in files:
-            scratchpad_clear_writer(full, session)
+            if full in moved and under_session_scratchpad(moved[full], session):
+                scratchpad_record_writer(full, session, after[full])
+            else:
+                scratchpad_clear_writer(full, session)
         return
     taken = ""
     for full in files:
@@ -6085,7 +6185,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     def record_writers():
         for full in files:
             if full not in removed:
-                scratchpad_record_writer(full, session, agent)
+                scratchpad_record_writer(full, session, after[full])
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
@@ -6093,36 +6193,221 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     record_writers()
 
 
+def scratchpad_command_words(tokens):
+    """(command word, the words after it up to the group's close) at each command of one segment: its own, and
+    the one in each `(` or `$(` or backtick group, glued or spaced, with or without an assignment before it
+    (`out=$(python3 F)`, `(python3 F)`, `echo $(python3 F)`). The word may keep a glued `(` or `$(`; `basename`
+    cuts it."""
+    quoted = getattr(tokens, "quoted", ())
+    views = [(tokens, False)]
+    after_assignment = set()   # `x=$(cmd`: resolve_command skips the assignment and names the next word
+    for at, token in enumerate(tokens):
+        opened = SUBST_OPEN.match(token) if at not in quoted else None
+        if opened:
+            tick = opened.group(1) == "`"
+            inside = [token[opened.end():]]
+            views.append((inside + tokens[at + 1:], tick))
+            # The next word is the assignment's own value only while the group stays open; a group that closes
+            # in this token (`A=$(date)`) hands the next word to the shell as the command.
+            if opened.start(1) > 0 and _in_group(inside, tick) == inside:
+                after_assignment.add(at + 1)
+    for number, (view, tick) in enumerate(views):
+        for start in command_indexes(view):
+            if number or start not in after_assignment:
+                yield view[start], _in_group(view[start + 1:], tick)
+
+
+def scratchpad_stdin(args):
+    """(args without any `<` redirect, the file a `<` redirect names, else ''). A heredoc, a here-string and a
+    process substitution (`<<`, `<<<`, `<(`) name no file."""
+    kept, stdin, take = [], "", False
+    for arg in args:
+        if take:
+            stdin, take = arg, False
+        elif arg == "<":
+            take = True
+        elif arg.startswith("<") and not arg.startswith(("<<", "<(")):
+            stdin = arg[1:]
+        else:
+            kept.append(arg)
+    return kept, stdin
+
+
+# The words the scratchpad-owner check reads as running a file. A second set, not `_RUNNER`: `_runs_written_file`
+# reads `_RUNNER` as "this word runs a file argument", so a word added there makes a heredoc written to a file
+# count as run when a command names that file. This check asks only whether a recorded scratchpad file is
+# reached, so it adds the runners and wrappers that reach one (a verb, flags and values of their own).
+SCRATCHPAD_RUNNER = re.compile(
+    r"(?:" + _RUNNER.__self__.pattern + r"|uv|npx|tsx|ts-node|bun|pytest|stdbuf|ionice|setsid|py)"
+    r"(?:\.exe|\.cmd)?").fullmatch
+# Runners that take test or script files anywhere in their arguments (`pytest -n 2 F`, `uv run --with x F`):
+# a flag's value cannot be told from a file, so every argument after the verb is judged.
+SCRATCHPAD_FILES_ANYWHERE = ("pytest", "py.test")
+# The flags of a verb runner, after its verb, that take the next word as their value (`uv run --with x F`), so
+# `scratchpad_verb_run` skips that word. A flag missing here is read as taking no value. Each entry costs a miss
+# when wrong: a listed flag that takes none skips the script, and a missing one that takes one makes its value the
+# judged word.
+#   uv: guard_stream's table, which matches `uv run --help` (uv 0.11.32) entry for entry.
+#   bun: `bun run --help` (bun 1.4.4), each `--flag=<val>` probed as `bun run FLAG a.js`; the ones that still ran
+#     a.js (`--inspect`, `-c`, `--config`) take a value only after `=`. `--inspect-wait` and `--inspect-brk` wait
+#     for a debugger, so the probe could not tell; they are left out, as `--inspect` is.
+#   deno: deno is not installed here, so the list is short: the `deno run` flags that need a value in deno 2.
+#     A flag with an optional value (`--env-file`, `-r`, `--allow-read`, `--watch`, `--inspect`) takes it only
+#     after `=`, so it is left out.
+#   npx: `tsx` and `ts-node` take node's flags (guard_env's runner table) and add their own. Inline code
+#     (`-e`, `-p`) is left out: unlisted, the code is the judged word, which is no scratchpad file.
+SCRATCHPAD_VERB_VALUE_FLAGS = {
+    "uv": UV_VALUE_FLAGS,
+    "bun": frozenset((
+        "--elide-lines", "-F", "--filter", "--shell", "--watch-kill-signal", "-r", "--preload", "--require",
+        "--import", "--cpu-prof-name", "--cpu-prof-dir", "--cpu-prof-interval", "--heap-prof-name",
+        "--heap-prof-dir", "--heap-prof-interval", "--install", "--port", "--conditions", "--fetch-preconnect",
+        "--max-http-header-size", "--dns-result-order", "--redirect-warnings", "--disable-warning", "--title",
+        "--unhandled-rejections", "--console-depth", "--user-agent", "--cron-title", "--cron-period",
+        "--main-fields", "--extension-order", "--tsconfig-override", "-d", "--define", "--drop", "--feature",
+        "-l", "--loader", "--jsx-factory", "--jsx-fragment", "--jsx-import-source", "--jsx-runtime",
+        "--env-file", "--cwd",
+    )),
+    "deno": frozenset(("-c", "--config", "--import-map", "--cert", "--location", "--seed", "-L", "--log-level",
+                       "--ext")),
+    "npx": frozenset(ENV_RUNNER_VALUE_FLAGS + ("--title", "--tsconfig", "-P", "--project", "-O",
+                                               "--compiler-options", "--compiler", "-I", "--ignore", "--cwd",
+                                               "--scope-dir")),
+}
+
+
+def scratchpad_files_start(name, args):
+    """The index in `args` from which a plain argument may be a file the runner runs, else None: from the
+    start for pytest, past the verb for `uv run`, `bun run`, `deno run` and `npx tsx`, past the module for
+    `python -m pytest`. The caller judges every plain argument after it, except for a verb runner, where only
+    the first one is the run (`scratchpad_script`)."""
+    if name in SCRATCHPAD_FILES_ANYWHERE:
+        return 0
+    for at, arg in enumerate(args):
+        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):
+            return at + 1
+        if arg == "-m" and args[at + 1:at + 2] and args[at + 1] in WORKFLOW_RUNNER_MODULES:
+            return at + 2
+    return None
+
+
+def scratchpad_verb_run(name, args):
+    """The index in `args` (the words after the verb of runner `name`) of the script word, the one file the
+    runner runs, else None. A flag in the verb's table (`SCRATCHPAD_VERB_VALUE_FLAGS`) skips itself and its value
+    (`uv run --with x F`, `uv run --env-file D python F`); every other flag skips only itself: a `--flag=value`, a
+    glued `-p3.12`, a flag that takes none (`uv run -q F`, `deno run -A F`) and an unknown flag
+    (`uv run --unknown-flag F` judges F). `--` ends the flags. The first plain word is the script word, and every
+    word after it is an argument of the command that runs (`uv run -q mine.py D`, `uv run ruff check F`), so it
+    is not judged. An unknown flag that takes a value, or a short cluster that ends in one (`-qp 3.12`), makes
+    its value the script word: the real script is a miss."""
+    takes = SCRATCHPAD_VERB_VALUE_FLAGS.get(name, frozenset())
+    at = 0
+    while at < len(args):
+        arg = args[at]
+        if arg == "--":
+            at += 1
+            break
+        if not arg.startswith("-"):
+            break
+        at += 2 if arg in takes else 1
+    return at if at < len(args) else None
+
+
+def scratchpad_script(word, args):
+    """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
+    script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
+    plain argument (past the flags and words `workflow_script_index` reads), or the file as the command word.
+    A runner that takes files anywhere in its arguments (`scratchpad_files_start`) names each plain argument
+    it has; a verb runner (`uv run`, `npx tsx`) names its script word (`scratchpad_verb_run`), the rest being
+    arguments of the command it runs. A script word that is a runner (`uv run python F`) is read again for that
+    command."""
+    name = basename(word)
+    if not SCRATCHPAD_RUNNER(name):
+        word = re.sub(r"^(?:\$?\()+", "", word).rstrip(")`")   # a glued group mark is no part of the path
+        return ([word] if "/" in word else []), "", False
+    args, stdin = scratchpad_stdin(args)
+    start = scratchpad_files_start(name, args)
+    if start is not None:
+        if name not in WORKFLOW_RUNNER_VERBS:
+            return [arg for arg in args[start:] if not arg.startswith("-")], "", False
+        at = scratchpad_verb_run(name, args[start:])
+        if at is None:
+            return [], "", False
+        at += start
+        # A wrapper as the script word hands on its command (`uv run timeout 60 python3 F`, `uv run env X=1 ...`).
+        at += resolve_command(args[at:]) or 0
+        files = [args[at]]
+        if SCRATCHPAD_RUNNER(basename(args[at])):
+            inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
+            files += inner[0] + ([inner[1]] if inner[1] else [])
+        return files, "", False
+    at = workflow_script_index(args, name)   # past the interpreter's flags and their values
+    # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
+    script = args[at] if at is not None and "-" not in args[:at] else ""
+    if script and SCRATCHPAD_RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
+        return scratchpad_script(script, args[at + 1:])
+    reads = not script and not any(flag in args for flag in WORKFLOW_NO_PATH_FLAGS)
+    return ([script] if script else []), (stdin if reads else ""), reads
+
+
+def scratchpad_piped_files(segments, ends, number, cwd):
+    """The files the stages of the pipeline ahead of segment `number` name: their words past the command word
+    and past the flags, a `<` redirect's file too (`cat F | python3`, `tr a b < F | python3`)."""
+    found, at = [], number - 1
+    while at >= 0 and ends[at] == "|":
+        tokens = segment_tokens(segments[at])
+        index = resolve_command(tokens) if tokens else None
+        if index is not None:
+            base = dir_before_segment(segments, at, cwd, ends)
+            for word in tokens[index + 1:]:
+                word = word[1:] if word.startswith("<") and not word.startswith(("<<", "<(")) else word
+                if word and not word.startswith(("-", "<", ">")):
+                    found.append(shell_abs(word, base))
+        at -= 1
+    return found
+
+
+def scratchpad_run_files(text: str, cwd: str, depth: int = 0):
+    """The absolute path of each file a shell text runs, command by command: every command of each segment
+    (`scratchpad_command_words`), the text a shell, `eval`, `ssh` or a wrapper hands on (`inner_commands`:
+    `bash -c`, `stdbuf`), a `<` redirect that feeds an interpreter and a pipe that does. A `cd` ahead of the
+    run names the folder a relative path is read from (`dir_before_segment`)."""
+    ends = []
+    segments = split_segments(text, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        where = dir_before_segment(segments, number, cwd, ends)
+        for word, args in scratchpad_command_words(tokens):
+            scripts, stdin, reads = scratchpad_script(word, args)
+            named = [shell_abs(file, where) for file in (scripts or ([stdin] if stdin else []))]
+            if reads and not stdin and number and ends[number - 1] == "|":
+                named = scratchpad_piped_files(segments, ends, number, cwd)
+            yield from (full for full in named if full)
+        if depth < SCRATCHPAD_NESTING:
+            for inner in inner_commands(tokens):
+                yield from scratchpad_run_files(inner, where or cwd, depth + 1)
+            # A substitution in double quotes runs too (`out="$(python3 F)"`), but shlex keeps it as one token,
+            # so `scratchpad_command_words` cannot read its command. `_substitutions` cuts each one out. A segment
+            # with no substitution in double quotes is left to `scratchpad_command_words` alone.
+            if '"' in segment and any(quote == '"' and (char == "`" or segment.startswith("$(", at))
+                                      for at, char, quote in walk_quotes(segment)):
+                for inner, _in_message in _substitutions(segment)[0][:-1]:
+                    yield from scratchpad_run_files(inner, where or cwd, depth + 1)
+
+
 def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule scratchpad-owner: the log detail when an agent's shell call runs a scratchpad file that another
-    agent of the session wrote, else ''. A run is an interpreter or runner word (`_RUNNER`) with the file as
-    its first plain argument, or the file as the command word. A `cd` ahead of the run names the folder a
-    relative path is read from (`dir_before_segment`). Quoted text, comments and heredoc bodies hold no
-    run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
-    as `_shell_write_hit` reads them (`_resolve_vars`)."""
+    agent of the session wrote, else ''. Quoted text, comments and heredoc bodies hold no run: the text is the
+    heredoc-stripped command with its variables read as `_shell_write_hit` reads them (`_resolve_vars`), and
+    `scratchpad_run_files` lists the runs in it."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
     command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
     if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
         return ""
-    ends = []
-    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)
-    for number, segment in enumerate(segments):
-        tokens = segment_tokens(segment)
-        index = resolve_command(tokens) if tokens else None
-        if index is None:
-            continue
-        word = tokens[index]
-        if _RUNNER(basename(word)):
-            args = list(tokens[index + 1:])
-            at = workflow_script_index(args)   # past the interpreter's flags and their values
-            # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
-            script = args[at] if at is not None and "-" not in args[:at] else ""
-        else:
-            script = word if "/" in word else ""
-        if not script:
-            continue
-        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))
-        if not full or SCRATCHPAD_WORD not in full or not under_session_scratchpad(full, session):
+    for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):
+        if SCRATCHPAD_WORD not in full or not under_session_scratchpad(full, session):
             continue
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent:
