@@ -2,9 +2,10 @@
 FAMILY = "push-delete"
 
 # Rule archive-push-gates-delete. A delete of a remote branch that follows an archive push of that branch runs
-# only when `&&` joins them, so the push's own exit status gates it. A `;`, a newline, `||`, or a pipe on the push
-# hides or breaks that status, so each is refused. An archive push from `HEAD` or `@` pairs `<name>` and `<name>`
-# without a `-N` suffix, for `archive/<name>`. An archive push from an explicit branch (`feat-2`, `origin/feat`)
+# only when `&&` joins them, so the push's own exit status gates it. A `;`, a bare newline, `||`, or a pipe on the push
+# hides or breaks that status, so each is refused. A line break after `&&` is still that join: the shell reads
+# the next line as the rest of the chain, and a backslash-newline is one too. An archive push from `HEAD` or `@`
+# pairs `<name>` and `<name>` without a `-N` suffix, for `archive/<name>`. An archive push from an explicit branch (`feat-2`, `origin/feat`)
 # pairs only that branch, minus `origin/`. `${b}` and `$b` are one name. An empty archive name pairs nothing and
 # must not crash the guard: a crash fails open for the whole command, so a gate after it never runs.
 ARCHIVE_GATE_RULE = "archive-push-gates-delete"
@@ -75,6 +76,21 @@ archive_gate_allowed("a delete with no archive push before it is allowed",
                      ARCHIVE_GATE_DELETE)
 archive_gate_allowed("a plain push, then --delete joined by ; is allowed: no archive push, so no gate",
                      VCS + " push origin HEAD:lane/x; " + ARCHIVE_GATE_DELETE)
+
+# A line break after `&&` joins the chain as `&&` does: the shell runs the next line as the rest of the chain, so
+# the push's status still gates the delete. Each allow is its known-green twin above with the break for the space.
+# A backslash-newline is one command to the shell, so it is a control. A bare newline, or a `;` before the break,
+# has no `&&` in front of it, so it is refused.
+archive_gate_allowed("archive push, && at the line end, then --delete on the next line is allowed",
+                     ARCHIVE_GATE_PUSH + " &&\n" + ARCHIVE_GATE_DELETE)
+archive_gate_allowed("archive push to archive/feat with 2>&1 and && at the line end, then --delete on the next line is allowed",
+                     VCS + " push origin HEAD:archive/feat 2>&1 &&\n" + ARCHIVE_GATE_DELETE)
+archive_gate_allowed("archive push, && and a backslash-newline, then --delete on the next line is allowed",
+                     ARCHIVE_GATE_PUSH + " && \\\n" + ARCHIVE_GATE_DELETE)
+archive_gate_refused("archive push, then a bare newline, then --delete is refused: no && joins them",
+                     ARCHIVE_GATE_PUSH + "\n" + ARCHIVE_GATE_DELETE)
+archive_gate_refused("archive push, ; at the line end, then --delete on the next line is refused",
+                     ARCHIVE_GATE_PUSH + " ;\n" + ARCHIVE_GATE_DELETE)
 
 # Explicit source, and an empty archive name. An explicit source is the branch pushed, so the taken name
 # `archive/feat-2` pairs only `feat-2`, and `feat` is free. An empty name (`HEAD:archive/`) pairs nothing. A crash
