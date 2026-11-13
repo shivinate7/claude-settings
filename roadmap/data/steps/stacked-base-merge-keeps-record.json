@@ -1,0 +1,14 @@
+{
+ "id": "stacked-base-merge-keeps-record",
+ "title": "A merge of a stacked base keeps the review record live",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane ruling-challenge-passes (#3143, stacked on ruling-challenge-passes-5; coordinator 10:43 CST Nov 13): merge --lane-lint demands that the base branch's current head be merged in (step lane-lint-stack-holds-base), but live_review_state keeps a record only across clean merges of main. A merge of the stacked base makes the record stale, so a stacked PR cannot satisfy both checks. #2999 failed the same way.",
+ "source": "coordinator 10:43 CST Nov 13",
+ "note": "Interim: wait for the base to merge, then retarget to main. Fix: live_review_state treats a clean merge of the PR's own base branch head like a clean merge of main. Done when: a test stacks a reviewed PR, merges the base head into it cleanly, and the record still reads live; a merge with a conflict hunk still reads stale.",
+ "updatedAt": "2026-11-13T10:45:03-06:00"
+}
