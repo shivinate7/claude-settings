@@ -30,7 +30,7 @@ merge while another ready PR ran CI, stricter than the batch-CI rule that was th
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-143 rows: exact 88, looser 11, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+127 rows: exact 75, looser 11, stricter 9, uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -145,10 +145,8 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:lock-acquire-unreadable` | none | - | uncited | exact | the lock ref, commit or base cannot be read or made (461, 480, 553-584) | rule rewrite: merge-lock decision |
 | `merge:lock-extend-failed` | none | - | uncited | exact | the lock expired, passed its max hold, or its push failed (423-433, 495, 499, 595-602) | rule rewrite: merge-lock decision |
 | `merge:unlock-failed` | none | - | uncited | exact | `merge --unlock` cannot expire the ref (530, 619, 621) | rule rewrite: merge-lock decision |
-| `merge:host-read-failed` | no-merge-during-batch-ci | "A failed read refuses. Unknown is red" | exact | exact | a page, PR, protection or run read fails (670, 703, 766, 918) | - |
 | `merge:gh-network-failed` | none | - | uncited | exact | a network error outlasts the retries (645); no claim revert | - |
 | `merge:pr-unnamed-or-ambiguous` | none | - | uncited | exact | no PR named and the branch unreadable (692), or 0 or 2+ open PRs on one head (696) | - |
-| `merge:required-none-named` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection (776) or an empty list (782) | - |
 | `merge:ignore-clash` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | merge.ignoreChecks names a required check (780) | - |
 | `merge:pinned-mismatch` | main-branch-protection (nearest) | "so the merge tool reads the name from the protection." | uncited | exact | a pinned check list differs from a non-empty protection list (800) | rule rewrite: add "the pin equals the protection" to main-branch-protection |
 | `merge:base-red-or-unknown` | no-merge-onto-red-main | "Unknown refuses, as the silent-undo check does." | exact | exact | the newest base run is red, or cancelled with no red job (947-980) | - |
@@ -173,7 +171,7 @@ Notes: the merge lock has no decision record: 5 lock rows uncited. BEHIND needs 
 
 | Refusal | Rule it cites | Rule sentence | Verdict | Gold | Showing case | Proposed fix |
 |---|---|---|---|---|---|---|
-| `merge-checks` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | `gh pr merge 5` on a red or pending head is denied | rule rewrite: add the decision slug no-merge-during-batch-ci to the guard index line |
+| `merge-checks` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | `gh pr merge 5` on a red or pending head is denied | - |
 | `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
 | `trust-card-in-build` | session-tiers | "allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag" | exact | exact | a cs-build session opens the trust card: denied | - |
 | `merge:dropped-lane-unread` | silent-undo-check-design | "`merge.py` refuses on unknown, because its merge cannot be taken back." | exact | exact | git log fails; --undo-check-unknown-ok lifts it (1761) | - |
@@ -193,7 +191,6 @@ Notes: the merge lock has no decision record: 5 lock rows uncited. BEHIND needs 
 | `merge:base-changed-under-lock` | none | - | uncited | exact | the PR is retargeted during the lock wait (2217) | - |
 | `merge:claim-off-default-base` | one-shared-record-stamp (nearest) | "The claim runs before the merge, on the pull request branch" | uncited | exact | a claimed head on a base that is not the default (2239) | rule rewrite: one line in one-shared-record-stamp |
 | `merge:confirm-head-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | the head checks are red before the claim (2258) | - |
-| `merge:confirm-required-names` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection and no pin (2210, 2220) | - |
 | `merge:records-stale` | records-index-at-merge | "A stale page ... gets the rebuild commit" | exact | exact | the base gained a record outside the tool (2317, 2321) | - |
 | `merge:heal-push-failed` | records-index-at-merge | "When only the page conflicts with the base, the tool rebuilds it on the merged tree." | exact | exact | the heal commit push fails; the claim reverts (2334) | - |
 | `merge:host-refused` | none | - | uncited | exact | the merge call is refused, for example the head moved; the claim reverts (2366) | - |

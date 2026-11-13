@@ -748,8 +748,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   control at Anthropic" (Oct 13, updated Oct 15) says "A proper merge queue, for example, doesn't make
   much sense at agent scale". It tests after merge and before deploy, with automated bisect and revert.
   Its Claude Code team scales human approval by the change's risk and tracks reverts as the guard; a
-  webinar on it runs Nov 18. Our batch flow holds a lock on main during each batch run (rule
-  git-no-merge-during-batch-ci), and the baseline counts 147 lane drops in 15 batch merges.
+  webinar on it runs Nov 18. Our batch flow held a lock on main during each batch run (rule
+  git-no-merge-during-batch-ci, retired by the per-lane cutover; its replacement is git-red-main-reverts), and the baseline counts 147 lane drops in 15 batch merges.
   1. A step that holds an owner ruling and has no lane is the coordinator's queue. It starts the step
      under rule parallelism-keep-going, not as a report line. Triage's reply names the step, and the
      sender's log item points to it, so the feedback guard proves it exists.
