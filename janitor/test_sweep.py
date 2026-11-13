@@ -4895,9 +4895,10 @@ class _AgentEndFixture(unittest.TestCase):
         commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
         require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
 
-    def sleeper(self, cwd):
-        """A plain sleeping process with its cwd in CWD, started by this test process (the host)."""
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
+    def sleeper(self, cwd, env=None):
+        """A plain sleeping process with its cwd in CWD, started by this test process (the host). ENV, when
+        given, is its whole environment (an agent marker rides in it); None inherits this process's."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, proc)
@@ -5599,6 +5600,171 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
             self.assertTrue(_gone(orphan), "the marked orphan is still running; %s" % self.reason_for(tree))
         with self.subTest(arm="the finished tree is removed"):
             self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+
+MARKER_NAMES = ("CLAUDE_AGENT_ID", "CLAUDE_CODE_SESSION_ID")
+PROCS_DIR_NAME = "CLAUDE_AGENT_PROCS_DIR"
+
+
+class AgentOwnedProcessTests(_AgentEndFixture):
+    """The per-agent process record (step agent-owned-processes, ruling own-agent-owned-processes). At
+    SubagentStop, janitor/agent_end_reap.py writes the ending agent's record under CLAUDE_AGENT_PROCS_DIR
+    and ends only the marked processes that agent started. The record is `<dir>/<agent_id>.json`:
+    {"agent": <id>, "procs": [{"pid", "start", "owner", "kind"}]}. `start` is the process's start ticks
+    (field 22 of /proc/<pid>/stat, the unit a live lock's `start S` uses). A kind of "unclear" reports a
+    process whose record start no longer matches it (pid reuse): reported, never ended.
+
+    The hook runs with a payload cwd that is no git checkout: the marker scan needs no worktree. The stop
+    list is checked through sweep.host_child_stops, the one home of the stop list. Linux only: the marker
+    and the start ticks are read from /proc.
+    """
+
+    AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id the marker carries
+    OTHER = "b71f3d0c2a9e56847"
+
+    def setUp(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("the marker and the start ticks are read from /proc, which only Linux has")
+        super().setUp()
+        self.procs_dir = os.path.join(self.root, "agent-procs")
+        self.scratch = os.path.join(self.root, "scratch")  # outside every agent worktree
+        os.makedirs(self.scratch)
+
+    def child_env(self, agent=None):
+        """This process's environment without the agent markers, with AGENT's marker set when given."""
+        env = {k: v for k, v in os.environ.items() if k not in MARKER_NAMES}
+        if agent:
+            env["CLAUDE_AGENT_ID"] = agent
+        return env
+
+    def spawn(self, agent=None):
+        """A sleeping child with AGENT's marker in its exec-time environment (none when AGENT is None)."""
+        return self.sleeper(self.scratch, env=self.child_env(agent))
+
+    def run_stop(self, agent):
+        """The SubagentStop hook for AGENT, as the harness runs it, with the record folder set and the
+        markers removed from the hook's own environment. `fire` asserts the hook exits 0."""
+        with mock.patch.dict(os.environ, {PROCS_DIR_NAME: self.procs_dir}):
+            for name in MARKER_NAMES:
+                os.environ.pop(name, None)
+            self.fire(agent, self.root)
+
+    def record_of(self, agent):
+        """AGENT's record as the hook wrote it, or None when no file is there."""
+        path = os.path.join(self.procs_dir, agent + ".json")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def write_record(self, agent, procs):
+        """Write AGENT's record with the entries PROCS, as an earlier SubagentStop would have."""
+        os.makedirs(self.procs_dir, exist_ok=True)
+        with open(os.path.join(self.procs_dir, agent + ".json"), "w", encoding="utf-8") as handle:
+            json.dump({"agent": agent, "procs": procs}, handle)
+
+    @staticmethod
+    def entry_for(record, pid):
+        return next((e for e in record.get("procs", []) if isinstance(e, dict) and e.get("pid") == pid), None)
+
+    def stop_list(self, pids, agent):
+        """sweep.host_child_stops for PIDS with AGENT, reading the record folder from the environment."""
+        with mock.patch.dict(os.environ, {PROCS_DIR_NAME: self.procs_dir}):
+            return sweep.host_child_stops(pids, os.getpid(), self.root, agent_id=agent)
+
+    def test_the_ending_agent_gets_a_record_that_lists_its_process(self):
+        """Item 1: SubagentStop writes the agent's record, and the record lists the process it started."""
+        proc = self.spawn(self.AGENT)
+        start = self.host_start_ticks(proc.pid)
+        self.run_stop(self.AGENT)
+        record = self.record_of(self.AGENT)
+        self.assertIsNotNone(record, "no record file for the agent was written under the procs dir at SubagentStop")
+        entry = self.entry_for(record, proc.pid)
+        self.assertIsNotNone(entry, "the agent's record does not list its process, pid %d" % proc.pid)
+        with self.subTest(arm="owner"):
+            self.assertEqual(entry.get("owner"), self.AGENT, "the entry's owner is %r, not the agent" % entry.get("owner"))
+        with self.subTest(arm="start"):
+            self.assertEqual(entry.get("start"), start, "the entry's start is %r, not the start ticks" % entry.get("start"))
+        with self.subTest(arm="kind"):
+            self.assertTrue(entry.get("kind"), "the entry has no kind")
+
+    def test_a_hidden_process_of_the_agent_ends_at_subagent_stop(self):
+        """Item 2: a marked process left running outside the agent's worktree is gone after SubagentStop, and
+        the record lists it."""
+        proc = self.spawn(self.AGENT)
+        self.run_stop(self.AGENT)
+        with self.subTest(arm="ended"):
+            self.assertIsNotNone(proc.poll(), "the agent's hidden process pid %d is still running after SubagentStop" % proc.pid)
+        with self.subTest(arm="listed"):
+            record = self.record_of(self.AGENT)
+            self.assertIsNotNone(record, "no record file for the agent was written at SubagentStop")
+            self.assertIsNotNone(self.entry_for(record, proc.pid), "the record does not list pid %d" % proc.pid)
+
+    def test_only_the_ending_agents_processes_end(self):
+        """Item 3: at SubagentStop of AGENT, its marked process ends. Another agent's marked process and the
+        session's own unmarked process survive."""
+        mine = self.spawn(self.AGENT)
+        other = self.spawn(self.OTHER)
+        session = self.spawn(None)
+        self.run_stop(self.AGENT)
+        with self.subTest(arm="the ending agent's process ends"):
+            self.assertIsNotNone(mine.poll(), "the ending agent's process pid %d still runs" % mine.pid)
+        with self.subTest(arm="another agent's process survives"):
+            self.assertIsNone(other.poll(), "another agent's process pid %d was ended" % other.pid)
+        with self.subTest(arm="the session's own process survives"):
+            self.assertIsNone(session.poll(), "the session's own process pid %d was ended" % session.pid)
+
+    def test_an_agent_with_no_marked_process_ends_nothing(self):
+        """Item 3, empty state (control): the hook exits 0 and a process the session started survives."""
+        session = self.spawn(None)
+        self.run_stop(self.AGENT)
+        self.assertIsNone(session.poll(), "the session's own process pid %d was ended" % session.pid)
+
+    def test_a_pid_whose_start_differs_from_the_record_is_reported_unclear_and_kept(self):
+        """Item 4 and 6 at SubagentStop: the record holds pid P with a start that is not P's now (pid reuse).
+        The hook keeps P and reports it as unclear."""
+        proc = self.spawn(self.AGENT)
+        stale = self.host_start_ticks(proc.pid) + 1
+        self.write_record(self.AGENT, [{"pid": proc.pid, "start": stale, "owner": self.AGENT, "kind": "background"}])
+        self.run_stop(self.AGENT)
+        with self.subTest(arm="the pid is kept"):
+            self.assertIsNone(proc.poll(), "pid %d, whose start differs from its record, was ended" % proc.pid)
+        with self.subTest(arm="the record reports the pid as unclear"):
+            record = self.record_of(self.AGENT)
+            self.assertIsNotNone(record, "the record file is gone after SubagentStop")
+            entry = self.entry_for(record, proc.pid)
+            self.assertIsNotNone(entry, "the record does not list pid %d after SubagentStop" % proc.pid)
+            self.assertEqual(entry.get("kind"), "unclear", "the record reads pid %d as %r, not unclear" % (proc.pid, entry.get("kind")))
+
+    def test_the_stop_list_skips_a_pid_whose_start_differs_from_the_record(self):
+        """Item 4, the stop list: sweep.host_child_stops leaves out a pid with the agent's marker whose start
+        differs from the agent's record."""
+        proc = self.spawn(self.AGENT)
+        self.assertEqual(sweep.agent_mark(proc.pid), self.AGENT, "scope: pid %d does not read as the agent's marker" % proc.pid)
+        self.write_record(self.AGENT, [{"pid": proc.pid, "start": self.host_start_ticks(proc.pid) + 1,
+                                        "owner": self.AGENT, "kind": "background"}])
+        stops = self.stop_list([proc.pid], self.AGENT)
+        self.assertNotIn(proc.pid, stops or [], "the stop list holds pid %d, whose start differs from its record" % proc.pid)
+
+    def test_the_stop_list_skips_a_pid_that_two_agents_both_list(self):
+        """Item 5: a pid the ending agent's record and another agent's record both list is never in the stop
+        list. It is reported."""
+        proc = self.spawn(self.AGENT)
+        self.assertEqual(sweep.agent_mark(proc.pid), self.AGENT, "scope: pid %d does not read as the agent's marker" % proc.pid)
+        start = self.host_start_ticks(proc.pid)
+        self.write_record(self.AGENT, [{"pid": proc.pid, "start": start, "owner": self.AGENT, "kind": "background"}])
+        self.write_record(self.OTHER, [{"pid": proc.pid, "start": start, "owner": self.OTHER, "kind": "background"}])
+        stops = self.stop_list([proc.pid], self.AGENT)
+        self.assertNotIn(proc.pid, stops or [], "the stop list holds pid %d, which another agent's record also lists" % proc.pid)
+
+    def test_an_unreadable_marker_keeps_the_stop(self):
+        """Item 6 and 11 (control): a marker the read cannot answer (Windows, or an EPERM read) is unproven, so
+        the stop list is None and nothing is stopped. Base behaviour, pinned for the record's new reads."""
+        import proc_env
+        proc = self.spawn(self.AGENT)
+        with mock.patch.object(proc_env, "entry_value", return_value=None):
+            stops = self.stop_list([proc.pid], self.AGENT)
+        self.assertIsNone(stops, "the stop list is %r with an unreadable marker, not a keep" % (stops,))
 
 
 def _sigkill_quietly(pid):

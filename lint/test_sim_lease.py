@@ -9,6 +9,7 @@ Temp files follow decisions/test-temp-standard.md: one run folder from lint/_tes
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -462,6 +463,42 @@ class Concurrency(LeaseCase):
                              "two concurrent duo takes are not granted slots 1 and 2 (round %d)" % n)
             self.give(a.pid)
             self.give(b.pid)
+
+
+class LeaseRecord(LeaseCase):
+    """A simulator lease joins the agent's process record (step agent-owned-processes, ruling own-agent-owned-processes).
+    A take by an agent writes its holder into `<CLAUDE_AGENT_PROCS_DIR>/<agent>.json` as kind "sim-lease". The lease
+    itself stays in leases.json, the one lease store. The record's shape is pinned by janitor/test_sweep.py."""
+
+    AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id the marker carries
+
+    def take_for_agent(self, holder):
+        """A duo take of HOLDER by AGENT, with the record folder set in the environment."""
+        procs = os.path.join(self.cfg, "agent-procs")
+        r = self.take("duo", holder.pid, env={"CLAUDE_AGENT_ID": self.AGENT, "CLAUDE_AGENT_PROCS_DIR": procs})
+        self.assertEqual(grant(r)[0], 0, "scope: the take was not granted: %s" % r.stderr.strip())
+        return procs
+
+    def test_the_agents_record_lists_the_lease_holder(self):
+        holder = self.spawn()
+        procs = self.take_for_agent(holder)
+        record_path = os.path.join(procs, self.AGENT + ".json")
+        self.assertTrue(os.path.isfile(record_path), "no record file for the agent under the procs dir after the take")
+        with open(record_path, encoding="utf-8") as handle:
+            entries = json.load(handle).get("procs", [])
+        listed = [e for e in entries if isinstance(e, dict) and e.get("pid") == holder.pid]
+        self.assertTrue(listed, "the agent's record does not list the lease holder, pid %d" % holder.pid)
+        self.assertEqual(listed[0].get("kind"), "sim-lease",
+                         "the lease holder's kind is %r, not sim-lease" % listed[0].get("kind"))
+
+    def test_the_lease_stays_in_the_one_lease_store(self):
+        """Control: the take still writes its lease to leases.json, so the record holds a reference, not a second store."""
+        holder = self.spawn()
+        self.take_for_agent(holder)
+        with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json"), encoding="utf-8") as handle:
+            leases = json.load(handle)["leases"]
+        self.assertTrue(any(e.get("pid") == holder.pid for e in leases),
+                        "the lease for pid %d is not in leases.json" % holder.pid)
 
 
 if __name__ == "__main__":
