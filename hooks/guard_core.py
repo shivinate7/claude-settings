@@ -2140,6 +2140,14 @@ DESIGNER_ROLE = "designer"
 # The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
 # brief hook and the tests import it, and none types it.
 REFUTER_ROLE = "refuter"
+ROLE_DEFAULT = "general-purpose"
+
+
+def role_key(subagent_type) -> str:
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
+    normaliser: role_name and opus_spawn_hit's Explore grant (guard.py) and the review log rule (guard_merge.py) read the role through it.
+    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
+    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
 def agent_role(payload) -> str:

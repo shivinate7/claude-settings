@@ -116,9 +116,10 @@
     },
     "roles-resume-by-name": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing distinguishes a resumed agent from a freshly spawned one at the tool layer this repo governs."
-      }
+        "kind": "guard",
+        "ref": "resume-finished-reviewer"
+      },
+      "test": "tests/guard/s15900-resume-finished-reviewer.py::resume-finished-reviewer: a finished background reviewer, named by its agent id, is refused"
     },
     "parallelism-each-own-checkout": {
       "mechanism": {
