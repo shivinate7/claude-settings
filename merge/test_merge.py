@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, fnmatch, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +23,6 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
-from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
@@ -131,6 +130,11 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+def complete_config(**fields):
+    """CONFIG with a complete merge block (requiredChecks set), so no defaults notice prints on the base; `fields` replace its merge keys.
+    CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
+    return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
@@ -138,18 +142,16 @@ class FakeHost:
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
-        self.checks, self.refuse, self.on_wait = (True, ""), None, None
+        self.checks, self.refuse, self.on_wait, self.on_claim = (True, ""), None, None, None  # on_claim: fires once after the claim push, wait or no wait
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
         self.draft = False
         self.body = ""  # the PR body gh reports: a `Drops-lines:` line in it excuses a path at the silent-undo check
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
-        self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
-        self.batch_pulls, self.created, self.batch_pr_calls = {}, [], []  # batch_pulls: the batch pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
-        self.to_drafts, self.to_draft_refuse, self.on_to_draft = [], None, None  # to_drafts: each n a to_draft call named; to_draft_refuse: the reason the host refuses; on_to_draft: a hook a case sets, called on each call before it answers
+        self.batch_pulls, self.batch_pr_calls = {}, []  # batch_pulls: the pull requests add_pr holds, by number; batch_pr_calls: each branch batch_pr read
         self.posted = []  # (n, body) of each comment post_comment was asked to make: a lane-lint PASS
         self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
@@ -164,7 +166,7 @@ class FakeHost:
     def review_comments(self, since):  # {PR number: [review record bodies]}: none here, so a record run reads no earlier record; the record cases pass theirs through PullsHost
         return {}
 
-    def pages(self, rel, key=None, fields=None):  # the open pull list reviewed_read reads; none open unless a case scripts one (LeftOutHost serves its own)
+    def pages(self, rel, key=None, fields=None):  # the open pull list reviewed_read reads; none open unless a case scripts one
         return []
 
     def pr(self, n):
@@ -193,13 +195,7 @@ class FakeHost:
     def required_names(self):
         return ["checks"]
 
-    def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
-        self.batch_calls.append((n, base))
-        if self.batch_error:
-            raise self.batch_error
-        return list(self.batch)
-
-    def head_state(self, n):
+    def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
 
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
@@ -207,7 +203,7 @@ class FakeHost:
 
     def wait_checks(self, n, sha, d, prior=None):
         self.waits.append((sha, prior))
-        if prior is not None and self.on_wait:  # on_wait plays the rival during the wait after the claim push
+        if prior is not None and self.on_wait:  # on_wait: a case whose premise is the wait itself. A claim-time hook is on_claim
             self.on_wait()
         return self.seq.pop(0) if self.seq else self.checks
 
@@ -249,27 +245,6 @@ class FakeHost:
 
     def open_prs(self):  # every open pull request as [(n, info)] in number order: a rebuild finds the on-batches among them
         return [(n, self.pr_info(n)) for n in sorted(self.batch_pulls) if self.batch_pulls[n]["state"] == "OPEN"]
-
-    def create_pr(self, branch, base, title, body, draft=False):  # the pull request holds the draft flag the caller sends
-        n = 900 + len(self.created)
-        self.created.append({"n": n, "branch": branch, "base": base, "title": title, "body": body, "draft": draft})
-        self.add_pr(n, branch, base=base, draft=draft, body=body)
-        return n
-
-    def to_draft(self, n):  # the return to draft a drop makes on a ready batch -> (ok, why). On success the host sets the draft flag.
-        self.to_drafts.append(n)
-        if self.on_to_draft:
-            self.on_to_draft(n)
-        if self.to_draft_refuse:
-            return False, self.to_draft_refuse
-        if n in self.batch_pulls:
-            self.batch_pulls[n]["draft"] = True
-        else:
-            self.draft = True
-        return True, ""
-
-    def set_body(self, n, body):
-        self.batch_pulls[n]["body"] = body
 
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
@@ -382,6 +357,15 @@ class RepoDirRuns:
             os.chdir(here)
         return rc, out.getvalue() + err.getvalue(), seen
 
+    def confirm_from(self, cwd, argv):
+        """A --confirm through the two-step confirm: the first run pushes the claim and stops, the second run merges it. -> (rc, output, seen)
+        of the last run, with the output of both."""
+        rc, out, seen = self.run_from(cwd, argv)
+        if rc == 0 and claim_pushed_line(out):
+            rc, second, seen = self.run_from(cwd, argv)
+            out += second
+        return rc, out, seen
+
     def spellings(self, *tail):
         """The named checkout in each spelling argparse takes, each followed by `tail`."""
         b = self.b_co
@@ -391,18 +375,6 @@ class RepoDirRuns:
         """The subjects on origin/main of `checkout`, after a fetch."""
         sh(checkout, "git", "fetch", "-q", "origin")
         return sh(checkout, "git", "log", "origin/main", "--format=%s")
-
-def wait_sites(src):
-    """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
-    times, so a caller trusts the count only when in_loop is False."""
-    found = []
-    def walk(node, looped):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "wait_checks":
-                found.append(looped)
-            walk(child, looped or isinstance(child, (ast.For, ast.While, ast.AsyncFor)))
-    walk(ast.parse(src), False)
-    return len(found), any(found)
 
 class PipeOut(io.TextIOWrapper):
     """A Windows stdout piped to a reader (no PYTHONUTF8): cp1252, errors strict. getvalue() reads back what the pipe got."""
@@ -475,20 +447,113 @@ class Env(unittest.TestCase):
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        self.claim_fired = [False]  # one claim per run: reset by run_merge
+        self.claim_push_fires_on_claim()
+
+    def claim_push_fires_on_claim(self):
+        """Patch merge.git so that the claim push of a run marks the claim fired, once per run, right after the push succeeds. The flag is
+        set on every claim push, so run_merge takes the second step of a two-step confirm for every case. The host's on_claim hook runs
+        there only when a case sets it: a hook that moves the rival, the base, or a tree runs after the claim and before the merge's own
+        reads, whether or not the merge waits on a check. Each push is the real git call; a case that patches merge.git captures this
+        wrapper as its real call."""
+        real = merge.git
+        def git(cwd, *a, **k):
+            c, out = real(cwd, *a, **k)
+            host = getattr(self, "host", None)
+            if (not c and a[:2] == ("push", "-q") and not self.claim_fired[0]
+                    and f"HEAD:refs/heads/{getattr(host, 'branch', None)}" in a):
+                self.claim_fired[0] = True
+                if getattr(host, "on_claim", None):
+                    host.on_claim()
+            return c, out
+        patch = unittest.mock.patch.object(merge, "git", git)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def in_wait(self, action):
+        """Run action once, right after the run's first head read (merge.holds_base, before the claim): main moves after the head was read
+        current, and before the run's own reads of the base. The per-lane run waits on no check, so the window is the head read, not a wait.
+        A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here.
+        One home for every class: RecordsEnv and UndoMemo both use it."""
+        real = merge.holds_base
+        moved = []
+        def read_then_move(*a, **k):
+            out = real(*a, **k)
+            if not moved:
+                moved.append(True)
+                action()
+            return out
+        patch = unittest.mock.patch.object(merge, "holds_base", read_then_move)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def merge_tree_faults(self, fault, after_claim=False):
+        """Every merge-tree call of the run returns `fault` instead: a (rc, out) pair, or an exception to raise. Both seams a merge-tree
+        can take are patched once per test, merge.git and merge.sh (the sh that merge_tree calls); a second call changes the fault only.
+        after_claim: only the calls made once this run's claim push has fired, the read the merge makes after its claim."""
+        self.tree_fault = (fault, after_claim)
+        if getattr(self, "tree_hooked", False):
+            return
+        self.tree_hooked = True
+        def faulted(argv):
+            fault, after = self.tree_fault
+            if fault is None or "merge-tree" not in argv or (after and not self.claim_fired[0]):
+                return False
+            if isinstance(fault, BaseException):
+                raise fault
+            return True
+        real_git, real_sh = merge.git, merge.sh
+        def git(cwd, *a, **k):
+            return self.tree_fault[0] if faulted(a) else real_git(cwd, *a, **k)
+        def sh(args, *a, **k):
+            return self.tree_fault[0] if faulted(args) else real_sh(args, *a, **k)
+        for name, fn in (("git", git), ("sh", sh)):
+            patch = unittest.mock.patch.object(merge, name, fn)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_once(self, args, out, err, host, lock, hosts, cwd, keep_claim):
+        """One merge.main run, its output written to out and err. keep_claim: the run is the second step of a two-step confirm, so the
+        claim this confirm pushed still counts as fired: a fault set after the claim fires in the run that makes those reads."""
+        if not keep_claim:
+            self.claim_fired[0] = False  # this run's claim push may fire the hook once
+        prior = os.getcwd()
+        os.chdir(cwd or self.co)
+        seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
+        target = host or self.host
+        o0, e0, r0 = len(out.getvalue()), len(err.getvalue()), len(getattr(target, "reads", []))
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                return merge.main(list(args), host=target, lock=lock or self.lock, **seam)
+        finally:
+            os.chdir(prior)
+            self.run_texts.append(out.getvalue()[o0:] + err.getvalue()[e0:])  # this run's own output, one entry per run
+            self.run_reads.append(list(getattr(target, "reads", []))[r0:])  # this run's own host reads, when the host keeps them
+
+    def per_run_count(self, needle):
+        """How many times `needle` appears in each run's output, in run order: the claim run, then the merge run."""
+        return [t.count(needle) for t in self.run_texts]
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
         Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
-        `cwd` is the clone merge runs in; self.co when not given."""
+        `cwd` is the clone merge runs in; self.co when not given.
+        A `--confirm` runs the two-step protocol (decision: the claim stays a commit): a run that pushes its claim commit and stops is
+        followed by the same confirm on the new head, which merges it. A draft's confirm and a run that merges in one step stay one run.
+        run_merge_once is the single run, for the cases that pin the first step."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
-        prior = os.getcwd()
-        os.chdir(cwd or self.co)
-        seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
-        try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
-        finally:
-            os.chdir(prior)
+        two_step = "--confirm" in args and not getattr(host or self.host, "draft", False)  # read before the run: a ready step clears the draft flag
+        self.run_texts, self.run_reads = [], []
+        rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
+        if two_step and rc == 0 and self.claim_fired[0] and not getattr(host or self.host, "merged", False):
+            rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=True)
+        return rc, out.getvalue() + err.getvalue()
+
+    def run_merge_once(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
+        """-> (rc, stdout + stderr) of one run of merge: no second step. A confirm that pushes a claim stops here."""
+        out, err = stdout or io.StringIO(), stderr or io.StringIO()
+        self.run_texts, self.run_reads = [], []
+        rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
         return rc, out.getvalue() + err.getvalue()
 
     def refs(self):
@@ -582,55 +647,37 @@ class Flow(Env):
         rc, out = self.run_merge("7")
         self.assertIn("head checks: red: checks: fail", out)
 
-    def test_the_lock_outlives_every_wait_one_run_can_take(self):
-        # Each wait_checks call site in merge.py is one wait, and none sits in a loop, so one run takes at most one wait per
-        # site: the head, the claim, the merge commit. Limit: a helper that wraps wait_checks and is called N times undercounts.
-        with open(merge.__file__, encoding="utf-8") as f:
-            sites, looped = wait_sites(f.read())
-        self.assertGreater(sites, 0)
-        self.assertFalse(looped, "a wait_checks call sits in a loop, so the site count is no bound")
-        d = merge.MERGE_DEFAULTS["deadlineMinutes"]  # the code's default deadline, set in the base config as the tool reads it
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=d))))
-        ttls = []
-        acquire = self.lock.acquire
-        self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        need = sites * d * 60
-        self.assertGreaterEqual(ttls[0], need, "lock ttl %d s; %d waits of %d min need %d s" % (ttls[0], sites, d, need))
-
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
+        self.host.state = "red: checks: fail"  # the head reads red before any wait
         self.host.seq = [(False, "a check is red: checks: fail")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: checks: fail", out)
         self.assertEqual(self.refs(), before)  # no claim push, and the lock ref is gone
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "a red head was waited on under the lock: %s" % (self.host.waits,))
 
-    def test_head_pending_then_green_claims_after_the_wait(self):
-        rc, out = self.run_merge("7", "--confirm")  # the fake wait returns green: one wait on the head, one on the claim
+    def test_head_green_claims_and_merges_with_no_wait(self):
+        rc, out = self.run_merge("7", "--confirm")  # the head is green: its claim and its merge follow with no wait under the lock
         self.assertEqual(rc, 0, out)
-        (s1, p1), (s2, p2) = self.host.waits
-        self.assertIsNone(p1)  # the first wait is on the head as it stands, before any push
-        self.assertNotEqual(s1, s2)
-        self.assertEqual(p2, s1)
+        self.assertEqual(self.host.waits, [], "a green head or its claim was waited on under the lock: %s" % (self.host.waits,))
         self.assertEqual(self.claims(), 1)
 
     def test_head_pending_then_red_claims_nothing(self):
         before = self.refs()
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         self.host.seq = [(False, "a check is red: checks: fail https://x")]  # the wait saw pending, then red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.claims(), 0)
 
-    def test_nothing_to_claim_waits_once(self):
+    def test_nothing_to_claim_takes_no_wait(self):
         self.leave_no_pending_record()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out)
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "a green head with nothing to claim was waited on under the lock: %s" % (self.host.waits,))
 
     @windows_slice
     def test_full_merge_claims_pushes_merges_syncs_cleans(self):
@@ -787,8 +834,8 @@ class Flow(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(methods, ["merge"])  # the default method
-        filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
-        self.assertEqual(len(filled), 1, out)  # one line names the filled field
+        filled = [[l for l in t.splitlines() if ".github/stamp.json" in l and "method" in l] for t in self.run_texts]
+        self.assertEqual([len(f) for f in filled], [1, 1], out)  # one line per run names the filled field
 
 
 def without_usage(text):
@@ -895,19 +942,20 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
 
-    def network_drops_the_wait_after_the_claim(self):
-        """The second check wait, the one after the claim push, raises a network error: the claim stays on the branch, unproven (NetStop)."""
-        wait, calls = self.host.wait_checks, []
-        def dropped(n, sha, d, prior=None):
-            calls.append(sha)
-            if len(calls) == 2:
-                raise merge.NetStop("the network dropped the wait after the claim push")
-            return wait(n, sha, d, prior)
-        self.host.wait_checks = dropped
+    def network_drops_the_merge_after_the_claim(self):
+        """The merge call after the claim push raises a network error, once: the claim stays on the branch, unproven (NetStop). The
+        per-lane run waits on no check, so the read after the claim is the merge call; a rerun gets the real call."""
+        merge_call, dropped = self.host.merge, []
+        def once(n, method, sha):
+            if not dropped:
+                dropped.append(sha)
+                raise merge.NetStop("the network dropped the merge call after the claim push")
+            return merge_call(n, method, sha)
+        self.host.merge = once
 
     def test_a_rerun_on_the_tools_own_claim_commit_proceeds(self):
         relayed = self.head()
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the claim is pushed, its result is unknown, so it stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -920,17 +968,18 @@ class ConfirmHead(Env):
 
     def test_a_rerun_on_the_tools_revert_of_its_claim_proceeds(self):
         relayed = self.head()
-        self.host.seq = [(True, ""), (False, "a check is red after the claim push")]  # the claim wait is red, so the tool reverts its own claim
+        self.host.refuse = "the merge was refused after the claim push"  # the merge call refuses, so the tool reverts its own claim
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
         self.assertNotEqual(rc, 0, out + err)
         self.assertNotEqual(self.head(), relayed, "the revert did not land on the branch")
+        self.host.refuse = None
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's revert of its claim
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
     def test_a_head_that_moves_between_the_compare_and_the_put_merges_nothing(self):
         relayed = self.head()
-        self.host.on_wait = self.competitor_push  # the rival lands in the wait after the claim push: after every compare, before the PUT
+        self.host.on_claim = self.competitor_push  # the rival lands right after the claim push: after every compare, before the PUT
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
         self.assertNotEqual(rc, 0, out + err)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT merged a head that moved after the compare")
@@ -939,7 +988,7 @@ class ConfirmHead(Env):
     def test_a_rival_commit_under_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
         relayed = self.head()
         rival = self.competitor_push()  # a rival commit on the relayed head
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", rival)  # the tool claims on the rival commit; the claim stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -954,7 +1003,7 @@ class ConfirmHead(Env):
 
     def test_a_rival_commit_on_top_of_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
         relayed = self.head()
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the tool claims on the relayed head; the claim stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -1111,7 +1160,7 @@ class ClaudeMdFlag(Env):
         asked = unittest.mock.patch("builtins.input", side_effect=AssertionError("the merge asked for input"))
         asked.start(); self.addCleanup(asked.stop)
         rc, out = self.run_merge("7", "--confirm")  # no extra flag, no extra word
-        self.assertEqual(len(self.host.waits), 2, out)  # the head and the claim, as for any PR: no wait added
+        self.assertEqual(self.host.waits, [], out)  # no wait under the lock: the head is green, and its claim-only commit counts as green
         self.assertFalse(self.lock_ref(), out)
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
 
@@ -1483,6 +1532,14 @@ class LockRetake(Env):
         self.assertEqual(self.head("merge-lock/main"), held)
 
 class Guards(Env):
+    def main_conflicts(self):
+        """A person pushes a commit to main that adds the path feat adds, with other text: the merge of the head and main conflicts there.
+        Under rule M3 a clean base move stands, so the base-tip refusals need this one."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("pending", "rival"))
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main adds the same decision"); sh(o, "git", "push", "-q", "origin", "main")
+
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
         self.competitor_push()
@@ -1507,24 +1564,6 @@ class Guards(Env):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_red_check_reverts_the_claim(self):
-        self.host.seq = [(True, ""), (False, "required check `build` is red")]  # the head is green, the claim run is red
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("`build` is red", out)
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
-        self.assertEqual(self.claims("feat"), 1)  # the claim commit stays in history, reverted
-        self.assertFalse(self.lock_ref())
-
-    def test_red_check_after_a_push_in_the_wait_reverts_nothing(self):
-        self.host.seq = [(True, ""), (False, "red")]
-        self.host.on_wait = self.competitor_push
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("Nothing reverted", out)
-        self.assertEqual(self.head(), sh(self.other, "git", "rev-parse", "HEAD"))
-        self.assertIn("id: D-002", self.show("feat", "docs/decisions/second.md"))
-
     def test_protection_refusal_reverts_the_claim(self):
         self.host.refuse = "protected branch: 1 approving review required"
         rc, out = self.run_merge("7", "--confirm")
@@ -1539,7 +1578,7 @@ class Guards(Env):
             sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
             put(os.path.join(o, "docs/decisions/third.md"), record("D-002", "third"))
             sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "base takes D-002"); sh(o, "git", "push", "-q", "origin", "main")
-        self.host.on_wait = base_takes_d2
+        self.host.on_claim = base_takes_d2
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("stale", out)
@@ -1547,14 +1586,14 @@ class Guards(Env):
 
     def test_a_failed_base_fetch_stops_the_merge_and_never_checks_a_stale_base(self):
         self.host.merged = False
-        self.host.on_wait = lambda: sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        self.host.on_claim = lambda: sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("cannot fetch origin main", out)
         self.assertFalse(self.host.merged)
 
     def test_a_head_without_the_base_tip_is_refused_before_any_claim(self):  # merge-needs-current-base
-        self.main_moves()
+        self.main_conflicts()  # a conflicting base: a clean one merges under M3 (PerLaneMerge clean-behind case)
         self.host.merged = False
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
@@ -1567,10 +1606,10 @@ class Guards(Env):
 
     def test_a_base_that_moves_during_the_wait_reverts_the_claim_and_merges_nothing(self):
         self.host.merged = False
-        self.host.on_wait = self.main_moves
+        self.host.on_claim = self.main_conflicts  # after the claim: the post-claim proof refuses the conflict, and the claim is reverted
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        self.assertIn("does not hold origin/main", out)
+        self.assertIn("does not merge cleanly with origin/main", out)  # records_proof's words: it reads the merge before holds_base does
         self.assertFalse(self.host.merged)
         self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
 
@@ -1583,11 +1622,11 @@ class Guards(Env):
         self.assertTrue(self.host.merged)
 
     def test_the_preview_names_a_head_without_the_base_tip(self):
-        self.main_moves()
+        self.main_conflicts()
         rc, out = self.run_merge("7")
         self.assertIn("base:   BEHIND:", out)
         self.assertIn("--confirm refuses it", out)
-        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(self.other, "git", "merge", "-q", "--no-edit", "main"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(self.other, "git", "merge", "-q", "--no-edit", "-X", "theirs", "main"); sh(self.other, "git", "push", "-q", "origin", "feat")
         rc, out = self.run_merge("7")
         self.assertIn("base:   holds main's tip", out)
 
@@ -1662,9 +1701,9 @@ class ScopedRepo:
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
 class SmallBaseMove(ScopedRepo, Env):
-    """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
-    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
-    no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
+    """The base-move cases under the per-lane merge (act 4, owner 09:48 CST Nov 12): a conflicting base is refused, a merge-tree read that
+    cannot run before the claim is unknown, and a merge-tree read that cannot run after the claim push stops unknown and keeps the claim. The
+    small-move suite run is removed, so the cases that pinned it are retired; their table is in the commit message."""
 
     @classmethod
     def setUpClass(cls):
@@ -1682,66 +1721,6 @@ class SmallBaseMove(ScopedRepo, Env):
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "N head")
         return repo, sh(repo, "git", "rev-parse", "HEAD")
 
-    def next_push(self, repo, n_head):
-        """A commit on the batch head, pushed after main moved. -> its sha."""
-        sh(repo, "git", "checkout", "-q", "-B", "n1", n_head); put(os.path.join(repo, "n1.txt"), "N+1\n")
-        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "N+1")
-        return sh(repo, "git", "rev-parse", "HEAD")
-
-    def holds_base_without_ci(self, repo, base_ref, sha):
-        """-> holds_base's (refusal, why), and asserts that no lint and no suite ran: the green run stands on the merge's tree alone."""
-        calls = []
-        real = merge.sh
-        def spy(args, *a, **k):
-            calls.append(" ".join(args))
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", spy):
-            refusal, why = merge.holds_base(repo, base_ref, sha)
-        self.assertFalse([c for c in calls if merge.CI_JOB in c or merge.CI_SCOPE in c], calls)
-        return refusal, why
-
-    def test_main_merged_from_the_batch_head_keeps_the_green_run_for_the_next_push(self):
-        repo, n_head = self.batch_repo()
-        sh(repo, "git", "checkout", "-q", "main"); sh(repo, "git", "merge", "-q", "--no-ff", "-m", "Merge n", "n")  # main has N head's tree
-        n1 = self.next_push(repo, n_head)
-        refusal, why = self.holds_base_without_ci(repo, "main", n1)
-        self.assertIsNone(refusal, refusal)
-        self.assertTrue(why)
-
-    def test_main_with_an_empty_commit_keeps_the_green_run_for_the_next_push(self):
-        repo, n_head = self.batch_repo()
-        sh(repo, "git", "checkout", "-q", "main"); sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "empty main commit")
-        n1 = self.next_push(repo, n_head)
-        refusal, why = self.holds_base_without_ci(repo, "main", n1)
-        self.assertIsNone(refusal, refusal)
-        self.assertTrue(why)
-
-    def test_main_that_moved_and_came_back_does_not_keep_the_green_run_for_the_lane(self):
-        # The lane is cut at M0. Main adds c.txt (M1), then reverts it (M2, tree M0). CI on the lane tested merge(lane, M1), which holds c.txt.
-        repo, n_head = self.batch_repo()
-        sh(repo, "git", "checkout", "-q", "main")
-        put(os.path.join(repo, "c.txt"), "c\n"); sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "M1 adds c")
-        sh(repo, "git", "rm", "-q", "c.txt"); sh(repo, "git", "commit", "-qm", "M2 reverts c")
-        refusal, _ = merge.holds_base(repo, "main", n_head)
-        self.assertIsNotNone(refusal)
-        self.assertIn("does not hold main", refusal)
-
-    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
-        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
-        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
-        repo, _ = self.batch_repo()
-        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
-        n_head = sh(repo, "git", "rev-parse", "HEAD")
-        base = sh(repo, "git", "merge-base", "main", n_head)
-        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
-        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
-        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
-        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
-        with tempfiles_in_run_folder():
-            ok, why = merge.small_base_move(repo, "main", n_head)
-        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
-        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
-
     def refused(self):
         self.host.merged = False
         rc, out = self.run_merge("7", "--confirm")
@@ -1751,360 +1730,52 @@ class SmallBaseMove(ScopedRepo, Env):
         self.assertFalse(self.host.merged, out)
         return out
 
-    def test_a_docs_only_main_move_keeps_the_green_run(self):
-        self.scoped()
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(self.host.merged, out)
-        self.assertNotIn("does not hold", out)
-        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
-        self.assertIn("# Guide", self.show("main", "docs/guide.md"))
-
-    def test_a_docs_only_move_during_the_wait_keeps_the_green_run(self):
-        self.scoped()
-        self.host.on_wait = lambda: self.on("main", {"docs/late.md": "# Late\n"})
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(self.host.merged, out)
-
-    def test_the_preview_says_a_docs_only_move_keeps_the_green_run(self):
-        self.scoped()
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        rc, out = self.run_merge("7")
-        self.assertIn("base:   main moved by 1 commit touching only paths no job of this batch reads", out)
-        self.assertNotIn("BEHIND", out)
-
-    def test_main_touching_a_file_of_the_batch_is_refused(self):
-        self.scoped()
-        self.on("feat", {"docs/shared.md": "one changed\ntwo\nthree\nfour\nfive\n"})
-        self.on("main", {"docs/shared.md": "one\ntwo\nthree\nfour\nfive changed\n"})  # merges clean, but one path
-        self.assertIn("docs/shared.md", self.refused())
-
     def test_a_conflicting_main_move_is_refused(self):
         self.scoped()
         self.on("feat", {"docs/shared.md": "one\nfeat\n"})
         self.on("main", {"docs/shared.md": "one\nmain\n"})
         self.refused()
 
-    def test_main_touching_a_code_path_is_refused(self):
+    def test_an_unreadable_merge_tree_before_the_claim_is_unknown_and_claims_nothing(self):
+        """Re-point of the unreadable merge base (decision merge-needs-current-base, the per-lane read): the head is read against main's tip
+        with merge-tree, and a read that cannot run before the claim is unknown, with nothing pushed."""
         self.scoped()
-        self.on("main", {"hooks/x.py": "X = 2\n"})
-        self.refused()
-
-    def test_main_touching_an_unmapped_path_is_refused(self):
-        self.scoped()
-        self.on("main", {"notes.txt": "a note\n"})
-        self.refused()
-
-    def test_a_main_doc_that_breaks_a_cross_file_lint_on_the_merge_is_refused(self):
-        self.scoped()
-        self.on("main", {"docs/other.md": "---\nslug: second\n---\n"})  # feat's record has slug second: each side alone passes
-        self.refused()
-
-    def test_a_main_doc_that_breaks_a_checks_suite_reading_docs_is_refused(self):
-        self.scoped()
-        self.on("main", {"docs/guide.md": "BROKEN\n"})
-        self.refused()
-
-    def test_a_scope_script_that_fails_with_every_flag_off_is_refused_with_its_exit(self):
-        self.scoped()
-        self.on("main", {".github/scripts/ci-scope.sh": 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'})
-        o = self.other  # feat takes main's script, then main moves by a doc only
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "origin/main"); sh(o, "git", "push", "-q", "origin", "feat")
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        self.assertIn("exit 3", self.refused())
-
-    def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
-        root = os.path.join(HERE, "..")
-        lints = merge.lint_steps(root, "origin/main")
-        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
-        self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
-        self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
-        self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
-        new = hits("docs/decisions/" + "new-" + "rec.md")  # a new record, split so this file names no such path: the suite that lists the folder runs, fixture-only suites do not
-        self.assertIn("hooks/test_precompact_handoff.py", new)
-        self.assertNotIn("hooks/test_guard.py", new)
-        self.assertIn("merge/test_merge.py", new)  # this suite reads the real tree whole, just above, so every path hits it
-        self.assertIn("skills/ios-apps/tests/test_new_app.py", hits("skills/ios-apps/templates/" + "new.md"))  # through new_app.py
-
-    def workflow_files(self):
-        """-> (the workflow file names of the other checkout, sorted; the ones among them that hold a `checks` job)."""
-        folder = os.path.join(self.other, ".github", "workflows")
-        names = sorted(os.listdir(folder))
-        with_job = []
-        for n in names:
-            with open(os.path.join(folder, n), encoding="utf-8") as f:
-                if job_block(f.read(), "checks") is not None:
-                    with_job.append(n)
-        return names, with_job
-
-    def suites_hit_on_other(self, path):
-        """-> the suite files hit_suites names for a doc at path, read from the other checkout. A stop is a failed assert that names it."""
-        try:
-            return [f for f, _ in merge.hit_suites(self.other, [path], set())]
-        except merge.Stop as e:
-            self.fail(f"hit_suites stopped on the other checkout: {e}")
-
-    def test_a_workflow_named_check_yml_with_a_checks_job_gets_its_suites_hit(self):
-        self.scoped(name="check.yml")
-        self.assertEqual(self.workflow_files(), (["check.yml"], ["check.yml"]), "fixture: the workflow folder does not hold one checks workflow, check.yml")
-        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
-                      "hit_suites did not find the checks job of check.yml")
-
-    def test_two_workflow_files_that_each_hold_a_checks_job_stop_hit_suites(self):
-        self.scoped()  # checks.yml, with a checks job
-        put(os.path.join(self.other, ".github", "workflows", "check.yml"), CHECKS_YML)
-        self.assertEqual(self.workflow_files()[1], ["check.yml", "checks.yml"], "fixture: both workflow files must hold a checks job")
-        with self.assertRaises(merge.Stop, msg="two workflow files hold a checks job, and hit_suites read one of them without a stop"):
-            merge.hit_suites(self.other, ["docs/guide.md"], set())
-
-    def test_a_checks_yml_with_a_checks_job_still_gets_its_suites_hit(self):
-        self.scoped()
-        self.assertEqual(self.workflow_files(), (["checks.yml"], ["checks.yml"]), "fixture: the workflow folder does not hold one checks workflow, checks.yml")
-        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
-                      "hit_suites lost the checks job of checks.yml")
-
-    def test_no_workflow_with_a_checks_job_stops_hit_suites(self):
-        self.scoped()
-        os.remove(os.path.join(self.other, ".github", "workflows", "checks.yml"))
-        put(os.path.join(self.other, ".github", "workflows", "check.yml"), "name: check\non: push\njobs:\n  scope:\n    runs-on: ubuntu-latest\n"
-            "    steps:\n      - run: echo ok\n")
-        self.assertEqual(self.workflow_files()[1], [], "fixture: a workflow file holds a checks job")
-        with self.assertRaises(merge.Stop, msg="no workflow holds a checks job, and hit_suites named no stop"):
-            merge.hit_suites(self.other, ["docs/guide.md"], set())
-
-    def test_a_workflow_without_the_checks_merge_install_job_stops_the_suite_read(self):
-        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that holds `checks` alone stops and names the
-        missing job; the control first shows that both jobs read the suite of `checks`, so the stop is the missing job's."""
-        root = tempfile.mkdtemp(dir=self.run_dir)
-        put(os.path.join(root, "hooks", "test_reads_guide.py"), DOC_SUITE)
-        put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the merge install step's suite: read, names no path
-        checks = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                  "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
-        merge_install = ("  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
-                         "      - name: Merge install suite\n        run: python3 hooks/x.py\n")
-        def hits(workflow):
-            put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow)
-            return [f for f, _ in merge.hit_suites(root, ["docs/guide.md"], set())]
-        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install))
-        with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
-            hits(checks)
-        self.assertIn("checks-merge-install", str(cm.exception))
-
-    def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
-        hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
-        self.assertFalse(hit('import os, tempfile\nd = tempfile.mkdtemp()\nos.makedirs(os.path.join(d, "docs", "decisions"))\n'))
-        self.assertFalse(hit('TEXT = "see decisions/other.md"  # a cite in text\n'))
-        self.assertTrue(hit('import os\nROOT = os.path.dirname(os.path.dirname(__file__))\nD = os.path.join(ROOT, "docs", "decisions")\n'))
-        self.assertTrue(hit('import pathlib\nROOT = pathlib.Path(__file__).parent.parent\nD = ROOT / "docs" / "decisions"\n'))
-        self.assertTrue(hit('open("docs/decisions/y.md").read()\n'))
-        self.assertTrue(hit('import os\nos.listdir(os.path.join("docs", "decisions"))\n'))
-        self.assertTrue(hit('X = "docs/decisions/x.md"\n'))  # the exact path, anywhere
-        # a root anchored on __file__ and walked whole: a path under it is read
-        self.assertTrue(merge.python_suite_hits('import os\nHERE = os.path.dirname(__file__)\nSKILL = os.path.dirname(HERE)\nwalk(SKILL)\n',
-                                                "skills/s/tests/test_s.py", ["skills/s/templates/new.md"]))
-        with self.assertRaises(SyntaxError):
-            hit("def (:\n")
-
-    def test_a_root_read_in_any_form_is_a_hit(self):
-        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
-        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\nROOT = os.path.dirname(HERE)\n"
-        for form in ('open(f"{ROOT}/docs/decisions/a.md")', 'open(ROOT + "/docs/decisions/a.md")',
-                     'open("{}/docs/decisions/a.md".format(ROOT))', 'open("%s/docs/decisions/a.md" % ROOT)',
-                     'D = pathlib.Path(__file__).resolve().parents[1] / "docs" / "decisions"'):
-            with self.subTest(form=form):
-                self.assertTrue(hit(here + form + "\n"))
-
-    def test_a_root_at_the_repo_top_is_a_hit(self):
-        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
-        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
-        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nos.listdir(DOCS)\n'))
-        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nfor x in os.walk(DOCS): pass\n'))
-        self.assertTrue(hit('import pathlib\nD = pathlib.Path(__file__).resolve().parent.parent / "docs"\nlist(D.rglob("*.md"))\n'))
-        self.assertTrue(hit(here + 'for x in os.walk(os.path.dirname(HERE)): pass\n', "notes/any.md"))  # the whole repo: every path
-
-    def test_a_read_through_a_local_module_is_a_hit(self):
-        files = {"skills/s/tests/test_s.py": "import os, sys\nsys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scripts'))\nimport helper\n",
-                 "skills/s/scripts/helper.py": "import os\nT = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')\nos.listdir(T)\n",
-                 "hooks/test_y.py": "import sibling\n", "hooks/sibling.py": "open('docs/decisions/y.md')\n"}
-        read = files.get
-        self.assertTrue(merge.python_suite_hits(files["skills/s/tests/test_s.py"], "skills/s/tests/test_s.py", ["skills/s/templates/new.md"], read))
-        self.assertTrue(merge.python_suite_hits(files["hooks/test_y.py"], "hooks/test_y.py", ["docs/decisions/z.md"], read))
-        self.assertFalse(merge.python_suite_hits("import nowhere\n", "hooks/test_z.py", ["docs/decisions/z.md"], read))
-
-    def test_a_checks_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
-        self.scoped(workflow=CHECKS_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        self.assertIn("docs/guide.md", self.refused())
-
-    def test_a_records_only_main_move_keeps_the_green_run(self):
-        """A new record and the page rebuilt on main; a checks suite names the record folder only in its temp tree."""
-        self.scoped(workflow=CHECKS_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
-        o = self.other
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put(os.path.join(o, "hooks/test_temp_tree.py"), 'import os, sys, tempfile\nd = tempfile.mkdtemp()\n'
-            'os.makedirs(os.path.join(d, "docs", "decisions"))\nsys.exit(1)  # fails if it is ever run on the merge\n')
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "temp suite"); sh(o, "git", "push", "-q", "origin", "feat")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main"); sh(o, "git", "merge", "-q", "--no-edit", "origin/feat")
-        sh(o, "git", "push", "-q", "origin", "main")
-        put(os.path.join(o, "docs/decisions/third.md"), record("D-009", "third"))
-        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a record"); sh(o, "git", "push", "-q", "origin", "main")
+        self.on("main", {"docs/guide.md": "# Guide\n"})  # main moved: the head lacks its tip, so the merge is read against it
+        before = self.refs()
+        self.merge_tree_faults((128, "fatal: unreadable"))
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(self.host.merged, out)
-        self.assertIn("touching only paths no job of this batch reads", out)
-
-    def test_an_unreadable_merge_base_is_refused(self):
-        self.scoped()
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        real = merge.git
-        def git(cwd, *a, **k):
-            if a and a[0] == "merge-base" and "--is-ancestor" not in a:
-                return 128, "fatal: no merge base"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", git):
-            self.refused()
-
-    def test_a_repo_without_the_scope_script_is_refused(self):
-        self.scoped(scope=False)
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        self.refused()
-
-    def test_a_lint_run_that_cannot_find_the_job_is_refused(self):
-        self.scoped(workflow=CHECKS_YML.replace("  checks:", "  other:"))
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        self.refused()
-
-    def test_a_lint_step_ci_job_cannot_read_is_refused(self):
-        self.scoped(workflow=CHECKS_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        self.refused()
-
-    def move_main_after_the_claim(self, claimed, move=None):
-        """Main moves during the wait, after the claim push, so the green run needs the small-move proof. move: the push (default a docs-only commit)."""
-        def on_wait():
-            claimed.append(self.head())
-            (move or (lambda: self.on("main", {"docs/guide.md": "# Guide\n"})))()
-        self.host.on_wait = on_wait
-
-    def base_read_fails_after_the_claim(self, matches, cause, move=None):
-        """A git read in the small-move proof fails after the claim push: `matches(args)` picks it. The stop is unknown, keeps the claim and names `cause`."""
-        claimed = []
-        self.move_main_after_the_claim(claimed, move)
-        real = merge.git
-        def git(cwd, *a, **k):
-            if claimed and matches(a):
-                return 128, "fatal: unreadable"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", git), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn(cause, out, "the stop does not name the read that could not run")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertEqual(self.refs(), before, "something was pushed for a read that could not run")
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_merge_of_the_base_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        real = merge.git
-        def merge_fails(cwd, *a, **k):
-            if claimed and "Merge origin/main to read the lints" in a:  # the merge the lints run on: it fails, and no file conflicts
-                return 128, "fatal: unable to write new index file"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", merge_fails), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("does not merge cleanly", out, "the stop does not name the merge that failed")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_a_lint_step_listing_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        real = merge.sh
-        def plan_fails(args, *a, **k):
-            if claimed and "--plan" in args:  # lint_steps: ci-job cannot list the lint steps
-                return 1, "ci-job: cannot list the steps"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", plan_fails), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("the lint steps cannot be listed", out, "the stop does not name the lint listing")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_a_checks_workflow_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        workflow = os.path.join(".github", "workflows", "checks.yml")
-        real_open = open
-        def unreadable(path, *a, **k):
-            if claimed and str(path).endswith(workflow):  # hit_suites reads the workflow of the merge
-                raise PermissionError(13, "Permission denied", str(path))
-            return real_open(path, *a, **k)
-        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("the workflow cannot be read", out, "the stop does not name the workflow read")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_a_checks_suite_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        suite = os.path.join("hooks", "test_reads_guide.py")
-        real_open = open
-        def unreadable(path, *a, **k):
-            if claimed and str(path).endswith(suite):  # hit_suites reads each suite line's file
-                raise PermissionError(13, "Permission denied", str(path))
-            return real_open(path, *a, **k)
-        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("cannot be read", out, "the stop does not name the suite read")
-        self.assertIn("test_reads_guide.py", out, "the stop does not name the suite")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_the_merge_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("merge-base",), "the merge base cannot be read")
-
-    def test_the_changed_paths_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("diff",) and "-z" in a, "the paths of main or of the batch cannot be read")
-
-    def test_the_commit_count_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("rev-list", "--count"), "the paths of main or of the batch cannot be read")
-
-    def test_the_worktree_head_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a == ("rev-parse", "HEAD"), "the worktree's HEAD cannot be read")
-
-    def test_the_trees_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        def empty_main_commit():  # main moves by a commit that changes no path, so the proof reads the trees of its commits
-            o = self.other
-            sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-            sh(o, "git", "commit", "-q", "--allow-empty", "-m", "main: an empty commit"); sh(o, "git", "push", "-q", "origin", "main")
-        self.scoped()
-        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("log", "--format=%T"), "the trees of main's commits since the merge base cannot be read",
-                                             move=empty_main_commit)
-
-    def test_the_proof_that_cannot_start_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        real = merge.sh
-        def scope_cannot_start(args, *a, **k):
-            if claimed and merge.CI_SCOPE in args:  # the scope script the proof runs cannot start
-                raise OSError(2, "No such file or directory", merge.CI_SCOPE)
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", scope_cannot_start), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("the proof could not run", out, "the stop does not name the proof")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+    def test_a_merge_tree_after_the_claim_push_that_cannot_run_stops_unknown_and_keeps_the_claim(self):
+        """Re-point of the base reads the small-move proof made after its claim: a merge of the base that fails, the merge base, the worktree
+        HEAD, the trees of main's commits. The per-lane merge reads the head against main's tip with merge-tree after the claim, so each way
+        that read can fail is one subtest: the stop is unknown, the claim stays, and nothing is merged."""
+        faults = (("exit 128", (128, "fatal: unreadable")),
+                  ("exit 1 with no CONFLICT line", (1, "")),  # a failed merge that names no conflict is unknown, not a refusal (the old merge-that-fails case)
+                  ("OSError", OSError(5, "Input/output error")),
+                  ("timeout", subprocess.TimeoutExpired(["git", "merge-tree"], 30)),
+                  ("any other error, RuntimeError", RuntimeError("boom")))  # the old any-error-after-the-push case, which the wait used to carry
+        for name, fault in faults:
+            with self.subTest(read=name):
+                self.setUp()
+                self.scoped()
+                self.on("main", {"docs/guide.md": "# Guide\n"})  # main moved: the head lacks its tip, so the merge is read against it
+                claimed = []
+                self.host.on_claim = lambda: claimed.append(self.head())
+                self.merge_tree_faults(fault, after_claim=True)
+                with tempfiles_in_run_folder():
+                    rc, out = self.run_merge("7", "--confirm")
+                assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+                self.assertNotIn("Traceback", out)
+                self.assertEqual(self.worktrees(), 1, "a worktree was left after the stop")
+                self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_a_real_conflict_with_the_base_is_still_a_refusal(self):
-        """Main and the batch both change the records page, which the shared-path check leaves out, so git conflicts. A refusal that names the merge, never unknown."""
+        """Main and the batch both change the records page. Re-point of the small-move call: the per-lane read is merge-tree of the head
+        against main's tip, and it names the conflicted page. A conflict is a result, never unknown."""
         repo, _ = self.batch_repo()
         page = os.path.join(*merge.RECORDS_PAGE.split("/"))
         sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, page), "main\n")
@@ -2112,11 +1783,105 @@ class SmallBaseMove(ScopedRepo, Env):
         sh(repo, "git", "checkout", "-q", "n"); put(os.path.join(repo, page), "batch\n")
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "batch page")
         n_head = sh(repo, "git", "rev-parse", "HEAD")
-        with tempfiles_in_run_folder():
-            ok, why = merge.small_base_move(repo, "main", n_head)
-        self.assertFalse(ok, why)
-        self.assertNotIsInstance(why, merge.UnreadText, why)
-        self.assertIn("does not merge cleanly", why)
+        state, _, files = merge.merge_tree(repo, "main", n_head)
+        self.assertEqual(state, "conflict", (state, files))
+        self.assertIn(merge.RECORDS_PAGE, files)
+
+class PerLaneMerge(Env):
+    """Per-lane merge (rule M3): a head that is green on its own base and merges cleanly with main's tip merges. No small-move suite run,
+    and no CI wait under the lock: confirm merges only a head that is already green. Each case names its cause in its first assert."""
+
+    FIRST = "---\nid: D-001\nslug: first\ntitle: First\n---\nbody\n"  # the seed's docs/decisions/first.md
+
+    def push_on(self, branch, text, msg):
+        """Commit `text` to docs/decisions/first.md on `branch` from the second clone, and push it."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        put(os.path.join(self.other, "docs/decisions/first.md"), text)
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", msg)
+        sh(self.other, "git", "push", "-q", "origin", branch)
+
+    def feat_edits_the_title(self):
+        self.push_on("feat", self.FIRST.replace("title: First", "title: Feat"), "feat: title")
+
+    def main_edits_the_body(self):
+        self.push_on("main", self.FIRST.replace("body\n", "body on main\n"), "main: body")
+
+    def test_a_green_head_behind_main_by_a_clean_merge_of_a_shared_path_merges_with_no_wait(self):
+        put_base_config(self, complete_config())  # first: head_takes_base then brings the config into feat, which the head edit builds on
+        self.feat_edits_the_title()  # the head changes first.md's title
+        self.main_edits_the_body()  # main changes first.md's body: a shared path, two hunks, a clean merge
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merged as", out)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+
+    def test_a_green_head_behind_main_by_a_move_in_other_paths_merges_with_no_wait(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so no defaults notice precedes the stop line
+        self.main_moves()  # main gains elsewhere.txt, a path no lane touches
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merged as", out)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+
+    def test_a_conflicting_head_is_refused_and_nothing_is_claimed_or_merged(self):
+        self.feat_edits_the_title()
+        self.push_on("main", self.FIRST.replace("title: First", "title: Main"), "main: title")  # the same line: the head will not merge
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("merged as", out)
+        self.assertEqual(self.refs(), before)  # no claim push, no merge
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_a_head_that_is_not_green_is_refused_before_any_wait_and_nothing_is_claimed(self):
+        self.host.state = "pending: checks: running"  # the head's checks have not reported: confirm refuses it, with no wait
+        self.host.checks = (None, "a required check is pending")
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.waits, [], "the head was waited on under the lock: %s" % (self.host.waits,))
+        self.assertEqual(self.refs(), before)  # no claim push
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_batch_build_is_an_unknown_flag(self):
+        rc, out, err = self.run_args("--batch-build", "x", "7")
+        self.assertIn("unrecognized arguments", err, "--batch-build is still accepted as a flag: rc %s\n%s%s" % (rc, out, err))
+        self.assertIn("--batch-build", err)
+
+    def test_batch_drop_is_an_unknown_flag(self):
+        rc, out, err = self.run_args("--batch-drop", "x", "7")
+        self.assertIn("unrecognized arguments", err, "--batch-drop is still accepted as a flag: rc %s\n%s%s" % (rc, out, err))
+        self.assertIn("--batch-drop", err)
+
+    def test_a_draft_with_a_red_head_is_not_marked_ready(self):
+        self.host.draft = True
+        self.host.state = "red: checks: fail"  # a head that will not merge never goes ready
+        self.host.checks = (False, "a check is red: checks: fail")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(self.host.readies, [], "a draft with a red head was marked ready: %s" % out)
+
+    def test_a_draft_that_will_not_merge_is_not_marked_ready(self):
+        self.feat_edits_the_title()
+        self.push_on("main", self.FIRST.replace("title: First", "title: Main"), "main: title")  # a conflict: the head will not merge
+        self.host.draft = True
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(self.host.readies, [], "a draft that will not merge was marked ready: %s" % out)
+
+    def test_confirm_holds_no_lock_across_a_ci_wait(self):
+        """No check wait runs while the merge lock is on origin. A wait under the lock holds the base for the whole check run, which the
+        lock's TTL does not cover (decision: the per-lane merge, rule M3). Each wait is checked against the lock ref at its call."""
+        held = []
+        real_wait = self.host.wait_checks
+        def watch(n, sha, d, prior=None):
+            if self.lock_ref():
+                held.append(sha)
+            return real_wait(n, sha, d, prior)
+        self.host.wait_checks = watch
+        rc, out = self.run_merge("7", "--confirm")  # a green head with a pending record: the claim is pushed, then the merge
+        self.assertEqual(held, [], "a check wait ran while the merge lock was held: %s" % held)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+        self.assertEqual(rc, 0, out)
 
 class CutBranch(Env):
     def local_branch(self, extra):
@@ -2260,21 +2025,12 @@ class CutBranchTree(Env):
         self.assertFalse(remove.called, f"the sweep removed a tree its own lock rule keeps; out: {out!r}")
         self.assertKept(out, r"feat kept here: .*locked: claude agent agent-x")
 
-# ------------------------------------------------------------------ the lanes of a batch
-# One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
-LANE_KEPT = "merge: lane origin/{b}: kept: {why}"
-LANE_FAILED = "merge: lane origin/{b}: not deleted: "  # then the last line of git's reply, as cut_branch prints it
-WHY = {"open": "it has an open PR.", "keep": "it is in merge.keepBranches.", "unproven": "its tip is not in the merge commit.",
-       "unread": "the open PRs could not be read."}
+# ------------------------------------------------------------------ the branches a merge keeps
 HELD = {"batch-map", "map-format-version", "map-skill-move", "claude-p-fetch-key"}  # the branches the repo's own config keeps
-# The new lines, pinned by their words. The builder picks the rest of each line.
-LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one line when the origin heads cannot be read
-LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
-LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
 def lane_batch(env, *names):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
-    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line."""
+    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips."""
     o, tips = env.other, {}
     for n in names:
         sh(o, "git", "fetch", "-q", "origin")
@@ -2289,23 +2045,6 @@ def lane_batch(env, *names):
     env.tips = tips
     return tips
 
-def lane_lines(out, b):
-    """Every line that names lane origin/b with a deleted outcome."""
-    return [l for l in out.splitlines() if f"origin/{b}" in l and "deleted" in l and "not deleted" not in l]
-
-def lane_deleted_line(test, out, b):
-    """Finding 4: the one line for a deleted lane names the lane's branch and its 9-character tip. -> that line."""
-    lines = lane_lines(out, b)
-    test.assertEqual(len(lines), 1, out)
-    test.assertIn(test.tips[b][:9], lines[0], "the deleted line of %s must name its tip %s" % (b, test.tips[b][:9]))
-    return lines[0]
-
-def kept_line(test, out, b):
-    """The one kept line of lane origin/b. -> that line."""
-    lines = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}: kept:")]
-    test.assertEqual(len(lines), 1, out)
-    return lines[0]
-
 def raw_tab_strings(source):
     """Source scan through tokenize. -> (line, text) of each string token that holds a raw TAB character. Tokenize reads a string
     whole, so a '#' or a quote inside a string, and a string over several lines, are never taken for code or for a comment."""
@@ -2314,38 +2053,8 @@ def raw_tab_strings(source):
             if tok.type in kinds and "\t" in tok.string]
 
 class LaneHost(FakeHost):
-    """FakeHost plus the open-PR read. style: how the merge lands, merge (a merge commit), squash or rebase.
-    unreadable: stop (raises Stop), none (returns None) or error (raises ValueError). on_merged runs once the merge is on origin.
-    open: {head name: (head sha, PR base)} of the open pull requests, the shape Host.open_heads returns.
-    A PR at the lane tip is the lane's own only when its base is the batch's base.
-    prs: raw rows [(head name, head sha, PR base), ...], one per open PR, in the order GitHub lists them. When set, open_heads
-    runs the real Host.open_heads over these rows, so a case does not pin the shape that read returns."""
-    style, open, unreadable, on_merged, prs = "merge", {}, None, None, None
-
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        self.open_calls = 0
-
-    def open_heads(self):
-        self.open_calls += 1
-        if self.unreadable == "stop":
-            raise merge.Stop("gh pr list failed: HTTP 502")
-        if self.unreadable == "none":
-            return None
-        if self.unreadable == "error":
-            raise ValueError("not json")
-        if self.prs is not None:
-            host = merge.Host()
-            items = [REST.list_item(100 + i, s, h, b) for i, (h, s, b) in enumerate(self.prs)]
-
-            def gh(args, cwd=None):
-                assert args[:1] == ["api"], f"unexpected gh call: {args}"
-                method, path, params, flags, jq = REST.parse(args[1:])
-                assert method == "GET" and re.fullmatch(r"repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/pulls", path), (method, path)
-                return 0, REST.listing(items, None, params, flags, jq, 100)
-            host.gh = gh
-            return host.open_heads()
-        return dict(self.open)
+    """FakeHost that lands the merge as `style` says: merge (a merge commit), squash or rebase. on_merged runs once the merge is on origin."""
+    style, on_merged = "merge", None
 
     def merge(self, n, method, sha):
         if self.style == "merge":
@@ -2368,9 +2077,8 @@ class LaneHost(FakeHost):
         return got
 
 class CutLanes(Env):
-    """After a merge, the lane branches the batch took in are deleted on origin. Driven end to end through merge.main,
-    so the split of work inside cut_lanes stays the builder's. Each keep case has a lane in the same batch that must go,
-    so a tool that deletes nothing fails it."""
+    """After a merge, the PR's own branch is cut and the batch's lane branches stay on origin. Driven end to end through merge.main,
+    so each case reads what the merge leaves on origin."""
     def setUp(self):
         super().setUp()
         self.host = LaneHost(self.co, self.other)
@@ -2378,78 +2086,18 @@ class CutLanes(Env):
     def go(self):
         return self.run_merge("7", "--confirm")
 
-    @contextlib.contextmanager
-    def spy(self, after=None):
-        """Every program merge.py runs through merge.sh, as arg lists. after(args, result) runs after each real call."""
-        real, calls = merge.sh, []
-        def wrapped(args, *a, **k):
-            r = real(args, *a, **k)
-            calls.append(list(args))
-            if after:
-                after(args, r)
-            return r
-        with unittest.mock.patch.object(merge, "sh", wrapped):
-            yield calls
-
-    def push_to(self, branch):
-        """A rival pushes one more commit to `branch`. -> its new tip."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
-        put(os.path.join(o, "rival.txt"), "pushed after the batch\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", branch)
-        return sh(o, "git", "rev-parse", "HEAD")
-
-    def assert_deleted(self, out, *names):
-        for b in names:
-            lane_deleted_line(self, out, b)
-            self.assertEqual(self.head(b), "", f"{b} is still on origin")
-
-    def assert_kept(self, out, b, why):
-        self.assertIn(LANE_KEPT.format(b=b, why=WHY[why]), out)
-        self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-
-    def assert_kept_line(self, out, b):
-        """The lane is kept, with exactly one kept line for it and no deleted line. The reason text is not pinned."""
-        kept = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}: kept:")]
-        self.assertEqual(len(kept), 1, out)
-        self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        self.assertEqual(lane_lines(out, b), [], out)
-
     def assert_merged(self):
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
 
-    def assert_moved_line(self, out, tip):
-        """Ruling 2: no origin head sits at this lane tip. One line names the tip (its first 9 characters) and says moved or gone."""
-        lines = [l for l in out.splitlines() if tip[:9] in l]
-        self.assertEqual(len(lines), 1, out)
-        self.assertTrue(any(w in lines[0] for w in LANE_MOVED), lines[0])
-
-    def assert_one_lane_line(self, out, words=None):
-        """Rulings 2 and 3: the whole cleanup prints one line, and when `words` is given that line holds one of them."""
-        lines = [l for l in out.splitlines() if "lane" in l]
-        self.assertEqual(len(lines), 1, out)
-        if words:
-            self.assertTrue(any(w in lines[0] for w in words), lines[0])
-        self.assertNotIn("Traceback", out)
-
-    def test_two_lanes_in_the_batch_are_deleted_after_the_merge(self):
-        tips = lane_batch(self, "agent/lane1", "lane2")
-        with self.spy() as calls:
-            rc, out = self.go()
+    def test_a_lane_whose_tip_the_pr_head_merged_is_kept_and_only_the_pr_branch_is_cut(self):
+        # The ruling (Nov 12 2026, per-lane merge): the cleanup deletes the PR's own branch only. A branch the PR head merged under its own name is
+        # another branch, so it stays on origin, whatever its tip.
+        lane_batch(self, "agent/lane1", "lane2")
+        rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_deleted(out, "agent/lane1", "lane2")
-        self.assertEqual(self.host.open_calls, 1)
-        self.assertEqual(self.head("feat"), "")  # the PR's own branch is cut_branch's, and it prints its own line
-        self.assertNotIn("merge: lane origin/feat", out)
-        self.assertNotIn("not deleted", out)
-        self.assertNotIn("keepBranches", out)  # a config without the field is no notice
-        self.assertNotEqual(self.head("main"), "")
-        for b, tip in tips.items():  # the delete is leased to the tip the batch took in
-            want = [f"--force-with-lease=refs/heads/{b}:{tip}", f":refs/heads/{b}"]
-            self.assertTrue(any("push" in c and "origin" in c and all(w in c for w in want) for c in calls), f"no leased delete push for {b}")
-        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.head("feat"), "", "the PR's own branch is still on origin: %s" % out)  # scope first: the PR's own branch goes
+        self.assertNotEqual(self.head("agent/lane1"), "", "agent/lane1, a branch the PR head merged, was deleted: %s" % out)
+        self.assertNotEqual(self.head("lane2"), "", "lane2, a branch the PR head merged, was deleted: %s" % out)
 
     def merge_of(self, lane):
         """The batch's newest merge commit for `lane`, on the other clone's feat."""
@@ -2488,14 +2136,6 @@ class CutLanes(Env):
         self.assertEqual(len(blocked), 1, out)
         self.assertIn("revert", blocked[0])
 
-    def test_a_lane_reverted_then_reapplied_is_deleted(self):
-        lane_batch(self, "lane1", "lane2")
-        rev = self.revert_on_batch(self.merge_of("lane1"))
-        self.revert_on_batch(rev, merge=False)  # revert the revert: the lane is live again
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2")
-
     def test_a_lane_reverted_then_merged_again_at_a_new_tip_is_refused(self):
         lane_batch(self, "lane1", "lane2")
         self.revert_on_batch(self.merge_of("lane1"))
@@ -2510,336 +2150,6 @@ class CutLanes(Env):
         self.tips["lane1"] = new_tip
         rc, out = self.go()  # the new merge brings only the fix: the reverted lane commit stays undone, so main would lose its file
         self.assert_refused_drop(rc, out, self.head("feat"))
-
-    def test_a_lane_pushed_to_after_the_merge_is_kept(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        moved = []
-        self.host.on_merged = lambda: moved.append(self.push_to("lane2"))
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1")
-        self.assertEqual(self.head("lane2"), moved[0])
-        self.assertEqual(lane_lines(out, "lane2"), [], out)
-        self.assert_moved_line(out, tips["lane2"])  # ruling 2: the tip has no origin head now, so one line says so
-
-    def test_a_lane_deleted_on_origin_after_the_merge_gets_one_line(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.on_merged = lambda: sh(self.other, "git", "push", "-q", "origin", "--delete", "lane2")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1")
-        self.assertEqual(self.head("lane2"), "")
-        self.assert_moved_line(out, tips["lane2"])  # ruling 2: gone counts as no head at the tip
-
-    def test_a_lane_that_moves_between_the_read_and_the_delete_is_kept(self):
-        lane_batch(self, "lane1", "lane2")
-        moved = []
-        def rival(args, result):  # the first read of the heads that lists lane2
-            if "ls-remote" in args and "refs/heads/lane2" in result[1] and not moved:
-                moved.append(self.push_to("lane2"))
-        with self.spy(rival):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(moved, "no read of the origin heads listed lane2")
-        self.assert_deleted(out, "lane1")
-        self.assertEqual(self.head("lane2"), moved[0])
-        self.assertEqual(lane_lines(out, "lane2"), [], out)
-
-    def test_a_lane_with_an_open_pr_at_its_tip_is_deleted(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup): GitHub marks a lane's PR merged 1-2 s after the batch, so the read can see it open at the tip.
-        # That PR's base is the batch's base, so it is the lane's own PR, and the lane is deleted.
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.open = {"lane1": (tips["lane1"], "main")}
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2")
-        self.assertNotIn(WHY["open"], out)
-
-    def test_a_lane_with_an_open_pr_at_a_newer_sha_is_kept(self):
-        # The control: this passes on the old code, which blocks on any open PR. A fix that ignores the sha fails it.
-        lane_batch(self, "lane1", "lane2")
-        self.host.open = {"lane1": (self.head("main"), "main")}  # the PR reports a commit that is not the lane tip
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane2")
-        self.assert_kept(out, "lane1", "open")
-
-    def test_a_backport_pr_at_the_lane_tip_keeps_the_lane(self):
-        # The open PR at the tip has another base (a backport to release/1.0), so it is not the lane's own, and the lane is kept.
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.open = {"lane1": (tips["lane1"], "release/1.0")}
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_kept_line(out, "lane1")
-        self.assert_deleted(out, "lane2")
-
-    def test_a_lane_that_is_the_base_of_an_open_pr_is_kept(self):
-        # A stacked PR (head stack, base lane1) is open, so lane1 stays. The stack's head is not lane1's tip, so this is not lane1's own PR.
-        lane_batch(self, "lane1", "lane2")
-        self.host.open = {"stack": (self.head("main"), "lane1")}
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_kept_line(out, "lane1")
-        self.assert_deleted(out, "lane2")
-
-    def test_a_full_stack_of_two_is_deleted_in_full(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup): lane2's open PR sits at its tip with base lane1, a lane of this batch, so it is done.
-        # lane1's only PR-base reference comes from that lane, so nothing outside the batch keeps it. Both lanes go.
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1")]
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2")
-        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
-
-    def test_a_partial_stack_keeps_its_base_and_names_the_stacked_branch(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup): stack-top is an open PR outside the batch, based on lane1, so lane1 stays. Its kept line names stack-top.
-        # lane2 is a lane of the batch with no PR, so it must still go: a cut that deletes nothing fails here.
-        lane_batch(self, "lane1", "lane2")
-        self.host.prs = [("stack-top", self.head("main"), "lane1")]
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertIn("stack-top", kept_line(self, out, "lane1"))
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.assert_deleted(out, "lane2")
-
-    def test_a_three_deep_full_stack_is_deleted_in_full(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup): each lane's open PR sits at its tip, based on the lane below it or on the batch's base.
-        tips = lane_batch(self, "lane1", "lane2", "lane3")
-        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1"), ("lane3", tips["lane3"], "lane2")]
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2", "lane3")
-        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
-
-    def test_a_backport_pr_beside_the_lane_own_pr_keeps_the_lane(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup): lane1 has its own PR to main at its tip, and a second open PR at the same tip to release/1.0. The second base
-        # is neither the batch's base nor a batch lane, so lane1 stays. Passes on the old code (a head with two PRs is never its own).
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane1", tips["lane1"], "release/1.0")]
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_kept_line(out, "lane1")
-        self.assert_deleted(out, "lane2")
-
-    def test_a_stacked_pr_whose_head_is_past_the_lane_tip_keeps_its_base(self):
-        # Control, passes on the old code. A PR counts as inside the batch only when its head sits at a lane tip. lane2's head is
-        # past its tip here, so that PR is outside, and lane1 stays as the base of an open PR. A cut that counts it as inside
-        # deletes a live base. The kept line's wording is not pinned here.
-        lane_batch(self, "lane1", "lane2")
-        self.host.prs = [("lane2", self.head("main"), "lane1")]
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        kept = [l for l in out.splitlines() if l.startswith("merge: lane origin/lane1: kept:")]
-        self.assertEqual(len(kept), 1, out)
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-
-    def stack_of_three(self):
-        """Lanes lane1 <- lane2 <- lane3 in one batch, each open at its tip, each PR based on the lane below it. -> tips."""
-        tips = lane_batch(self, "lane1", "lane2", "lane3")
-        self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", tips["lane2"], "lane1"), ("lane3", tips["lane3"], "lane2")]
-        return tips
-
-    def one_lane_line_matches_state(self, out, b):
-        """One lane line for origin/b, and it says deleted exactly when no origin head is left for b. -> that line."""
-        lines = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}:")]
-        self.assertEqual(len(lines), 1, out)
-        self.assertEqual(" deleted at " in lines[0], self.head(b) == "", lines[0])
-        return lines[0]
-
-    def delete_index(self, calls, b):
-        """The position of the leased delete push of lane b among the git calls. Each lane is pushed once."""
-        hits = [i for i, c in enumerate(calls) if "push" in c and f":refs/heads/{b}" in c]
-        self.assertEqual(len(hits), 1, f"{b}: {len(hits)} delete pushes")
-        return hits[0]
-
-    def proof_fails_for(self, tip):
-        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
-        c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
-        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
-        real = git_reads._git
-        def broken(where, *args, **k):
-            if "merge-base" in args and tip in args and "origin/main" not in args:
-                return subprocess.CompletedProcess(args, 128, "", "fatal: simulated: the ancestry proof cannot run")
-            return real(where, *args, **k)
-        return unittest.mock.patch.object(git_reads, "_git", broken)
-
-    def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
-        # Fixpoint: lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
-        # lane3 gets one line that matches its state. The proof is made to fail for lane2 only.
-        tips = self.stack_of_three()
-        with self.proof_fails_for(tips["lane2"]):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertIn(LANE_PROOF_NOT_RUN, kept_line(self, out, "lane2"))
-        self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
-        kept_line(self, out, "lane1")
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.one_lane_line_matches_state(out, "lane3")
-
-    def test_a_stack_whose_middle_lane_moved_keeps_the_base_below_it_as_a_control(self):
-        # Control, passes on the old code. lane2's origin head moves after the merge, so it sits at no lane tip and is not cut.
-        # Its open PR still needs lane1, so lane1 stays. lane3 gets one line that matches its state.
-        tips = self.stack_of_three()
-        def moved():
-            sha = self.push_to("lane2")
-            self.host.prs = [("lane1", tips["lane1"], "main"), ("lane2", sha, "lane1"), ("lane3", tips["lane3"], "lane2")]
-        self.host.on_merged = moved
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        kept_line(self, out, "lane1")
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.one_lane_line_matches_state(out, "lane3")
-
-    def test_a_keepBranches_middle_lane_keeps_the_base_below_it_like_an_unproven_one(self):
-        # Control, passes on the old code. lane2 is in merge.keepBranches, so it is kept, and lane1 is kept as its base, as in the unproven case.
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["lane2"]))))
-        self.stack_of_three()
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_kept(out, "lane2", "keep")
-        kept_line(self, out, "lane1")
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.one_lane_line_matches_state(out, "lane3")
-
-    def test_a_stack_is_deleted_dependents_first(self):
-        # Delete order: a dependent is deleted before its base: lane3's delete is pushed first, then lane2's, then lane1's.
-        self.stack_of_three()
-        with self.spy() as calls:
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2", "lane3")
-        order = [self.delete_index(calls, b) for b in ("lane3", "lane2", "lane1")]
-        self.assertEqual(order, sorted(order), out)
-
-    def test_a_stack_whose_middle_lane_delete_goes_stale_keeps_the_base_below_it_and_says_why(self):
-        # Stale delete: lane2 moves after the cleanup reads the heads, so its leased delete fails with stale info.
-        # lane3, its dependent, is deleted. lane1 is kept, with a line, because lane2 is still on origin and its PR needs lane1.
-        self.stack_of_three()
-        merged, moved = [], []
-        self.host.on_merged = lambda: merged.append(True)
-        def rival(args, result):  # the first read of the heads after the merge that lists lane2: the cleanup's read
-            if merged and not moved and "ls-remote" in args and "--heads" in args and "refs/heads/lane2" in result[1]:
-                moved.append(self.push_to("lane2"))
-        with self.spy(rival):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(moved, "the cleanup never read the heads after the merge")
-        self.assertEqual(self.head("lane2"), moved[0])
-        self.assertEqual(len([l for l in out.splitlines() if LANE_FAILED.format(b="lane2") in l]), 1, out)
-        kept_line(self, out, "lane1")
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        lane_deleted_line(self, out, "lane3")
-        self.assertEqual(self.head("lane3"), "", "lane3 is still on origin")
-
-    def test_a_deleted_lane_line_names_its_nine_character_tip(self):
-        # The line that deletes a lane names its branch and the first 9 characters of its tip.
-        tips = lane_batch(self, "lane1", "lane2")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        line = lane_deleted_line(self, out, "lane1")
-        self.assertIn(tips["lane1"][:9], line)
-        self.assertEqual(len(tips["lane1"][:9]), 9)
-
-    def test_a_lane_in_keepBranches_is_kept(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["batch-map"]))))
-        lane_batch(self, "batch-map", "lane2")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane2")
-        self.assert_kept(out, "batch-map", "keep")
-
-    def unreadable(self, how):
-        """The open-PR read fails: nothing is deleted, each lane says why, and the merge still lands."""
-        lane_batch(self, "lane1", "lane2")
-        self.host.unreadable = how
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertEqual(self.host.open_calls, 1)
-        for b in ("lane1", "lane2"):
-            self.assert_kept(out, b, "unread")
-        self.assertNotIn("Traceback", out)
-
-    def test_an_open_pr_read_that_stops_deletes_nothing_and_the_merge_lands(self):
-        self.unreadable("stop")
-
-    def test_an_open_pr_read_that_returns_none_deletes_nothing_and_the_merge_lands(self):
-        self.unreadable("none")
-
-    def test_an_open_pr_read_that_raises_deletes_nothing_and_the_merge_lands(self):
-        self.unreadable("error")
-
-    def test_a_squash_merged_lane_is_not_proven_and_is_kept(self):
-        lane_batch(self, "lane1", "lane2")
-        self.host.style = "squash"  # no lane tip is in the squash commit, and no lane patch is alone in it
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        for b in ("lane1", "lane2"):
-            self.assert_kept(out, b, "unproven")
-
-    def test_a_rebase_merged_lane_is_proven_by_its_patches_and_deleted(self):
-        lane_batch(self, "lane1", "lane2")
-        self.host.style = "rebase"  # the lane commits sit on main under new ids: the tip is no ancestor, the patches are all there
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_deleted(out, "lane1", "lane2")
-
-    def test_a_delete_push_that_fails_does_not_fail_the_merge(self):
-        lane_batch(self, "agent/lane1", "lane2")
-        hook = os.path.join(self.bare, "hooks", "pre-receive")
-        put_lf(hook, '#!/bin/sh\nwhile read old new ref; do\n  if [ "$ref" = refs/heads/agent/lane1 ] && [ -z "$(echo "$new" | tr -d 0)" ]; then\n'
-                     '    echo "agent/lane1 may not be deleted" >&2; exit 1\n  fi\ndone\n')
-        os.chmod(hook, 0o755)
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertIn(LANE_FAILED.format(b="agent/lane1"), out)
-        self.assertNotEqual(self.head("agent/lane1"), "")
-        self.assert_deleted(out, "lane2")  # the failure stops no other lane
-        self.assertFalse(self.lock_ref())
-
-    def test_an_origin_heads_read_that_fails_prints_one_line_and_deletes_nothing(self):
-        # Ruling 2: the read of the origin heads fails after the merge has landed. Only the ls-remote with --heads fails.
-        lane_batch(self, "lane1", "lane2")
-        real, merged = merge.sh, []
-        def failing(args, *a, **k):
-            if merged and "ls-remote" in args and "--heads" in args:
-                return 128, "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com"
-            return real(args, *a, **k)
-        self.host.on_merged = lambda: merged.append(True)
-        with unittest.mock.patch.object(merge, "sh", failing):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        for b in ("lane1", "lane2"):
-            self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        self.assert_one_lane_line(out, LANE_HEADS_UNREAD)
-
-    def lane_tips_breaks(self, effect, fail_from=0):
-        """Rulings 2 and 3: the read of the lane tips fails before the merge. effect is the (rc, text) git returns, or an
-        exception its read raises. The merge still lands, no lane is deleted, and one line says so.
-        c110: the same read runs first for the dropped-lane check, which refuses a failed read. fail_from=1 lets that first
-        read pass, so the cleanup's own read is the one that fails."""
-        lane_batch(self, "lane1", "lane2")
-        real, n = merge.sh, [0]
-        def broken(args, *a, **k):
-            if "log" in args and any("%x01" in a for a in args):  # read_lanes' one git log: merges and reverts
-                n[0] += 1
-                if n[0] > fail_from:
-                    if isinstance(effect, BaseException):
-                        raise effect
-                    return effect
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", broken):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        for b in ("lane1", "lane2"):
-            self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        self.assert_one_lane_line(out)
 
     def unreadable_lane_log(self):
         """c110: the one git log that reads the batch's merge commits fails. -> the merge's (rc, out)."""
@@ -2898,11 +2208,12 @@ class CutLanes(Env):
     @contextlib.contextmanager
     def first_lane_log_fails(self):
         """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
-        real, n = merge.sh, [0]
+        real, n = merge.sh, {}
         def first_fails(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):
-                n[0] += 1
-                if n[0] == 1:
+                run = len(self.run_texts)  # each run's first read fails, as a run of its own would see it
+                n[run] = n.get(run, 0) + 1
+                if n[run] == 1:
                     return 128, "fatal: bad revision"
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", first_fails):
@@ -2927,90 +2238,6 @@ class CutLanes(Env):
             self.assertNotIn("owner", line, "the refusal does not name the owner as who types the flag")
             self.assertIn("reason flag", line)
 
-    def test_a_reason_flag_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
-        # c110: the cleanup's kept line is the fallback when a reason flag lifts a failed first read.
-        lane_batch(self, "lane1", "lane2")
-        self.revert_on_batch(self.merge_of("lane1"))
-        with self.first_lane_log_fails():
-            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "batch read by hand")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("dropped-lane check UNKNOWN", out)
-        self.assert_merged()
-        self.assertIn("reverted", kept_line(self, out, "lane1"))
-        self.assert_deleted(out, "lane2")
-
-    def test_a_failed_git_log_in_lane_tips_prints_one_line_and_deletes_nothing(self):
-        self.lane_tips_breaks((128, "fatal: bad revision"), fail_from=1)
-
-    def test_a_lane_tips_read_that_raises_oserror_still_lands_the_merge(self):
-        self.lane_tips_breaks(OSError("git could not start"), fail_from=1)
-
-    def test_a_lane_tips_read_that_times_out_still_lands_the_merge(self):
-        self.lane_tips_breaks(subprocess.TimeoutExpired(["git", "log"], 5), fail_from=1)
-
-    def test_a_merge_commit_that_cannot_be_read_says_the_proof_could_not_run(self):
-        # Ruling 5: the merge lands on origin, but the local repo cannot read the commit id host.merge returns.
-        lane_batch(self, "lane1", "lane2")
-        real_merge = self.host.merge
-        def unreadable(n, method, sha):
-            real_merge(n, method, sha)
-            return "f" * 40, ""
-        self.host.merge = unreadable
-        rc, out = self.go()  # the local main cannot move onto that id, so rc is not pinned here
-        self.assert_merged()
-        self.assertNotIn(WHY["unproven"], out)
-        for b in ("lane1", "lane2"):
-            self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-            kept = [l for l in out.splitlines() if l.startswith(f"merge: lane origin/{b}: kept:")]
-            self.assertEqual(len(kept), 1, out)
-            self.assertIn(LANE_PROOF_NOT_RUN, kept[0])
-        self.assertNotIn("Traceback", out)
-
-    def lane_push_raises(self, b, exc):
-        """The delete push of lane b raises. Lane b gets one line of its own, and the later lane still gets its line."""
-        lane_batch(self, "lane1", "lane2")
-        real = merge.sh
-        def broken(args, *a, **k):
-            if "push" in args and f":refs/heads/{b}" in args:
-                raise exc
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", broken):
-            rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        own = [l for l in out.splitlines() if f"origin/{b}" in l]
-        self.assertEqual(len(own), 1, out)
-        other = "lane2" if b == "lane1" else "lane1"
-        lane_deleted_line(self, out, other)
-        self.assertEqual(self.head(other), "", f"{other} is still on origin")
-        self.assertNotIn("Traceback", out)
-
-    def test_a_lane_push_that_times_out_gets_one_line_and_the_later_lane_still_goes(self):
-        self.lane_push_raises("lane1", subprocess.TimeoutExpired(["git", "push"], 5))
-
-    def test_a_lane_push_that_raises_oserror_gets_one_line_and_the_later_lane_still_goes(self):
-        self.lane_push_raises("lane1", OSError("git could not start"))
-
-    def test_a_head_at_a_commit_already_on_main_is_not_a_lane(self):
-        # The batch merged main in ("sync main"): that merge commit's second parent is a main commit. A head still at that
-        # commit is no lane, and its tip is an ancestor of the merge, so only the base check keeps it.
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "moves.txt"), "main moves\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
-        sh(o, "git", "push", "-q", "origin", "HEAD:refs/heads/stale")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
-        sh(o, "git", "push", "-q", "origin", "feat")
-        lane_batch(self, "lane2")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane2")
-        self.assertNotEqual(self.head("stale"), "")
-        self.assertNotIn("origin/stale", out)
-
     # The local side of a lane: a local branch at a lane tip, and its worktree, go with the lane when the batch took it in.
     def local_branch(self, branch, sha, tree=None):
         """A local branch at `sha`, and a worktree on it at `tree` when given. -> the worktree path, or None."""
@@ -3026,37 +2253,6 @@ class CutLanes(Env):
 
     def tree_listed(self, path):
         return tree_listed(self.co, path)
-
-    def test_a_batch_takes_its_local_lane_branches_and_clean_trees_with_it(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.on_merged = lambda: [sh(self.other, "git", "push", "-q", "origin", "--delete", n) for n in ("lane1", "lane2")]  # GitHub deleted the heads
-        tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
-        self.local_branch("worktree-agent-x", tips["lane2"])
-        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
-        self.assertTrue(self.has_local("lane-a") and self.has_local("worktree-agent-x"), "subject: both local lane branches must exist first")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertFalse(self.tree_listed(tree), f"the lane's clean worktree is still listed; out: {out!r}")
-        self.assertFalse(os.path.exists(tree), f"the lane's clean worktree folder is still there; out: {out!r}")
-        self.assertFalse(self.has_local("lane-a"), f"local lane-a was not deleted; out: {out!r}")
-        self.assertFalse(self.has_local("worktree-agent-x"), f"local worktree-agent-x was not deleted; out: {out!r}")
-
-    def test_a_lane_tree_with_uncommitted_edits_keeps_its_branch_and_says_dirty(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
-        put(os.path.join(tree, "scratch.txt"), "an uncommitted edit\n")
-        self.assertTrue(self.tree_listed(tree), "subject: the lane's worktree must exist first")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        kept = [l for l in out.splitlines() if l.startswith("merge: lane-a kept here:")]
-        self.assertEqual(len(kept), 1, f"one kept line for lane-a, got: {out!r}")
-        self.assertIn("dirty", kept[0])
-        self.assertTrue(os.path.isdir(tree), f"the dirty tree was removed; out: {out!r}")
-        self.assertTrue(self.tree_listed(tree), out)
-        self.assertTrue(self.has_local("lane-a"), f"the local branch of a kept tree was deleted; out: {out!r}")
-        self.assert_deleted(out, "lane1", "lane2")  # control: the lanes on origin still go
 
     def test_a_dropped_lane_keeps_its_local_branch_and_clean_tree(self):
         tips = lane_batch(self, "lane1", "lane2")
@@ -3076,42 +2272,6 @@ class CutLanes(Env):
         self.assertTrue(self.has_local(branch), "subject: the local lane branch must exist first")
         return tree
 
-    def test_a_local_lane_in_keepBranches_keeps_its_branch_and_clean_tree(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], keepBranches=["lane1"]))))
-        tips = lane_batch(self, "lane1", "lane2")
-        tree = self.kept_local_lane("lane1", tips["lane1"])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_kept(out, "lane1", "keep")  # the remote lane is kept by its name
-        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
-        self.assertTrue(self.has_local("lane1"), f"the local branch of a keepBranches lane was deleted; out: {out!r}")
-        self.assert_deleted(out, "lane2")  # control: the other lane still goes
-
-    def test_a_local_branch_of_a_lane_kept_for_an_open_pr_keeps_its_clean_tree(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.prs = [("stack-top", self.head("main"), "lane1")]  # a partial stack: its base is lane1
-        tree = self.kept_local_lane("lane-a", tips["lane1"])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_kept_line(out, "lane1")  # the remote lane is kept for its open PR
-        self.assertTrue(self.tree_listed(tree), f"the kept lane's clean worktree is no longer listed; out: {out!r}")
-        self.assertTrue(self.has_local("lane-a"), f"the local branch of an open-PR base was deleted; out: {out!r}")
-        self.assert_deleted(out, "lane2")  # control: the other lane still goes
-
-    def test_a_local_lane_branch_is_untouched_when_the_open_pr_read_fails(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.unreadable = "error"  # the open-PR read raises
-        tree = self.kept_local_lane("lane-a", tips["lane1"])
-        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to keep")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
-        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
-        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the open-PR read failed; out: {out!r}")
-
     def test_a_local_lane_branch_is_untouched_when_the_origin_heads_read_fails(self):
         tips = lane_batch(self, "lane1", "lane2")
         tree = self.kept_local_lane("lane-a", tips["lane1"])
@@ -3130,32 +2290,18 @@ class CutLanes(Env):
         self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
         self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the origin heads read failed; out: {out!r}")
 
-    def test_a_local_branch_at_no_lane_tip_is_untouched(self):
-        lane_batch(self, "lane1", "lane2")
-        base = sh(self.co, "git", "rev-parse", "origin/main")  # the base is no lane tip; it is an ancestor of the merge
-        self.local_branch("stray", base)
-        self.assertTrue(self.has_local("stray"), "subject: the stray local branch must exist first")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_deleted(out, "lane1", "lane2")
-        self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
-        self.assertNotIn("stray", out)
-
-    def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_prs(self):
+    def test_deleteBranch_false_keeps_every_lane(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 0)
         self.assertNotIn("merge: lane", out)
         for b in ("lane1", "lane2", "feat"):
             self.assertNotEqual(self.head(b), "")
 
-    def test_a_batch_without_lanes_reads_no_open_prs_and_prints_no_lane_line(self):
+    def test_a_batch_without_lanes_prints_no_lane_line(self):
         rc, out = self.go()  # feat holds no merge commit
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 0)
         self.assertNotIn("merge: lane", out)
 
     def keepBranches_config(self, value):
@@ -3208,13 +2354,14 @@ class CutLanes(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("is not valid", out)
 
-    def test_the_preview_says_the_merge_also_deletes_the_lane_branches(self):
-        # Ruling 6: the then-line of the preview names the lane branches, when deleteBranch is on.
+    def test_the_preview_says_the_merge_deletes_the_pr_branch_and_names_no_lane(self):
+        # The then-line of the preview names the PR's own branch when deleteBranch is on, and no lane: batch lanes are not cut.
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
         move = [l for l in out.splitlines() if "move local main" in l]
         self.assertEqual(len(move), 1, out)
-        self.assertIn("lane", move[0])
+        self.assertIn("delete the branch", move[0])
+        self.assertNotIn("lane", move[0])
 
     def test_the_preview_without_deleteBranch_names_no_lane_branches(self):  # control
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
@@ -3231,30 +2378,20 @@ class CutLanes(Env):
         self.assertLessEqual(HELD, set(kept))
 
 class CutLanesHome(unittest.TestCase):
-    """The names the lane cleanup is built on. One home each: cut_lanes beside cut_branch and called from confirm, the proof
-    from guard's own branch_cherry_empty, the open-PR read on Host."""
+    """The names the merge's reads and config are built on. One home each: the keepBranches field, the ls-remote tab split,
+    and the rule that merge.py copies no guard function."""
     def tree(self):
         with open(merge.__file__, encoding="utf-8") as f:
             return ast.parse(f.read())
 
-    def test_cut_lanes_is_defined_and_confirm_calls_it(self):
-        self.assertTrue(callable(getattr(merge, "cut_lanes", None)), "merge.py must define cut_lanes(root, lanes, commit)")
-        self.assertEqual(list(inspect.signature(merge.cut_lanes).parameters)[:3], ["root", "lanes", "commit"])
-        confirm = next(n for n in ast.walk(self.tree()) if isinstance(n, ast.FunctionDef) and n.name == "confirm")
-        self.assertTrue([n for n in ast.walk(confirm) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "cut_lanes"],
-                        "confirm must call cut_lanes where deleteBranch is honoured")
-
-    def test_the_open_pr_read_and_the_config_field_exist(self):
-        self.assertTrue(callable(getattr(merge.Host, "open_heads", None)), "merge.Host must define open_heads()")
+    def test_the_config_field_exists(self):
         self.assertIn("keepBranches", merge.MERGE_FIELDS)
 
-    def test_the_proof_calls_guards_cherry_test_and_holds_no_copy(self):
+    def test_the_cherry_test_is_not_copied_into_merge_py(self):
         tree = self.tree()
         copies = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "branch_cherry_empty"
                   or isinstance(n, ast.Constant) and n.value == "cherry"]
         self.assertEqual(copies, [], "merge.py copies guard.branch_cherry_empty at line %s. Call it." % copies)
-        uses = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "branch_cherry_empty"]
-        self.assertTrue(uses, "cut_lanes must call guard.branch_cherry_empty")
 
     def test_the_ls_remote_split_is_an_escape_not_a_raw_tab(self):
         # The ls-remote parse splits on the escape \t. A raw TAB in a string is invisible in review and breaks on a re-save.
@@ -3325,19 +2462,8 @@ class AfterPush(Env):
         for name, hook, check in cases:
             with self.subTest(gone=name):
                 self.setUp()
-                self.host.on_wait = hook
+                self.host.on_claim = hook
                 check(*self.run_merge("7", "--confirm"))
-
-    def test_any_error_after_the_push_keeps_the_claim_and_says_unknown(self):
-        claimed = []
-        def boom():
-            claimed.append(self.head())  # the claim is on origin when the wait starts
-            raise RuntimeError("boom")
-        self.host.on_wait = boom
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertNotIn("Traceback", out)
-        self.assertEqual(self.worktrees(), 1)
 
     def test_an_error_in_the_merge_call_reverts_the_claim(self):
         def boom(*a):
@@ -3347,7 +2473,7 @@ class AfterPush(Env):
 
     def test_the_tree_is_locked_while_the_run_waits(self):
         seen = []
-        self.host.on_wait = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
+        self.host.on_claim = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("locked", seen[0])
@@ -3360,11 +2486,11 @@ def route_of(args):
 def assert_unknown_stop_keeps_the_claim(test, rc, out, claim):
     """A read that could not run after the claim push: the claim stays, nothing is pushed after it, and the one stop says the result is unknown and to rerun.
     Only a proven refusal reverts a claim (decision standing-merge-grant)."""
+    test.assertEqual(rc, 1, out)  # the scope first: a run that merged or refused is named here, before the branch reads below, which fail once it is deleted
     test.assertIsNotNone(claim, "the claim was never pushed, so this case proves nothing about it:\n" + out)
     test.assertNotIn("reverted on", out, "a claim was reverted for a read that could not run")
     test.assertNotIn("id: pending", test.show("feat", "docs/decisions/second.md"), "the claim's record is pending on feat: the claim was reverted")
     test.assertEqual(test.head(), claim, "feat moved after the claim push: something pushed or reverted")
-    test.assertEqual(rc, 1, out)
     test.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
     test.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
     test.assertFalse(test.lock_ref(), "the merge lock was left on origin")
@@ -3381,14 +2507,18 @@ class ClaimSurvivesUnknown(Env):
     """A read that could not run after the claim push keeps the claim, on the fake host. Only a proven refusal reverts it (standing-merge-grant)."""
 
     def unknown_at_the_claim_wait(self, error):
-        """The claim's wait raises `error`: the claim is pushed, then the read after it is unknown. -> (rc, out, the claim's sha)."""
+        """The stamp check that reads the base after the claim push raises `error`: the claim is pushed, then the read after it is unknown.
+        The check is a record check, which the per-lane merge keeps, so the fault holds on the old and the new code alike. -> (rc, out, the claim's sha)."""
         claimed = []
-        def unknown():
-            claimed.append(self.head())
-            raise error
-        self.host.on_wait = unknown
-        rc, out = self.run_merge("7", "--confirm")
-        self.host.on_wait = None  # the rerun waits on its own terms, not on this read
+        self.host.on_claim = lambda: claimed.append(self.head())
+        real = merge.node_stamp
+        def check_raises(wt, cfgrel, mode, base):
+            if claimed and mode == "check":
+                raise error
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_raises), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        self.host.on_claim = None  # the rerun runs on its own terms, not on this read
         return rc, out, (claimed[0] if claimed else None)
 
     def merge_main_onto_feat(self):
@@ -3400,7 +2530,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_an_unknown_base_check_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real = merge.node_stamp
         def check_unknown(wt, cfgrel, mode, base):
             if claimed and mode == "check":  # the base check prove() makes after the claim push
@@ -3411,20 +2541,10 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_failed_pulls_read_before_the_put_stops_unknown_and_keeps_the_claim(self):
-        claimed = []
-        def read_fails_after_the_claim():
-            claimed.append(self.head())
-            self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the pre-PUT batch read, after the claim push
-        self.host.on_wait = read_fails_after_the_claim
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
     def test_an_undo_history_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         """Confirm runs no Retire check: CI's verdict is the gate. The history read that runs again after the claim push is the silent-undo check's."""
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_undo = merge.undo_check
         def history_unreadable(*a, **k):
             if claimed:  # prove() reads the history again after the claim push
@@ -3438,7 +2558,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_holds_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_ancestor = merge.ancestor
         def ancestor_unknown(cwd, tip, base):
             if claimed and base == claimed[0]:  # holds_base asks whether the claim holds the base tip: git cannot tell
@@ -3458,7 +2578,7 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)
-        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [claim], "the rerun waited on a head other than its claim: it pushed")
+        self.assertEqual(self.host.waits[before:], [], "the rerun waited under the lock on its own claim: a claim-only commit is a green head")
         self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
 
     def test_a_rerun_over_a_merge_commit_on_its_claim_claims_nothing_and_pushes_nothing(self):
@@ -3470,17 +2590,21 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out, "the rerun did not say it claims nothing")
-        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [merged], "the rerun waited on a head other than its merge commit: it pushed")
+        self.assertEqual(self.host.waits[before:], [], "the rerun waited under the lock on its merge commit: it has no wait to make")
         self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
 
-    def test_an_unknown_read_in_the_wait_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+    def test_an_unknown_read_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+        """Re-point of the unknown read in the rerun's wait (the wait is removed): the rerun's base check gives no answer, which is unknown."""
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
         merged = self.merge_main_onto_feat()
-        def read_fails(n, sha, deadline, prior=None):
-            raise merge.Stop("reading the checks of #7 failed: boom")
-        self.host.wait_checks = read_fails
-        rc, out = self.run_merge("7", "--confirm")
+        real = merge.node_stamp
+        def check_unknown(wt, cfgrel, mode, base):
+            if mode == "check":
+                return 0, "UNKNOWN: the stamp could not read origin/main"
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
         self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
@@ -3492,15 +2616,16 @@ class ClaimSurvivesUnknown(Env):
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
         merged = self.merge_main_onto_feat()
-        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the one read of the head's checks (head_state), red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("checks: fail", out, "the stop does not print the red check")
-        self.assertIn("stays on feat", out, "the stop does not say the claim stays on feat")
-        self.assertIn(claim[:9], out, "the stop does not name the claim")
-        self.assertIn(merged[:9], out, "the stop does not name the merge commit the claim stays under")
+        self.assertIn("nothing was claimed or pushed", out, "the red head was not refused before the claim")  # per-lane: the refusal comes before the
+        # claim's "stays on" line, so that sentence is not printed on this path (reported as a lost sentence)
         self.assertNotIn("reverted", out, "a revert of the head was made: the head is a merge commit, not the claim")
         self.assertEqual(self.head(), merged, "feat moved: the red rerun pushed or reverted")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertIn(claim, sh(self.co, "git", "rev-list", "origin/feat").split(), "the first run's claim is no longer on feat")
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_a_base_proof_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
@@ -3509,7 +2634,7 @@ class ClaimSurvivesUnknown(Env):
         def main_moves_during_the_wait():
             claimed.append(self.head())
             self.main_moves()
-        self.host.on_wait = main_moves_during_the_wait
+        self.host.on_claim = main_moves_during_the_wait
         real_git = merge.git
         def base_unreadable(cwd, *a, input=None):
             if claimed and a == ("rev-parse", "origin/main"):
@@ -3522,7 +2647,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_base_config_listing_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def listing_unreadable(cwd, *a, input=None):
             if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
@@ -3535,7 +2660,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_base_config_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def config_unreadable(cwd, *a, input=None):
             if claimed and a == ("show", "origin/main:.github/stamp.json"):
@@ -3548,7 +2673,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_records_merge_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def merge_fails_without_a_conflict(cwd, *a, input=None):
             if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
@@ -3567,14 +2692,14 @@ class ClaimSurvivesUnknown(Env):
                 path = line[len("worktree "):] if line.startswith("worktree ") else ""
                 if path and os.path.realpath(path) != os.path.realpath(self.co):
                     shutil.rmtree(path)  # swept or cleaned: the merge tool's tree is gone before the base proof
-        self.host.on_wait = tree_swept
+        self.host.on_claim = tree_swept
         rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_an_os_error_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         def merge_fails(*a):
             raise OSError(5, "Input/output error")
         self.host.merge = merge_fails
@@ -3584,7 +2709,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_timeout_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         def merge_times_out(*a):
             raise subprocess.TimeoutExpired(["gh", "api"], 30)
         self.host.merge = merge_times_out
@@ -3594,16 +2719,16 @@ class ClaimSurvivesUnknown(Env):
 
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
-        # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
-        self.host.seq = [(True, ""), (False, "check checks is red")]
+        # Banchi #595, DEBT81: a refusal after the claim reverts it; the rerun, once the merge goes through, must claim again.
+        self.host.refuse = "the merge was refused after the claim push"  # per-lane: no check is read after the claim, so the refusal is the revert
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
         self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.host.checks = (True, "")
+        self.host.refuse = None
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertNotIn("resumed", out)
+        self.assertNotIn("resumed", self.run_texts[0], "the rerun's claim run resumed a claim instead of claiming the number again")  # the merge run resumes its own claim
         self.assertIn("Record-claim: D-002 pushed", out)  # the same number, no branch reset
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         # the claim, its revert, and the claim again: three commits on top of the feature commit
@@ -3738,14 +2863,17 @@ class BaseAware(Env):
         self.assertFalse(getattr(self.host, "merged", False))
         self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
-    def test_6_undo_check_the_base_fetch_after_the_wait_and_stamp_check_use_the_base(self):
+    def test_6_undo_check_the_base_fetch_after_the_head_read_and_stamp_check_use_the_base(self):
+        marks = []
+        self.in_wait(lambda: marks.append(len(self.fetches)))  # the mark: the fetches made from the head's read on
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
+        self.assertTrue(marks, "the head read never ran, so no fetch is marked as after it")
         want = f"origin/{self.BASE}"
         self.assertTrue(self.undo_bases and all(b == want for b in self.undo_bases), self.undo_bases)
         checks = [b for m, b in self.modes if m == "check"]
         self.assertTrue(checks and all(b == want for b in checks), self.modes)
-        after_wait = [a for n, a in self.fetches if n >= 1]  # fetches made once the wait has run
+        after_wait = [a for _, a in self.fetches[marks[0]:]]  # fetches made once the head has been read
         self.assertTrue(any(f"+refs/heads/{self.BASE}:refs/remotes/origin/{self.BASE}" in a for a in after_wait), after_wait)
         self.assertFalse(any("+refs/heads/main:refs/remotes/origin/main" in a for a in after_wait), after_wait)
 
@@ -3782,38 +2910,6 @@ class BaseAware(Env):
         self.assertEqual(self.host.waits, [])  # stopped before the wait
         self.assertFalse(getattr(self.host, "merged", False))
         self.assertEqual(self.head(), claim)  # nothing pushed
-        self.assertNotIn("refs/heads/merge-lock/", self.refs())
-
-    def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
-        fake = self.host
-        class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
-            def __init__(h):
-                super().__init__(["checks"], minute=60, now=lambda: 0, pause=lambda s: None)
-                h.in_wait, h.passes = False, 0
-            def pr(h, n, *a, **k):
-                info = fake.pr(n)
-                if h.in_wait:
-                    h.passes += 1
-                    if h.passes > 1:
-                        info["base"] = "other-base"  # the second pass of the wait sees a new base
-                h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
-                return info
-            def required_names(h): return ["checks"]
-            def batch_running(h, n, base, head=None): return []  # no other pull request here: its gh reads are not this case's subject
-            def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
-            def runs(h, sha): return []
-            def base_state(h, base, flows): return "green", ""
-            def head_state(h, n, *a, **k): return "green"
-            def wait_checks(h, *a, **k):
-                h.in_wait = True
-                try:
-                    return super().wait_checks(*a, **k)
-                finally:
-                    h.in_wait = False
-            def merge(h, *a): return fake.merge(*a)
-        rc, out = self.run_merge("7", "--confirm", host=WaitHost())
-        self.assertEqual(rc, 1, out)
-        self.assertFalse(getattr(fake, "merged", False), out)
         self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
 class Unlock(Env):
@@ -4215,8 +3311,8 @@ try:
         finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
 
     elif method == "GET" and rel == "pulls":
-        if S.get("open_heads_fail"):
-            raise Refused(S["open_heads_fail"])
+        if S.get("open_pulls_fail"):
+            raise Refused(S["open_pulls_fail"])
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
         items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
@@ -4357,6 +3453,9 @@ try:
         if S.get("contexts") is None:
             raise Refused(api_error(404, "Branch not protected"))
         finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
+
+    elif method == "GET" and re.fullmatch(r"rules/branches/[^/]+", rel):  # any base: GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
+        answer_list(S.get("main_rules") or [], None)
 
     else:
         raise Refused(api_error(404, "Not Found"))
@@ -4748,26 +3847,27 @@ class GhHalf(Env):
         self.assertIn("commit_message", fields[0], "the dropped-lane lift is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --undo-check-unknown-ok: octopus read it"})
 
-    def test_a_silent_undo_read_after_the_wait_lifted_by_the_reason_flag_is_written_into_the_merge_commit_message(self):
-        # the first silent-undo read passes. The read in prove(), after the wait, cannot read the history, and the flag lifts it.
-        # Only that read lifts, so its line is the one the merge call must carry.
+    def test_a_silent_undo_read_the_merge_run_lifts_by_the_reason_flag_is_written_into_the_merge_commit_message(self):
+        # The claim run reads the history and stops. The merge run's first read cannot read the history, and the flag lifts it. The
+        # merge run's read after the wait is the memo, not a second read, so this first read is the one that lifts: its line is the one the
+        # merge call must carry.
         reason = "history read by hand after the wait"
-        with UnknownOverride.unreadable_after_the_claim(self):
+        with UnknownOverride.unreadable_read(self, run=1, read=1):
             rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", reason, host=self.gh_host())
         self.assertEqual(rc, 0, out)
-        self.assertIn("pushed to feat", out, "the claim moved the head, so the read after the wait scans again and is not the memo")
-        self.assertEqual(out.count(f"--undo-check-unknown-ok, reason: {reason}"), 1, "the lift is logged once, by the read after the wait")
+        self.assertIn("pushed to feat", out, "the claim run stopped at its claim")
+        # the merge run calls undo_check twice; the memo keeps the Unknown, so both calls say the lift. The commit message holds it once.
+        self.assertEqual(self.per_run_count(f"--undo-check-unknown-ok, reason: {reason}"), [0, 2], "the lift is logged by the merge run's two undo_check calls")
         fields = self.gh_state("merge_fields") or []
         self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
-        self.assertIn("commit_message", fields[0], "the lift of the read after the wait is written into the merge commit message")
+        self.assertIn("commit_message", fields[0], "the lift of the merge run's read is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {f"Reason flag: --undo-check-unknown-ok: {reason}"})
 
-    def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
-        # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
-        # Each head comes with its sha and its PR's base, {name: (sha, base)}, so the cut can tell the lane's own PR
-        # (base = the batch's base) from a backport, and see a stacked PR whose base is a lane.
+    def test_open_pulls_lists_the_open_pr_heads_past_ghs_default_of_30(self):
+        # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A head past row 30 would be missed.
+        # Each head comes with its sha and its PR's base, {name: (sha, base)}, read from the rows open_pulls returns.
         self.set(open_prs=[["lane2", "a" * 40, "main"], ["agent/lane1", "b" * 40, "release/1.0"]])
-        got = self.gh_host().open_heads()
+        got = {d["head"]["ref"]: (d["head"]["sha"], d["base"]["ref"]) for d in self.gh_host().open_pulls()}
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
         for part in (LIST_CALL, "state=open", "per_page=100"):  # one page holds 100 at most, so the read asks for each page by number
@@ -4775,9 +3875,9 @@ class GhHalf(Env):
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
         # An empty set means no PR is open, and every lane would go. A failure stops (merge.Stop) or answers None.
-        self.set(open_heads_fail="HTTP 404: Not Found")
+        self.set(open_pulls_fail="HTTP 404: Not Found")
         try:
-            got = self.gh_host().open_heads()
+            got = self.gh_host().open_pulls()
         except merge.Stop:
             return
         self.assertIsNone(got)
@@ -4791,97 +3891,8 @@ class GhHalf(Env):
         self.assertIn("ALLOWED docs/decisions/first.md: the lines are dead", out)
         self.assertIn("GET pulls/7", self.calls())
 
-    def test_a_batch_with_lanes_reads_the_open_prs_through_gh_and_keeps_those_lanes(self):
-        # Ruling 1: the open PR's head is a newer commit than lane2's tip, so lane2 is kept. Origin's lane2 stays at the tip.
-        lane_batch(self, "agent/lane1", "lane2")
-        self.set(open_prs=[["lane2", self.head("main"), "main"]])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertIn(LIST_CALL, self.calls())
-        lane_deleted_line(self, out, "agent/lane1")
-        self.assertEqual(self.head("agent/lane1"), "")
-        self.assertIn(LANE_KEPT.format(b="lane2", why=WHY["open"]), out)
-        self.assertNotEqual(self.head("lane2"), "")
-
-    def test_a_batch_lane_whose_open_pr_is_at_its_tip_is_deleted_through_gh(self):
-        # Per decision merge-deletes-batch-lanes (lane cleanup), through gh: the PR head is the lane tip, so the PR does not block the delete. Its base is the batch's base.
-        tips = lane_batch(self, "agent/lane1", "lane2")
-        self.set(open_prs=[["agent/lane1", tips["agent/lane1"], "main"]])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        lane_deleted_line(self, out, "agent/lane1")
-        lane_deleted_line(self, out, "lane2")
-        self.assertEqual(self.head("agent/lane1"), "")
-        self.assertNotIn(WHY["open"], out)
-
-    def test_a_backport_pr_at_the_lane_tip_keeps_the_lane_through_gh(self):
-        # Through gh: the PR at the tip has base release/1.0, so it is a backport, not the lane's own PR, and the lane is kept.
-        tips = lane_batch(self, "agent/lane1", "lane2")
-        self.set(open_prs=[["agent/lane1", tips["agent/lane1"], "release/1.0"]])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        kept = [l for l in out.splitlines() if l.startswith("merge: lane origin/agent/lane1: kept:")]
-        self.assertEqual(len(kept), 1, out)
-        self.assertNotEqual(self.head("agent/lane1"), "", "agent/lane1 was deleted")
-        lane_deleted_line(self, out, "lane2")
-
-    def test_a_stacked_pr_keeps_the_lane_that_is_its_base_through_gh(self):
-        # Through gh: an open PR (head stack) has lane2 as its base, so lane2 stays. agent/lane1 has no PR.
-        lane_batch(self, "agent/lane1", "lane2")
-        self.set(open_prs=[["stack", self.head("main"), "lane2"]])
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        kept = [l for l in out.splitlines() if l.startswith("merge: lane origin/lane2: kept:")]
-        self.assertEqual(len(kept), 1, out)
-        self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
-        lane_deleted_line(self, out, "agent/lane1")
-
-    def batch_with_open_prs(self, rows_of):
-        """Two lanes in one batch, then the open-PR rows that rows_of(tips) returns, in the order gh lists them. -> (tips, out)."""
-        tips = lane_batch(self, "lane1", "lane2")
-        self.set(open_prs=rows_of(tips))
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        return tips, out
-
-    def assert_both_lanes_deleted(self, out):
-        for b in ("lane1", "lane2"):
-            lane_deleted_line(self, out, b)
-            self.assertEqual(self.head(b), "", f"{b} is still on origin")
-        self.assertEqual([l for l in out.splitlines() if ": kept:" in l], [], out)
-
-    def test_a_same_batch_lane_with_a_main_pr_first_and_a_stacked_pr_second_is_deleted(self):
-        # Through gh: lane2 has two open PRs at its tip, to main then to lane1. Both are done, so both lanes go.
-        # Before the fix, the second row's base was kept under a new key, and lane2 read as having more than one PR.
-        _, out = self.batch_with_open_prs(lambda t: [["lane2", t["lane2"], "main"], ["lane2", t["lane2"], "lane1"]])
-        self.assert_both_lanes_deleted(out)
-
-    def test_a_same_batch_lane_with_a_stacked_pr_first_and_a_main_pr_second_is_deleted(self):
-        # Through gh: the same two PRs in the other row order. The result must not change with the order.
-        _, out = self.batch_with_open_prs(lambda t: [["lane2", t["lane2"], "lane1"], ["lane2", t["lane2"], "main"]])
-        self.assert_both_lanes_deleted(out)
-
-    def test_an_outside_head_whose_stacked_pr_comes_first_keeps_the_base_lane(self):
-        # Through gh: outside head stack-top has two open PRs, to lane1 then to main. Its PR to lane1 keeps lane1.
-        # The first row's base must not be lost: before the fix it was, and lane1 was deleted under an open PR.
-        _, out = self.batch_with_open_prs(lambda t: [["stack-top", self.head("main"), "lane1"], ["stack-top", self.head("main"), "main"]])
-        self.assertIn("stack-top", kept_line(self, out, "lane1"))
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.assert_deleted_lane2(out)
-
-    def test_an_outside_head_whose_main_pr_comes_first_keeps_the_base_lane(self):
-        # Control, through gh: the same two PRs, main row first. Lane1 is kept whichever row comes first.
-        _, out = self.batch_with_open_prs(lambda t: [["stack-top", self.head("main"), "main"], ["stack-top", self.head("main"), "lane1"]])
-        self.assertIn("stack-top", kept_line(self, out, "lane1"))
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted")
-        self.assert_deleted_lane2(out)
-
-    def assert_deleted_lane2(self, out):
-        lane_deleted_line(self, out, "lane2")
-        self.assertEqual(self.head("lane2"), "", "lane2 is still on origin")
-
     def test_a_batch_without_lanes_reads_no_open_pr_list_after_the_merge(self):
-        # confirm reads the open pull list before the merge, for the batch brake. Only list reads after the PUT count here.
+        # No batch brake is left to read the open pull list, so a merge reads none after its PUT: nothing cuts a batch's lanes after a merge.
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         lines = self.calls().splitlines()
@@ -4894,22 +3905,6 @@ class GhHalf(Env):
         self.set(open_prs=[["feat2", other, "main", 8]], other_rows={other: list(rows)}, other_runs={other: list(runs)})
         return self.gh_host(ignore=ignore)
 
-    def test_confirm_refuses_while_a_workflow_runs_before_its_required_check_reports(self):
-        # scope runs first, so checks has no row yet: the workflow run in progress must still hold the merge
-        before = self.refs()
-        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "in_progress", None)], rows=[("scope", "pending", "")]))
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#8", out)
-        self.assertIn("ci-checks", out)
-        self.assertNotIn("PUT pulls/7/merge", self.calls())
-        self.assertEqual(self.refs(), before)
-
-    def test_confirm_refuses_a_queued_workflow_with_no_check_rows_on_another_ready_pr(self):
-        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "queued", None)]))
-        self.assertEqual(rc, 1, out)
-        self.assertIn("ci-checks", out)
-        self.assertNotIn("PUT pulls/7/merge", self.calls())
-
     def test_confirm_merges_when_the_other_pr_workflows_have_finished(self):
         rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "completed", "success")], rows=[("checks", "pass", "")]))
         self.assertEqual(rc, 0, out)
@@ -4918,6 +3913,12 @@ class GhHalf(Env):
     def test_confirm_merges_past_an_ignored_running_workflow_on_another_ready_pr(self):
         rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("sync", "in_progress", None)], rows=[("checks", "pass", "")],
                                                                       ignore={"sync": "the sync job is advisory"}))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", self.calls())
+
+    def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
+        # Each ready pull request merges on its own required checks, so a pending required check on another ready pull request holds no merge.
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[], rows=[("checks", "pending", "")]))
         self.assertEqual(rc, 0, out)
         self.assertIn("PUT pulls/7/merge", self.calls())
 
@@ -4979,13 +3980,12 @@ class GhHalf(Env):
         self.assertIn("resumed", out)
         self.assertEqual(self.claims("main"), 1)
 
-    def test_a_real_refusal_in_the_wait_reverts_the_claim_and_is_not_retried(self):
-        self.set(view_fail={"n": 1, "msg": PLAIN_403_API, "after": self.head()})
+    def test_a_real_refusal_of_the_merge_reverts_the_claim_and_is_not_retried(self):
+        self.set(merge_replies=[[PLAIN_403_API, False]])  # the merge call, after the claim push, answers a plain 403: refused, not a network stop
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertEqual(self.gh_state("view_failed"), 1, out)  # tried once
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, out)  # tried once
         self.assertIn("reverted on feat", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
@@ -5139,21 +4139,21 @@ class GhHalf(Env):
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def required_read_fails_after_the_claim(self, msg, rate=False):
-        """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert.
+    def required_read_fails_before_the_claim(self, msg, rate=False):
+        """The required-checks read fails with `msg` at its one read under the lock, before the claim. Retried 3 times, then a stop: nothing claimed.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
-        self.set(contexts=["checks"], api_fail={"msg": msg, "after_checks": 1})
+        self.set(contexts=["checks"], api_fail={"msg": msg, "after_checks": 0})
         rc, out = self.go(required="protection")
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("api_failed"), 4, out)  # one try and three retries
         if rate:
             self.rate_waits_the_whole_ladder(out)
-        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertNotIn("Claim record numbers", self.feat_subjects())  # nothing claimed: the required names are read before the claim
         self.assertFalse(self.lock_ref())
 
-    def test_a_required_check_read_with_gh_server_error_502_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
+    def test_a_required_check_read_with_gh_server_error_502_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim("gh: Server Error (HTTP 502)")
 
     def merge_reply_is_retried_then_stops(self, msg, rate=False):
         """Every merge try answers `msg` and nothing lands: a network-class error, checked (the PR reads OPEN), retried 3 times, then a stop. The PR reads OPEN: no revert. `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
@@ -5213,12 +4213,16 @@ class GhHalf(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
         self.assertNotIn(MERGE_CALL, self.calls())
 
-    def test_a_pr_read_with_a_non_network_error_in_the_wait_stops_unknown_and_keeps_the_claim(self):
-        def cut_short(args):
-            return (1, "gh: could not read the pull request: the reply was cut short") if route_of(args).endswith("/pulls/7") else None
-        rc, out, claim = self.after_the_claim(gh=cut_short)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+    def test_a_pr_read_with_a_non_network_error_before_the_claim_stops_and_claims_nothing(self):
+        self.set(view_fail={"n": 1, "msg": "gh: could not read the pull request: the reply was cut short", "after": "0" * 40})  # the first read fails
+        before = self.head()
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("view_failed"), 1, out)
+        self.assertIn("cut short", out)
+        self.assertEqual(self.head(), before, out)  # nothing claimed or pushed
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertFalse(self.lock_ref())
 
     def test_a_pr_read_with_a_json_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         def unparsable(args):
@@ -5241,22 +4245,6 @@ class GhHalf(Env):
             return None
         rc, out, claim = self.after_the_claim(git_call=fetch_of_main)
         assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_checks_wait_past_its_deadline_with_a_required_check_pending_stops_unknown_and_keeps_the_claim(self):
-        # A busy Mac: each poll of the wait is ten minutes of the fake clock, past the five-minute deadline. The head's wait is green; the claim's wait is pending.
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "pending", "")]])
-        rc, out, claim = self.after_the_claim(minute=600)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertIn("Still pending: checks", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_wait_deadline_while_github_still_shows_the_prior_head_stops_unknown_and_keeps_the_claim(self):
-        # GitHub still shows the head from before the push. Each poll is ten minutes of the fake clock, so the second read is past the deadline.
-        self.set(lag={"n": 1000, "prior": self.head()})
-        rc, out, claim = self.after_the_claim(minute=600)
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertIn("still shows the head before the push", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
@@ -5283,7 +4271,8 @@ class GhHalf(Env):
         self.set(runs_fail="HTTP 500: Internal Server Error (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        # the unknown read's refusal prints GREEN_CITE, which says "not green", so only the red head's own phrase tells them apart
+        self.assertNotIn("the head's own checks are not green", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
         self.assertIn("network", out.lower())
@@ -5311,7 +4300,8 @@ class GhHalf(Env):
         self.set(runs_fail=msg)
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        # the unknown read's refusal prints GREEN_CITE, which says "not green", so only the red head's own phrase tells them apart
+        self.assertNotIn("the head's own checks are not green", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
         if rate:
@@ -5354,12 +4344,13 @@ class GhHalf(Env):
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
     def checks_read_fails(self, msg, n=99, rate=False):
-        """Every check is green and the checks read fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed.
+        """Every check is green and the head's one checks read fails n times with `msg`. A network-class text: retried 3 times, then a stop.
+        The read is the head's, before any claim, so the stop says the head's checks are unknown, never green. Nothing is claimed.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
         self.set(checks_fail={"n": n, "msg": msg})
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        self.assertIn("the read of the head's checks is unknown", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("checks_failed"), 4, out)  # one try and three retries
         if rate:
@@ -5386,11 +4377,11 @@ class GhHalf(Env):
         self.assertEqual(self.gh_state("checks_failed"), 1)
         self.assertEqual(self.paused[0], RATE_LADDER[0], self.paused)  # the header's 17 s is ignored
 
-    def test_a_required_check_read_with_a_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_403, rate=True)  # `gh api` form: the claim stays, 4 tries over the whole ladder, then the network stop
+    def test_a_required_check_read_with_a_rate_limit_403_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim(RATE_API_403, rate=True)  # `gh api` form: nothing claimed, 4 tries over the whole ladder, then the network stop
 
-    def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_without_a_revert(self):
-        self.required_read_fails_after_the_claim(RATE_API_SECONDARY_403, rate=True)
+    def test_a_required_check_read_with_a_secondary_rate_limit_403_stops_before_the_claim(self):
+        self.required_read_fails_before_the_claim(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
@@ -5423,14 +4414,13 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         self.assertFalse(self.lock_ref())
 
-    def test_a_plain_403_on_the_required_check_read_reverts_the_claim_and_is_not_retried(self):  # (d): a guard
-        self.set(contexts=["checks"], api_fail={"msg": PLAIN_403_API, "after_checks": 1})
+    def test_a_plain_403_on_the_required_check_read_stops_before_the_claim_and_is_not_retried(self):  # (d): a guard
+        self.set(contexts=["checks"], api_fail={"msg": PLAIN_403_API, "after_checks": 0})
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("api_failed"), 1, out)  # tried once
-        self.assertIn("reverted on feat", out)
         self.assertNotIn("network", out.lower())
-        self.assertTrue(self.reverted())
+        self.assertNotIn("Claim record numbers", self.feat_subjects())  # refused at the required names' read, before any claim
         self.assertFalse(self.lock_ref())
 
     def test_a_merge_lock_read_that_fails_once_with_a_json_error_is_retried_and_the_run_goes_on(self):
@@ -5461,27 +4451,28 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_a_red_check_named_http_500_is_a_refusal_that_reverts_and_is_not_retried(self):
-        # the wait after the claim push reads the red check; its name carries "HTTP 500"
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")],
-                             [("checks", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
+    def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
+        # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
+        before = self.head()
+        self.set(checks_seq=[[("checks", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
         rc, out = self.go()
         self.assertIn("a check is red: build: HTTP 500 guard: fail", out)
-        self.assertIn("reverted on feat", out)
+        self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
         self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
         self.assertNotIn("network", out.lower())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_green_run_waits_without_a_watch_and_merges_pinned_to_the_claim_head(self):
-        self.set(checks_seq=[[("checks", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("checks", "pass", "")]])
+    def test_green_run_merges_pinned_to_the_head_with_no_wait_and_no_watch(self):
+        self.set(checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         log = self.calls()
         self.assertNotIn("run watch", log)  # decision ci-wait-reads-run-status
-        self.assertIn(30, self.paused)  # the wait between two reads of the checks
+        self.assertNotIn(30, self.paused)  # one read of the checks, and no wait between reads
         self.assertIn(MERGE_CALL + " merge_method=merge sha=" + sh(self.co, "git", "rev-parse", "origin/main^2"), log)
         self.assertEqual(log.count("PUT "), 1)  # the one write is the merge
         self.assertNotIn("DELETE", log)  # the branch is cut through git (cut_branch), never by the merge call
@@ -5528,30 +4519,7 @@ class GhHalf(Env):
         self.set(checks_seq=[[("checks", "pending", ""), ("checks", "pass", "")]])  # pending then pass: never green
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("Still pending: checks", out)
-
-    def test_a_lagging_head_is_waited_out_not_called_moved(self):
-        self.set(lag={"n": 2, "prior": self.head()})
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(len(self.paused), 2)
-
-    def test_a_head_that_never_leaves_the_prior_sha_stops_at_the_deadline(self):
-        self.set(lag={"n": 1000, "prior": self.head()})
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("still shows the head before the push", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_base_that_changes_during_the_wait_reverts_the_claim_and_names_both(self):
-        def retarget():  # the first wait retargets the pull request, so the next read sees a new base
-            if self.paused and not getattr(self, "retargeted", False):
-                self.retargeted = True
-                self.set(base="integ")
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
-        rc, out = self.run_merge("7", "--confirm", host=self.gh_host(pause=retarget))
-        self.assertEqual(rc, 1, out)
-        assert_cites(self, "wait-base-changed", printed(out, "changed from main to integ"))
+        self.assertIn("a check is pending: checks", out)
 
     def test_a_pull_request_gh_reads_blocked_gets_no_merge_call(self):
         self.set(pr_raw={"mergeable_state": "blocked"})
@@ -5595,25 +4563,6 @@ class GhHalf(Env):
         self.assertNotIn("run watch", self.calls())
         self.assertEqual(self.calls(), "")  # block only pauses; the wait loop reads the checks and the runs
 
-    def test_dirty_in_the_wait_reverts_the_claim(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]], dirty_after_checks=1)
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("went DIRTY", out)
-        assert_cites(self, "wait-base-changed", printed(out, "went DIRTY"))
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertTrue(self.reverted())
-
-    def test_force_push_in_the_wait_reverts_nothing_and_merges_nothing(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
-        rival = []
-        rc, out = self.go(pause=lambda: rival.append(self.competitor_push()))
-        self.assertEqual(rc, 1)
-        self.assertIn("head moved", out)
-        self.assertEqual(self.head(), rival[0])  # the rival's head stands: no revert on top of it
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertFalse(self.lock_ref())
-
     def test_the_merge_sha_refuses_a_moved_head(self):
         old = self.head()
         self.competitor_push()
@@ -5632,12 +4581,13 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
-    def test_protection_names_come_from_the_api_and_an_absent_one_stops_the_wait(self):  # c189: re-pointed from the deadline; the absent name ends the wait at once
+    def test_protection_names_come_from_the_api_and_an_absent_one_stops_before_the_claim(self):
         self.set(contexts=["checks", "needed"], checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("no run reports the required check needed", out)
-        self.assertTrue(self.reverted())
+        self.assertIn("a check is pending: needed", out)  # a required name with no row reads pending at the head's one read
+        self.assertNotIn("Claim record numbers", self.feat_subjects())
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_no_protection_and_no_list_stops_with_the_remedy(self):
         before = self.head()
@@ -5674,12 +4624,15 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         self.assertNotIn(MERGE_CALL, self.calls())
 
-    def test_head_pending_then_green_claims_and_waits_again(self):
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
+    def test_head_pending_claims_nothing_and_merges_nothing(self):
+        self.set(checks_seq=[[("checks", "pending", "")]])  # the head's one read is pending: refused before any claim, with the check named
+        before = self.head()
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims("main"), 1)
-        self.assertGreaterEqual(self.paused.count(60), 1)  # the head's own pending check was waited on
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: checks", out)
+        self.assertEqual(self.claims("main"), 0)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_the_preview_names_the_head_state(self):
         for seq, want in (([("checks", "pass", "")], "head checks: green"), ([("checks", "pending", "")], "head checks: pending: checks"),
@@ -5690,34 +4643,24 @@ class GhHalf(Env):
             self.assertIn(want, out)
 
     def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
-        """A pending check that is not required does not hold the wait, and its red still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
-        # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
-        # the red it turns into is seen on the settle re-read and refuses.
+        """A pending check that is not required does not hold the merge, and a red check that is not required still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
+        # The head reads `design` red, not required: every check on the head counts for red, so the one read refuses before any claim.
         before = self.head()
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
         self.assertNotIn(60, self.paused)  # no minute-long wait for `design`
-        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
+        self.assertEqual(self.head(), before)  # refused at the head's read: nothing claimed
         self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_banchi_604_same_in_the_wait_after_the_claim_push(self):
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pass", "")], [("checks", "pass", ""), ("design", "pending", "")],
-                             [("checks", "pass", ""), ("design", "fail", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("a check is red: design: fail", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertTrue(self.reverted())
 
     def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
-        """A pending check that is not required is not waited on, and one line names it. Ruling: step merge-waits-required-only, wait only on the required check."""
+        """A pending check that is not required does not hold the merge: the head's one read is green on the required check, and the merge goes on with no wait. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
-        self.assertTrue(any("design" in l for l in out.splitlines() if l.startswith("merge:")), out)  # the one line names what was not waited on
+        self.assertEqual(self.paused, [], out)  # no pause at all: the green head is read once and merges
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
@@ -5747,11 +4690,11 @@ class GhHalf(Env):
         self.assertEqual((red, pending), ([], []))
 
     def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
-        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The wait holds for a pull_request run, then stops at the deadline with the check named.
+        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The head's one read holds it: refused before any claim, with the check named.
         self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
         rc, out = self.go(required=["all-jobs-passed"])
         self.assertEqual(rc, 1, out)
-        self.assertIn("Still pending: all-jobs-passed", out)
+        self.assertIn("a check is pending: all-jobs-passed", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
@@ -5884,21 +4827,29 @@ class GhHalf(Env):
         red, pending, _ = merge.Host.classify({"checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
         self.assertEqual((red, pending), ([], ["checks"]))
 
-    def test_a_skipped_head_with_a_run_in_progress_waits_for_the_run(self):
-        # B1: the skipped rows are old. The checks run is still in progress with no job rows, so the wait holds.
+    def test_a_skipped_head_with_a_run_in_progress_refuses_at_once(self):
+        # B1: the skipped rows are old. The checks run is still in progress with no job rows: the head is pending, so it is refused at once.
+        before = self.head()
         self.set(checks_seq=[[("checks", "skipping", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "skipped")]])
         rc, out = self.go()
-        self.assertGreaterEqual(self.paused.count(60), 1, out)
         self.assertEqual(rc, 1, out)
-        self.assertIn("no check ran on this head", out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "a pending head waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
 
-    def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
-        # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
+    def test_the_remedy_run_in_progress_beside_old_skipped_rows_refuses_at_once(self):
+        # B1: the remedy's own run. Old skipped rows and a run in progress refuse the head at once; the pass that follows is never read.
+        before = self.head()
         self.set(checks_seq=[[("checks", "skipping", "")], [("checks", "pass", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "a pending head waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
 
     def test_an_older_run_still_in_progress_holds_the_wait_under_a_newer_success(self):
         # B2: gh lists the newest run first. The older in-progress run is read as pending before the dedup.
@@ -5930,16 +4881,20 @@ class GhHalf(Env):
             self.assertFalse(self.lock_ref())
 
     def test_an_ignored_red_check_is_reported_and_the_merge_goes_on(self):
+        ignore = {"design": "flaky upstream", "slow": "nightly"}
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "fail", ""), ("slow", "pending", "")]])
-        rc, out = self.go(ignore={"design": "flaky upstream", "slow": "nightly"})
+        rc, out = self.run_merge("7", host=self.gh_host(ignore=ignore))  # the preview names what merge.ignoreChecks left out
         self.assertEqual(rc, 0, out)
         self.assertIn("design (flaky upstream): fail", out)
+        rc, out = self.go(ignore=ignore)
+        self.assertEqual(rc, 0, out)  # confirm no longer prints the ignored checks: its one read holds only the required ones
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_the_preview_lists_a_pending_check_that_is_not_required(self):
+    def test_the_preview_says_green_beside_a_pending_check_that_is_not_required(self):
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.run_merge("7", host=self.gh_host())
-        self.assertIn("head checks: pending: design", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("head checks: green", out)  # the head's read holds only required checks; `design` is not named
 
     def test_a_required_check_is_never_ignored(self):
         before = self.head()
@@ -5987,13 +4942,75 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn(60, self.paused)  # the run did not hold a minute
 
-    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_the_wait(self):
-        # The folder defines the required job `checks`, so its pending run holds the wait until the next read sees it complete.
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_refuses_at_once(self):
+        # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
+        before = self.head()
         self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow checks", out)
+        self.assertEqual(self.paused, [], "the pending run of the workflow that defines the required job waited before it refused")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
+
+    def assert_pending_run_refused_at_once(self, runs_name, required=("checks",)):
+        """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
+        and nothing claimed or pushed. The required names pass, so only the run holds the head."""
+        before = self.head()
+        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
+        rc, out = self.go(required=required)
+        self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"a check is pending: workflow {runs_name}", out)
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
+
+    def test_a_pending_run_with_no_workflow_folder_on_main_refuses_at_once(self):
+        # No file on main shows the run to be outside the required names, so the run holds.
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_run_whose_name_matches_no_workflow_file_refuses_at_once(self):
+        # The head renamed the workflow's `name:`, so the run's name maps to no file. A name no file maps to is unknown, and it holds over a stale pass.
+        push_base(self, {".github/workflows/checks.yml": workflow_text("checks-renamed", "checks")})
+        self.assert_pending_run_refused_at_once("checks")
+
+    def test_a_pending_run_of_the_file_that_defines_a_pinned_required_job_refuses_at_once(self):
+        push_base(self, {".github/workflows/lint.yml": workflow_text("lint", "lint")})
+        self.assert_pending_run_refused_at_once("lint", required=("lint",))
+
+    def test_a_pending_run_whose_file_has_a_four_space_indent_refuses_at_once(self):
+        # The line scan finds no job under a 4-space indent, so the file is unknown and its run holds.
+        push_base(self, {".github/workflows/docs.yml": "name: docs\non: push\njobs:\n    docs:\n        runs-on: ubuntu-latest\n"})
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_run_whose_file_has_a_flow_style_jobs_line_refuses_at_once(self):
+        push_base(self, {".github/workflows/docs.yml": "name: docs\non: push\njobs: {docs: {runs-on: ubuntu-latest}}\n"})
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_check_that_is_not_required_does_not_clear_a_no_job_ran_refusal(self):
+        # The required job was skipped, so no job ran. A pending check that is not required must not stop that refusal, nor make the head wait.
+        before = self.head()
+        self.set(checks_seq=[[("lint", "skipping", ""), ("design", "pending", "")]], runs_seq=[[("lint", "completed", "skipped")]])
+        rc, out = self.go(required=("lint",))
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(s in out for s in ("no job ran", "no check ran")), out)
+        self.assertEqual(self.paused, [], "a pending check that is not required waited before the no-job-ran refusal")
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
+
+    def test_known_limit_a_required_check_red_after_the_head_read_still_gets_the_merge_call(self):
+        # KNOWN LIMIT, not a goal: the head is read once, before the claim and the merge call. A required check that turns red after that
+        # read is not seen again, so the merge call still goes out. Whether GitHub refuses that PUT for the merging identity is unproven
+        # here: this fixture's PUT always succeeds, so the case proves only what the tool sends.
+        # The claim run reads the head's checks once and the merge run reads them once more: both see pass. The red is for a read after that.
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "fail", "https://x/checks")]])
+        rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertIn("merge: waiting on workflow checks", out, "the pending run of the workflow that defines the required job did not hold the wait")
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.paused, [], out)
 
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
@@ -6004,22 +5021,6 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         rc, out = self.go(ignore={"ci": "known"})
         self.assertEqual(rc, 0, out)
-
-    def test_a_check_that_appears_on_the_settle_reread_holds_the_wait(self):
-        before = self.head()
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", ""), ("late", "fail", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertIn("late: fail", out)
-        self.assertIn(merge.SETTLE_SECONDS, self.paused)
-        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
-
-    def test_a_failed_read_in_the_wait_keeps_the_claim_and_says_unknown(self):
-        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not: a 404, not a proven refusal
-        self.set(checks_seq=[[("checks", "pass", "")]])
-        rc, out, claim = self.after_the_claim()
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")  # the stop names the read that failed
 
     # ---- no .github/stamp.json: the defaults
 
@@ -6055,12 +5056,12 @@ class GhHalf(Env):
         self.assertEqual(len(named), 1, out)
         self.assertIn("default", named[0].lower())
 
-    def test_no_config_waits_the_default_45_minutes(self):
+    def test_no_config_pending_check_is_refused_before_the_claim(self):
         drop_config(self)
         self.set(contexts=["checks"], checks_seq=[[("checks", "pending", "")]])
-        rc, out = self.go(required="protection", minute=900)  # a poll every 15 minutes of the fake clock: 3 reads reach the deadline, not 45 (each read is a few process starts)
+        rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("the deadline of 45 minutes passed", out)
+        self.assertIn("a check is pending: checks", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_no_config_never_runs_stamp(self):
@@ -6106,10 +5107,10 @@ class GhHalf(Env):
 
     def assert_draft_stops(self, rc, out, before):
         """A draft confirm is the records step: it pushes at most the page, marks the pull request ready, and stops.
-        It never merges, claims a record number, or waits on a check. before: the head sha before the run."""
+        It never merges, claims a record number, or waits on a check. It may read the head's checks once (a red head never goes ready).
+        before: the head sha before the run."""
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ticks, 0, "waited on a draft")
-        self.assertNotIn(CHECKS_CALL, self.calls())
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -6158,7 +5159,7 @@ class SupersededRuns(Env):
     """A cancelled run of a workflow is superseded when a newer run of that same workflow (a larger run id) is on the head. Host.checks
     drops that run's check rows, so every caller judges the head by the newer run. Never dropped: a row with no run link, a commit status,
     a failed run, a cancelled run with no newer run of its workflow, and every row when the runs read fails or lists no such run.
-    Fixtures run through checks() then classify, and through head_read, head_state and wait_checks, with the fake's runs_seq as the workflow runs.
+    Fixtures run through checks() then classify, and through head_read and head_state, with the fake's runs_seq as the workflow runs.
     Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
 
@@ -6460,11 +5461,12 @@ class RestRoutes(Env):
     def test_two_pages_of_open_pull_requests_with_the_head_on_page_two_is_found(self):
         lane = "c" * 40
         self.set(page_cap=2, open_prs=[["one", "a" * 40, "main"], ["two", "b" * 40, "main"], ["lane", lane, "main"]])
-        self.assertEqual(self.gh_host().open_heads(), {"one": ("a" * 40, "main"), "two": ("b" * 40, "main"), "lane": (lane, "main")})
+        got = {d["head"]["ref"]: (d["head"]["sha"], d["base"]["ref"]) for d in self.gh_host().open_pulls()}
+        self.assertEqual(got, {"one": ("a" * 40, "main"), "two": ("b" * 40, "main"), "lane": (lane, "main")})
 
-    def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
+    def test_open_pulls_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
         self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
-        self.assertEqual(len(self.gh_host().open_heads()), 250)
+        self.assertEqual(len(self.gh_host().open_pulls()), 250)
 
     # ---- the proxy refuses the numeric page gh follows from a Link header, so a list read asks for each page by number
 
@@ -6754,13 +5756,6 @@ class RestRoutes(Env):
         self.assertGreaterEqual(self.calls().count("GET pulls/7\n"), 3, self.calls())
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_a_null_mergeable_that_then_reads_conflicting_stops_the_merge(self):
-        self.set(mergeable_seq=[None, None, False])
-        rc, out = self.go()
-        self.assertEqual(rc, 1, out)
-        self.assertRegex(out, r"DIRTY|CONFLICTING")
-        self.assertNotIn(MERGE_CALL, self.calls())
-
     # ---- the selector: a number, a URL, a branch name, or the current branch
 
     def two_open_prs(self):
@@ -6845,7 +5840,7 @@ class RestRoutes(Env):
                 pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
                 host = merge.Host(["checks"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, repo=repo)
                 host.pr(7)
-                host.open_heads()
+                host.open_pulls()
                 host.checks(7, warn=False)
                 host.head_read(7)
                 host.merge(7, "merge", head)
@@ -6856,7 +5851,7 @@ class RestRoutes(Env):
     # ---- retries hold on every REST route
 
     def read_calls(self):
-        return {"pr": lambda h: h.pr(7), "list": lambda h: h.open_heads(),
+        return {"pr": lambda h: h.pr(7), "list": lambda h: h.open_pulls(),
                 "check-runs": lambda h: h.checks(7, warn=False), "status": lambda h: h.checks(7, warn=False)}
 
     def test_a_502_on_any_rest_read_is_retried_and_the_read_goes_through(self):
@@ -7292,10 +6287,10 @@ class DebtRetire(Env):
         names_kind(self, out, "retire-target", "red")
 
     def test_confirm_with_red_ci_refuses_at_the_head_wait_before_any_claim_or_push(self):
-        """CI's verdict on the head is the gate at confirm. A red wait refuses before the claim, and confirm runs no Retire check."""
+        """CI's verdict on the head is the gate at confirm. A red head read refuses before the claim, and confirm runs no Retire check."""
         self.pr_on_debt(1)
         calls = self.stub_retire_check()
-        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
@@ -7331,10 +6326,12 @@ class DebtRetire(Env):
         """The PR closes a debt. The head's CI is green and the claim is pushed; then the read of CI's verdict on the claim raises. -> (rc, out, the claim's sha)."""
         self.pr_on_debt(0)
         claimed = []
-        def read_fails_after_the_claim():
-            claimed.append(self.head())
-            raise error
-        self.host.on_wait = read_fails_after_the_claim
+        def read(url):
+            if claimed:
+                raise error
+            return "success", run_head
+        self.host.cited_run = read
+        self.host.on_claim = lambda: claimed.append(self.head())
         rc, out = self.run_merge("7", "--confirm")
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
         return rc, out, (claimed[0] if claimed else None)
@@ -7359,10 +6356,8 @@ class DebtRetire(Env):
         """CI's verdict on the claim is red: the wait refuses and the claim reverts. confirm runs no Retire check after the push."""
         self.pr_on_debt(0)
         claimed = []
-        def red_after_the_claim():
-            claimed.append(self.head())
-            self.host.checks = (False, "a check is red: checks: fail")
-        self.host.on_wait = red_after_the_claim
+        self.host.on_claim = lambda: claimed.append(self.head())
+        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
         rc, out = self.run_merge("7", "--confirm")
         self.assertTrue(claimed, "scope: the wait after the claim push never ran")
         self.assertEqual(rc, 1, out)
@@ -7627,13 +6622,16 @@ class UndoMemo(Env):
         import check_silent_undo as undo
         real_check, real_undo = undo.check, merge.undo_check
         scans, undos = [], []
+        self.scan_runs, self.undo_runs = [], []  # the run index (0 for the first run) of each scan and each undo read
 
         def spy_check(*a, **k):
             scans.append(a[1])
+            self.scan_runs.append(len(self.run_texts))
             return real_check(*a, **k)
 
         def spy_undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             undos.append(base_ref)
+            self.undo_runs.append(len(self.run_texts))
             return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
@@ -7645,17 +6643,17 @@ class UndoMemo(Env):
         sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
         sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
 
-    def move_main_in_the_wait(self, real_wait, fetch_co=False):
-        def wait_while_main_moves(n, sha, d, prior=None):
+    def main_moves_in_the_run(self, fetch_co=False):
+        """-> an action for in_wait: main gains a clean commit (moved.txt) after the run's first head read."""
+        def move():
             sh(self.other, "git", "fetch", "-q", "origin")
             sh(self.other, "git", "checkout", "-q", "-B", "main", "origin/main")
-            put(os.path.join(self.other, "moved.txt"), "main moved in the wait\n")
-            sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-qm", "main moves in the wait")
+            put(os.path.join(self.other, "moved.txt"), "main moved in the run\n")
+            sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-qm", "main moves in the run")
             sh(self.other, "git", "push", "-q", "origin", "main")
             if fetch_co:
                 sh(self.co, "git", "fetch", "-q", "origin")
-            return real_wait(n, sha, d, prior)
-        return wait_while_main_moves
+        return move
 
     def test_unchanged_head_base_and_default_scan_once(self):
         self.no_claim()
@@ -7666,10 +6664,10 @@ class UndoMemo(Env):
 
     def test_origin_base_moving_during_the_wait_scans_again(self):
         self.no_claim()
-        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks)
+        self.in_wait(self.main_moves_in_the_run())
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
-        self.assertEqual(rc, 1, out)  # the scan runs again, then the moved base refuses the merge (merge-needs-current-base)
-        self.assertIn("does not hold origin/main", out)
+        self.assertEqual(rc, 0, out)  # the scan runs again; the moved base is a clean merge, so the green run stands (rule M3)
+        self.assertIn("The green run stands", out)
         self.assertEqual(undos, 2, out)
         self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
 
@@ -7678,7 +6676,7 @@ class UndoMemo(Env):
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
         self.host.base = "integ"
-        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks, fetch_co=True)
+        self.in_wait(self.main_moves_in_the_run(fetch_co=True))
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
         self.assertEqual(rc, 0, out)
         self.assertEqual(undos, 2, out)
@@ -7688,8 +6686,10 @@ class UndoMemo(Env):
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
         self.assertEqual(rc, 0, out)
         self.assertIn("pushed to feat", out)
-        self.assertEqual(undos, 2, out)
-        self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+        # per run: the claim run reads twice and scans twice, because the claim moved the head; the merge run reads twice and scans once,
+        # its second read reusing the first scan (the memo is per run)
+        self.assertEqual([self.undo_runs.count(i) for i in range(len(self.run_texts))], [2, 2], "undo reads per run, scans %d\n%s" % (scans, out))
+        self.assertEqual([self.scan_runs.count(i) for i in range(len(self.run_texts))], [2, 1], "scans per run, undo reads %d\n%s" % (undos, out))
 
 
 class MemoKeyRead(Env):
@@ -7764,15 +6764,21 @@ class UnknownOverride(Env):
         self.assertEqual(got, "octopus read it")
 
     def unreadable_after_the_claim(self):
-        """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
+        """The claim run's second silent-undo read, which prove() runs after the claim push, cannot read the history. Every other read passes."""
+        return self.unreadable_read(run=0, read=2)
+
+    def unreadable_read(self, run, read):
+        """The silent-undo check raises Unknown on read number `read` (1-based) of run number `run` (0 for the claim run). Reads are
+        counted per run, and every other read passes. A run's later undo_check reuses the memo of an Unknown, so it makes no second check call."""
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
-        real, calls = undo.check, []
+        real, calls = undo.check, {}
         def first_then_boom(*a, **k):
-            calls.append(1)
-            if len(calls) == 1:
-                return real(*a, **k)
-            raise undo.Unknown("git is older than 2.38")
+            r = len(self.run_texts)
+            calls[r] = calls.get(r, 0) + 1
+            if r == run and calls[r] == read:
+                raise undo.Unknown("git is older than 2.38")
+            return real(*a, **k)
         return unittest.mock.patch.object(undo, "check", first_then_boom)
 
     def test_unknown_refuses_and_names_the_flag(self):
@@ -7867,16 +6873,16 @@ class LockHolder(Env):
         return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def peek(self, *args):
-        """Run `merge 7 --confirm *args`. Inside its wait, read the lock message and run a second merge.
-        Returns (lock message, the second run's output). A run that never reaches the wait gives ("", "")."""
+        """Run `merge 7 --confirm *args`. At the head's one read under the lock (Host.head_state), read the lock message and run a second merge.
+        Returns (lock message, the second run's output). A run that never reaches that read gives ("", "")."""
         seen = {"msg": "", "second": ""}
-        orig = self.host.wait_checks
-        def wait(n, sha, d, prior=None):
+        orig = self.host.head_state
+        def read(n, sha=None):
             if not seen["msg"]:
                 seen["msg"] = self.lock_msg()
                 seen["second"] = self.run_merge("8", "--confirm")[1]
-            return orig(n, sha, d, prior)
-        self.host.wait_checks = wait
+            return orig(n, sha)
+        self.host.head_state = read
         try:
             self.run_merge("7", "--confirm", *args)
         except SystemExit:
@@ -8492,16 +7498,21 @@ class MethodSafeRetry(unittest.TestCase):
             self.assertEqual(lock.acquire("main", 600), "c1")
         self.assertEqual(len(posts), 2)
 
-    def test_set_body_patch_is_idempotent_and_is_resent_after_a_502(self):  # a body is set to a value: a resend writes the same value
+    def test_a_patch_flagged_idempotent_on_host_api_is_resent_after_a_502(self):  # a PATCH that sets a value: a resend writes the same value
         seq = [(1, self.ERR), (0, "{}")]
         calls = []
         def sh(args, cwd=None, input=None, env=None):
             calls.append(args)
             return seq[min(len(calls), len(seq)) - 1]
         host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        reply = None
         with unittest.mock.patch.object(merge, "sh", sh):
-            host.set_body(7, "b")
-        self.assertEqual(len(calls), 2)
+            try:
+                reply = host.api("pulls/7", method="PATCH", body={"body": "b"}, idempotent=True)
+            except merge.NetStop:  # a 502 that is not resent stops the call: the count below names the cause
+                pass
+        self.assertEqual(len(calls), 2, "a PATCH flagged idempotent was not resent after its 502")
+        self.assertEqual(reply[0], 0, "the resent PATCH flagged idempotent did not succeed")
 
     def test_host_gh_still_retries_a_get_on_a_502(self):
         calls = []
@@ -8971,296 +7982,12 @@ class ShardSelector(unittest.TestCase):
         self.assertIn("MERGE_SHARD", r.stdout + r.stderr)
         self.assertNotIn("Ran ", r.stdout + r.stderr)
 
-class TimedLines(io.StringIO):
-    """stdout that stamps each `merge: ` line with the fake clock at the moment it is written."""
-    def __init__(self, clock):
-        super().__init__()
-        self.clock, self.lines = clock, []
-
-    def write(self, s):
-        if s.startswith("merge: "):
-            self.lines.append((self.clock[0], s.rstrip("\n")))
-        return super().write(s)
-
-READ_SECONDS = 2  # fake time one gh read takes
-
-class ClockedHost(merge.Host):
-    """Host with no gh and a fake clock. `checks_at(t)` gives the check buckets at fake time t; `head_at(t)` the head."""
-    def __init__(self, checks_at, head_at=lambda t: "sha"):
-        self.clock, self.pauses = [0.0], []
-        self.checks_at, self.head_at = checks_at, head_at
-        super().__init__(required=["checks"], base="main", minute=60, now=lambda: self.clock[0], pause=self.advance)
-
-    def advance(self, s):
-        self.pauses.append(s)
-        self.clock[0] += s
-        assert len(self.pauses) < 500, "the wait never ended"
-
-    def read(self):
-        """Each fake gh read costs READ_SECONDS of fake time, as a real call does."""
-        self.clock[0] += READ_SECONDS
-
-    def pr(self, n, *a, **k):
-        self.read()
-        return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False, "changed_files": 1}
-
-    def batch_running(self, n, base, head=None):  # no gh here, and no other pull request in these cases
-        return []
-
-    def checks(self, n, *a, **k):
-        self.read()
-        return self.checks_at(self.clock[0])
-
-    def runs(self, sha):
-        self.read()
-        return []
-
-class WaitProgress(unittest.TestCase):
-    """The wait prints progress: a `merge: waiting on` line at first sight, on a change of the pending set, and at least every 120 s."""
-    def wait(self, host, deadline, prior=None):
-        """-> (ok, why, merge lines, waiting lines, end time). Every `merge: ` line is stamped with fake time."""
-        out = TimedLines(host.clock)
-        with contextlib.redirect_stdout(out):
-            ok, why = host.wait_checks(7, "sha", deadline, prior=prior)
-        return ok, why, out.lines, [(t, l) for t, l in out.lines if l.startswith("merge: waiting on")], host.clock[0]
-
-    def assert_gaps_within(self, lines, start, end, bound=135):
-        """No quiet gap between start, each `merge:` line and end exceeds bound: 120 s plus one pass of the loop."""
-        marks = [start] + [t for t, _ in lines] + [end]
-        gaps = [b - a for a, b in zip(marks, marks[1:])]
-        self.assertLessEqual(max(gaps), bound, f"longest quiet gap {max(gaps):.0f} s; lines at {[round(t) for t, _ in lines]}")
-
-    def test_a_ten_minute_pending_wait_never_goes_120_seconds_without_a_line(self):
-        host = ClockedHost(lambda t: {"checks": [("pending" if t < 600 else "pass", "")]})
-        ok, why, lines, waits, end = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertTrue(waits, "no `merge: waiting on` line during the 10-minute wait")
-        self.assertIn("checks", waits[0][1])  # the first line names the pending check
-        self.assert_gaps_within(lines, 0.0, end)
-
-    def test_a_lagging_head_never_goes_120_seconds_without_a_line(self):
-        # The head reads as the prior one for 600 s; the checks are pending until 900 s.
-        host = ClockedHost(lambda t: {"checks": [("pending" if t < 900 else "pass", "")]},
-                           head_at=lambda t: "old" if t < 600 else "sha")
-        ok, why, lines, _, end = self.wait(host, 30, prior="old")
-        self.assertTrue(ok, why)
-        self.assert_gaps_within(lines, 0.0, end)
-
-    def test_a_pending_check_that_is_not_required_is_never_printed_as_waited_on(self):
-        """A pending check that is not required is never named as waited on. Ruling: step merge-waits-required-only, wait only on the required check."""
-        def checks_at(t):
-            if t < 300:
-                return {"checks": [("pending", "")], "design": [("pending", "")]}
-            return {"checks": [("pass", "")], "design": [("pass", "")]}
-        host = ClockedHost(checks_at)
-        ok, why, _, waits, _ = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertTrue(waits, "no `merge: waiting on` line while the required check was pending")
-        self.assertEqual([l for _, l in waits if "design" in l], [], f"the wait named a check that is not required: {waits}")
-
-    def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
-        host = ClockedHost(lambda t: {"checks": [("pass", "")]})
-        ok, why, _, waits, _ = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertEqual(waits, [])
-
-    def test_a_green_wait_says_what_it_checks_before_the_first_read(self):
-        """A start line, not a waiting line: the wait names the checks it reads before its first gh call (fake time 0)."""
-        host = ClockedHost(lambda t: {"checks": [("pass", "")]})
-        ok, why, lines, _, _ = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
-        self.assertIn("checks", lines[0][1])
-
 def workflow_text(name, *jobs):
     """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each."""
     lines = [f"name: {name}", "on: push", "jobs:"]
     for job in jobs:
         lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]
     return "\n".join(lines) + "\n"
-
-
-def pending_run(name, run_id=101):
-    """A workflow run still in progress, with the fields `gh run list --json` gives it that the wait reads."""
-    return {"databaseId": run_id, "name": name, "workflowName": name, "workflowDatabaseId": run_id, "status": "in_progress", "conclusion": ""}
-
-
-def workflow_folder(test, files=None, git=False):
-    """A checkout root under this run's folder, removed at cleanup. Its .github/workflows holds `files` (name -> text); with `files` None there is
-    no such folder, and `files` {} is an empty .github/workflows. `git` makes the root a checkout, so the walk up for a workflow folder stops there."""
-    root = os.path.realpath(tempfile.mkdtemp(prefix="required-only-", dir=run_folder()))
-    test.addCleanup(shutil.rmtree, root, True)
-    if git:
-        os.mkdir(os.path.join(root, ".git"))
-    if files is not None:
-        os.makedirs(os.path.join(root, ".github", "workflows"))
-    for name, text in (files or {}).items():
-        put(os.path.join(root, ".github", "workflows", name), text)
-    return root
-
-
-class AbsentRequiredCheck(unittest.TestCase):
-    """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned checks* names)."""
-    wait = WaitProgress.wait
-
-    def host(self, checks_at):
-        h = ClockedHost(checks_at)
-        h.required = ["checks", "needed"]
-        return h
-
-    def test_an_absent_required_check_stops_the_wait_before_the_deadline_naming_it(self):
-        host = self.host(lambda t: {"checks": [("pass", "")]})
-        ok, why, _, _, end = self.wait(host, 55)
-        self.assertFalse(ok)
-        self.assertIn("needed", why)
-        self.assertLess(end, 300, f"waited {end:.0f} s")
-
-    def test_an_absent_required_check_does_not_stop_the_wait_while_another_check_runs(self):
-        host = self.host(lambda t: {"checks": [("pending" if t < 400 else "pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
-        ok, why, *_ = self.wait(host, 55)
-        self.assertTrue(ok, why)
-
-    def test_a_required_status_posted_45_seconds_after_the_last_job_ended_is_waited_for(self):  # an external status can lag the jobs by a minute
-        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 45 else {})})
-        ok, why, *_ = self.wait(host, 55)
-        self.assertTrue(ok, why)
-
-    def test_a_pending_run_of_another_workflow_does_not_keep_the_wait_going(self):
-        """A pending run of a workflow that does not define a required job does not keep the wait going. Ruling: step merge-waits-required-only, wait only on the required check."""
-        host = ClockedHost(lambda t: {"checks": [("pass", "")], "needed": [("pass", "")]})
-        host.required, host.cwd = ["checks", "needed"], workflow_folder(self, {"ci.yml": workflow_text("ci", "ci")})
-        host.runs = lambda sha: [pending_run("ci")]  # a run of a workflow that does not define the required job: it is not waited on
-        ok, why, _, _, end = self.wait(host, 55)
-        self.assertTrue(ok, why)
-        self.assertLess(end, 55 * 60, f"the wait ran to {end:.0f} s for a run that is not required")
-
-    def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
-        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
-        ok, why, *_ = self.wait(host, 55)
-        self.assertTrue(ok, why)
-
-    def test_a_head_with_no_check_reported_yet_is_waited_on_to_the_deadline(self):  # GitHub lags a push
-        host = self.host(lambda t: {})
-        ok, why, _, _, end = self.wait(host, 5)
-        self.assertFalse(ok)
-        self.assertIn("deadline of 5 minutes", why)
-
-class RequiredOnlyWait(unittest.TestCase):
-    """merge-waits-required-only: the wait holds on the required check names. A pending run holds only when its workflow file defines a
-    required job, or when no workflow folder can be read. A pending check or run that is not required never holds the wait, and one line on
-    success names what was not waited for. A red check, required or not, still refuses.
-    Ruling: step merge-waits-required-only, wait only on the required check."""
-    wait = WaitProgress.wait
-
-    def host(self, checks_at, runs=lambda sha: [], folder=None, required=(REQUIRED_CHECK,)):
-        host = ClockedHost(checks_at)
-        host.required, host.cwd, host.runs = list(required), folder, runs
-        return host
-
-    def test_a_pending_check_that_is_not_required_does_not_hold_a_green_required_check(self):
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]})
-        ok, why, _, _, end = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a check that is not required")
-
-    def test_a_pending_required_check_still_holds_to_the_deadline(self):
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pending", "")]})
-        ok, why, _, _, end = self.wait(host, 5)
-        self.assertFalse(ok)
-        self.assertIn("deadline of 5 minutes", why)
-        self.assertGreaterEqual(end, 5 * 60)
-
-    def test_a_red_required_check_refuses_at_once(self):
-        host = self.host(lambda t: {REQUIRED_CHECK: [("fail", "")]})
-        ok, why, _, _, end = self.wait(host, 15)
-        self.assertFalse(ok)
-        self.assertIn(f"{REQUIRED_CHECK}: fail", why)
-        self.assertLess(end, 60, f"a red required check waited {end:.0f} s")
-
-    def test_on_success_one_line_names_the_pending_check_and_run_it_did_not_wait_for(self):
-        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]},
-                         runs=lambda sha: [pending_run("docs")], folder=folder)
-        ok, why, lines, _, _ = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        named = [l for _, l in lines if "design" in l or "docs" in l]
-        self.assertEqual(len(named), 1, f"want one line naming what was not waited for: {lines}")
-        self.assertIn("design", named[0])
-        self.assertIn("docs", named[0])
-
-    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_past_an_old_pass(self):
-        folder = workflow_folder(self, {"checks.yml": workflow_text("checks", "checks", REQUIRED_CHECK)})
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
-        ok, why, *_ = self.wait(host, 5)  # the pass row is the old run's: the re-run of the workflow is pending on this head
-        self.assertFalse(ok, why)
-        self.assertIn("deadline of 5 minutes", why)
-
-    def test_a_red_check_that_is_not_required_still_refuses(self):
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("fail", "")]})
-        ok, why, _, _, end = self.wait(host, 15)
-        self.assertFalse(ok, why)
-        self.assertIn("design: fail", why)
-        self.assertLess(end, 60, f"a red check that is not required waited {end:.0f} s")
-
-    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_a_green_required_check(self):
-        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
-        ok, why, _, _, end = self.wait(host, 15)
-        self.assertTrue(ok, why)
-        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a run whose workflow does not define the required job")
-
-    def test_a_pending_run_holds_when_no_workflow_folder_can_be_read(self):  # the fallback: unknown holds, so a folder that is not read never lets a run through
-        folder = workflow_folder(self, None, git=True)
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
-        ok, why, *_ = self.wait(host, 5)
-        self.assertFalse(ok, why)
-        self.assertIn("deadline of 5 minutes", why)
-
-    def test_a_pending_run_whose_name_matches_no_local_workflow_holds_over_a_stale_pass(self):
-        # The head renamed the workflow's `name:`, so the run's name maps to no local file. A name no file maps to is unknown, and it holds.
-        folder = workflow_folder(self, {"checks.yml": workflow_text("checks-renamed", REQUIRED_CHECK)})
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
-        ok, why, *_ = self.wait(host, 5)
-        self.assertFalse(ok, "a pending run that maps to no local workflow file was dropped, and the stale pass let the wait pass")
-        self.assertIn("deadline of 5 minutes", why)
-
-    def test_a_pending_run_of_the_file_that_defines_a_pinned_required_job_holds_over_a_stale_pass(self):
-        # The wait holds on every required name. A pinned `lint` is required, and its file defines the job `lint`.
-        folder = workflow_folder(self, {"lint.yml": workflow_text("lint", "lint")})
-        host = self.host(lambda t: {"lint": [("pass", "")]}, runs=lambda sha: [pending_run("lint")], folder=folder, required=("lint",))
-        ok, why, *_ = self.wait(host, 5)
-        self.assertFalse(ok, "a pending run of the file that defines the pinned required job `lint` was dropped, and the stale pass let the wait pass")
-        self.assertIn("deadline of 5 minutes", why)
-
-    def test_an_empty_workflow_folder_holds_a_pending_run(self):
-        # No file is shown to define the run's job, so the run is unknown and it holds.
-        folder = workflow_folder(self, {})
-        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
-        ok, why, *_ = self.wait(host, 5)
-        self.assertFalse(ok, "a pending run in an empty workflow folder was dropped, and the wait passed")
-        self.assertIn("deadline of 5 minutes", why)
-
-    def test_a_workflow_file_whose_line_scan_finds_no_job_holds_its_pending_run(self):
-        # A 4-space indent or a flow-style `jobs:` gives the line scan no job. A file with no job found is unknown, so its run holds.
-        texts = {"indent.yml": "name: docs\non: push\njobs:\n    docs:\n        runs-on: ubuntu-latest\n",
-                 "flow.yml": "name: docs\non: push\njobs: {docs: {runs-on: ubuntu-latest}}\n"}
-        for name, text in texts.items():
-            with self.subTest(file=name):
-                folder = workflow_folder(self, {name: text})
-                host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
-                ok, why, *_ = self.wait(host, 5)
-                self.assertFalse(ok, "a workflow file whose line scan finds no job dropped its pending run, and the wait passed")
-                self.assertIn("deadline of 5 minutes", why)
-
-    def test_a_pending_check_that_is_not_required_does_not_clear_a_no_job_ran_red(self):
-        # A pending check that is not required is not waited on, so it cannot hold back the red that no job ran. That red still refuses.
-        skipped = {"databaseId": 102, "name": "lint", "workflowName": "lint", "workflowDatabaseId": 102, "status": "completed", "conclusion": "skipped"}
-        host = self.host(lambda t: {"lint": [("skipping", "")], "design": [("pending", "")]}, runs=lambda sha: [skipped], required=("lint",))
-        ok, why, _, _, end = self.wait(host, 15)
-        self.assertFalse(ok, "a pending check that is not required cleared the no-job-ran red, and the wait passed")
-        self.assertTrue(any(s in why for s in ("no job ran", "no check ran")), why)
-        self.assertLess(end, 60, f"the skipped required job waited {end:.0f} s before it was refused")
 
 
 class SilentWait(Env):
@@ -9285,7 +8012,9 @@ class SilentWait(Env):
         def go():
             try:
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                    result["rc"] = merge.main(["7", "--confirm"], host=host, lock=self.lock)
+                    first = merge.main(["7", "--confirm"], host=host, lock=self.lock)  # the claim step: pushes the claim and stops
+                    claimed = claim_pushed_line(out.getvalue() + err.getvalue())
+                    result["rc"] = merge.main(["7", "--confirm"], host=host, lock=self.lock) if first == 0 and claimed else first  # the merge step
             except BaseException as e:  # a crash in the thread must fail the test, not vanish
                 result["error"] = repr(e)
 
@@ -9335,8 +8064,7 @@ class SilentWait(Env):
         self.set(checks_seq=[[]], runs_seq=[[("check", "in_progress", None)]])
         rc, out = self.go(required=("check",))
         self.assertEqual(rc, 1, out)
-        self.assertIn("waiting on check", out)
-        self.assertIn("workflow check", out)
+        self.assertIn("a check is pending: check", out)  # the refusal names the required check it found pending; the run's own line was the wait's
 
 _real_threading = threading  # the real module. merge's `threading` name is swapped in the scan cases, this name is not
 
@@ -9505,11 +8233,6 @@ class WaitStepLines(unittest.TestCase):
         self.assertTrue(seen, "no gh call was made")
         return seen[0]
 
-    def test_the_check_step_is_named_before_its_first_gh_read(self):
-        host = merge.Host(required="protection", base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
-        before = self.first_call_text(host, lambda h: h.wait_checks(7, "sha", 15))
-        self.assertRegex(before, r"(?m)^merge: checking", f"printed before the first gh read: {before!r}")
-
     def test_the_merge_step_is_named_before_the_merge_call(self):
         host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
         before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
@@ -9571,20 +8294,10 @@ class RecordsEnv(Env):
             put_lf(os.path.join(o, rel), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
 
-    def in_wait(self, action, at=1):
-        """Run action as the at-th check wait starts: main moves while the run waits, after the head was read current.
-        A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here."""
-        actions = getattr(self, "_wait_actions", None)
-        if actions is None:
-            actions = self._wait_actions = {}
-            real = self.host.wait_checks
-            def wait(n, sha, d, prior=None):
-                act = actions.pop(len(self.host.waits) + 1, None)
-                if act:
-                    act()
-                return real(n, sha, d, prior)
-            self.host.wait_checks = wait
-        actions[at] = action
+    def main_debt_conflicts(self):
+        """main adds the debt the head adds, with other text: the merge of the head and main conflicts on it. Under rule M3 a clean base
+        move stands, so a case that needs a refused head moves main this way."""
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Main gap")}, "untooled push")
 
     def drop(self, branch, rel, msg):
         """Push one commit to origin/<branch> from the second clone that removes rel, as a person would."""
@@ -9677,6 +8390,178 @@ class RecordsEnv(Env):
                "done\nexit $status\n")
         os.chmod(os.path.join(self.bare, "hooks", "pre-receive"), 0o755)
 
+def claim_pushed_line(out):
+    """The stop line of a two-step confirm: the one line that says the claim is pushed and to confirm again. '' when there is none."""
+    return next((l for l in out.splitlines() if "claim" in l and "pushed" in l and "confirm" in l), "")
+
+class TwoStepConfirm(RecordsEnv):
+    """Two-step confirm. A claim is a commit on the pull request head, and the claim head's own checks must run before it merges. So a confirm
+    that must push its claim commit pushes it and stops: no merge call, no wait, and one stop line that says the claim is pushed and to confirm
+    again. The next confirm, on the claim head, merges it. A confirm that needs no claim merges in one run. Each case names its cause in its first assert."""
+
+    def test_the_first_confirm_calls_no_merge_put(self):
+        asked = []
+        real_merge = self.host.merge
+        def spy(n, method, sha):
+            asked.append(sha)
+            return real_merge(n, method, sha)
+        self.host.merge = spy
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(asked, [], "the first confirm called the merge PUT, so it did not stop at the claim: %s" % out)
+
+    def test_the_first_confirm_stops_with_a_line_that_says_the_claim_is_pushed(self):
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(claim_pushed_line(out), "no stop line says the claim is pushed and to confirm again: %s" % out)
+
+    def test_the_first_confirm_leaves_its_claim_commit_on_the_lane_head(self):
+        before = self.head("feat")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "the first confirm merged, so the lane head is gone: %s" % out)  # scope first
+        claim = self.head("feat")
+        self.assertNotEqual(claim, before, "the first confirm pushed no claim commit: %s" % out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", claim), "Claim record numbers", "the lane head is not the claim commit")
+
+    def test_a_confirm_that_needs_no_claim_merges_in_one_run(self):
+        self.leave_no_pending_record()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "a confirm with nothing to claim did not merge in one run: %s" % out)
+
+    def test_the_second_confirm_merges_the_claim_head(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit the first confirm pushes, on the relayed head
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the second confirm did not merge the claim head: %s" % out)
+
+    def test_the_second_confirm_on_a_pending_claim_head_refuses_before_any_push(self):
+        relayed = self.head("feat")
+        self.claim_head()
+        self.host.state = "pending: checks: running"  # the claim head's required check has not reported
+        self.host.checks = (None, "a required check is pending")
+        before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), before, "a push landed on a claim head whose check is pending")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_the_second_confirm_on_a_red_claim_head_refuses(self):
+        relayed = self.head("feat")
+        self.claim_head()
+        self.host.state = "red: checks: fail"  # the claim head's required check is red
+        self.host.checks = (False, "a check is red: checks: fail")
+        before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), before, "a push landed on a claim head whose check is red")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_the_relayed_yes_binds_across_the_claim_commit(self):
+        relayed = self.head("feat")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "the first confirm merged instead of stopping at the claim: %s" % out)
+        self.assertTrue(claim_pushed_line(out), "no stop line after the claim push: %s" % out)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)  # the relayed head is the parent of the claim commit
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the relayed yes did not carry over the claim commit: %s" % out)
+
+    def test_a_rival_commit_on_the_claim_head_refuses_the_relayed_yes(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit on the relayed head
+        self.competitor_push()  # a rival commit lands on top of the claim: the relayed head is no longer the parent of the live head
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("moved", out, "the refusal does not say the head moved: %s" % out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_relayed_yes_survives_a_page_only_rebuild_commit_on_the_claim_head(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit the first confirm pushes, on the relayed head
+        self.on("feat", {merge.RECORDS_PAGE: page()}, "Rebuild the records page")  # the resumed page commit: the records page alone, no trailer
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertNotIn("so that yes does not cover it", out, "the relayed yes was refused for a page-only rebuild commit: %s" % out)  # scope first: not refused as moved
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the relayed yes did not carry over the page-only rebuild commit: %s" % out)
+
+    def test_a_commit_with_the_page_subject_but_another_file_still_refuses_the_relayed_yes(self):  # control: green on the old code
+        relayed = self.head("feat")
+        self.claim_head()
+        self.on("feat", {"rival.txt": "someone else pushed\n"}, "Rebuild the records page")  # the subject alone does not make a page commit
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("so that yes does not cover it", out, "the refusal does not say the relayed yes is not covered: %s" % out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+class ClaimCollision(RecordsEnv):
+    """Two lanes claim the same record number between their confirms (per-lane merge, the coordinator's pick of Nov 12 2026). Lane B's first
+    confirm pushes its claim D-002 and stops. Lane A then merges, and main holds D-002. Lane B's second confirm finds its own claim taken on main:
+    it reverts that claim while its branch still holds it, says so, and stops. Its next confirm claims a fresh number and merges. Lane A's merge
+    is a push of its record to main from the second clone, as a landed merge leaves it. Each case names its cause in its first assert."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def lane_b_pushes_its_claim(self):
+        """Lane B's first confirm: it pushes its claim commit and stops. -> the sha of that claim head."""
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(claim_pushed_line(out), "lane B's first confirm did not stop at its pushed claim: %s" % out)
+        return self.head("feat")
+
+    def lane_a_merges(self):
+        """Lane A's merge lands on main: its record holds D-002 and carries the claim trailer."""
+        self.on("main", {"docs/decisions/lane-a.md": record("D-002", "lane-a")}, "Claim record numbers\n\nRecord-claim: D-002")
+
+    def test_a_second_confirm_whose_claim_main_holds_reverts_it_and_stops(self):
+        claim = self.lane_b_pushes_its_claim()
+        self.lane_a_merges()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)  # scope first: the confirm stops
+        self.assertFalse(getattr(self.host, "merged", False), "lane B merged on a claim main already holds: %s" % out)
+        self.assertNotEqual(self.head("feat"), claim, "lane B kept the claim D-002 that main holds: %s" % out)
+        self.assertEqual(self.log1("%s", "origin/feat"), 'Revert "Claim record numbers"', "feat's head is not the revert of the claim: %s" % out)
+        self.assertRegex(out, r"[Rr]evert", "the stop does not name the revert: %s" % out)
+        self.assertRegex(out, r"--confirm", "the stop does not name the next confirm: %s" % out)
+
+    def test_the_lane_whose_claim_collided_claims_a_fresh_number_and_merges(self):
+        self.lane_b_pushes_its_claim()
+        self.lane_a_merges()
+        self.run_merge_once("7", "--confirm")  # the revert stop
+        rc, out = self.run_merge("7", "--confirm")  # the next confirm claims, pushes, and merges on its second step
+        self.assertEqual(rc, 0, "the confirm after the revert did not merge: %s" % out)
+        self.assertTrue(getattr(self.host, "merged", False), "the confirm after the revert did not merge: %s" % out)
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-003",
+                         "the merged claim is not the fresh number D-003: %s" % out)
+
+    def test_a_second_confirm_whose_claim_main_does_not_hold_still_merges(self):  # control: green on the old code
+        self.lane_b_pushes_its_claim()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "a claim main does not hold did not merge on its second confirm: %s" % out)
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
+
+class ResumedPageStale(RecordsEnv):
+    """A resumed claim whose records page is current on its own tree, but stale for the merge with main. Confirm proves the merge result after
+    its claim is on origin, and a stale proof stops the run. This run pushed nothing (the claim is the lane's, already on origin), so the
+    refusal reverts nothing: a revert push would undo a claim this run did not make, and the refusal's words say nothing was pushed."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def test_a_resumed_claim_whose_page_main_makes_stale_is_refused_with_no_push(self):
+        self.claim_head({"docs/records.md": page()})  # the claim, and a page current on the head's own tree
+        self.on("main", {"debts/gap-two.md": DEBT_TEXT.replace("Gap one", "Main gap")}, "a debt lands on main")  # the merge result would change the page
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)  # scope first: the run refuses
+        self.assertFalse(getattr(self.host, "merged", False), "the stale page was merged: %s" % out)
+        self.assertEqual(self.refs(), refs_before, "a push landed on the page-stale refusal, which says nothing was pushed: %s" % out)
+        self.assertIn("Nothing was merged or pushed", out)
+
 class RecordsRebuild(RecordsEnv):
     """The records index is rebuilt at merge time, the way record numbers are claimed
     from the slug form at merge: merge.py runs a records generator.
@@ -9696,9 +8581,8 @@ class RecordsRebuild(RecordsEnv):
       the draft step refuses a claim head, so it is never named first. The preview's records line gives the same remedy.
     - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
       the page in the same commit. A resumed claim with a stale page: the subject "Rebuild the records page", and no
-      Record-claim trailer. The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red
-      check on it reverts that commit, as for a claim.
-    - Nothing changed in the worktree: no commit, and one wait.
+      Record-claim trailer. The head is read green once, before the page commit is pushed; nothing waits on the new sha.
+    - Nothing changed in the worktree: no commit, and no wait.
     - Proof before the merge call: after the last fetch of the base, merge origin/<base> into the worktree without a
       commit and run the generator. When it would change the page, the page on the head is stale for the merge result
       (the base moved with a record): refuse with a line that says "records page" and "stale", revert the rebuild
@@ -9776,7 +8660,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", after).strip(), "")
         self.assertIn(merge.RECORDS_PAGE, self.log1("%(trailers:key=Drops-lines,valueonly)", after))
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
-        self.assertEqual(self.host.waits, [(before, None), (after, before)])  # the head first, then the page commit on top of it
+        self.assertEqual(self.host.waits, [], "confirm waited on a check")  # no wait: the head was read green, and nothing waits on the page commit
         self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_a_stale_page_on_a_draft_heals_even_when_the_pr_touches_no_record(self):
@@ -9792,14 +8676,14 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.head("main"), main_before, "the draft step moved main")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_a_current_page_adds_no_commit_and_waits_once(self):
+    def test_a_current_page_adds_no_commit_and_no_wait(self):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
         before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rev("origin/main^2"), before)
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "confirm waited on a check")
         self.assertTrue(os.path.exists(self.calls), "the generator did not run on a page that was already current")
 
     def test_a_base_that_is_not_the_default_is_left_alone(self):
@@ -9907,25 +8791,12 @@ class RecordsRebuild(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_a_red_check_on_the_rebuild_commit_reverts_it(self):
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the page commit on top of the claim is the one pushed
-        before = self.head()
-        self.host.seq = [(True, ""), (False, "a check is red: checks: fail")]  # the head is green, the rebuild commit is red
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted", out)
-        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")  # the branch tree is as it was
-        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
-        self.assertFalse(getattr(self.host, "merged", False))
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
     def test_main_gaining_a_record_during_the_wait_refuses_and_reverts(self):
         # A push that did not use the tool: a debt lands on main and the page is not rebuilt. The merge result
         # would hold a stale page, so the merge must not happen.
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
         before = self.head()
-        self.host.on_wait = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
+        self.host.on_claim = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("records page", out.lower())
@@ -9936,17 +8807,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_main_gaining_an_unrelated_change_during_the_wait_refuses_and_reverts(self):
-        # The page is fresh, but no run tested the head with main's new commit (merge-needs-current-base).
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
-        before = self.head()
-        self.host.on_wait = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+    def test_main_gaining_an_unrelated_change_after_the_claim_merges_on_the_clean_merge(self):
+        # Rule M3: main's new commit touches no path the head changes, so the merge of the two is clean and the green run stands.
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after it
+        self.host.on_claim = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("does not hold origin/main", out)
-        self.assertIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("The green run stands", out)
+        self.assertNotIn("reverted", out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_the_preview_on_a_non_default_base_says_nothing_about_the_page(self):
         # The records line sits inside the default-branch block of preview(), so a pull request
@@ -9977,7 +8846,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_prepare_refuses_a_head_that_does_not_hold_the_base_tip(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on; the head does not hold its tip
+        self.main_debt_conflicts()  # main moves on with a conflicting debt: the head does not hold its tip, and the merge conflicts
         before = (self.head(), self.head("main"))
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
@@ -10043,9 +8912,9 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], "the ready confirm marked it ready again")
         # deleteBranch removes `feat` after the merge, so read the merge commit instead. Its second parent is the sha
-        # the draft step pushed, and the one wait is on that sha: the ready confirm pushed no commit after it.
+        # the draft step pushed. The ready confirm pushed no commit after it, and waited on none.
         self.assertEqual(self.rev("origin/main^2"), prepared, "the ready confirm pushed a commit after the draft step")
-        self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
+        self.assertEqual(self.host.waits, [], "the ready confirm waited on a check")
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
 
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
@@ -10071,7 +8940,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.head(), before, "refused push: the head moved")
         self.assertEqual(len(self.host.readies), 2, "refused push: the pull request was marked ready")
         self.assertEqual(asked, [], "refused push: merge was called")
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on: the head is behind it
+        self.main_debt_conflicts()  # main moves on with a conflicting debt: the head is behind it
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, "BEHIND: " + out)
         self.assertIn("BEHIND", out)
@@ -10093,14 +8962,12 @@ class RecordsRebuild(RecordsEnv):
         self.assertTrue(self.host.draft, "the refused ready cleared the draft flag")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_prepare_goes_on_when_the_green_run_stands_on_a_small_base_move(self):
+    def test_prepare_goes_on_when_the_base_moved_by_a_clean_merge(self):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # the head lacks the base tip, but its green run stands
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # the head lacks the base tip; the merge of the two is clean, so the green run stands (M3)
         before = self.head()
-        stands = (True, "main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge")
-        with unittest.mock.patch.object(merge, "small_base_move", return_value=stands):
-            rc, out = self.draft_confirm()
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         self.assertIn("The green run stands", out)
         self.assertNotIn("BEHIND", out)
@@ -10123,7 +8990,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_prepare_behind_names_the_remedy_once(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.main_debt_conflicts()
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
         self.assertIn("BEHIND: ", out)
@@ -10143,27 +9010,31 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.host.readies, [], "marked ready on a refusal")
 
     def test_prepare_under_the_lock_extends_it_and_releases_it(self):
-        # A PR that turns draft once the lock is held: the draft step runs under confirm's lock, so its proof hands holds_base
-        # the lock's own extend_for, as the ready path does. Without it a rate wait there could outlive the lock.
+        # A PR that turns draft once the lock is held: the draft step runs under confirm's lock, and its ready call runs with the
+        # lock's own extend_for as before_wait, so a rate wait there extends the lock. Without it a rate wait could outlive the lock.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
-        real_acquire, real_holds, seen = lock.acquire, merge.holds_base, []
+        real_acquire, real_ready, seen = lock.acquire, self.host.ready, []
+        drafted = []
         def acquire(*a, **k):
             token = real_acquire(*a, **k)
-            self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
+            if not drafted:  # main's read saw a ready PR; the read under the lock of the claim run sees a draft
+                drafted.append(True)
+                self.host.draft = True
             return token
-        def holds(wt, base_ref, sha, before_run=None):
-            seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+        def ready(n):
+            seen.append(self.host.before_wait)
+            return real_ready(n)
         lock.acquire = acquire
-        with unittest.mock.patch.object(merge, "holds_base", holds):
-            rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.host.ready = ready
+        rc, out = self.run_merge("7", "--confirm", lock=lock)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.readies, [7], out)
-        self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual(self.host.readies, [7], out)  # the draft step readies once: the merge run's head is ready already
+        self.assertEqual(seen, [lock.extend_for], "the draft step's ready call did not run under the lock's extend_for")
         self.assertFalse(self.lock_ref(), "the lock was not released")
-        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(len(self.run_texts), 2, out)  # the claim run stops; the merge run merges the claim
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_the_draft_preview_hints_the_push_when_the_head_holds_the_base_tip(self):
         self.kinds_off()
@@ -10181,10 +9052,10 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotIn("--confirm on the draft", self.preview_line(out, "records"), f"hints a push that --confirm refuses\n{out}")
 
     def test_the_draft_preview_hints_no_push_when_the_head_is_behind(self):
-        # The draft step refuses a head that does not hold the base tip, so there is no push to promise.
+        # The draft step refuses a head that does not hold the base tip and conflicts with it, so there is no push to promise.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.main_debt_conflicts()
         self.assert_refused_draft_preview_hints_no_push(self.draft_preview(), "BEHIND")
 
     def test_the_draft_preview_hints_no_push_when_the_base_cannot_be_read(self):
@@ -10266,19 +9137,19 @@ class RecordsRebuildReal(RecordsEnv):
         finally:
             sh(self.co, "git", "worktree", "remove", "--force", wt)
 
-    def test_a_conflict_only_on_the_page_is_rebuilt_on_the_merged_tree(self):
-        # Only the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
-        # records_stale() must not read any conflict as "cannot be proved fresh" and revert the claim.
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the head's page commit is pushed, then the heal merges the base
+    def test_a_conflict_only_on_the_page_is_refused_for_a_rebuild_before_any_push(self):
+        # Only the generated page conflicts (add/add on both sides). The merged tree needs a page rebuild, which is a heal: it would push a
+        # commit no check has read. The ready pull request is refused with the rebuild remedy, and the feat head stays where it was.
+        # A conflict on the page reads as stale, never as unknown, so the refusal is the page's, not the conflict's.
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the head already holds its claim
+        before = self.head()
         self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
                                      "a debt and a hand-written page on main"))
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-        page = self.show("main", "docs/records.md")
-        self.assertIn("gap-one", page)
-        self.assertIn("main-gap", page)
-        self.assertEqual(page, self.generated("origin/main"))
+        self.assertFalse(getattr(self.host, "merged", False), "the heal merged a page commit no check read:\n" + out)
+        self.assertEqual(self.head(), before, "the heal pushed a page commit before it refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"rebuild[\s\S]*\bpush\b[\s\S]*\breview\b", "the refusal does not say to rebuild the page and push before review:\n" + out)
 
     def test_a_conflict_on_another_file_still_refuses_and_reverts(self):
         # A conflict outside the generated page must still stop the merge. This blocks a blanket
@@ -10345,10 +9216,11 @@ class RecordsScope(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def delete_edit_setup(self, head_files=None, generated=False, trailer=False):
+    def delete_edit_setup(self, head_files=None, generated=False, trailer=False, lane_heals=False):
         """The page is in the base. The head edits it: by hand, or, when generated, to the generator's own output for the head's
         debts (head_files are written first, so the generator sees them). Then main deletes it. trailer adds the Drops-lines
-        trailer on the head's commit, as the heal's merge commit carries it."""
+        trailer on the head's commit. lane_heals: main deletes it before the run, so the lane heals against that drop (lane_heal)
+        before the confirm; otherwise main deletes it during the run's first head read."""
         self.kinds_off()
         self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
         o = self.other
@@ -10363,7 +9235,25 @@ class RecordsScope(RecordsEnv):
             put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
         msg = ["-m", "the head edits the page"] + (["-m", "Drops-lines: docs/records.md -- a generated page, rebuilt by the generator"] if trailer else [])
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", *msg); sh(o, "git", "push", "-q", "origin", "feat")
-        self.in_wait(lambda: self.drop("main", "docs/records.md", "main drops the page"))
+        if lane_heals:
+            self.drop("main", "docs/records.md", "main drops the page")  # before the run: the lane merges this drop, then the confirm reads it
+        else:
+            self.in_wait(lambda: self.drop("main", "docs/records.md", "main drops the page"))
+
+    def lane_heal(self):
+        """The lane's heal, before the confirm: merge origin/main into feat, rebuild the page, commit the merge and push it. main deleted
+        the page and the head edited it, so the merge conflicts on the page alone, and the generator's rebuild resolves it. -> the pushed sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        merged = subprocess.run(["git", "merge", "--no-edit", "origin/main"], cwd=o, capture_output=True, text=True)
+        self.assertNotEqual(merged.returncode, 0, "the merge of main did not conflict, so there is no page to heal")  # scope before subject
+        self.assertEqual(sh(o, "git", "diff", "--name-only", "--diff-filter=U"), "docs/records.md", "the merge conflicts on more than the page")
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "Merge main into feat")
+        sh(o, "git", "merge-base", "--is-ancestor", "origin/main", "HEAD")  # the head holds main's tip, so the confirm's merge reads it clean
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
 
     def test_a_page_deleted_on_main_and_edited_on_the_head_with_no_records_stops_the_merge(self):
         # The generator writes nothing here, and the head's page has no marker, so the head's page would be committed to main.
@@ -10381,23 +9271,27 @@ class RecordsScope(RecordsEnv):
         self.assertEqual(self.worktrees(), 1)
 
     def test_a_generated_page_deleted_on_main_with_records_rebuilds_and_merges(self):
-        # The control: a root with a record folder. The head's page is the generator's output for its debt, and main
-        # deletes the page. The rebuild should go on. The silent-undo check refuses the head's commit: it drops a base line and
-        # carries no Drops-lines trailer. The heal's merge commit carries one, and the next case shows it goes through with it.
-        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True)
+        # The control: a root with a record folder. The head's page is the generator's output for its debt, and main deletes
+        # the page. The lane merges main and rebuilds the page before the confirm, so the confirm reads a head that holds main's
+        # tip and merges it. The silent-undo check allows the page: it is the generator's output for the head, with no trailer needed.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, lane_heals=True)
+        healed = self.lane_heal()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        self.assertEqual(self.rev("origin/main^2"), healed, "the confirm did not merge the head the lane pushed")
 
     def test_a_generated_page_with_a_drops_trailer_deleted_on_main_with_records_rebuilds_and_merges(self):
-        # Green control, as the heal's merge commit does it: the same head commit with the Drops-lines trailer. The page is generated,
-        # so the drop of a base line is excused, and the merge goes on.
-        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True)
+        # The twin: the same head with the Drops-lines trailer on its commit. The page is generated, so the drop of a base line
+        # is excused, and the lane's heal and the merge go on as in the control.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True, lane_heals=True)
+        healed = self.lane_heal()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        self.assertEqual(self.rev("origin/main^2"), healed, "the confirm did not merge the head the lane pushed")
 
     def test_a_root_with_hooks_and_no_settings_merges(self):
         # The generator must not stop on "hook_catalog: cannot read settings.json": the records page can be rebuilt.
@@ -10424,9 +9318,9 @@ class RecordsScope(RecordsEnv):
         self.assertNotIn("docs/catalog.md", changed, changed)
 
 class RecordsHeal(RecordsEnv):
-    """The keep paths of the heal wait in confirm(): the third wait of a run, on the merge commit that heals the page. The
-    fake generator writes the page, so the heal is a real conflict on docs/records.md. Each push or red check fires on the
-    third wait only (len(host.waits) == 3). These pin the keep paths."""
+    """The heal of a page that conflicts with main: the merge commit that heals the page is pushed and merged in one run, with no
+    wait on its checks. The fake generator writes the page, so the heal is a real conflict on docs/records.md. The keep-path cases
+    that pinned the old third wait are retired (see the commit message); the heal's own records and drops-lines contract stays here."""
     def setUp(self):
         super().setUp()
         self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
@@ -10435,100 +9329,27 @@ class RecordsHeal(RecordsEnv):
                   unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
             p.start(); self.addCleanup(p.stop)
 
-    def heal_setup(self):
-        """The head adds a debt and holds its claim, so a stale page on it is pushed as a page commit (the resumed path); a debt and a
-        hand-written page land on main during the head's wait. The head's rebuild commits one page, and the heal merges both."""
+    def heal_setup(self, page=True):
+        """The head holds its claim and adds a debt. During the head's wait, main adds a debt, and with page also a hand-written page that
+        conflicts with the head's generated one. The merged tree then needs a page rebuild, which is a heal."""
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})
-        self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
-                                     "a debt and a hand-written page on main"))
+        files = {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap")}
+        if page:
+            files["docs/records.md"] = "records\n- main-gap\n"
+        self.in_wait(lambda: self.on("main", files, "a debt and a hand-written page on main" if page else "a debt on main"))
 
-    def on_heal_wait(self, action):
-        """Run action when the heal wait starts: the third wait, on the merge commit."""
-        self.host.on_wait = lambda: action() if len(self.host.waits) == 3 else None
-
-    def assert_kept(self, rc, out):
-        """The merge commit that heals the page stays on feat: no revert, no merge, lock free."""
+    def test_a_heal_with_no_page_conflict_is_refused_before_any_check_is_read(self):
+        """Main adds a debt and no page edit, so the head's page is stale with no conflict. The merged tree still needs the rebuild, and the
+        rebuild would be a commit no check has read. The per-lane run refuses it at once: no check wait, nothing pushed, nothing merged, and
+        a line that tells the lane to rebuild the page and push before review (decision: two-step confirm)."""
+        self.heal_setup(page=False)
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "the heal merged a page commit no check read:\n" + out)
+        self.assertEqual(self.host.waits, [], "the heal waited on a check:\n" + out)
+        self.assertEqual(self.head(), before, "the heal pushed a page commit before it refused:\n" + out)
         self.assertEqual(rc, 1, out)
-        self.assertEqual(len(self.host.waits), 3, self.host.waits)
-        self.assertIn("stays on feat", out)
-        self.assertNotIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0])
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
-    def assert_unknown_kept(self, rc, out):
-        """The heal wait could not get an answer: the stop says the result is unknown and to rerun, the merge commit stays on feat, nothing is merged."""
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(len(self.host.waits), 3, self.host.waits)
-        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
-        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
-        self.assertNotIn("are not green", out, "the heal wait read an unanswered wait as a red check")
-        self.assertNotIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0], "feat moved off the merge commit the heal pushed")
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
-    def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
-        self.heal_setup()
-        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: checks: fail")]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("are not green", out)
-        self.assertIn("checks: fail", out)
-
-    def test_a_deadline_with_a_required_check_pending_on_the_heal_commit_stops_unknown_and_keeps_it(self):
-        self.heal_setup()
-        self.host.seq = [(True, ""), (True, ""), (None, "the checks wait ended at its deadline with a required check pending")]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_a_failed_read_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
-        self.heal_setup()
-        def read_fails():
-            raise merge.Stop("reading the checks of #7 failed: boom")
-        self.on_heal_wait(read_fails)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_an_error_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
-        self.heal_setup()
-        def boom():
-            raise RuntimeError("boom")
-        self.on_heal_wait(boom)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("records page is stale", out)
-
-    def test_a_page_edit_landing_on_main_during_the_heal_wait_stops_the_second_heal(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"docs/records.md": "records\n- rival\n"}, "untooled page edit"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("conflicts again", out)
-
-    def test_a_non_page_conflict_landing_on_main_during_the_heal_wait_refuses(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Rival gap one")}, "untooled debt"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("does not merge cleanly", out)
-
-    def test_the_heal_commit_names_only_the_page_in_drops_lines(self):
-        self.heal_setup()
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.rev("origin/main")  # fetches
-        body = sh(self.co, "git", "log", "-1", "--format=%B", "origin/main^2")  # the heal commit: the merge's second parent
-        drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
-        self.assertEqual(drops, [["docs/records.md"]], body)
+        self.assertRegex(out, r"rebuild[\s\S]*\bpush\b[\s\S]*\breview\b", "the refusal does not say to rebuild the page and push before review:\n" + out)
 
 class ReadyPageState(RecordsEnv):
     """ready_page_state(root, n, host): the state of the records page on a pull request's head, read before the pull request
@@ -11117,19 +9938,20 @@ class GhLockRateRetry(unittest.TestCase):
             self.lock().read("main")
 
 class BeforeWaitHost(FakeHost):
-    """Keeps the hook the run has handed it (Host.before_wait) when its first wait starts."""
+    """Keeps the hook the run has handed it (Host.before_wait) at the first read the run makes under the lock: the head's read, the
+    per-lane confirm's only read before the claim (it waits on nothing)."""
     seen = "never read"
 
-    def wait_checks(self, n, sha, d, prior=None):
+    def head_state(self, n, sha=None):
         if self.seen == "never read":
             self.seen = getattr(self, "before_wait", None)
-        return super().wait_checks(n, sha, d, prior)
+        return super().head_state(n, sha)
 
 class LockExtensionReachesHost(Env):
     """A rate wait is the exception to the lock's take expiry. So once the lock is
     taken, confirm hands the host the lock's own extend_for (host.before_wait): the host runs it before each rate wait. It hands over no bound
     (host.until) that stops a wait at the end of the lock's spare."""
-    def test_the_run_hands_the_host_the_lock_extension_before_its_first_wait(self):
+    def test_the_run_hands_the_host_the_lock_extension_before_its_first_read_under_the_lock(self):
         host = BeforeWaitHost(self.co, self.other)
         rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertEqual(rc, 0, out)
@@ -11837,36 +10659,30 @@ class JobCapWarning(Env):
         self.assertIn(CAP_LINE, hits[0], out)
         self.assertNotIn("job scope", out)
 
-    def test_a_wait_over_a_green_run_prints_the_line_and_still_merges(self):
-        host = CapsHost(self.co, [check("checks", "pass", 40), check("scope", "pass", 5)], [run("success")])
-        (ok, why), out = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
-        self.assertTrue(ok, why)
-        self.assertIn(CAP_LINE, out)
-
     def test_a_cancel_at_the_full_cap_is_a_timeout_not_a_test_failure(self):
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = self.read(host, lambda h: h.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_a_cancel_sooner_than_the_cap_is_not_a_timeout(self):
         host = CapsHost(self.co, [check("checks", "cancel", 2)], [run("cancelled")])
-        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = self.read(host, lambda h: h.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
 class StampDeadlineFloor(Env):
     """Recovery rule: a deadline under the floor does not stop the merge. The merge waits max(deadlineMinutes, floor)
     and prints one line naming the fix. The floor is the largest job timeout-minutes plus 5, clamped at 360."""
-    def test_a_deadline_under_the_largest_cap_plus_five_waits_the_floor_and_names_the_fix(self):
+    def test_a_deadline_under_the_largest_cap_plus_five_takes_the_floor_and_names_the_fix(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
-    def test_a_deadline_at_the_largest_cap_plus_five_waits_itself_and_names_nothing(self):
+    def test_a_deadline_at_the_largest_cap_plus_five_takes_itself_and_names_nothing(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
@@ -11879,14 +10695,14 @@ class StampDeadlineFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {65}, "the traps (99, 120, 130, step cap 90) must not raise the floor")
-        self.assertEqual(out.count(fix_line(65)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(65)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_a_provisional_sixty_minute_cap_sets_the_floor_at_sixty_five(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": PROVISIONAL_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {65}, out)
-        self.assertEqual(out.count(fix_line(65)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(65)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_a_repo_with_no_workflow_has_no_floor(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(5)})
@@ -11956,8 +10772,8 @@ class CapReviewRound1(Env):
         os.chdir(os.path.join(self.co, "docs", "decisions"))
         self.addCleanup(os.chdir, old)
         host = CapsHost(None, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_a_double_quoted_cap_reads_as_its_number_for_the_warning(self):
@@ -11969,8 +10785,8 @@ class CapReviewRound1(Env):
     def test_f5_a_single_quoted_cap_reads_as_its_number_for_a_timeout(self):
         push_base(self, {".github/workflows/checks.yml": cap_workflow("'50'")})
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_an_expression_cap_is_unknown_so_it_gives_no_warning_and_no_timeout(self):
@@ -11980,8 +10796,8 @@ class CapReviewRound1(Env):
         self.assertIn("job scope: 9 of 10 min", out, "the literal cap must still warn: the control proves the path is live")
         self.assertNotIn("job checks", out)
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
@@ -11991,22 +10807,20 @@ def merge_stamp_text(deadline):
     return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
 
-class DeadlineRecorder(FakeHost):
-    """FakeHost that records the deadline each wait is given."""
-    def __init__(self, root, other, branch="feat"):
-        super().__init__(root, other, branch)
-        self.deadlines = []
-
-    def wait_checks(self, n, sha, d, prior=None):
-        self.deadlines.append(d)
-        return super().wait_checks(n, sha, d, prior)
-
-
 def confirmed_wait(env):
-    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each wait was given)."""
-    host = DeadlineRecorder(env.co, env.other)
-    rc, out = env.run_merge("7", "--confirm", host=host)
-    return rc, out, host.deadlines
+    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each lock take is given). The per-lane run waits on no check, so the
+    floored deadline reaches the lock alone: confirm takes it for (WAITS * deadline + 10) * 60 seconds, and this reads the deadline back from that."""
+    takes = []
+    take = env.lock.acquire
+    def record(base, ttl):
+        takes.append((ttl // 60 - 10) // merge.WAITS)
+        return take(base, ttl)
+    env.lock.acquire = record
+    try:
+        rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
+    finally:
+        del env.lock.acquire
+    return rc, out, takes
 
 
 def fix_line(floor):
@@ -12016,26 +10830,26 @@ def fix_line(floor):
 class CapReviewFloor(Env):
     """Recovery rule: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
     is read as the merge tool reads it when it sets the floor (F5)."""
-    def test_f2_a_cap_of_356_waits_the_clamped_floor_of_360_at_a_deadline_of_360(self):
+    def test_f2_a_cap_of_356_takes_the_clamped_floor_of_360_at_a_deadline_of_360(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/checks.yml": cap_workflow("356")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
 
-    def test_f2_a_cap_of_360_waits_the_clamped_floor_of_360_at_a_deadline_of_359(self):
+    def test_f2_a_cap_of_360_takes_the_clamped_floor_of_360_at_a_deadline_of_359(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(359), ".github/workflows/checks.yml": cap_workflow("360")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
-        self.assertEqual(out.count(fix_line(360)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(360)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f5_a_double_quoted_cap_sets_the_floor_like_a_plain_cap(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": cap_workflow('"50"')})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f5_an_expression_cap_sets_no_floor(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/checks.yml": cap_workflow("${{ inputs.cap }}")})
@@ -12049,7 +10863,7 @@ class CapReviewFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
 
 class DuplicateJobIds(Env):
@@ -12061,7 +10875,7 @@ class DuplicateJobIds(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {105}, out)
-        self.assertEqual(out.count(fix_line(105)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(105)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f8_the_warning_keeps_the_larger_of_two_caps_for_one_job_id(self):
         push_base(self, {".github/workflows/a.yml": cap_workflow("100"), ".github/workflows/b.yml": cap_workflow("10")})
@@ -12081,7 +10895,8 @@ class NestedCheckout(Env):
         os.makedirs(nested)
         sh(nested, "git", "init", "-q")
         host = CapsHost(nested, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
@@ -12100,10 +10915,14 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1):
-    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more."""
-    return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1, message=None):
+    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more.
+    `message` is the head commit's message, as GitHub gives it in `head_commit` and `display_title`: a merge commit names its pull request in it."""
+    run = {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
+           "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+    if message is not None:
+        run["display_title"], run["head_commit"] = message.splitlines()[0], {"message": message}
+    return run
 
 
 def main_job(name, conclusion, minutes=1):
@@ -12555,8 +11374,8 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(1081, "success", event="workflow_dispatch"), main_run(1080, "failure", event="schedule")],
                              {1080: [main_job("checks", "failure", 20)], 1081: [main_job("checks", "success", 20)]})
         self.merged(rc, out)
-        self.assertEqual(self.host.reads.count("actions/runs/1080/jobs"), 1)
-        self.assertEqual(self.host.reads.count("actions/runs/1081/jobs"), 1)
+        self.assertEqual([r.count("actions/runs/1080/jobs") for r in self.run_reads], [1, 1], "the red run's jobs: one read in each run")
+        self.assertEqual([r.count("actions/runs/1081/jobs") for r in self.run_reads], [1, 1], "the green run's jobs: one read in each run")
 
     def test_a_red_run_with_no_candidate_reads_no_other_jobs(self):
         rc, out, before = self.go([main_run(1091, "failure", event="schedule")], {1091: [main_job("checks", "failure", 20)]})
@@ -12592,7 +11411,7 @@ class RedMainBrake(Env):
     def test_a_green_latest_run_reads_no_jobs_and_merges(self):
         rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {})
         self.merged(rc, out)
-        self.assertEqual(self.host.reads.count("actions/runs"), 1)
+        self.assertEqual([r.count("actions/runs") for r in self.run_reads], [1, 1], "the latest-run list: one read in each run")
         self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
 
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
@@ -12802,11 +11621,12 @@ class RedMainBrake(Env):
     # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
     # passes reads green. Each is the green control beside the red cases above.
 
-    def test_a_red_newest_run_alone_is_refused_with_no_rerun_remedy(self):
+    def test_a_lone_first_red_with_no_green_parent_names_no_rerun(self):
+        # a first red is offered its re-run only with a green parent on the page: a lone one has none, so nothing is named as its way out
         rc, out, before = self.go([main_run(1421, "failure")], {1421: [main_job("checks", "failure", 20)]})
         self.refused(rc, out, before)
         self.assertIn("run 1421", out)
-        self.assertNotIn("gh run rerun", out, "a red run is never offered a re-run")
+        self.assertNotIn("gh run rerun", out, "a lone first red with no green parent is offered a re-run, though nothing is known of its parent")
 
     def test_a_re_run_in_flight_keeps_its_wait_text_and_names_no_rerun(self):
         rc, out, before = self.re_run_over_green("in_progress")
@@ -12839,6 +11659,302 @@ class RedMainBrake(Env):
         self.assertIn("run 1601", out)
         self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
 
+    # The breaking merge (decision no-merge-onto-red-main, the revert route): a red push run whose parent run is green is the run a merge broke.
+    # The refusal names that run's commit and its pull request, read from the run's head commit message. A first red names its re-run first,
+    # and blames nothing until that re-run is red again.
+    @staticmethod
+    def sha_of(id_):
+        """The head sha of main's run `id_`: its id repeated, so its first nine characters name the run."""
+        return (f"{id_:x}" * 40)[:40]
+
+    def merge_run(self, id_, conclusion, pr, run_attempt=1):
+        """Main's push run `id_` on the merge commit of pull request `pr`, as the runs list gives it."""
+        return main_run(id_, conclusion, sha=self.sha_of(id_), run_attempt=run_attempt, message=f"Merge pull request #{pr} from o/lane-{pr}")
+
+    @staticmethod
+    def page_jobs(runs):
+        """The jobs of each run: a failed run fails `checks`, any other passes it, and `scope` passes in every run."""
+        return {r["id"]: [main_job("scope", "success"), main_job("checks", "failure" if r["conclusion"] == "failure" else "success", 20)] for r in runs}
+
+    def test_a_red_main_blames_the_first_red_run_whose_parent_is_green(self):
+        # 903 broke main: its parent 902 is green, and 903 is red again on its re-run. 904 and 905 are later reds on top of it.
+        runs = [self.merge_run(905, "failure", 2652), self.merge_run(904, "failure", 2651), self.merge_run(903, "failure", 2650, run_attempt=2),
+                self.merge_run(902, "success", 2649), self.merge_run(901, "success", 2648)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn(self.sha_of(903)[:9], out, "the refusal does not name the breaking merge commit, run 903's")
+        self.assertIn("#2650", out, "the refusal does not name the pull request of the breaking merge commit")
+        for pr in (2651, 2652):
+            self.assertNotIn(f"#{pr}", out, f"the refusal blames #{pr}, a later red run on top of the breaking merge")
+
+    def test_a_red_main_blames_the_breaking_run_deep_in_a_full_page_of_fifty(self):
+        # a full page, newest first: 1060 to 1041 are red, and 1041 is red again on its re-run; its parent 1040 is green, and the rest are green
+        runs = [self.merge_run(i, "failure" if i >= 1041 else "success", i + 1000, run_attempt=2 if i == 1041 else 1) for i in range(1060, 1010, -1)]
+        self.assertEqual(len(runs), 50, "the fixture is not a full page of fifty runs")
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn(self.sha_of(1041)[:9], out, "the refusal does not name the breaking merge commit, run 1041's, at the far end of the page")
+        self.assertIn("#2041", out, "the refusal does not name the pull request of run 1041")
+        for i in range(1042, 1061):
+            self.assertNotIn(f"#{i + 1000}", out, f"the refusal blames #{i + 1000}, a red run above the breaking run 1041")
+
+    def test_a_red_main_names_the_pull_request_of_the_breaking_commit_in_either_merge_style(self):
+        for style, message in (("merge commit", "Merge pull request #2650 from o/lane-2650"), ("squash", "Lane fix (#2650)")):
+            with self.subTest(style=style):
+                runs = [main_run(903, "failure", sha=self.sha_of(903), run_attempt=2, message=message), main_run(902, "success", sha=self.sha_of(902))]
+                rc, out, before = self.go(runs, self.page_jobs(runs))
+                self.refused(rc, out, before)
+                self.assertIn("#2650", out, f"the refusal does not name pull request #2650 from its {style} message")
+
+    def test_a_first_red_names_its_re_run_first_and_blames_no_pull_request(self):
+        runs = [self.merge_run(903, "failure", 2650), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn("gh run rerun 903 --failed", out, "the refusal does not name the re-run of the first red run 903 as its first way out")
+        self.assertIn("--base-red-ok", out, "the refusal names no reason flag after the re-run")
+        self.assertLess(out.index("gh run rerun 903 --failed"), out.index("--base-red-ok"), "the re-run is not named before the reason flag")
+        self.assertNotIn("#2650", out, "the first red run is blamed before its re-run is red again")
+
+    def test_a_breaking_run_is_blamed_only_once_its_re_run_is_red_again(self):
+        first = [self.merge_run(903, "failure", 2650), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(first, self.page_jobs(first))
+        self.refused(rc, out, before)
+        self.assertNotIn("#2650", out, "run 903 is blamed on its first red, before its re-run")
+        again = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(again, self.page_jobs(again))
+        self.refused(rc, out, before)
+        self.assertIn("#2650", out, "run 903 is red again on its re-run, and the refusal does not blame its pull request")
+
+    def test_a_run_still_going_below_a_red_run_stops_the_walk_and_names_no_breaking_merge(self):
+        # run 904 is a re-run in flight between red 905 and green 903: the walk stops at it, so no run is blamed
+        runs = [self.merge_run(905, "failure", 2652, run_attempt=2),
+                main_run(904, None, status="in_progress", run_attempt=2, sha=self.sha_of(904), message="Merge pull request #2651 from o/lane-2651"),
+                self.merge_run(903, "success", 2650)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "the refusal blames a breaking merge past a run still going")
+        self.assertNotIn("#2652", out, "the refusal names the pull request of run 905, past a run still going")
+
+    def test_a_run_still_going_below_a_red_run_says_the_breaking_run_is_unknown(self):
+        runs = [self.merge_run(905, "failure", 2652, run_attempt=2),
+                main_run(904, None, status="in_progress", run_attempt=2, sha=self.sha_of(904), message="Merge pull request #2651 from o/lane-2651"),
+                self.merge_run(903, "success", 2650)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        detail = out.split("No batch merges onto a red", 1)[0]  # the route line already says "the unknown read", so only the detail above it counts
+        self.assertIn("unknown", detail.lower(), "the refusal's detail does not say the breaking run is unknown while run 904 is still going")
+
+    def test_a_scheduled_red_run_is_never_blamed_on_the_commit_it_tested(self):
+        # a schedule run tests its head at run time, which is not the commit that broke main: no commit or pull request is named for it
+        runs = [main_run(909, "failure", event="schedule", run_attempt=2, sha=self.sha_of(909), message="Merge pull request #2790 from o/lane-2790"),
+                main_run(908, "success", event="schedule", sha=self.sha_of(908)),
+                self.merge_run(907, "success", 2789)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "the refusal names a breaking merge for a scheduled run, which tests its head at run time")
+        self.assertNotIn("#2790", out, "the refusal names the pull request of a scheduled run's head commit")
+
+    def test_a_page_red_to_its_end_names_no_breaking_merge(self):
+        # a full page of fifty red runs has no green parent on it: the walk reaches the page's end and blames no run
+        runs = [self.merge_run(i, "failure", i + 1000) for i in range(1060, 1010, -1)]
+        self.assertEqual(len(runs), 50, "the fixture is not a full page of fifty runs")
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "a page red to its end names a breaking merge, though no green parent is on the page")
+        self.assertNotRegex(out, r"pull request #10[0-6]\d\b", "a page red to its end names a pull request as the breaking one")
+
+    # A red nightly above the breaking push run: each red group is judged on its own, so the push run's blame is not hidden by the nightly's.
+    # A nightly is never blamed on its pull request (it tests the base's head when it runs), so its number is not named either.
+    def test_a_first_red_nightly_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        nightly = main_run(920, "failure", event="schedule", sha=self.sha_of(920), message="Merge pull request #2660 from o/lane-2660")
+        _, out, _ = self.revert_route_refusal(above=[nightly], below=[main_run(910, "success", event="schedule", sha=self.sha_of(910))])
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a first red nightly")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a first red nightly")
+        self.assertNotIn("#2660", out, "the refusal names the pull request of the nightly, which tests the base's head when it runs")
+
+    def test_a_red_nightly_re_run_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        nightly = main_run(920, "failure", event="schedule", run_attempt=2, sha=self.sha_of(920), message="Merge pull request #2660 from o/lane-2660")
+        _, out, _ = self.revert_route_refusal(above=[nightly], below=[main_run(910, "success", event="schedule", sha=self.sha_of(910))])
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a red nightly re-run")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a red nightly re-run")
+        self.assertNotIn("#2660", out, "the refusal names the pull request of the nightly, which tests the base's head when it runs")
+
+    def test_a_red_links_schedule_run_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        # the second red workflow file: links.yml's schedule group is judged apart from checks.yml's push group
+        links = main_run(930, "failure", event="schedule", name="links", path=LINKS_PATH, run_attempt=2, sha=self.sha_of(930), message="Merge pull request #2670 from o/lane-2670")
+        links_green = main_run(925, "success", event="schedule", name="links", path=LINKS_PATH, sha=self.sha_of(925))
+        jobs = {930: [main_job("readme-links", "failure", 20)], 925: [main_job("readme-links", "success", 20)]}
+        _, out, _ = self.revert_route_refusal(above=[links], below=[links_green], jobs=jobs)
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a red links.yml schedule run")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a red links.yml schedule run")
+        self.assertNotIn("#2670", out, "the refusal names the pull request of the links.yml schedule run, which tests the base's head when it runs")
+
+    def test_a_first_red_schedule_run_promises_no_pull_request_that_its_red_re_run_does_not_name(self):
+        # Scope first: the first-attempt detail is run 909's. A schedule run is never blamed on its commit's pull request. If the first-attempt
+        # text promises such a blame on a red re-run, the red re-run must name the pull request; otherwise the promise is a false claim.
+        def runs_at(attempt):
+            return [main_run(909, "failure", event="schedule", run_attempt=attempt, sha=self.sha_of(909), message="Merge pull request #2790 from o/lane-2790"),
+                    main_run(908, "success", event="schedule", sha=self.sha_of(908)), self.merge_run(907, "success", 2789)]
+        runs = runs_at(1)
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        first = out.split("No batch merges onto a red", 1)[0]
+        self.assertIn("run 909", first, "the first-attempt detail does not name run 909")
+        self.assertNotIn("#2790", out, "the first red schedule run is blamed on its pull request before its re-run")
+        if "pull request" in first:  # the first-attempt text promises a pull-request blame on a red re-run
+            runs = runs_at(2)
+            rc, again, before = self.go(runs, self.page_jobs(runs))
+            self.refused(rc, again, before)
+            self.assertIn("#2790", again, "the first-attempt text promises a pull-request blame on a red re-run, and the red re-run names no pull request")
+
+    # The walk from the breaking run takes only runs of its own workflow file and event group (breaking_line's filter). A run of another group between
+    # two push runs is neither blamed nor a stop: a schedule or another workflow's run says nothing about which push merge broke main.
+    def test_a_red_schedule_run_of_the_same_file_between_push_runs_neither_breaks_nor_extends_the_walk(self):
+        # mutants: the group filter `if False:`, and the path-only filter `r["path"] != key[0]`, which keeps a schedule run of the same file
+        runs = [self.merge_run(906, "failure", 2650, run_attempt=2), main_run(905, "failure", event="schedule", sha=self.sha_of(905)), self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertRegex(out, r"#2650\b", "the walk does not name the push breaking merge, pull request #2650, past a red schedule run between push runs")
+        self.assertNotIn("gh run rerun 905", out, "the walk takes a schedule run between push runs as the first red run")
+
+    def test_a_red_links_run_between_push_runs_neither_breaks_nor_extends_the_walk(self):
+        # mutant: the group filter `if False:`; a run of another workflow file is outside the walk
+        links = main_run(905, "failure", name="links", path=LINKS_PATH, sha=self.sha_of(905))
+        runs = [self.merge_run(906, "failure", 2650, run_attempt=2), links, self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, {**self.page_jobs(runs), 905: [main_job("readme-links", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertRegex(out, r"#2650\b", "the walk does not name the push breaking merge, pull request #2650, past a red links.yml run between push runs")
+        self.assertNotIn("gh run rerun 905", out, "the walk takes a links.yml run between push runs as the first red run")
+
+    def test_a_run_between_a_red_and_its_green_parent_is_stepped_over_whatever_its_conclusion(self):
+        # mutant: dropping "cancelled" from the stepped-over tuple (breaking_line) makes the cancelled run 902 the first red run
+        for conclusion in ("cancelled", "skipped", "neutral"):
+            with self.subTest(conclusion=conclusion):
+                runs = [self.merge_run(903, "failure", 2651, run_attempt=2), self.merge_run(902, conclusion, 2650), self.merge_run(901, "success", 2649)]
+                jobs = {**self.page_jobs(runs), 902: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+                rc, out, before = self.go(runs, jobs)
+                self.refused(rc, out, before)
+                self.assertRegex(out, r"#2651\b", "the walk does not name the push breaking merge, pull request #2651, past a run that is " + conclusion)
+                self.assertNotIn("gh run rerun 902 --failed", out, "the walk takes a " + conclusion + " run between a red run and its green parent as the first red run")
+
+    def test_a_revert_run_still_going_over_the_breaking_run_refuses_and_says_so(self):
+        # the revert's own run, 906, is pending on main: base_state skips a first-attempt run still going, so breaking run 905 stays the newest red
+        runs = [main_run(906, None, status="in_progress", sha=self.sha_of(906), message="Merge pull request #2653 from o/lane-2653"),
+                self.merge_run(905, "failure", 2650, run_attempt=2), self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn("#2650", out, "the refusal does not name breaking run 905's pull request while the revert's run is pending")
+        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+
+    def revert_route_refusal(self, above=(), below=(), jobs=None):
+        """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route.
+        `above` and `below` are runs newest first, put on top of that shape and under its green parent 902. `jobs` overrides the jobs of the runs it names."""
+        runs = [*above, self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649), *below]
+        rc, out, before = self.go(runs, {**self.page_jobs(runs), **(jobs or {})})
+        self.refused(rc, out, before)
+        return rc, out, before
+
+    def test_the_refusal_names_base_red_ok_as_the_route_for_the_revert_pr(self):
+        _, out, _ = self.revert_route_refusal()
+        self.assertRegex(out, r"(?i)revert[^.\n]*--base-red-ok|--base-red-ok[^.\n]*revert", "the refusal does not name --base-red-ok as the route for the revert PR")
+
+    def test_the_revert_route_says_merges_resume_once_the_revert_run_on_main_is_green(self):
+        # the revert's own run is pending after the revert merges: merges resume when that run is green, not when the revert merges
+        _, out, _ = self.revert_route_refusal()
+        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+        self.assertNotIn("merges resume once the revert merges", out, "the refusal says merges resume once the revert merges, which is false while the revert's run is pending")
+
+    def test_the_revert_route_does_not_say_drops_lines_is_needed_only_for_deleted_files(self):
+        # the silent-undo check flags a revert of a merge for each file it deletes and for each file it restores
+        _, out, _ = self.revert_route_refusal()
+        self.assertNotIn("for each file it deletes", out, "the refusal says a Drops-lines trailer is needed only for each file a revert deletes")
+
+    def test_the_revert_route_does_not_say_a_revert_of_a_revert_needs_no_drops_lines(self):
+        # a re-land restores a file the silent-undo check names as whole file restored, so it needs a trailer for that file
+        _, out, _ = self.revert_route_refusal()
+        self.assertNotIn("needs none", out, "the refusal says a revert of a revert needs no Drops-lines trailer, though a re-land restores files the check flags")
+
+    def test_the_revert_route_names_git_revert_m_1_for_a_merge_commit(self):
+        _, out, _ = self.revert_route_refusal()
+        self.assertIn("git revert -m 1", out, "the refusal does not name `git revert -m 1`, the way to revert a merge commit")
+
+    def test_the_revert_route_names_the_drops_lines_trailer_in_its_way_text(self):
+        # the positive pin beside the negative ones above: the way text itself names the trailer a revert PR needs (red_base's revert route)
+        _, out, _ = self.revert_route_refusal()
+        parts = out.split("No batch merges onto a red", 1)
+        self.assertEqual(len(parts), 2, "the refusal has no way text after its detail")
+        self.assertIn("Drops-lines", parts[1], "the revert route's way text does not name the Drops-lines trailer")
+
+    def pr_head_after(self, *steps, drops=""):
+        """Push feat, the PR head, on top of its own head. Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to add a file.
+        `drops` is a trailer line for the head commit's message: the silent-undo check's escape for a commit that deletes a file on purpose.
+        -> feat's new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for step in steps:
+            if step == "fix":
+                put(os.path.join(o, "fix.txt"), "fix\n")
+                sh(o, "git", "add", "-A")
+                sh(o, "git", "commit", "-q", "-m", "Fix the lane")
+            else:
+                sh(o, "git", "revert", "--no-edit", step)
+        if drops:
+            sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_revert_pr_with_its_drops_line_is_not_refused_on_a_red_main_beyond_the_red_main_itself(self):
+        # the PR head reverts main's own lane commit and carries the silent-undo escape for the file it deletes; under --base-red-ok the run merges
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.pr_head_after(self.main_head(), drops="Drops-lines: lane.txt -- revert of the breaking merge")
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "revert of the breaking merge")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert PR, and --base-red-ok does not lift that finding")
+        self.merged(rc, out)
+
+    def reland_after_revert(self, drops=""):
+        """Main reverts the lane's commit, `base files`, which adds lane.txt. A fresh branch from main then reverts that revert and adds a fix: the
+        re-land. It restores lane.txt, which the silent-undo check names as a whole file restored. The re-land is pushed over feat by force, since it
+        is a fresh branch and not feat's history. `drops` is a Drops-lines line for the head commit: the escape for the file the re-land restores."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "revert", "--no-edit", "HEAD")
+        sh(o, "git", "push", "-q", "origin", "main")
+        revert = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "checkout", "-q", "-B", "feat", revert)
+        sh(o, "git", "revert", "--no-edit", revert)
+        put(os.path.join(o, "fix.txt"), "fix\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "Fix the lane")
+        if drops:
+            sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+
+    def test_a_reland_with_a_drops_line_for_the_file_it_restores_is_not_refused_under_base_red_ok(self):
+        # the re-land restores lane.txt, which the silent-undo check names: its Drops-lines line excuses that file, and --base-red-ok lifts only red main
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.reland_after_revert(drops="Drops-lines: lane.txt -- the re-land restores the lane's file")
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the re-land, though its Drops-lines line excuses the file it restores")
+        self.merged(rc, out)
+
+    def test_a_reland_without_a_drops_line_for_the_file_it_restores_is_refused_by_the_silent_undo_check(self):
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.reland_after_revert()
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
+        self.refused(rc, out, before)
+        self.assertIn("silently undoes", out, "the silent-undo check does not refuse a re-land that restores lane.txt with no Drops-lines line")
+        self.assertIn("lane.txt: whole file restored", out, "the silent-undo check does not name the restored file as a whole file restored")
+
+    def main_head(self):
+        """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return sh(self.other, "git", "rev-parse", "origin/main")
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
@@ -12859,14 +11975,32 @@ class PinnedMismatchStopsMain(Env):
         self.assertIn("pins gates", err.getvalue())
         self.assertFalse(self.lock_ref())
 
+def github_read(args, rules, contexts, read_error=None):
+    """-> (code, output) of one `gh api` read of main's rules and classic protection, as GitHub answers it. `rules` is main's effective rules, []
+    when no ruleset applies: the rules/branches/main read gives them, a page at a time. `contexts` is the classic required checks, None for no
+    classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other call fails the case."""
+    rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+    jq = args[args.index("--jq") + 1] if "--jq" in args else None
+    if rel == "branches/main/protection/required_status_checks":
+        if contexts is None:
+            return 1, rest_err(404, "Branch not protected")
+        return 0, REST.one({"contexts": contexts}, jq)
+    if rel == "rules/branches/main" and read_error:
+        return read_error
+    if rel == "rules/branches/main":  # a list read: the page asked for, 30 rules to a page unless per_page asks for more
+        _method, _path, params, flags, _jq = REST.parse(args[1:])
+        return 0, REST.listing(rules, None, params, flags, jq, 100)
+    raise AssertionError("unexpected gh call: " + " ".join(args))
+
 class ProtectionHost(merge.Host):
-    """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
+    """Host whose reads of main answer as GitHub does with no ruleset (see github_read): `contexts` (a list) is the classic required checks,
+    None for no classic protection (a 404). No other gh call is answered."""
     def __init__(self, required, contexts):
         super().__init__(required=required, base="main", pause=lambda s: None)
         self.contexts = contexts
 
     def gh(self, args, cwd=None):
-        return (0, json.dumps(self.contexts)) if self.contexts is not None else (1, "HTTP 404: Not Found")
+        return github_read(args, [], self.contexts)
 
 class MergeChecksFromProtection(unittest.TestCase):
     """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
@@ -12897,6 +12031,121 @@ class MergeChecksFromProtection(unittest.TestCase):
         host = ProtectionHost("protection", ["x"])
         host.gh = lambda *a, **k: self.fail("a gh read was made")
         host.refuse_pinned_mismatch()
+
+REQUIRED_RULE = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}]}}
+NO_CHECK_RULES = [{"type": "deletion"}, {"type": "non_fast_forward"}]  # the blocks ruling r adds that name no check
+
+class RulesHost(merge.Host):
+    """Host whose reads of main answer as GitHub does. `rules` is main's effective rules, [] when no ruleset applies: the rules/branches/main
+    read gives them. `contexts` is the classic required checks,
+    None for no classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other gh call fails the case."""
+    def __init__(self, rules, contexts, read_error=None):
+        super().__init__(required="protection", base="main", pause=lambda s: None)
+        self.rules, self.contexts, self.read_error = rules, contexts, read_error
+
+    def gh(self, args, cwd=None):
+        return github_read(args, self.rules, self.contexts, self.read_error)
+
+class RulesetFirst(unittest.TestCase):
+    """The merge tool reads main's ruleset first and the classic protection second. A repo whose ruleset holds the required checks and that
+    has no classic protection must still merge, so the names come from the ruleset. The ruleset's one check is the rollup, all-jobs-passed (decision `main-branch-protection`)."""
+
+    def read(self, call):
+        try:
+            return call()
+        except merge.Stop as e:
+            self.fail("the merge tool stopped on main's required checks: %s" % e)
+
+    def test_a_ruleset_alone_names_the_required_check(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "a ruleset that requires the rollup, with no classic protection, names the rollup")
+
+    def test_a_ruleset_alone_does_not_stop_the_merge(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.required_names), [REQUIRED_CHECK],
+                         "the wait has names to wait for: a repo with a ruleset and no classic protection merges")
+
+    def test_the_ruleset_is_read_before_the_classic_protection(self):
+        host = RulesHost([REQUIRED_RULE], contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "the ruleset's names come first, so the classic list does not name the checks here")
+
+    def test_a_ruleset_without_a_check_rule_hands_the_names_to_the_classic_protection(self):
+        host = RulesHost(NO_CHECK_RULES, contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), ["checks"],
+                         "a ruleset with no status-check rule leaves the names to the classic protection")
+
+    def test_no_ruleset_and_no_classic_protection_names_nothing(self):
+        host = RulesHost([], contexts=None)
+        self.assertIsNone(self.read(host.protection_names), "no ruleset and no classic protection name no check")
+
+    def test_every_context_the_ruleset_requires_is_named(self):
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        host = RulesHost([two], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the wait names every check the ruleset requires, not only the first")
+
+    def test_a_check_rule_on_page_two_of_the_rules_read_is_named(self):
+        # GitHub gives 30 rules to a page by default, so the check rule (the 31st) is on page 2 and only a read that asks for it holds it
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        rules = [NO_CHECK_RULES[i % 2] for i in range(30)] + [two]
+        self.assertEqual(rules.index(two), 30, "the scope: the check rule is past the first page of 30")
+        host = RulesHost(rules, contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the check rule on page 2 names nothing: the rules read stops at page 1")
+
+    def test_a_failed_ruleset_read_stops_and_does_not_fall_back_to_the_classic_list(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(403, "Resource not accessible by integration")))
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            return
+        self.fail("a failed ruleset read must stop the merge, not fall back to the classic list (got %r)" % (names,))
+
+    def test_an_http_404_on_the_ruleset_read_stops_the_merge(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(404, "Not Found")))
+        reads = []
+        answer = host.gh
+        host.gh = lambda args, cwd=None: (reads.append(args[1]), answer(args, cwd))[1]  # the scope: the routes the merge reads
+        stopped, names = False, None
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            stopped = True
+        self.assertTrue(any(r.endswith("/rules/branches/main") for r in reads), "the merge must read main's ruleset before the classic list")
+        self.assertTrue(stopped, "a 404 on the ruleset read reads as no ruleset, so the classic list answered for it (got %r): the merge must stop" % (names,))
+
+class RulesReadNetwork(unittest.TestCase):
+    """A network error on the rules read is a NetStop: Host.gh raises it once its retries fail. The rules read must keep it a NetStop. A plain Stop
+    is read by the pinned-list check as an unreadable protection, so the run would go on where a network error must stop it."""
+
+    def host(self):
+        return merge.Host(required=["checks"], base="main", pause=lambda s: None)
+
+    def net_down(self):
+        """Every gh call fails with a network text, as a dropped connection does."""
+        return unittest.mock.patch.object(merge, "sh", lambda argv, cwd=None: (1, NET_DEADLINE))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_protection_names(self):
+        with self.net_down():
+            try:
+                names = self.host().protection_names()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped as a plain Stop, not a NetStop: %s" % e)
+        self.fail("a network error on the rules read named %r instead of stopping" % (names,))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_the_pinned_check(self):
+        with self.net_down(), contextlib.redirect_stdout(io.StringIO()):
+            try:
+                self.host().refuse_pinned_mismatch()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped the pinned check as a plain Stop: %s" % e)
+        self.fail("a network error on the rules read let the pinned check go on as an unreadable protection, not a stop")
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
@@ -12929,7 +12178,6 @@ class SignalReleasesLock(Env):
 
 # The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
 BATCH_LINK = "https://github.com/o/r/actions/runs/88"
-BATCH_BLOCKER = "#2 (feat2) required check `checks` is pending: " + BATCH_LINK  # the shape FakeHost.batch reports
 OWN_SHA, OTHER_SHA = "a" * 40, "b" * 40
 # Containment: a busy ready pull request whose head holds this one's head (compare status ahead or identical) does not block it.
 N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
@@ -12937,7 +12185,7 @@ P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
 def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", head_ref=None):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads.
+    """An open pull request as `pages("pulls")` lists it, with the fields the pulls read takes and created_at, which the review list reads.
     head_ref names the head branch; the default is feat<number>."""
     return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": head_ref or "feat%d" % number, "sha": sha}}
 
@@ -12986,6 +12234,7 @@ class PullsHost(merge.Host):
         self.commit_reads = []  # the sha of each commits/<sha> read, in order
         self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
+        self.rules = []  # main's effective rules, as rules/branches/main answers them: [] when no ruleset applies
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -13053,6 +12302,8 @@ class PullsHost(merge.Host):
             return self.files_reply(rel, params, flags)
         if rel == "issues/comments":
             return REST.listing(self.comments, None, params, flags, None, 100)
+        if rel == f"rules/branches/{self.base}":
+            return json.dumps(self.rules)
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
@@ -13085,198 +12336,30 @@ class PullsHost(merge.Host):
             return self.files
         raise AssertionError("unexpected read: " + rel)
 
-class BatchRunningReads(unittest.TestCase):
-    """merge.Host.batch_running over scripted reads. Only `pages` is faked: the filters and the check judging are the real code."""
+class HeadReadNoBatchRead(unittest.TestCase):
+    """head_read over scripted reads: a settled head makes no read of the open pull requests."""
 
-    def test_a_pending_required_check_on_another_ready_pr_blocks(self):
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks")]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("checks", blockers[0])
-        self.assertIn(BATCH_LINK, blockers[0])
-        self.assertEqual(host.reads.count("pulls"), 1)  # the open pull list is read once
+    def test_head_read_on_a_settled_head_makes_no_batch_read(self):
+        # head_read's verdict is the head's own, and a batch read of the other ready pull requests cannot change it. Each open pull request costs
+        # gh calls the guard then discards, inside its one budget, so a settled head's read makes none of them.
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)],
+                         {OWN_SHA: [batch_run("checks", "completed", "success")], OTHER_SHA: [batch_run("checks")]})
+        verdict, detail = host.head_read(1)
+        self.assertEqual((verdict, detail), ("green", ""), "precondition: the own head reads green, so the batch read is the only one in question")
+        self.assertNotIn("pulls", host.reads, "head_read read the open pull requests for the batch read, and discarded the answer")
 
-    def test_a_required_check_that_ran_green_or_red_does_not_block(self):
-        for conclusion in ("success", "failure"):
-            with self.subTest(conclusion=conclusion):
-                host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", conclusion)]})
-                self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_draft_pr_never_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA, draft=True)], {OTHER_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_pending_check_that_is_not_required_does_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success"), batch_run("sync")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_the_pr_own_pending_run_never_blocks_it(self):
-        host = PullsHost([batch_pull(1, OWN_SHA)], {OWN_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_pr_on_another_base_never_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA, base="release")], {OTHER_SHA: [batch_run("checks")]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_failed_pulls_read_stops(self):
-        host = PullsHost([], {}, pulls_error="reading pulls from GitHub failed: boom")
-        with self.assertRaises(merge.Stop):
-            host.batch_running(1, "main")
-
-    def test_a_running_workflow_blocks_before_its_required_check_reports(self):
-        # scope runs first and checks needs it: the workflow is in progress, no required row exists yet, only the non-required scope row is pending
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "in_progress", "conclusion": None}]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("ci-checks", blockers[0])
-
-    def test_a_queued_workflow_with_no_check_rows_blocks(self):
-        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "queued", "conclusion": None}]})
-        blockers = host.batch_running(1, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#2", blockers[0])
-        self.assertIn("ci-checks", blockers[0])
-
-    def test_finished_workflows_with_the_required_check_passed_do_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
-                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "completed", "conclusion": "success"}]})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_an_ignored_running_workflow_does_not_block(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
-                         workflow_runs={OTHER_SHA: [{"name": "sync", "status": "in_progress", "conclusion": None}]},
-                         ignore={"sync": "the sync job is advisory"})
-        self.assertEqual(host.batch_running(1, "main"), [])
-
-    def test_a_busy_pr_whose_head_holds_this_head_does_not_block(self):
-        # The replay: #63 merges while #65, which holds #63's head, runs CI. The head of #63 is read through pr(63).
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-        self.assertEqual(host.batch_running(63, "main", head=N63_SHA), [])
-        self.assertIn((N63_SHA, P65_SHA), host.compare_reads)
-
-    def test_a_busy_pr_on_this_very_head_does_not_block(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, N63_SHA)], {N63_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, N63_SHA): "identical", ("main", N63_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-
-    def test_a_busy_pr_whose_head_does_not_hold_this_head_still_blocks(self):
-        for status in ("diverged", "behind"):
-            with self.subTest(status=status):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compares={(N63_SHA, P65_SHA): status})
-                blockers = host.batch_running(63, "main")
-                self.assertEqual(len(blockers), 1, blockers)
-                self.assertIn("#65", blockers[0])
-                self.assertIn("checks", blockers[0])
-                self.assertIn(BATCH_LINK, blockers[0])
-
-    def test_a_containing_busy_pr_is_passed_and_a_non_containing_one_is_named(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA), batch_pull(66, Q66_SHA)],
-                         {P65_SHA: [batch_run("checks")], Q66_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead", (N63_SHA, Q66_SHA): "diverged", ("main", N63_SHA): "ahead"})
-        blockers = host.batch_running(63, "main")
-        self.assertEqual(len(blockers), 1, blockers)
-        self.assertIn("#66", blockers[0])
-        self.assertNotIn("#65", blockers[0])
-
-    def test_a_failed_compare_read_stops(self):  # unknown is red: the pull request is not skipped
-        for code_and_text in ((1, "gh: Not Found (HTTP 404)"), (1, "gh: Server Error (HTTP 500)")):
-            with self.subTest(read=code_and_text[1]):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compare_error=code_and_text)
-                with self.assertRaises(merge.Stop):
-                    host.batch_running(63, "main")
-
-    def test_a_busy_pr_on_a_head_behind_the_base_blocks_and_is_named(self):
-        # The busy PR holds this head, but this head is behind main: a run on it did not test main's tip
-        for status in ("behind", "diverged"):
-            with self.subTest(status=status):
-                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                                 compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): status})
-                blockers = host.batch_running(63, "main")
-                self.assertEqual(len(blockers), 1, blockers)
-                self.assertIn("#65", blockers[0])
-                self.assertIn(BATCH_LINK, blockers[0])
-
-    def test_a_failed_base_compare_read_stops(self):  # the base read is its own read: a failure stops, and never skips the pull request
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
-                         compares={(N63_SHA, P65_SHA): "ahead"}, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
-        with self.assertRaises(merge.Stop):
-            host.batch_running(63, "main")
-
-    def test_the_containment_read_is_made_only_for_a_busy_pr(self):
-        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks", "completed", "success")]},
-                         compares={(N63_SHA, P65_SHA): "ahead"})
-        self.assertEqual(host.batch_running(63, "main"), [])
-        self.assertEqual(host.compare_reads, [])
 
 class BatchBrake(Env):
-    """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""
-
-    def test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending(self):
-        self.host.batch = [BATCH_BLOCKER]
-        before = self.refs()
-        rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#2", out)
-        self.assertIn("CI-done comment", out)
-        self.assertEqual(self.host.batch_calls, [(1, "main")])
-        self.assertEqual(self.refs(), before)  # nothing pushed: no claim, and the lock is released
-        self.assertEqual(self.host.waits, [])
-        self.assertFalse(getattr(self.host, "merged", False))
+    """Lone-lane merges with no other ready pull request. The brake's other-PR cases are in GhHalf, the one home of that read (act 4 removes the brake)."""
 
     def test_confirm_proceeds_when_no_other_pr_blocks(self):
         rc, out = self.run_merge("1", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertIn((1, "main"), self.host.batch_calls)  # the brake was read, not assumed clear
         self.assertTrue(getattr(self.host, "merged", False))
-
-    def test_a_batch_that_goes_ready_during_the_head_wait_refuses_the_put(self):
-        host, wait = self.host, self.host.wait_checks
-        def wait_then_ready(n, sha, d, prior=None):
-            ok = wait(n, sha, d, prior)
-            host.batch = [BATCH_BLOCKER]  # the other pull request goes ready while this head is waited on
-            return ok
-        host.wait_checks = wait_then_ready
-        rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#2", out)
-        self.assertIn("CI-done comment", out)
-        self.assertFalse(getattr(host, "merged", False))  # the PUT is never made
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))  # the claim is reverted, as for a refused PUT
-        self.assertFalse(self.lock_ref())
-
-    def test_an_unreadable_pulls_list_refuses_confirm(self):
-        self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")
-        before = self.refs()
-        rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reading pulls", out)
-        self.assertEqual(self.refs(), before)
-        self.assertFalse(getattr(self.host, "merged", False))
-
-    def test_preview_prints_a_batch_line_that_is_clear(self):
-        rc, out = self.run_merge("1")
-        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("clear", lines[0])
-
-    def test_preview_prints_the_blocker_on_its_batch_line(self):
-        self.host.batch = [BATCH_BLOCKER]
-        rc, out = self.run_merge("1")
-        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("#2", lines[0])
 
 class ExpressPath(ScopedRepo, Env):
     """confirm with a bare --express: a prose-only pull request whose body names a ruling in the store (origin/roadmap's rulings) goes on
-    to the merge. Every other case refuses before anything is pushed, and the batch brake still refuses a live batch run."""
+    to the merge. Every other case refuses before anything is pushed."""
 
     RULINGS = ("r55", "timer-allowed-when-cheaper")  # the real ids; the second has the hyphens the id pattern allows
     FLAG_ARGV = ("7", "--confirm", "--express")
@@ -13395,19 +12478,19 @@ class ExpressPath(ScopedRepo, Env):
         for m in markers:
             self.assertIn(m.lower(), out.lower(), "the refusal does not name %r:\n%s" % (m, out))
 
-    @staticmethod
-    def brake_text(out):
-        """The batch brake's text in a refusal: from the line that says the pull request does not merge to its base, to the end of the
-        output, less merge's closing sentence. Nothing before the brake is compared."""
-        lines = out.splitlines()
-        start = next((i for i, l in enumerate(lines) if "does not merge to" in l), None)
-        if start is None:
-            return None
-        return "\n".join(lines[start:]).split(" No override lifts", 1)[0]
-
     def test_the_store_path_is_one_constant(self):
         self.assertEqual(getattr(merge, "RULED_STORE_PATH", None), "roadmap/rulings/{id}.json",
                          "merge.RULED_STORE_PATH is not the one store path the express check reads")
+
+    def test_the_express_usage_text_no_longer_says_the_batch_brake_still_holds(self):
+        """The --express block of merge's usage text (its docstring, the block that starts at `merge <pr> --confirm --express`) no longer
+        says the batch brake still holds: act 4 removes that brake. The block is read on its own, up to the next usage line."""
+        doc = merge.__doc__ or ""
+        start = doc.find("merge <pr> --confirm --express")
+        self.assertNotEqual(start, -1, "the usage text has no --express block")
+        end = doc.find("  merge --unlock", start)
+        block = doc[start:end] if end != -1 else doc[start:]
+        self.assertNotIn("The batch brake still holds", block, "the --express usage text still says the batch brake holds: %s" % block)
 
     def test_the_parser_takes_a_bare_express_flag(self):
         self.require_express_flag()
@@ -13426,7 +12509,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_prose_only_pr_with_a_hyphenated_ruling_merges(self):
         self.store(self.RULINGS)
@@ -13436,7 +12519,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
@@ -13533,31 +12616,6 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown")
 
-    def test_a_live_batch_run_under_express_refuses_with_the_plain_brake_text(self):
-        """Under --express a live batch run still refuses, with the brake text it has without the flag: the express path adds no sentence."""
-        self.store(self.RULINGS)
-        self.host.body = "Ruling: r55\n"
-        self.assert_prose_only()  # the express check passes, so the refusal is the batch brake's
-        self.host.batch = [BATCH_BLOCKER]
-        before = self.refs()
-        rc, out = self.run_express()
-        self.assert_refused(rc, out, before, "#2")
-        self.assertIn((7, "main"), self.host.batch_calls, "the batch brake was not read, so the refusal is not the brake's:\n" + out)
-        self.assertNotIn("cancel", out.lower(), "the express brake refusal names a cancel:\n" + out)
-        plain_rc, plain_out = self.run_merge("7", "--confirm")
-        self.assertEqual(plain_rc, 1, plain_out)
-        self.assertEqual(self.brake_text(out), self.brake_text(plain_out), "the express brake text differs from the plain one:\n%s\n--- plain:\n%s" % (out, plain_out))
-
-    def test_without_express_the_batch_refusal_is_the_plain_brake(self):
-        self.host.body = "Ruling: r55\n"
-        self.host.batch = [BATCH_BLOCKER]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#2", out, out)
-        self.assertIn("does not merge to main", out, "the refusal without --express is not the batch brake:\n" + out)
-        self.assertNotIn("cancel", out.lower(), "the batch refusal without --express names a cancel:\n" + out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-
     def test_without_express_a_non_prose_pr_merges_as_before(self):
         self.on("feat", {"hooks/note.py": "X = 2\n"})
         rc, out = self.run_merge("7", "--confirm")
@@ -13603,7 +12661,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
@@ -13949,7 +13007,7 @@ class StandingGrantSwitch(CloudSession):
 
     def grant_text(self, **fields):
         """The base's .github/stamp.json: a complete merge block, so no defaults notice prints, with `fields` set."""
-        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
+        return complete_config(**fields)
 
     def grant_config(self, **fields):
         put_base_config(self, self.grant_text(**fields))
@@ -14139,13 +13197,13 @@ class RepoDirFlag(RepoDirRuns, Env):
         self.assertNotIn("merge #7", self.main_subjects(self.co), "the merge landed in the process directory's checkout")
 
     def test_a_confirm_with_repo_dir_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
 
     def test_a_confirm_with_repo_dir_equals_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
 
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
 
     def test_c_alone_with_reviewed_reads_the_named_checkout(self):
         """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
@@ -14163,7 +13221,7 @@ class RepoDirFlag(RepoDirRuns, Env):
         so the case reads only what main hands the check: the real check's reads run in that root and through that host."""
         calls = []
 
-        def fake(root, h, numbers, lints, root_why=None):
+        def fake(root, h, numbers, lints, root_why=None, cfgrel=None):  # cfgrel: the config file main passes as the sixth argument; the case does not read it
             calls.append((root, h, list(numbers)))
             return ["#7 PASS"], True
 
@@ -15302,6 +14360,19 @@ class ReviewEnv(Env):
             fx.on_main[(m, "main")] = "ahead"
         return heads[1:]
 
+    def base_tip(self, sha):
+        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
+        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def claim_over(self, parent, changes):
+        """-> the sha of a claim commit over `parent`: one parent, and the tree git_commit builds for `changes`, under the message a claim commit
+        carries (a Record-claim trailer, claim_only reads it). The tree is git_commit's, so the fixture stays one home; only the message differs."""
+        plain = self.git_commit(parent, changes)
+        tree = sh(self.co, "git", "rev-parse", f"{plain}^{{tree}}")
+        return sh(self.co, "git", "commit-tree", tree, "-p", parent, "-m", "Claim record numbers\n\nRecord-claim: D-002")
+
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
     --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
@@ -15361,18 +14432,16 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    def test_run_goes_with_touches_or_with_a_batch_blame_and_nothing_else(self):
-        """--run is refused unless it goes with --touches, or with --batch-build NAME --blame PR. Each refusal names its pairing. The blame
-        route gets the run URL as given, since it reads the run by its URL."""
+    def test_run_goes_with_touches_and_nothing_else(self):
+        """--run is refused unless it goes with --touches. The refusal names its pairing, by id or by URL. The batch blame pairing is gone
+        with the batch flags, so --blame is an unknown argument."""
         url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
         # Setup first: the allowed pairing reads the run, so a refusal below cannot come from a fixture that reads nothing.
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
         self.assertEqual(rc, 0, "setup: --touches --run ID did not run:\n" + out + err)
         for argv, cause in (
-            (("--run", TOUCH_RUN), "--run goes with --touches, or with --batch-build NAME --blame PR"),
-            (("--run", url), "--run goes with --touches, or with --batch-build NAME --blame PR"),
-            (("--blame", "102", "--run", url), "--blame goes with --batch-build NAME"),
-            (("--touches", "--run", url, "--blame", "102"), "--blame goes with --batch-build NAME"),
+            (("--run", TOUCH_RUN), "--run goes with --touches"),
+            (("--run", url), "--run goes with --touches"),
             (("--case", TOUCH_CASE_A), "--case and --file go with --touches"),
             (("--file", TOUCH_GUARD), "--case and --file go with --touches"),
         ):
@@ -15381,19 +14450,6 @@ class ReviewArgs(ReviewEnv):
                 self.assertIn(cause, err, "the refusal does not name its pairing %r: %s" % (cause, out + err))
                 self.assertEqual(rc, 2, "%s exited %s, not 2: %s" % (" ".join(argv), rc, out + err))
                 self.assertNotIn("Traceback", err, out + err)
-
-    def test_the_blame_route_takes_a_run_url_as_given(self):
-        """--batch-build NAME --blame PR --run URL is accepted, and batch_blame gets PR and the URL as given: the blame route reads the run
-        by its URL, so the URL is not turned into an id."""
-        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
-        real = merge.batch_blame
-        with unittest.mock.patch.object(merge, "batch_blame", return_value=0) as blame:
-            rc, out, err = self.run_args("--batch-build", "nightly", "--blame", "102", "--run", url, host=incident_host())
-        self.assertEqual(blame.call_count, 1, "the blame route did not reach batch_blame: %s" % (out + err))
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(passed_to(blame, real, "number"), 102, "batch_blame got a different blamed PR: %s" % (out + err))
-        got = passed_to(blame, real, "url")
-        self.assertEqual(got, url, "batch_blame got %r, not the run URL as given" % got)
 
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
@@ -16266,15 +15322,17 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read of
+        # rules/branches/main when no ruleset applies) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         "branches/main/protection/required_status_checks"])
+        self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
+        self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
+        self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -16352,16 +15410,17 @@ class ReleaseCheck(ReviewEnv):
         _, err = self.assert_usage_error("--release-check", "7", "--lint", lint)
         self.assertRegex(self.error_line(err), self.SHA_RULE, f"the refusal of --lint {lint} does not name the sha rule: " + err)
 
-    def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, **reads):
+    def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, extra=(), **reads):
         """-> (rc, lines, err, host) of `merge --release-check numbers`. Each pull request is open, reviewed and lint-passed unless the argument
-        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head."""
+        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head.
+        `extra` holds more flags for the run, such as --config."""
         numbers = list(numbers)
         pulls = [self.live(n) for n in numbers] if pulls is None else pulls
         comments = [self.review(n) for n in numbers] if comments is None else comments
         heads = {p["number"]: p["head"]["sha"] for p in [*pulls, *closed]}
         lint = self.lints(numbers, heads=heads) if lint is None else lint
         host = ReleaseHost(pulls, closed=closed, broken=broken, gh_missing=gh_missing, comments=list(comments), **reads)
-        rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, host=host)
+        rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, *extra, host=host)
         self.assertIn(rc, (0, 1), f"merge refused the --release-check line (rc {rc}):\n{err}")  # the flag is accepted before any line is read
         return rc, out.splitlines(), err, host
 
@@ -16818,12 +15877,6 @@ class ReleaseCheck(ReviewEnv):
 
     # A clean merge of main after the reviewed head (decision pr-review-record). --release-check reads the record as --reviewed does.
 
-    def base_tip(self, sha):
-        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
-        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
-        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
-        sh(self.co, "git", "fetch", "-q", "origin")
-
     def release_at(self, fx, head, record_head):
         """-> (rc, lines, err) of --release-check on pull request 7 at `head`, its one record for `record_head`, and the commits, trees and
         compares of fx. The lint is PASS on `head`."""
@@ -16883,6 +15936,74 @@ class ReleaseCheck(ReviewEnv):
                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
 
+    def claim_only_release(self, fx, claim, lint_head, record_head, lint=None, extra=()):
+        """-> (rc, lines, err) of --release-check on pull request 7 at the claim commit `claim`: its lint PASS on `lint_head`, its one record for
+        `record_head`, and the commits, trees and compares of fx. `lint` replaces the lint flags; `extra` goes to the run, as release does."""
+        flags = self.lints([7], heads={7: lint_head}) if lint is None else lint
+        rc, lines, err, _ = self.release([7], lint=flags, pulls=[self.live(7, head=claim)], comments=[self.review(7, head=record_head)],
+                                         commits=fx.parents, trees=fx.trees, compares=fx.on_main, extra=extra)
+        return rc, lines, err
+
+    def test_g_a_claim_only_head_carries_the_lint_of_the_reviewed_head_it_stacks_on(self):
+        # Catches: --release-check reading the lint only at the live head, so the PASS on the reviewed head that a one-parent claim commit carries
+        # reads as a lint that ran on another sha. lint_check carries it; release_check must carry it the same way.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)  # the record is done at the live head
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_h_a_record_done_at_the_reviewed_head_survives_a_claim_only_head(self):
+        # Catches: the clean-merge walk of the record refusing a one-parent claim commit, so the record done at the reviewed head reads stale on the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=claim, record_head=fx.fixed)  # the lint is PASS on the live head
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_i_a_claim_shaped_commit_that_writes_a_code_file_carries_no_lint(self):  # control: green on the old code
+        # A commit with a Record-claim trailer that writes a file no stamp kind holds is no claim: the lint on the head it stacks on is not carried.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"a.txt": "claimed\n"})
+        self.facts(fx, [claim])
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
+
+    ALT_CONFIG = ".github/alt-stamp.json"  # a second stamp config on origin's main, beside the default .github/stamp.json
+
+    def config_folder_claim(self):
+        """-> (fx, claim). origin's main gets ALT_CONFIG, the default config with its one kind moved to docs/alt, and the default config stays as
+        it is, so it names no docs/alt. `claim` is a claim commit over the lint-passed head that writes docs/alt/second.md."""
+        fx = self.real_commits()
+        alt = dict(CONFIG, kinds=[dict(CONFIG["kinds"][0], folder="docs/alt")])
+        base = self.git_commit(fx.main2, {self.ALT_CONFIG: json.dumps(alt)})
+        self.base_tip(base)
+        self.facts(fx, [base])
+        claim = self.claim_over(fx.fixed, {"docs/alt/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        return fx, claim
+
+    def test_j_release_check_config_file_names_the_folder_the_claim_carry_reads(self):
+        # Catches: --release-check reading the claim carry under the default config, since main hands release_check no config (cfgrel is None).
+        # The claim in docs/alt is refused, though --config names docs/alt, and the lint result on the head it stacks on carries under that config.
+        fx, claim = self.config_folder_claim()
+        self.assertNotIn("docs/alt", sh(self.co, "git", "show", "origin/main:.github/stamp.json"),
+                         "scope: the default config names docs/alt, so the case below proves nothing about --config")
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim, extra=("--config", self.ALT_CONFIG))
+        self.assertEqual(lines, ["#7 PASS"], "--config names docs/alt, but the claim's lint carry read another config: " + err)
+        self.assertEqual(rc, 0, err)
+
+    def test_k_without_config_the_default_names_no_folder_so_the_claim_is_refused(self):
+        # Control for the case above: the same origin and claim, with no --config. The default config names no docs/alt, so the lint is not carried.
+        fx, claim = self.config_folder_claim()
+        rc, lines, err = self.claim_only_release(fx, claim, lint_head=fx.fixed, record_head=claim)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
@@ -16893,6 +16014,44 @@ PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PUL
 # The model record. Its round rows set the model each reviewer runs on, so a docs-only edit of them moves review models, and the guard holds it
 # (decision agent-model-cap). Built from the layout and the guard's file name, so a moved record changes this path, never a copy of it.
 MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_guard.ROLE_TABLE_FILE))
+
+class ClaimOnlyReviewed(ReviewEnv):
+    """`merge --reviewed` reads a one-parent claim commit as the head it stacks on: the record done at the reviewed head survives the claim, and the
+    lane-lint PASS on the reviewed head carries to the claim head (claim_only, the rule lint_check already uses). A claim-shaped commit that
+    writes a code file carries neither, so the control reads not done."""
+
+    def claim_host(self, fx, claim, record_head, lint_head):
+        """The host of `merge --reviewed` for pull request 7 at `claim`: its one record for `record_head`, and a lane-lint PASS on `lint_head`."""
+        comments = [review_comment(1, 7, record_text(head=record_head, rounds=REVIEW_PASS)), lint_of(7, lint_head)]
+        return self.reviewed_host(fx, claim, comments=comments)
+
+    def test_j_a_record_done_at_the_reviewed_head_reads_done_on_a_claim_only_head(self):
+        # Catches: the clean-merge walk refusing a one-parent claim commit, so the record done at the reviewed head reads stale on the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.reviewed_line(self.claim_host(fx, claim, record_head=fx.fixed, lint_head=claim), claim, "done",
+                           "a claim-only head reads stale for a record done at the reviewed head")
+
+    def test_k_a_lint_pass_on_the_reviewed_head_carries_to_the_claim_only_head(self):
+        # Catches: lint_check's carry (claim_only) not reaching --reviewed, so the PASS on the reviewed head reads as no lint at the claim head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.reviewed_line(self.claim_host(fx, claim, record_head=claim, lint_head=fx.fixed), claim, "done",
+                           "a lint PASS on the reviewed head does not carry to the claim-only head")
+
+    def test_l_a_claim_shaped_commit_that_writes_a_code_file_carries_no_lint(self):  # control: green on the old code
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"a.txt": "claimed\n"})
+        self.facts(fx, [claim])
+        rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, claim, record_head=claim, lint_head=fx.fixed))
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
+        self.assertIn("merge --lane-lint 7", out, out)
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -17549,6 +16708,8 @@ if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_
     if r["contexts"] is None:
         answer(api_error(404, "Branch not protected"), 1)
     answer(one({"contexts": r["contexts"]}, jq))
+if method == "GET" and rel == "rules/branches/main":  # no ruleset applies unless the root names rules: GitHub's reply is []
+    answer(listing(r.get("rules", []), None, params, flags, jq, 100))
 cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
 if method == "GET" and cmp:
     answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
@@ -17622,11 +16783,11 @@ unexpected(method + " " + rel)
 
     def assert_one_unknown_beside_a_full_block(self, out, failing, reason, other, failing_first):
         """The printed lines are four. `failing`'s block is one line, `repo <failing as given>: unknown (...)`, at its place in the order given,
-        and `other`'s block is whole: its header, its one #5 line and its batch line. Nothing else prints. `reason` is a text the reason must
-        hold, or None for any reason that is not empty."""
+        and `other`'s block is whole: its header and its one #5 line, with no batch line (the batch route is gone from --reviewed). Nothing else
+        prints. `reason` is a text the reason must hold, or None for any reason that is not empty."""
         lines = printed_review_lines(out)
-        self.assertEqual(len(lines), 4, "want one unknown line and one whole block, and nothing else:\n" + out)
-        unknown, block = (lines[0], lines[1:]) if failing_first else (lines[3], lines[:3])
+        self.assertEqual(len(lines), 3, "want one unknown line and one whole block, and nothing else:\n" + out)
+        unknown, block = (lines[0], lines[1:]) if failing_first else (lines[2], lines[:2])
         m = re.fullmatch(rf"repo {re.escape(failing)}: unknown \((.+)\)", unknown)
         self.assertTrue(m, f"the failing root's block is not `repo {failing}: unknown (...)`:\n" + out)
         self.assertTrue(m.group(1).strip(), "the unknown line gives no reason:\n" + out)
@@ -17634,7 +16795,7 @@ unexpected(method + " " + rel)
             self.assertIn(reason, m.group(1), "the unknown line does not give the reason:\n" + out)
         self.assertEqual(block[0], f"repo {other}:", out)
         self.assert_done(block, 5)
-        self.assertEqual(self.batch_numbers(block), [5], f"{other} lost its batch line:\n" + out)
+        self.assertEqual(self.batch_numbers(block), [], f"{other} names a batch line, which the batch route no longer prints:\n" + out)
 
     def test_root_needs_reviewed(self):
         # --root goes only with --reviewed: the parser refuses it anywhere else, and the usage error names the flag's refusal.
@@ -17674,18 +16835,6 @@ unexpected(method + " " + rel)
         self.assertTrue(pr_lines(blocks["o/alpha"], 7), out)
         self.assertFalse(pr_lines(blocks["o/alpha"], 5), out)
 
-    def test_a_done_pr_opens_its_batch_while_another_repo_has_one_running(self):
-        # alpha has a ready integration pull request with its CI pending and no done pull request. bravo has one done pull request and nothing
-        # running. bravo's batch opens: the running CI in alpha does not hold it.
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
-                                       check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
-        self.assertEqual(blocks["o/bravo"][-1], "open batch now: o/bravo #5", "the batch line comes after the repo's own lines:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "alpha has no done pull request, so it gets no batch line:\n" + out)
 
     def test_a_repo_with_no_done_pr_prints_no_batch_line(self):
         # the number 5 is done in alpha and open in bravo: each block names only its own done pull requests
@@ -17697,58 +16846,36 @@ unexpected(method + " " + rel)
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "bravo has no done pull request:\n" + out)
 
-    def test_a_busy_repo_builds_the_next_batch_and_an_idle_one_opens_its_own(self):
-        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5), lint_of(5, head5)],
-                                       check_rows={head5: green(), head6: running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["build next batch on the running head: o/alpha #5"], out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
 
-    def test_done_prs_are_listed_in_ascending_order_and_held_or_open_ones_are_left_out(self):
-        pulls = [batch_pull(n, hex_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
-        comments = [record_of(9, hex_head("9")), record_of(6, hex_head("6"), rounds=OPEN_ROUNDS), record_of(5, hex_head("5")),
-                    record_of(4, hex_head("4"), net="negative"), lint_of(9, hex_head("9")), lint_of(5, hex_head("5"))]
-        check_rows = {hex_head("9"): green(), hex_head("5"): green()}
-        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5 #9"], out)
 
-    def test_every_done_pr_of_a_full_repo_is_listed(self):
-        heads = {n: format(n, "x") * 40 for n in range(1, 13)}
-        pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
-        comments = [record_of(n, heads[n]) for n in range(1, 13)] + [lint_of(n, heads[n]) for n in range(1, 13)]
-        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo " + " ".join(f"#{n}" for n in range(1, 13))], out)
 
-    def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_batch(self):
+    def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_no_batch_line(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: self.roots_with_done()[self.bravo]}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(blocks["o/alpha"], ["no open pull requests."], out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
 
-    def test_a_draft_with_running_ci_does_not_block_the_batch(self):
-        # a draft never counts as a running batch: only a ready pull request with CI pending holds the next one
-        head5, head6 = hex_head("5"), hex_head("6")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
-                                       comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+
+    def test_the_reviewed_output_prints_no_batch_route_line(self):
+        """`merge --reviewed` no longer prints the batch route. Alpha has a done pull request on its base with a second one's CI running, and
+        bravo has a done pull request ready: neither `open batch now: ` nor `build next batch on the running head: ` appears in any block,
+        and the reviewed lines still print."""
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)],
+                                       comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)],
+                                       check_rows={head9: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")  # scope first: both blocks print
+        self.assertTrue(pr_lines(blocks["o/alpha"], 5), "alpha's done pull request has no reviewed line:\n" + out)
+        self.assertNotIn("open batch now: ", out, "--reviewed still prints the removed batch route:\n" + out)
+        self.assertNotIn("build next batch on the running head: ", out, "--reviewed still prints the removed batch route:\n" + out)
 
     def test_a_failed_read_in_one_root_prints_that_root_unknown_and_the_others_in_full(self):
         argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
@@ -17791,73 +16918,11 @@ unexpected(method + " " + rel)
                 self.assertEqual(batch_lines_of(out.splitlines()), [], out)
 
 
-    def test_a_done_pr_held_by_an_open_pr_head_is_not_named(self):
-        # #9's head holds #5's head: the compare of head 5 with head 9 reads ahead or identical, as holds_head reads it. #5 is not named.
-        # #6 is held by nothing, so it is named.
-        for status in ("ahead", "identical"):
-            for draft9 in (True, False):
-                with self.subTest(status=status, draft=draft9):
-                    hosts = self.held_hosts({(hex_head("5"), hex_head("9")): status}, draft9)
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    self.assertEqual(self.batch_numbers(block), [6], "a done pull request whose head an open pull request holds is named:\n" + out)
 
-    def test_a_done_draft_lane_no_open_pr_holds_is_named(self):
-        # The control for the held case: the same pull requests, with no compare that holds #5. Both done lanes are named.
-        for draft9 in (True, False):
-            with self.subTest(draft=draft9):
-                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts({}, draft9))
-                self.assertEqual(rc, 0, out + err)
-                block = by_repo(self, out, "o/alpha")["o/alpha"]
-                self.assert_done(block, 5, 6)
-                self.assertEqual(self.batch_numbers(block), [5, 6], out)
 
-    def test_a_done_pr_that_is_ready_with_ci_running_is_not_named(self):
-        # #5 is done and ready, with its CI running: it is not named. #6, a done draft with nothing running, is named.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): running(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [6], "a done pull request that is ready with CI running is named in the batch line:\n" + out)
 
-    def test_a_done_ready_pr_with_green_ci_is_named(self):
-        # The control for the running case: #5 ready with CI green is named, with #6.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [5, 6], out)
 
-    def test_a_done_pr_on_another_base_is_not_named(self):
-        # #5 is done on release, not the repo's default main: no batch line names it. #6, done on main, is named.
-        pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [6], out)
 
-    def test_a_root_names_the_batch_of_its_own_default_branch(self):
-        # The root's default branch is trunk, and its one done pull request is on trunk. Its test host names main as its base, as every test
-        # host does. The batch line still names the PR, because the root's base is its own default branch.
-        self.make_trunk_default(self.alpha)
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
-                                       comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5)
-        self.assertEqual(self.batch_numbers(block), [5], "the batch line does not name the PR on the root's default branch trunk:\n" + out)
 
     def test_the_real_host_reads_the_config_of_its_default_branch(self):
         # No host is given, so each root gets a real Host(cwd=root), and gh names trunk as the repo's default branch. The root's config must be
@@ -17935,63 +17000,13 @@ unexpected(method + " " + rel)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assert_done(blocks["o/alpha"], 5)
         self.assertEqual(pr_lines(blocks["o/alpha"], 9), [], "alpha's block holds bravo's pull request:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
         self.assert_done(blocks["o/bravo"], 9)
         self.assertEqual(pr_lines(blocks["o/bravo"], 5), [], "bravo's block holds alpha's pull request:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
 
-    def test_a_done_pr_whose_head_the_base_holds_is_named_in_neither_batch_line(self):
-        # holds_head reads head...main: ahead or identical says main holds head 5, so #5 is already in the base, and no batch line names it. #6, a
-        # done draft that no compare holds, is still named. Both batch lines are covered: the open one, and the one built on a running head.
-        for status in ("ahead", "identical"):
-            for busy in (False, True):
-                with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    want = "build next batch on the running head: o/alpha #6" if busy else "open batch now: o/alpha #6"
-                    self.assertEqual(batch_lines_of(block), [want], "a done pull request whose head the base holds is named in a batch line:\n" + out)
 
-    def test_a_done_pr_whose_head_the_base_does_not_hold_is_named(self):
-        # The control. No compare says main holds head 5, or the compare reads "behind" on head...main, which says head 5 is ahead of main: neither
-        # holds head 5, so #5 and #6 are both named, in either batch line.
-        for status in (None, "behind"):
-            for busy in (False, True):
-                with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    want = "build next batch on the running head: o/alpha #5 #6" if busy else "open batch now: o/alpha #5 #6"
-                    self.assertEqual(batch_lines_of(block), [want], out)
 
-    def test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines(self):
-        # alpha's base has no branch protection, so its required checks cannot be named. The stop comes from the batch line's CI read (ready_busy):
-        # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
-        head5, head9 = hex_head("5"), hex_head("9")
-        self.per_root_gh({
-            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()},
-                                        contexts=None),
-            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()}),
-        })
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
-        self.assertEqual(rc, 1, out + err)
-        self.assertNotIn(f"repo {self.alpha}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
-        lines = out.splitlines()
-        self.assertIn("repo o/alpha:", lines, out)
-        self.assertIn("repo o/bravo:", lines, out)
-        i, j = lines.index("repo o/alpha:"), lines.index("repo o/bravo:")
-        unknown = [k for k, line in enumerate(lines) if line.startswith("batch line unknown (")]
-        self.assertEqual(len(unknown), 1, "want one batch line unknown, in alpha's block:\n" + out)
-        self.assertTrue(i < unknown[0] < j, "the batch line unknown is not in alpha's block:\n" + out)
-        m = re.fullmatch(r"batch line unknown \((.+)\)", lines[unknown[0]])
-        self.assertTrue(m, "the batch line unknown is not `batch line unknown (...)`:\n" + out)
-        self.assertIn("no branch protection", m.group(1), "the batch line unknown does not give the stop's reason:\n" + out)
-        alpha = lines[i:j]
-        self.assert_done(alpha, 5)
-        self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
-        self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
@@ -19062,45 +18077,6 @@ def controls(text):
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
 
-def passed_to(spy, real, name):
-    """The value a patched function was called with for its parameter `name`, read through the real function's signature, however the caller
-    passed it (by position or by keyword). `real` is the function as it was before the patch."""
-    call = spy.call_args
-    bound = inspect.signature(real).bind(*call.args, **call.kwargs)
-    bound.apply_defaults()  # a parameter the caller left out reads as its default, so the value is never a KeyError
-    return bound.arguments[name]
-
-def freeze_inner(name, lanes, dropped=(), on=None, blamed=()):
-    """The lines between a frozen block's markers: `Batch:`, `On: BRANCH SHA` when the batch stacks on one, one `Lane:` line per (PR, head)
-    by PR number, then one `Dropped:` per dropped PR and one `Blamed:` per lane a red lint of the batch head blamed."""
-    return [f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {sha}" for n, sha in sorted(lanes)),
-            *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed))]
-
-def freeze_body(inner):
-    return "\n".join([BATCH_BEGIN, *inner, BATCH_END]) + "\n"
-
-def block_raw(body):
-    """The lines between a PR body's one begin marker line and its one end marker line, or None when it holds no single block."""
-    lines = body.split("\n")
-    if lines.count(BATCH_BEGIN) != 1 or lines.count(BATCH_END) != 1 or lines.index(BATCH_BEGIN) > lines.index(BATCH_END):
-        return None
-    return lines[lines.index(BATCH_BEGIN) + 1:lines.index(BATCH_END)]
-
-def block_lines(body):
-    """block_raw without the Base line: the lane-set cases compare the lines a build or a drop owns. block_base reads Base."""
-    lines = block_raw(body)
-    return None if lines is None else [x for x in lines if not x.startswith("Base: ")]
-
-def block_base(body):
-    """The sha on the block's `Base:` line, or None when the block has none."""
-    return next((m.group(1) for x in block_raw(body) or [] if (m := re.fullmatch(r"Base: ([0-9a-f]{40})", x))), None)
-
-
-def sentences_of(text):
-    """The sentences of `text`. A full stop, question mark or exclamation mark that a space or a line break follows ends one; a line break
-    inside a sentence is part of it, so a condition on the line above a printed command sits in that command's sentence."""
-    return re.split(r"(?<=[.!?])\s+", text)
-
 
 LINT_STATES = {  # what ci-job answers for the batch head's lint, as ci_job_run returns it: state, lines, log, liftable
     "pass": ("pass", [], [], False),
@@ -19108,32 +18084,20 @@ LINT_STATES = {  # what ci-job answers for the batch head's lint, as ci_job_run 
     "unknown": ("unknown", ["unknown: lint-marker"], [], True),
 }
 
-def ci_batch_pattern():
-    """The head-ref pattern CI reads as a batch's branch: the case arm in ci-scope.sh's mutation_report gate, read from that script. None when
-    the script names no such arm."""
-    with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-        m = re.search(r'HEAD_REF:-\}" in (\S+)\)', f.read())
-    return m.group(1) if m else None
-
-class BatchFreeze(CloudSession):
-    """merge --batch-build and --batch-drop: a batch's frozen lane set, kept in its pull request body between the markers. A build opens
-    the pull request as a draft. `--batch-build NAME --ready` lints the batch head once, runs the ready checks on it, and asks the host to
-    mark it ready. Host.ready sends nothing, so a real run stops there and names the route. A drop asks the host to return a ready batch to
-    draft; Host.to_draft sends nothing either. A build and a drop run no lane lint and no ready check. Each case's first assert names the
-    behaviour it claims, so its red names the cause."""
+class DraftReady(CloudSession):
+    """A lane's draft, as merge --confirm readies it: the ready checks run first, and the mark ready follows only when they pass. The
+    draft step never merges, so a failing check or a refused mark leaves the draft as it is. Each case's first assert names the
+    behaviour it claims, so its red names the cause. The batch cases of this class were retired with the batch flags (act 4)."""
 
     def setUp(self):
         super().setUp()
-        self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
-        self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
-        self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
+        self.heads = {}  # lane PR number -> its head sha on origin, as lane() leaves it
 
-    def lane(self, n, on=None):
-        """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
-        that lane's head), and an open pull request in the host. -> its head sha."""
+    def lane(self, n):
+        """Lane PR #n: a branch on origin with one commit of its own, off origin/main, and an open pull request in the host. -> its head sha."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{on}" if on else "origin/main")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", "origin/main")
         put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
         sh(o, "git", "add", "-A")
         sh(o, "git", "commit", "-q", "-m", f"lane {n}")
@@ -19142,1826 +18106,67 @@ class BatchFreeze(CloudSession):
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
 
-    def advance(self, n):
-        """Lane PR #n gets one more commit, so its head on origin moves. -> the new head."""
-        return self.lane_commit(n, os.path.join("lanes", f"{n}-more.txt"), "more\n", f"lane {n}, second commit")
-
-    def lane_commit(self, n, path, text, message):
-        """Lane PR #n gets one commit of its own that adds `path` with `text`: its head on origin moves, and its diff against main touches
-        `path`. -> the new head."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{n}")
-        put(os.path.join(o, path), text)
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", message)
-        sh(o, "git", "push", "-q", "origin", f"lane-{n}")
-        self.heads[n] = self.head(f"lane-{n}")
-        return self.heads[n]
-
-    def bump(self, branch):
-        """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. -> the new head."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
-        put(os.path.join(o, "lanes", f"{branch.replace('/', '-')}-heal.txt"), "heal\n")
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"{branch}: heal")
-        sh(o, "git", "push", "-q", "origin", branch)
-        return self.head(branch)
-
-    def drift_batch(self, name, numbers):
-        """origin's batch-NAME is force-pushed to origin/main with only the lanes `numbers` merged in, as a hand edit leaves it. The pull
-        request body is not touched, so the body and the branch now disagree. -> the new head."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", f"batch-{name}", "origin/main")
-        for n in numbers:
-            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge lane {n}", self.heads[n])
-        sh(o, "git", "push", "-q", "-f", "origin", f"batch-{name}")
-        return self.head(f"batch-{name}")
-
-    def frozen_batch(self, name, numbers, on=None, draft=False, blamed=()):
-        """The batch a build made: origin's batch-NAME merges each lane in `numbers` no-ff onto origin/main (or, with `on`, onto
-        origin/<on>, and its block carries the On line), and one pull request carries the frozen block, a draft when `draft`, else ready.
-        `blamed` lists the lanes a red lint of the batch head blamed: the only lanes a drop may take off. -> the pull request's number."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", f"batch-{name}", f"origin/{on}" if on else "origin/main")
-        for n in numbers:
-            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge lane {n}", self.heads[n])
-        sh(o, "git", "push", "-q", "origin", f"batch-{name}")
-        inner = freeze_inner(name, [(n, self.heads[n]) for n in numbers], on=(on, self.head(on)) if on else None, blamed=blamed)
-        return self.host.create_pr(f"batch-{name}", "main", f"Batch {name}", freeze_body(inner), draft=draft)
-
-    def ready_stack(self, blamed=()):
-        """Lanes 101, 102 and 104: a batch-x holds 101 and 102, ready, and a ready batch-nightly holds 104 on batch-x. `blamed` are the
-        lanes a red lint blamed on batch-x. -> (x's pull request, nightly's pull request, batch-nightly's head)."""
-        for n in (101, 102, 104):
-            self.lane(n)
-        x = self.frozen_batch("x", [101, 102], blamed=blamed)
-        nightly = self.frozen_batch("nightly", [104], on="batch-x")
-        return x, nightly, self.head("batch-nightly")
-
-    def stacked_refusal_run(self, stacked):
-        """Lane #101 is open, and each lane in `stacked` is stacked on it. Those lanes are frozen in a draft batch-nightly, which is then reset
-        to main with no lane, so a --ready must rebuild it and the stacked check runs; the lint of the head would pass. -> (pull request number,
-        rc, output, snapshot taken before the run)."""
-        self.lane(101)
-        for n in stacked:
-            self.lane(n, on=101)  # each lane's head contains #101's head
-        pr = self.frozen_batch("nightly", list(stacked), draft=True)
-        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready must rebuild it, and the stacked check runs
-        for n in stacked:
-            self.assertTrue(self.ancestor(self.heads[101], self.heads[n]), "setup: lane #%d does not contain lane #101's head" % n)
-            self.assertFalse(self.on_origin(self.heads[n], "batch-nightly"), "setup: batch-nightly still holds lane #%d's head, so no rebuild runs" % n)
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        return pr, rc, out, snap
-
-    def ancestor(self, old, new):
-        """True when commit `old` is `new` or an ancestor of it. Both are shas on origin, or refs origin holds."""
-        sh(self.co, "git", "fetch", "-q", "origin")
-        r = subprocess.run(["git", "merge-base", "--is-ancestor", old, new], cwd=self.co, capture_output=True, text=True)
-        if r.returncode not in (0, 1):
-            raise AssertionError(f"{old[:9]} or {new} cannot be read: {r.stderr.strip()}")
-        return r.returncode == 0
-
-    def on_origin(self, sha, branch):
-        """True when origin's `branch` holds commit `sha`."""
-        return self.ancestor(sha, f"origin/{branch}")
-
-    def second_parents(self, branch):
-        """The second parent of each merge on origin's `branch`: the head that a no-ff merge brought in."""
-        sh(self.co, "git", "fetch", "-q", "origin")
-        out = sh(self.co, "git", "log", "--merges", "--format=%P", f"origin/{branch}")
-        return {line.split()[1] for line in out.splitlines() if len(line.split()) == 2}
-
-    def body(self, n):
-        return self.host.batch_pulls[n]["body"]
-
-    def snapshot(self, n):
-        """What a refused run must leave alone: origin's batch-nightly head, and the body of pull request n."""
-        return self.head("batch-nightly"), self.body(n)
-
-    def assert_untouched(self, n, snap, out):
-        """A refused run moved nothing: batch-nightly keeps its head, pull request n keeps its body, and origin got no push."""
-        self.assertEqual(self.head("batch-nightly"), snap[0], "the refused run moved batch-nightly: %s" % out)
-        self.assertEqual(self.body(n), snap[1], "the refused run changed the body of #%d: %s" % (n, out))
-        self.assertEqual(self.pushes(), [], "the refused run pushed: %s" % out)
-
-    def record_pushes(self):
-        """From here on the origin writes each ref update it receives to pushes.log in its folder, and accepts it."""
-        hook = os.path.join(self.bare, "hooks", "pre-receive")
-        put(hook, "#!/bin/sh\ncat >> pushes.log\n")
-        os.chmod(hook, 0o755)
-
-    def pushes(self):
-        """The ref updates the origin received since record_pushes, as "old new ref" lines. [] when none, or before the recorder."""
-        try:
-            with open(os.path.join(self.bare, "pushes.log"), encoding="utf-8") as f:
-                return f.read().splitlines()
-        except FileNotFoundError:
-            return []
-
-    def run_batch(self, *argv, cwd=None):
-        """-> (rc, output) of merge.main on argv, run in the clone (`cwd`, or self.co). argparse exits 2 through SystemExit: that is the rc, and what it printed is kept."""
-        out, err = io.StringIO(), io.StringIO()
-        try:
-            rc = self.run_merge(*argv, stdout=out, stderr=err, cwd=cwd)[0]
-        except SystemExit as e:
-            rc = e.code
-        return rc, out.getvalue() + err.getvalue()
-
-    @contextlib.contextmanager
-    def no_lint_or_ready_check(self, ready_state=None, checks_state=None):
-        """The ready checks, patched to fail the run if called: draft_step and run_ready_checks always. With no `ready_state`, the lane lint
-        too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown", or a ci_job_run answer as a tuple), the run is a
-        --batch-build --ready: lane_lint runs for real under a spy that counts its calls, ci-job's answer is scripted to that state, and the
-        temp tree lives in this run's folder. With `checks_state` too (the same answer forms), run_ready_checks runs for real, and its ci-job
-        run ("--pinned") answers `checks_state` while the lint keeps `ready_state`. Yields {name: mock}: read after the run."""
-        if checks_state is not None and ready_state is None:
-            raise ValueError("checks_state goes with ready_state: the ready checks run in a --ready run, which lints first")
-        with contextlib.ExitStack() as stack:
-            patched = ("draft_step",) if checks_state is not None else ("draft_step", "run_ready_checks")
-            mocks = {name: stack.enter_context(unittest.mock.patch.object(
-                         merge, name, side_effect=AssertionError(f"merge.{name} ran: a batch run runs no ready check")))
-                     for name in patched}
-            if ready_state is None:
-                mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(
-                    merge, "lane_lint", side_effect=AssertionError("merge.lane_lint ran: a batch build or drop runs no lane lint")))
-            else:
-                answer = LINT_STATES[ready_state] if isinstance(ready_state, str) else ready_state
-                checks = LINT_STATES[checks_state] if isinstance(checks_state, str) else checks_state
-                mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(merge, "lane_lint", wraps=merge.lane_lint))
-                mocks["ci_job_run"] = stack.enter_context(unittest.mock.patch.object(
-                    merge, "ci_job_run", side_effect=lambda wt, *args, **kw: checks if checks is not None and "--pinned" in args else answer))
-                stack.enter_context(unittest.mock.patch.object(tempfile, "tempdir", self.run_dir))
-            yield mocks
-
-    def lint_calls(self, mocks):
-        """-> [(target, base, unknown_ok)] of each lane lint the run made, bound to lane_lint's own parameters, so a positional or a keyword call reads the same."""
-        bind = inspect.signature(merge.lane_lint).bind
-        calls = []
-        for c in mocks["lane_lint"].call_args_list:
-            a = bind(*c.args, **c.kwargs)
-            a.apply_defaults()
-            calls.append((a.arguments["target"], a.arguments["base"], a.arguments["unknown_ok"]))
-        return calls
-
-    # ci-job names a step by its temp script (verdict's argv), as captured from `ci-job checks --workflow` on a scratch workflow.
-    FAILED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp62v2ry54.sh"
-    PASSED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp24302j2s.sh"
-
-    def lint_fail_naming(self, *paths, passing=(), log_written=True, passing_cmd=None, rc=1, note=""):
-        """ci_job_run's answer for a batch head whose lint FAILs on one step that names each of `paths`, in the log shape ci-job writes: one
-        verdict log shared by every step, each step's section headed `=== verdict run <time>: <cmd>`, and the FAIL line carries that same
-        <cmd>. A passing step's section comes first and names each of `passing`. `log_written=False`: the FAIL names a log that is not there,
-        so its step output cannot be read. `passing_cmd`: the passing step's command, the failing step's by default; the same command for
-        both is two steps of one name. `rc` and `note` write the FAIL line as verdict does: a note such as " no tests ran" sits after rc,
-        before the duration. -> the answer as ci_job_run returns it: (state, lines, log, liftable)."""
-        log = os.path.join(self.t, "ci-job-batch.log")
-        if log_written:
-            put(log, f"=== verdict run 2026-11-09 04:47:54: {passing_cmd or self.PASSED_STEP_CMD}\n"
-                     + "".join(f"a passing step prints {p}\n" for p in passing)
-                     + f"=== verdict run 2026-11-09 04:47:54: {self.FAILED_STEP_CMD}\n"
-                     + "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
-        verdict = f"FAIL {self.FAILED_STEP_CMD} rc={rc}{note} (0.2s) log={log}"
-        return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
-
-    @contextlib.contextmanager
-    def blame_spy(self):
-        """Spies on merge.blamed_lanes. Yields a list that receives each result the run makes: {} when the log was read and no frozen lane
-        touches a path it names, None when the log could not be read, and an empty list when the blame never ran."""
-        seen = []
-        real = merge.blamed_lanes
-
-        def spy(*args, **kwargs):
-            got = real(*args, **kwargs)
-            seen.append(got)
-            return got
-        with unittest.mock.patch.object(merge, "blamed_lanes", side_effect=spy):
-            yield seen
-
-    def drop_pr_numbers(self, out, name):
-        """The PR numbers of each `merge --batch-drop NAME <pr>` command the run printed, in order."""
-        return re.findall(rf"merge --batch-drop {re.escape(name)} (\d+)", out)
-
-    def drop_commands(self, out, name):
-        """The token after each `--batch-drop NAME` the run printed, as printed: a PR number, or a placeholder such as <lane>. A remedy that
-        names a placeholder still names a drop, so a check on the printed drops reads the token, not only a digit."""
-        return re.findall(rf"--batch-drop {re.escape(name)} (\S+)", out)
-
-    def blame_lane(self, name, n):
-        """A red run blames lane #n on the draft batch NAME: its one batch-head lint FAILs on lanes/<n>.txt, and the run prints the drop
-        command for #n. The setup of a drop the blame allows. -> (rc, output)."""
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming(f"lanes/{n}.txt")):
-            rc, out = self.run_batch("--batch-build", name, "--ready")
-        self.assertEqual(self.drop_pr_numbers(out, name), [str(n)], "setup: the red run did not blame lane #%d: %s" % (n, out))
-        return rc, out
-
-    def refused_blame_run(self):
-        """Lanes #101 and #102 in a draft batch-nightly, and a --ready whose lint FAILs on lanes/102.txt, so the red run blames #102. The blame
-        write that FAIL makes is refused, so #102 stores no blame. -> (pull request number, rc, output)."""
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        self.fail_the_next_body_write()  # the blame a lint FAIL stores is the first body write of this run
-        with self.blame_spy() as seen, self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertTrue(seen, "setup: the lint FAIL never reached the blame: %s" % out)
-        self.assertEqual(sorted(seen[-1] or {}), [102], "setup: the lint FAIL did not blame #102 alone: %s" % out)
-        return pr, rc, out
-
-    def read_run(self, url):
-        """The host's run read, as Host.cited_run answers it: (conclusion, head sha) of a scripted run, None as the conclusion while it runs.
-        A URL no case scripted is a Stop, as a failed read is: never a default answer."""
-        if url not in self.runs:
-            raise merge.Stop(f"no run was scripted for {url}")
-        return self.runs[url]
-
-    def scripted_run(self, n, conclusion, sha):
-        """Run n's URL, scripted to conclude `conclusion` on commit `sha`. -> the URL."""
-        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{n}"
-        self.runs[url] = (conclusion, sha)
-        return url
-
-    def stored_blamed(self, n):
-        """The lanes pull request n's frozen block stores as Blamed, in order."""
-        return [int(x[len("Blamed: #"):]) for x in (block_lines(self.body(n)) or []) if x.startswith("Blamed: #")]
-
-    def frozen_lanes(self, n):
-        """The lanes pull request n's frozen block lists as Lane, in order."""
-        return [int(x.split()[1][1:]) for x in (block_lines(self.body(n)) or []) if x.startswith("Lane: ")]
-
     def ready_checks_on_main(self):
-        """origin's main names one ready check, so a --ready run must run it (merge.readyChecks)."""
+        """origin's main names one ready check, so a draft confirm must run it before the ready mark (merge.readyChecks)."""
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
 
-    # Build: the branch, the pull request, the lock and the lint.
+    @contextlib.contextmanager
+    def ready_check_answers(self, checks_state):
+        """merge.ci_job_run answers a ready check (its --pinned run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
+        Yields the --pinned calls the run made, so a case reads whether a ready check ran."""
+        ran = []
 
-    def test_build_merges_each_lane_no_ff_and_pushes_the_integration_branch(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
-        self.assertTrue(self.head("batch-nightly"), "the build did not push batch-nightly: %s" % out)
-        self.assertEqual(self.second_parents("batch-nightly"), {self.heads[n] for n in (101, 102, 103)},
-                         "batch-nightly does not merge each lane's head no-ff: %s" % out)
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        def answer(wt, *args, **kw):
+            if "--pinned" in args:
+                ran.append(args)
+                return LINT_STATES[checks_state]
+            return LINT_STATES["pass"]
+        with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
+                unittest.mock.patch.object(tempfile, "tempdir", self.run_dir):
+            yield ran
 
-    def test_a_tool_built_batch_sits_on_a_branch_the_ci_batch_pattern_matches(self):
-        """The branch a build makes is the one CI reads as a batch: it matches the batch head-ref pattern in ci-scope.sh, and not the old batch/NAME form."""
-        pattern = ci_batch_pattern()
-        self.assertIsNotNone(pattern, "ci-scope.sh names no batch head-ref pattern, so CI has no batch to read")
-        for n in (101, 102):
-            self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        branch = self.host.created[0]["branch"]
-        self.assertTrue(fnmatch.fnmatchcase(branch, pattern),
-                        "the batch is on %r, which the CI pattern %r does not match, so CI skips its mutation report: %s" % (branch, pattern, out))
-        self.assertFalse(branch.startswith("batch/"), "the batch is on the old batch/NAME form %r: %s" % (branch, out))
-
-    def test_build_opens_one_draft_pr_holding_the_frozen_block(self):  # re-pointed: was "opens one ready pr", a build opened it ready
-        for n in (101, 102, 103):
-            self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        pr = self.host.created[0]
-        self.assertTrue(pr["draft"], "the build opened the batch PR ready: a build opens a draft, and --ready marks it ready: %s" % out)
-        self.assertEqual(self.host.readies, [], "the build called Host.ready: only --ready marks a batch ready: %s" % out)
-        self.assertEqual((pr["branch"], pr["base"], pr["title"]), ("batch-nightly", "main", "Batch nightly"),
-                         "the batch PR is not batch-nightly into main, titled Batch nightly")
-        self.assertEqual(block_lines(pr["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in (101, 102, 103)]),
-                         "the batch PR body does not hold the frozen block: %s" % out)
-        self.assertIn("merge: batch nightly built: PR #%d" % pr["n"], out, "the verdict line does not start with the built line: %s" % out)
-        self.assertNotIn("PR #%d ready" % pr["n"], out, "the verdict says the new draft is ready: %s" % out)
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_build_takes_no_lock_and_runs_no_lane_lint_or_ready_check(self):
-        for n in (101, 102):
-            self.lane(n)
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertTrue(self.head("batch-nightly"), "the build did not push batch-nightly: %s" % out)
-        self.assertFalse(self.lock_ref(), "the build took the merge lock: a batch build takes no lock")
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the build called merge.%s: a batch build runs no lane lint and no ready check" % name)
-
-    def test_full_size_set_lists_every_lane_once_in_pr_number_order(self):
-        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes; a text sort would put #10 and #100 before #9
-        for n in numbers:
-            self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in reversed(numbers)))
-        self.assertTrue(self.head("batch-nightly"), "the build did not push batch-nightly for twelve lanes: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request for twelve lanes: %s" % out)
-        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in numbers]),
-                         "the frozen block of twelve lanes is not one Lane line each, sorted by PR number: %s" % out)
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    # Build on a batch that exists: a set that differs is refused, the same set is allowed.
-
-    def test_a_late_pr_is_refused_and_the_frozen_batch_does_not_move(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
-        self.assertEqual(rc, 1, "a late PR was not refused with exit 1: %s" % out)
-        self.assertIn("#103 is not in batch nightly's frozen lane set; it goes to the next batch", out, "the late PR's refusal does not say so: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_changed_lane_head_is_refused_and_the_frozen_batch_does_not_move(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.advance(102)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 1, "a moved lane head was not refused with exit 1: %s" % out)
-        self.assertIn("#102", out, "the refusal does not name the lane whose head moved: %s" % out)
-        self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_frozen_lane_left_out_of_the_request_is_refused_and_named(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101")
-        self.assertEqual(rc, 1, "a request missing a frozen lane was not refused with exit 1: %s" % out)
-        self.assertIn("#102", out, "the refusal does not name the frozen lane left out: %s" % out)
-        self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_the_same_set_again_is_allowed_with_no_second_pr_and_no_push(self):  # strengthened: a rerun leaves a draft or a ready PR as it is
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        for draft in (True, False):  # the draft comes first: its red is the one the old build's ready call makes
-            with self.subTest(draft=draft):
-                self.host.batch_pulls[pr]["draft"], self.host.readies = draft, []
-                with self.no_lint_or_ready_check():
-                    rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
-                self.assertEqual(self.host.readies, [], "the same set again called Host.ready on a %s batch PR: a rerun leaves it as it is: %s"
-                                 % ("draft" if draft else "ready", out))
-                self.assertEqual(self.host.batch_pulls[pr]["draft"], draft, "the same set again changed the draft flag: %s" % out)
-                self.assertEqual(rc, 0, "the same set again was refused: %s" % out)
-                self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
-                self.assert_untouched(pr, snap, out)
-
-    # Ready: a build never leaves a draft.
-
-    def test_a_build_on_a_draft_leaves_it_a_draft_and_never_calls_ready(self):  # re-pointed: was "marks it ready once", a build marked it ready
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(self.host.readies, [], "the build on a draft called Host.ready: only --ready marks a batch ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the build on a draft marked the batch PR ready: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build on a draft opened a second pull request: %s" % out)
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_ready_refused_by_the_host_prints_its_reason_exits_1_and_leaves_the_draft(self):  # re-pointed: was a build's ready refusal, now --ready's
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+    def test_a_lane_draft_the_host_will_not_mark_ready_stays_a_draft_with_its_reason(self):  # re-pointed from the batch's --ready (act 4)
+        self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
         self.host.ready_refuse = "no mark-ready route is open to this session"
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once before it asked the host: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "--ready did not ask the host to mark the batch PR ready once: %s" % out)
+        rc, out = self.run_merge("101", "--confirm")
+        self.assertEqual(self.host.readies, [101], "the draft confirm did not ask the host to mark #101 ready once: %s" % out)
         self.assertIn(self.host.ready_refuse, out, "the refused ready's reason is not printed: %s" % out)
-        self.assertEqual(rc, 1, "a refused ready did not exit 1: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the batch PR went ready though the host refused it")
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "the draft went ready though the host refused it: %s" % out)
+        self.assertFalse(getattr(self.host, "merged", False), "a draft confirm merged #101: %s" % out)
 
-    # --ready: the one lint of the batch head, then the mark ready. A refused or failed lint never reaches Host.ready.
-
-    def test_ready_lints_the_batch_head_once_then_marks_the_draft_ready_and_pushes_nothing(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
-                         "--ready did not lint the batch head once, and no other lint: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "--ready did not call Host.ready once after a passing lint: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
-        self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
-        self.assertEqual(self.pushes(), [], "--ready pushed: it lints and marks ready, and pushes nothing")
-        self.assertFalse(self.lock_ref(), "--ready took the merge lock")
-
-    def test_ready_lint_that_fails_exits_1_stays_a_draft_and_never_calls_ready(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="fail") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertIn("FAILs", out, "the FAIL of the batch head is not printed: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_that_is_unknown_is_refused_without_the_flag_and_stays_a_draft(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="unknown") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [], "an unknown lint of the batch head called Host.ready with no --lint-unknown-ok: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "an unknown lint marked the batch PR ready: %s" % out)
-        self.assertIn("is unknown, not a pass", out, "the unknown lint is not refused by name: %s" % out)
-        self.assertEqual(rc, 1, "an unknown lint without --lint-unknown-ok exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_that_is_unknown_goes_on_with_lint_unknown_ok_and_logs_the_reason(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="unknown") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "tool missing on this box")
-        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "tool missing on this box")],
-                         "--ready did not pass --lint-unknown-ok to the one lint of the batch head: %s" % out)
-        self.assertIn("tool missing on this box", out, "the reason of --lint-unknown-ok is not logged: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "--ready with --lint-unknown-ok did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
-        self.assertEqual(rc, 0, "--ready with --lint-unknown-ok exited %s: %s" % (rc, out))
-
-    # The ready checks: a draft goes ready only when merge.readyChecks pass (decision lanes-run-no-full-ci-job). Here the lint of the head passes,
-    # so only the checks decide the ready mark.
-
-    def test_ready_refuses_the_ready_mark_when_a_ready_check_fails(self):
+    def test_a_lane_draft_with_a_failing_ready_check_is_not_marked_ready(self):  # re-pointed from the batch's --ready (act 4)
         self.ready_checks_on_main()
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="pass", checks_state="fail") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        ran = [c for c in mocks["ci_job_run"].call_args_list if "--pinned" in c.args]
-        self.assertTrue(ran, "--ready ran no ready check, though merge.readyChecks names one: %s" % out)
+        self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("fail") as ran:
+            rc, out = self.run_merge("101", "--confirm")
+        self.assertTrue(ran, "the draft confirm ran no ready check, though merge.readyChecks names one: %s" % out)
         self.assertEqual(self.host.readies, [], "a failing ready check did not refuse the ready mark: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a failing ready check marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "a failing ready check marked #101 ready: %s" % out)
         self.assertEqual(rc, 1, "a failing ready check exited %s, not 1: %s" % (rc, out))
 
-    def test_ready_marks_the_batch_ready_when_every_ready_check_passes(self):  # the control of the case above
+    def test_a_lane_draft_with_passing_ready_checks_is_marked_ready(self):  # the control of the case above
         self.ready_checks_on_main()
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="pass", checks_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.host.readies, [pr], "passing ready checks did not let --ready mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready with its checks passing: %s" % out)
-        self.assertEqual(rc, 0, "--ready with its checks passing exited %s: %s" % (rc, out))
-
-    def test_ready_on_a_batch_whose_head_a_lint_already_read_says_already_ready_and_lints_nothing(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")  # the one lint of the head, then ready
-        self.assertEqual(rc, 0, "setup: the first --ready exited %s: %s" % (rc, out))
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the first --ready did not mark the batch PR ready: %s" % out)
-        readies = list(self.host.readies)
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertIn("already ready", out, "--ready on a ready batch does not say already ready: %s" % out)
-        self.assertEqual(self.lint_calls(mocks), [], "--ready on a batch whose head a lint already read linted it again: %s" % out)
-        self.assertEqual(self.host.readies, readies, "--ready on a ready batch called Host.ready: %s" % out)
-        self.assertEqual(rc, 0, "--ready on a ready batch exited %s: %s" % (rc, out))
-
-    def test_ready_on_a_ready_batch_whose_head_moved_since_its_lint_is_linted_again(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")  # the lint of the head that passed, then ready
-        self.assertEqual(rc, 0, "setup: the first --ready exited %s: %s" % (rc, out))
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the first --ready did not mark the batch PR ready: %s" % out)
-        passed = self.head("batch-nightly")
-        self.bump("batch-nightly")  # a claim or a heal moves the head on origin after the lint that passed it
-        self.assertNotEqual(self.head("batch-nightly"), passed, "setup: the head did not move")
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
-                         "--ready did not lint the moved head once, so a head no lint read is marked ready: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the moved batch PR is not ready after --ready: %s" % out)
-        self.assertEqual(rc, 0, "--ready on the moved head exited %s: %s" % (rc, out))
-
-    def test_a_lint_fail_whose_blame_write_is_refused_says_so_and_the_lane_cannot_be_dropped(self):
-        # re-pointed: was "the red run prints `merge --batch-drop nightly 102`", a drop that the refused blame write leaves refused
-        pr, rc, out = self.refused_blame_run()
-        self.assertIn("the blame could not be stored", out, "a refused blame write is not said: %s" % out)
-        self.assertEqual(rc, 1, "the red run exited %s, not 1: %s" % (rc, out))
-        self.assertEqual(self.drop_commands(out, "nightly"), [],
-                         "the red run prints a drop for #102, whose blame was refused and never stored, so the drop is refused: %s" % out)
-        self.assertIn("--blame", out, "the red run does not name the --blame route for #102: %s" % out)
-        self.assertFalse(any(line.startswith("Blamed:") for line in block_lines(self.body(pr)) or []),
-                         "the refused blame write left a Blamed line in the body: %s" % out)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertIn("no red run of its head blamed it", out, "a drop of #102 is not refused after its blame was not stored: %s" % out)
-        self.assertEqual(rc, 1, "the drop of #102 exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_refused_blame_route_names_its_failed_head_condition_in_the_sentence_that_holds_it(self):
-        _, _, out = self.refused_blame_run()
-        self.assertIn("the blame could not be stored", out, "setup: the blame write was not refused: %s" % out)
-        blame = [s for s in sentences_of(out) if "--blame" in s]
-        self.assertTrue(blame, "scope: the refused blame names no --blame route for #102: %s" % out)
-        self.assertTrue(any(re.search(r"\bfailed\b", s) and re.search(r"\bhead\b", s) for s in blame),
-                        "the --blame route for #102 is printed without its condition, a failed run of the batch head, in the same sentence: %s" % out)
-
-    def test_ready_with_a_pr_list_other_than_the_frozen_set_is_refused_as_a_build_is(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "--ready")
-        self.assertIn("#102 is frozen in batch nightly and is left out of this request", out, "the refusal does not name the frozen lane left out: %s" % out)
-        self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
-        self.assertEqual(rc, 1, "--ready with a PR list other than the frozen set exited %s, not 1: %s" % (rc, out))
-        self.assertEqual(self.lint_calls(mocks), [], "a refused --ready linted the batch head: %s" % out)
-        self.assertEqual(self.host.readies, [], "a refused --ready called Host.ready: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_ready_with_the_frozen_set_listed_is_allowed(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "102", "101", "--ready")
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready with the frozen set listed did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "--ready with the frozen set listed did not mark the batch PR ready once: %s" % out)
-        self.assertEqual(rc, 0, "--ready with the frozen set listed exited %s: %s" % (rc, out))
-
-    def test_ready_on_a_batch_whose_on_batch_has_merged_is_not_refused_and_lints_once_then_readies(self):
-        for n in (101, 102, 104):
-            self.lane(n)
-        x = self.frozen_batch("x", [101, 102])
-        nightly = self.frozen_batch("nightly", [104], on="batch-x", draft=True)  # a draft stacked on batch-x
-        # batch-x's pull request merges into main: its branch is now in the base. FakeHost.merge names the head of its own branch, so the
-        # fake points at batch-x for this one merge and goes back to the lane branch after it.
-        lane_branch, self.host.branch = self.host.branch, "batch-x"
-        try:
-            _, refusal = self.host.merge(x, "merge", self.head("batch-x"))
-        finally:
-            self.host.branch = lane_branch
-        self.assertEqual(refusal, "", "setup: the merge of batch-x's pull request into main was refused: %s" % refusal)
-        self.host.batch_pulls[x]["state"] = "MERGED"
-        self.assertTrue(self.ancestor(self.head("batch-x"), "origin/main"), "setup: batch-x is not contained in main after its pull request merged")
-        lanes_before = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            lints_at_ready = []
-            real_ready = self.host.ready
-
-            def ready_after_the_lint(n):  # the lint count when Host.ready runs: the lint comes first
-                lints_at_ready.append(len(mocks["lane_lint"].call_args_list))
-                return real_ready(n)
-            self.host.ready = ready_after_the_lint
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertNotIn("not a running batch", out, "--ready refused batch-nightly because its On batch has merged, as not a running batch: %s" % out)
-        self.assertEqual(rc, 0, "--ready for a batch whose On batch has merged exited %s: %s" % (rc, out))
-        self.assertEqual([target for target, _, _ in self.lint_calls(mocks)], ["batch-nightly"],
-                         "--ready for a batch whose On batch has merged did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [nightly], "--ready for a batch whose On batch has merged did not mark its PR ready once: %s" % out)
-        self.assertEqual(lints_at_ready, [1], "--ready for a batch whose On batch has merged marked the PR ready before its one lint: %s" % out)
-        lanes_after = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
-        self.assertEqual(lanes_after, lanes_before, "--ready for a batch whose On batch has merged changed its frozen lanes: %s" % out)
-
-    def test_ready_alone_or_with_a_drop_is_an_argument_error_that_names_batch_build(self):
         self.lane(101)
-        self.record_pushes()
-        for argv in (("--ready",), ("--ready", "101"), ("--batch-drop", "nightly", "101", "--ready")):
-            with self.subTest(argv=" ".join(argv)):
-                with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-                    rc, out = self.run_batch(*argv)
-                errors = [line for line in out.splitlines() if "error:" in line]  # the usage text names --batch-build too: read the error line only
-                self.assertTrue(any("--batch-build" in line for line in errors), "the error line does not name --batch-build: %s" % out)
-                self.assertNotEqual(rc, 0, "the refused arguments exited 0: %s" % out)
-                self.assertEqual(self.lint_calls(mocks), [], "the refused arguments linted the batch head: %s" % out)
-                self.assertEqual(self.host.pr_calls, [], "the refused arguments read a pull request: %s" % out)
-                self.assertEqual(self.pushes(), [], "the refused arguments pushed: %s" % out)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("pass") as ran:
+            rc, out = self.run_merge("101", "--confirm")
+        self.assertTrue(ran, "setup: the draft confirm ran no ready check: %s" % out)
+        self.assertEqual(self.host.readies, [101], "passing ready checks did not let the draft confirm mark #101 ready once: %s" % out)
+        self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after its checks passed: %s" % out)
+        self.assertEqual(rc, 0, "a draft confirm with its checks passing exited %s: %s" % (rc, out))
 
-    def test_cloud_without_the_batch_runner_role_refuses_ready_before_any_host_read(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.cloud(), self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertIn("may not", out, "the cloud refusal of --ready does not say the session may not merge: %s" % out)
-        self.assertEqual(rc, 1, "a cloud session with no batch-runner role was not refused --ready with exit 1: %s" % out)
-        self.assertEqual(self.lint_calls(mocks), [], "a refused cloud --ready linted the batch head: %s" % out)
-        self.assertEqual(self.host.readies, [], "a refused cloud --ready called Host.ready: %s" % out)
-        self.assertEqual(self.host.pr_calls, [], "a refused cloud --ready read a pull request: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    # Blame: a lint FAIL of the batch head names the lane whose files the failing path touches. The gap these cases hold: lane_lint's FAIL
-    # output names no path. ci-job prints the FAIL line and the `log=` line, and keeps the step's own output, which names the path, in the
-    # verdict log that `log=` names. So the tool must read the path from that log, then map it to each frozen lane's diff against the base.
-    # lint_fail_naming writes that log as ci-job leaves it.
-
-    def test_ready_lint_fail_names_the_one_lane_that_touches_the_failing_path_with_its_drop_command(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")) as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"],
-                         "the lint FAIL names lanes/102.txt but prints no `merge --batch-drop nightly 102` for the lane that touches it: %s" % out)
-        self.assertIn("#102", out, "the lint FAIL names lanes/102.txt but does not name #102, the one frozen lane whose diff touches it: %s" % out)
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_fail_names_both_lanes_that_touch_the_failing_path(self):
-        for n in (101, 102):
-            self.lane(n)
-        self.lane_commit(101, "lanes/shared.txt", "shared\n", "lane 101 touches lanes/shared.txt")
-        self.lane_commit(102, "lanes/shared.txt", "shared\n", "lane 102 touches lanes/shared.txt")
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/shared.txt")):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        for n in (101, 102):
-            self.assertIn(f"#{n}", out, "the lint FAIL names lanes/shared.txt, which #101 and #102 both touch, but does not name #%d: %s" % (n, out))
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_fail_on_a_path_no_lane_touches_says_the_blame_is_unknown_and_prints_no_drop_command(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("docs/unrelated.md")), self.blame_spy() as seen:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(seen, [{}], "the log is readable and names docs/unrelated.md, which no frozen lane touches, so the blame should read it as "
-                         "no lane ({}), not as an unreadable log (None): blamed_lanes returned %r: %s" % (seen, out))
-        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
-                         "the lint FAIL names docs/unrelated.md, which no frozen lane touches, but does not say the blame is unknown: %s" % out)
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
-                         "the lint FAIL names docs/unrelated.md, which no frozen lane touches, yet prints a drop command: a guess: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_fail_does_not_blame_a_lane_that_only_a_passing_step_prints(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        answer = self.lint_fail_naming("docs/unrelated.md", passing=("lanes/102.txt",))
-        with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(seen, [{}], "a passing step printed lanes/102.txt, which #102 touches, and the failing step printed only docs/unrelated.md, "
-                         "which no lane touches: the blame should read the failing step alone (no lane), not the whole log: blamed_lanes returned %r: %s" % (seen, out))
-        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
-                         "a passing step printed lanes/102.txt and the failing step printed docs/unrelated.md, but the run does not say the blame is unknown: %s" % out)
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
-                         "a passing step printed lanes/102.txt, which #102 touches, yet the run prints a drop command for #102: a whole-log scan, not the failing step: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_ready_lint_fail_with_a_log_that_is_not_there_says_the_blame_is_unknown_and_prints_no_drop_command(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming(log_written=False)), self.blame_spy() as seen:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(seen, [None], "the lint FAIL's log is not there, so the blame should read it as unreadable (None): blamed_lanes returned %r: %s" % (seen, out))
-        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
-                         "the lint FAIL's log is not there, but the run does not say the blame is unknown: %s" % out)
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
-                         "the lint FAIL's log is not there, yet the run prints a drop command: a guess: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def ready_lint_fail_naming_lane_102(self, variant, **fail):
-        """--ready's lint FAILs on one step that names lanes/102.txt, its FAIL line written as verdict writes it with `fail` (rc, note). The FAIL
-        line is found, so the blame reads the failing step's section and names #102, the one frozen lane whose diff touches that path. `variant`
-        names the FAIL line in each message."""
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt", **fail)), self.blame_spy() as seen:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertTrue(seen and seen[0] is not None, "%s: the FAIL line is found, so the blame should read its failing step's section, but it "
-                        "read nothing (unknown): blamed_lanes returned %r: %s" % (variant, seen, out))
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"], "%s: the lint FAIL names lanes/102.txt, which #102 touches, but prints no "
-                         "`merge --batch-drop nightly 102`: %s" % (variant, out))
-        self.assertEqual(self.host.readies, [], "%s: a FAILing lint of the batch head called Host.ready: %s" % (variant, out))
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "%s: a FAILing lint marked the batch PR ready: %s" % (variant, out))
-        self.assertEqual(rc, 1, "%s: a FAILing lint exited %s, not 1: %s" % (variant, rc, out))
-
-    def test_ready_lint_fail_with_a_runner_failure_marker_after_its_rc_still_blames_the_lane_its_step_touches(self):
-        self.ready_lint_fail_naming_lane_102("runner failure marker", rc=1, note=" runner failure marker")
-
-    def test_ready_lint_fail_with_no_tests_ran_after_its_rc_still_blames_the_lane_its_step_touches(self):
-        self.ready_lint_fail_naming_lane_102("no tests ran", rc=1, note=" no tests ran")
-
-    def test_ready_lint_fail_killed_by_a_signal_after_its_rc_still_blames_the_lane_its_step_touches(self):
-        self.ready_lint_fail_naming_lane_102("killed by signal 9", rc=137, note=" killed by signal 9")
-
-    def test_ready_lint_fail_of_a_step_sharing_its_command_with_a_passing_step_does_not_blame_a_path_only_the_passing_step_printed(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        answer = self.lint_fail_naming("docs/unrelated.md", passing=("lanes/102.txt",), passing_cmd=self.FAILED_STEP_CMD)  # two steps, one command
-        with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertTrue(seen, "the blame never ran, so the loop below checked no result: %s" % out)
-        for got in seen:  # the scope first: a lane is named only by a path the failing step printed, docs/unrelated.md. None or {} passes too
-            for n, paths in (got or {}).items():
-                self.assertEqual([p for p in paths if p != "docs/unrelated.md"], [],
-                                 "#%d is named by a path only the passing step printed, which the failing step does not print: blamed_lanes returned %r: %s"
-                                 % (n, got, out))
-        self.assertNotIn("102", self.drop_pr_numbers(out, "nightly"),
-                         "a path only the passing step printed names #102, and the run prints its drop command: %s" % out)
-        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-
-    def test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)  # a draft: a FAILing lint never leaves a batch ready, and a ready one is not linted
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")) as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
-        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"],
-                         "the lint FAIL names lanes/102.txt but prints no `merge --batch-drop nightly 102` to run: %s" % out)
-        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 0, "the drop the lint named exited %s: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
-        self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
-        self.assertIn("merge --batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
-        self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
-                         "the --ready after the drop did not lint the batch head once, and no other lint: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
-        self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
-
-    # Blame by route: a red run names the lane a drop may take off (decision batch-freeze-lane-set). The route is
-    # `--batch-build NAME --blame N --run URL`. Each refusal case's first assert is one phrase of the refusal's own text, so its red
-    # names the missing refusal and not a parser's error.
-
-    def test_a_blame_of_a_failed_run_on_the_head_is_stored_and_lets_a_later_drop_through(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready: a red CI run is a run on a ready batch
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        url = self.scripted_run(7001, "failure", self.head("batch-nightly"))
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
-        self.assertEqual(self.stored_blamed(pr), [102], "a failed run on the batch's head did not store Blamed: #102: %s" % out)
-        self.assertEqual(rc, 0, "the blame of #102 from a failed run on the head exited %s, not 0: %s" % (rc, out))
-        self.assertEqual(self.pushes(), [], "the blame pushed to origin, though it writes only the frozen block: %s" % out)
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 0, "the drop of #102, which the failed run blamed, exited %s: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-
-    def test_a_blame_from_a_run_on_an_older_head_is_refused_and_stores_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        older = self.head("batch-nightly")
-        self.bump("batch-nightly")  # the batch's head moves on: the red run below ran on `older`
-        url = self.scripted_run(7002, "failure", older)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
-        self.assertRegex(out, r"current head|older head", "a blame from a run on an older head is not refused as one: %s" % out)
-        self.assertEqual(rc, 1, "a blame from a run on an older head exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_blame_from_a_green_run_is_refused_and_stores_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        url = self.scripted_run(7003, "success", self.head("batch-nightly"))
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
-        self.assertRegex(out, r"success|green|not (a )?failed", "a blame from a green run is not refused as one that is not failed: %s" % out)
-        self.assertEqual(rc, 1, "a blame from a green run exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_blame_from_a_run_still_running_is_refused_and_stores_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        url = self.scripted_run(7004, None, self.head("batch-nightly"))  # a run that is still running has no conclusion yet
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
-        self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a blame from a run still running is not refused as one: %s" % out)
-        self.assertEqual(rc, 1, "a blame from a run still running exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_blame_with_no_run_is_refused_and_names_the_run_flag(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102")
-        self.assertIn("--run", out, "a blame with no --run is not refused as one that needs --run: %s" % out)
-        self.assertNotEqual(rc, 0, "a blame with no --run exited 0: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_blame_of_a_lane_outside_the_batch_is_refused_and_stores_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])  # #103 is open, and not in the batch
-        self.assertEqual(self.frozen_lanes(pr), [101, 102], "setup: batch-nightly's frozen set is not #101 and #102")
-        url = self.scripted_run(7005, "failure", self.head("batch-nightly"))
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "103", "--run", url)
-        self.assertRegex(out, r"not in batch|frozen lane set", "a blame of #103, which batch nightly does not hold, is not refused as one: %s" % out)
-        self.assertEqual(rc, 1, "a blame of #103 exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_the_unblamed_drop_refusal_names_the_blame_route(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertIn("--batch-build nightly --blame 102", out, "the refused drop of #102, which no run blamed, does not name the --blame route: %s" % out)
-        self.assertEqual(rc, 1, "the refused drop of #102 exited %s, not 1: %s" % (rc, out))
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_stacked_refusal_prints_no_drop_for_an_unblamed_lane_and_names_the_blame_route(self):
-        pr, rc, out, snap = self.stacked_refusal_run([102])  # lane #102 is stacked on open lane #101
-        self.assertIn("holds a commit of #101", out, "scope: the refusal is not the stacked check that names #101: %s" % out)
-        self.assertEqual(rc, 1, "the stacked refusal exited %s, not 1: %s" % (rc, out))
-        self.assertEqual(self.drop_commands(out, "nightly"), [],
-                         "the stacked refusal prints a drop for lane #102, which no red run blamed, so the drop is refused: %s" % out)
-        self.assertIn("--blame", out, "the stacked refusal does not name the --blame route for lane #102: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_stacked_refusal_names_no_route_that_keeps_the_lane_in_the_batch(self):
-        pr, rc, out, snap = self.stacked_refusal_run([102])
-        self.assertIn("holds a commit of #101", out, "scope: the refusal is not the stacked check that names #101: %s" % out)
-        self.assertEqual(rc, 1, "the stacked refusal exited %s, not 1: %s" % (rc, out))
-        self.assertNotRegex(out, r"(?i)\b(leave|keep)\b[^.\n]*\bin\b[^.\n]*\bbatch\b|\bships\b",
-                            "the stacked refusal names a route that keeps lane #102 in the batch, and the next --ready stops at this same refusal: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_stacked_refusal_for_two_unblamed_lanes_does_not_say_caused_by_it(self):
-        pr, rc, out, snap = self.stacked_refusal_run([102, 103])  # lanes #102 and #103 are both stacked on open lane #101
-        self.assertIn("#102 holds a commit of #101", out, "scope: the refusal does not name lane #102 as stacked on #101: %s" % out)
-        self.assertIn("#103 holds a commit of #101", out, "scope: the refusal does not name lane #103 as stacked on #101: %s" % out)
-        self.assertEqual(self.drop_commands(out, "nightly"), [],
-                         "setup: a drop is printed, so a lane has a stored blame and the lanes are not both unblamed: %s" % out)
-        self.assertNotIn("caused by it", out,
-                         "the stacked refusal for two unblamed lanes says 'caused by it', which does not say which lane a failed run blames: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_ready_check_fail_that_names_a_lane_stores_its_blame_so_the_drop_goes_through(self):
-        self.ready_checks_on_main()
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        with self.no_lint_or_ready_check(ready_state="pass", checks_state=self.lint_fail_naming("lanes/102.txt")):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(rc, 1, "a ready check that fails on lanes/102.txt exited %s, not 1: %s" % (rc, out))
-        self.assertEqual(self.stored_blamed(pr), [102], "a ready check that fails on lanes/102.txt did not store Blamed: #102: %s" % out)
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 0, "the drop of #102, which the ready check blamed, exited %s: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-
-    # Drop: one lane off the branch, the block rewritten, nothing else touched.
-
-    def test_drop_takes_one_lane_off_the_branch_and_runs_no_lint_or_ready_check(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
-        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "setup: lane #102 is not on batch-nightly before the drop")
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[103], "batch-nightly"),
-                        "the drop took a kept lane off batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
-                         "the frozen block does not drop #102 with a Dropped line: %s" % out)
-        self.assertEqual(self.host.readies, [], "the drop marked a pull request ready")
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
-
-    # After the build, a drop takes off only a lane that a red run blamed (decision batch-freeze-lane-set). The control is
-    # test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once, which drops a blamed lane.
-
-    def test_a_drop_of_an_unblamed_lane_from_a_draft_batch_is_refused_and_moves_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 1, "a drop of lane #102, which no red run blamed, was not refused with exit 1: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_a_drop_of_an_unblamed_lane_from_a_ready_batch_is_refused_and_returns_nothing_to_draft(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 1, "a drop of lane #102, which no red run blamed, was not refused with exit 1: %s" % out)
-        self.assertEqual(self.host.to_drafts, [], "a refused drop of an unblamed lane called to_draft: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_drop_leaves_another_batchs_branch_and_pr_alone(self):
-        for n in (101, 102, 103, 104):
-            self.lane(n)
-        self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
-        other_pr = self.frozen_batch("other", [104])
-        other_head, other_body = self.head("batch-other"), self.body(other_pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertEqual(self.head("batch-other"), other_head, "the drop moved batch-other")
-        self.assertEqual(self.body(other_pr), other_body, "the drop changed the body of batch-other's pull request")
-        self.assertFalse(any("batch-other" in line for line in self.pushes()), "the drop pushed batch-other: %s" % self.pushes())
-
-    def test_drop_refuses_a_pr_outside_the_frozen_set_and_names_the_set(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-drop", "nightly", "103")
-        self.assertEqual(rc, 1, "a PR outside the frozen set was not refused with exit 1: %s" % out)
-        self.assertIn("#101", out, "the refusal does not name the frozen set: %s" % out)
-        self.assertIn("#102", out, "the refusal does not name the frozen set: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_drop_refuses_the_only_lane_and_says_to_close_the_batch(self):
+    def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
         self.lane(101)
-        pr = self.frozen_batch("nightly", [101], blamed=(101,))
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-drop", "nightly", "101")
-        self.assertEqual(rc, 1, "dropping the only lane was not refused with exit 1: %s" % out)
-        self.assertIn("close", out, "the refusal does not say to close the batch instead: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_drop_refuses_a_body_whose_markers_sit_in_a_fenced_code_block(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        self.host.batch_pulls[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 1, "a body whose markers sit in a fenced code block was not refused as having no block: %s" % out)
-        self.assert_untouched(pr, snap, out)
-
-    def test_text_outside_the_markers_is_kept_when_a_lane_is_dropped(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
-        self.host.batch_pulls[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
-        before = self.body(pr)
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        after = self.body(pr)
-        self.assertIsNotNone(block_lines(after), "the drop left no single frozen block in the body: %s" % out)
-        self.assertEqual(after.split(BATCH_BEGIN)[0], before.split(BATCH_BEGIN)[0], "the text above the block changed on drop: %s" % out)
-        self.assertEqual(after.split(BATCH_END)[1], before.split(BATCH_END)[1], "the text below the block changed on drop: %s" % out)
-
-    def test_a_body_with_two_begin_markers_is_refused_by_build_and_by_drop(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        self.host.batch_pulls[pr]["body"] = self.body(pr) + self.body(pr)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        for argv in (("--batch-build", "nightly", "101", "102"), ("--batch-drop", "nightly", "102")):
-            with self.subTest(argv=argv[0]):
-                rc, out = self.run_batch(*argv)
-                self.assertEqual(rc, 1, "a body with two begin markers was not refused with exit 1 by %s: %s" % (argv[0], out))
-                self.assert_untouched(pr, snap, out)
-
-    # A drop of a ready batch returns it to draft, once, before its push; a refused return warns and drops anyway; a draft never calls it.
-
-    def test_a_drop_of_a_ready_batch_returns_it_to_draft_once_before_its_push_and_says_it_needs_ready_again(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready
-        before = self.head("batch-nightly")
-        seen = []
-        self.host.on_to_draft = lambda n: seen.append(self.head("batch-nightly"))
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(self.host.to_drafts, [pr], "a drop of a ready batch did not return it to draft once: %s" % out)
-        self.assertEqual(seen, [before], "the return to draft came after batch-nightly was pushed: %s" % out)
-        self.assertIn("--batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop did not leave the batch PR a draft: %s" % out)
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
-
-    def test_a_refused_return_to_draft_warns_and_the_drop_still_goes_through(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
-                      "the refused return to draft does not warn, with its reason: %s" % out)
-        self.assertEqual(rc, 0, "a refused return to draft exited %s, not 0: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "a refused return to draft blocked the drop: %s" % out)
-        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
-                         "the frozen block does not drop #102 after a refused return to draft: %s" % out)
-        self.assertEqual(self.host.to_drafts, [pr], "the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "a refused return to draft changed the draft flag: %s" % out)
-
-    def test_a_drop_of_a_ready_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready: the drop's return to draft is refused, so the PR stays ready
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(self.host.to_drafts, [pr], "setup: the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the refused return to draft changed the draft flag: %s" % out)
-        self.assertIn("merge --batch-build nightly --ready", out,
-                      "the drop of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-
-    def test_a_drop_of_a_draft_batch_never_calls_to_draft_and_says_it_needs_ready_again(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
-        self.blame_lane("nightly", 102)  # a red run blames #102, so the drop below is allowed
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertIn("--batch-build nightly --ready", out, "the drop of a draft does not say the batch needs --ready again: %s" % out)
-        self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop of a draft batch changed the draft flag: %s" % out)
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-
-    def test_a_drop_on_a_ready_base_returns_its_ready_on_batch_to_draft_before_the_rebuild_and_never_lints(self):
-        x, nightly, old_nightly = self.ready_stack(blamed=(102,))
-        seen = []
-        self.host.on_to_draft = lambda n: seen.append((n, self.head("batch-nightly")))
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "x", "102")
-        self.assertEqual(sorted(self.host.to_drafts), sorted([x, nightly]),
-                         "the drop of batch-x did not return batch-x and its ready on-batch to draft, once each: %s" % out)
-        self.assertIn((nightly, old_nightly), seen, "batch-nightly was rebuilt before it went to draft: %s" % out)
-        self.assertTrue(self.host.batch_pulls[x]["draft"] and self.host.batch_pulls[nightly]["draft"], "the drop left batch-x or batch-nightly ready: %s" % out)
-        self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")),
-                        "batch-nightly was not rebuilt on the new head of batch-x: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
-
-    def test_a_refused_return_to_draft_on_a_drop_still_rebuilds_the_ready_on_batch(self):
-        x, nightly, _ = self.ready_stack(blamed=(102,))
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "x", "102")
-        self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
-                      "the refused return to draft does not warn: %s" % out)
-        self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")),
-                        "a refused return to draft blocked the rebuild of batch-nightly: %s" % out)
-        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "a refused return to draft changed batch-nightly's draft flag: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-
-    def test_a_restack_of_a_ready_on_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
-        x, nightly, _ = self.ready_stack(blamed=(102,))
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "x", "102")
-        self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")), "setup: the drop did not restack batch-nightly on batch-x: %s" % out)
-        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "setup: the refused return to draft changed batch-nightly's draft flag: %s" % out)
-        self.assertIn("merge --batch-build nightly --ready", out,
-                      "the restack of a ready batch-nightly whose return to draft was refused does not say it needs --ready again: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-
-    # --on: the batch stacks on a running batch's head.
-
-    def test_a_drop_that_restacks_a_ready_batch_with_no_return_to_draft_then_ready_lints_its_head(self):
-        # batch-x is a draft holding 101 and 102. Ready batch-nightly stacks on it. A red run blames #102, the drop takes it off x, and the
-        # host refuses the return to draft that the restack asks for. Nothing then lints batch-nightly's new head.
-        for n in (101, 102, 104):
-            self.lane(n)
-        self.frozen_batch("x", [101, 102], draft=True)
-        nightly = self.frozen_batch("nightly", [104], on="batch-x")
-        self.blame_lane("x", 102)
-        self.host.to_draft_refuse = merge.Host.to_draft(None, 1)[1]
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "x", "102")
-        self.assertIn(nightly, self.host.to_drafts, "setup: the restack did not try to return ready batch-nightly to draft: %s" % out)
-        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "setup: the refused return left batch-nightly ready, which the case needs: %s" % out)
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
-                         "--ready on batch-nightly, whose head a drop restacked and no return to draft covered, did not lint that head once: %s" % out)
-
-    def test_on_builds_from_the_running_head_and_records_it_with_the_lane(self):
-        for n in (101, 102):
-            self.lane(n)
-        self.frozen_batch("old", [101])
-        old = self.head("batch-old")
-        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch-old")
-        self.assertTrue(self.head("batch-nightly"), "the --on build did not push batch-nightly: %s" % out)
-        self.assertTrue(self.on_origin(old, "batch-nightly"), "batch-nightly does not hold the running batch-old head %s" % old[:9])
-        self.assertEqual(rc, 0, "the --on build exited %s: %s" % (rc, out))
-        lines = block_lines(self.host.created[-1]["body"]) or []
-        self.assertIn(f"On: batch-old {old}", lines, "the new block does not record On: batch-old with the running head: %s" % out)
-        self.assertIn(f"Lane: #102 {self.heads[102]}", lines, "the new block does not list lane #102: %s" % out)
-
-    def test_on_refuses_a_branch_whose_open_pr_holds_no_freeze_block(self):
-        for n in (101, 102):
-            self.lane(n)  # lane-101's open pull request has an empty body: no freeze block
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "lane-101")
-        self.assertEqual(rc, 1, "--on a branch with no freeze block was not refused with exit 1: %s" % out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused --on build pushed batch-nightly")
-        self.assertEqual(self.host.created, [], "the refused --on build opened a pull request")
-        self.assertEqual(self.pushes(), [], "the refused --on build pushed")
-
-    # Cloud: both flags need the batch-runner role, and a refusal reads no host.
-
-    def test_cloud_without_the_batch_runner_role_refuses_both_flags_before_any_host_read(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.cloud():
-            rc_build, out_build = self.run_batch("--batch-build", "nightly", "101", "102")
-            rc_drop, out_drop = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc_build, 1, "a cloud session with no batch-runner role was not refused the build with exit 1: %s" % out_build)
-        self.assertIn("may not", out_build, "the cloud refusal of the build does not say the session may not merge: %s" % out_build)
-        self.assertEqual(rc_drop, 1, "a cloud session with no batch-runner role was not refused the drop with exit 1: %s" % out_drop)
-        self.assertIn("may not", out_drop, "the cloud refusal of the drop does not say the session may not merge: %s" % out_drop)
-        self.assertEqual(self.host.pr_calls, [], "a refused cloud run read a pull request")
-        self.assertEqual(self.host.batch_pr_calls, [], "a refused cloud run read the batch pull request")
-        self.assert_untouched(pr, snap, out_build)
-
-    def test_cloud_batch_runner_role_builds_the_batch(self):
-        for n in (101, 102):
-            self.lane(n)
-        self.put_role("batch-runner")
-        with self.cloud():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertTrue(self.head("batch-nightly"), "a batch-runner session's build did not push batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the batch-runner build exited %s: %s" % (rc, out))
-
-    # Arguments: the flags' own rules, refused before any host read or push.
-
-    def test_on_and_base_without_batch_build_are_refused_by_name(self):
-        self.lane(101)
-        self.record_pushes()
-        for argv in (("101", "--on", "batch-old"), ("101", "--base", "main")):
-            with self.subTest(argv=" ".join(argv)):
-                rc, out = self.run_batch(*argv)
-                self.assertIn("--batch-build", out, "the refusal does not name --batch-build: %s" % out)
-                self.assertNotEqual(rc, 0, "the refused arguments exited 0: %s" % out)
-                self.assertEqual(self.host.pr_calls, [], "the refused arguments read a pull request")
-                self.assertEqual(self.pushes(), [], "the refused arguments pushed")
-
-    def test_a_bad_batch_name_is_refused_by_name_before_any_host_read(self):
-        self.lane(101)
-        self.record_pushes()
-        for bad in ("Bad_Name", "x" * 33):  # uppercase and underscore; then one character past the 32 allowed
-            with self.subTest(name=bad):
-                rc, out = self.run_batch("--batch-build", bad, "101")
-                self.assertIn(bad, out, "the refusal does not name the NAME it refused: %s" % out)
-                self.assertNotEqual(rc, 0, "a bad NAME exited 0: %s" % out)
-                self.assertEqual(self.head("batch-" + bad), "", "a bad NAME pushed its batch branch")
-        self.assertEqual(self.host.batch_pr_calls, [], "a bad NAME read a batch pull request")
-        self.assertEqual(self.pushes(), [], "a bad NAME pushed")
-
-    def test_batch_build_with_no_pr_is_refused_by_name(self):
-        self.lane(101)
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly")
-        self.assertTrue("PR" in out or "pull request" in out, "the refusal does not say the build needs a PR: %s" % out)
-        self.assertNotEqual(rc, 0, "a build with no PR exited 0: %s" % out)
-        self.assertEqual(self.host.batch_pr_calls, [], "a build with no PR read a batch pull request")
-        self.assertEqual(self.pushes(), [], "a build with no PR pushed")
-
-    def test_a_lane_pr_that_is_not_open_is_refused_before_any_push(self):
-        for n in (101, 102):
-            self.lane(n)
-        self.host.batch_pulls[102]["state"] = "MERGED"
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 1, "a merged lane PR was not refused with exit 1: %s" % out)
-        self.assertIn("#102", out, "the refusal does not name the pull request that is not open: %s" % out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request")
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly")
-        self.assertEqual(self.pushes(), [], "the refused build pushed")
-
-    # Dependents and on-batches: a drop takes its stacked dependents along, and a head that moves is rebuilt under the batches on it.
-
-    def test_drop_takes_a_stacked_dependent_along_and_names_it(self):
-        self.lane(101)
-        self.lane(102, on=101)  # stacked on lane #101: its head contains #101's head
-        self.lane(103)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(101,))
-        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
-        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "setup: lane #102 is not on batch-nightly before the drop")
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-drop", "nightly", "101")
-        self.assertFalse(self.on_origin(self.heads[101], "batch-nightly"), "the drop did not take lane #101 off batch-nightly: %s" % out)
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop kept lane #102, which stacks on the dropped #101: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[103], "batch-nightly"), "the drop took unrelated lane #103 off batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertTrue(any("#102" in line and "#101" in line for line in out.splitlines()),
-                        "the output does not name dependent #102 and say it stacks on #101: %s" % out)
-        lines = block_lines(self.body(pr)) or []
-        self.assertEqual([line for line in lines if not line.startswith("Dropped:")], freeze_inner("nightly", [(103, self.heads[103])]),
-                         "the block keeps other than lane #103: %s" % out)
-        self.assertEqual({line for line in lines if line.startswith("Dropped:")}, {"Dropped: #101", "Dropped: #102"},
-                         "the block does not carry one Dropped line per dropped PR: %s" % out)
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
-
-    def test_a_drop_on_a_base_rebuilds_the_batch_stacked_on_it_and_leaves_others(self):
-        for n in (101, 102, 103, 104):
-            self.lane(n)
-        self.frozen_batch("x", [101, 102], blamed=(102,))
-        nightly_pr = self.frozen_batch("nightly", [103], on="batch-x")
-        self.frozen_batch("free", [104])
-        old_nightly, free_head = self.head("batch-nightly"), self.head("batch-free")
-        self.assertTrue(self.ancestor(self.head("batch-x"), old_nightly), "setup: batch-nightly does not stack on batch-x")
-        self.record_pushes()
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-drop", "x", "102")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-x"), "the drop did not take lane #102 off batch-x: %s" % out)
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        new_x, new_nightly = self.head("batch-x"), self.head("batch-nightly")
-        self.assertTrue(self.ancestor(new_x, new_nightly), "the drop on batch-x did not rebuild batch-nightly on its new head: %s" % out)
-        self.assertEqual(block_lines(self.body(nightly_pr)), freeze_inner("nightly", [(103, self.heads[103])], on=("batch-x", new_x)),
-                         "batch-nightly's block does not carry the new On sha with its own lanes: %s" % out)
-        self.assertTrue(any(line.split() == [old_nightly, new_nightly, "refs/heads/batch-nightly"] for line in self.pushes()),
-                        "batch-nightly was not pushed from its old head to the rebuilt one: %s" % self.pushes())
-        self.assertEqual(self.head("batch-free"), free_head, "the drop moved batch-free, which stacks on nothing")
-        self.assertFalse(any("batch-free" in line for line in self.pushes()), "the drop pushed batch-free: %s" % self.pushes())
-        self.assertEqual(len(self.host.created), 3, "the drop opened a pull request: %s" % out)
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the drop called merge.%s: a rebuild runs no lane lint and no ready check" % name)
-
-    def test_build_of_an_on_batch_whose_on_sha_is_behind_rebuilds_it_on_the_new_head(self):
-        self.lane(101)
-        self.lane(102)
-        self.frozen_batch("x", [101])
-        nightly_pr = self.frozen_batch("nightly", [102], on="batch-x")
-        new_x = self.bump("batch-x")  # batch-x moved on; batch-nightly's On sha is now behind it
-        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch-x")
-        self.assertTrue(self.ancestor(new_x, self.head("batch-nightly")),
-                        "the on-batch build did not rebuild batch-nightly on the new batch-x head: %s" % out)
-        self.assertEqual(rc, 0, "the same-set on-batch build was refused: %s" % out)
-        self.assertEqual(block_lines(self.body(nightly_pr)), freeze_inner("nightly", [(102, self.heads[102])], on=("batch-x", new_x)),
-                         "the On sha was not updated to the new head with the same lane set: %s" % out)
-        self.assertEqual(len(self.host.created), 2, "the rebuild opened a second pull request: %s" % out)
-        self.assertNotIn("never changes except by --batch-drop", out, "a same-set rebuild was refused as a lane-set change: %s" % out)
-
-    def test_a_rebuild_keeps_every_lane_head_of_the_on_batch(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.frozen_batch("x", [101, 102])
-        self.frozen_batch("nightly", [103], on="batch-x")
-        new_x = self.bump("batch-x")
-        rc, out = self.run_batch("--batch-build", "nightly", "103", "--on", "batch-x")
-        nightly_new = self.head("batch-nightly")
-        self.assertTrue(self.ancestor(new_x, nightly_new), "the rebuild did not put batch-nightly on the new batch-x head: %s" % out)
-        for n in (101, 102, 103):
-            self.assertTrue(self.ancestor(self.heads[n], nightly_new), "the rebuild dropped lane #%d's head from batch-nightly: %s" % (n, out))
-        self.assertEqual(rc, 0, "the rebuild exited %s: %s" % (rc, out))
-
-    # A stacked lane needs its base lane, and a lane's pull request targets the batch's base. The cases below cover a failed
-    # body write, a dependent on a later batch's On chain, a shallow clone, an unrelated body quoting a marker, and the base recorded at build.
-
-    def fail_the_next_body_write(self):
-        """The host refuses the next body write, by raising Stop; each write after it is kept as usual."""
-        real, calls = self.host.set_body, []
-
-        def set_body(n, body):
-            calls.append(n)
-            if len(calls) == 1:
-                raise merge.Stop("the host refused the body write of #%d" % n)
-            real(n, body)
-
-        self.host.set_body = set_body
-
-    def lanes_on_branch_and_listed(self, pr, numbers):
-        """-> (the lanes of `numbers` that batch-nightly holds, the lanes that pull request pr's block lists as Lane lines)."""
-        lines = block_lines(self.body(pr)) or []
-        held = {n for n in numbers if self.on_origin(self.heads[n], "batch-nightly")}
-        listed = {n for n in numbers if f"Lane: #{n} {self.heads[n]}" in lines}
-        return held, listed
-
-    def test_a_stacked_lane_without_its_base_lane_is_refused_and_nothing_moves(self):
-        self.lane(101)
-        self.lane(102, on=101)
-        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "102")
-        self.assertEqual(rc, 1, "a stacked lane without its base lane was not refused with exit 1: %s" % out)
-        self.assertIn("#101", out, "the refusal does not name the base lane #101, which is missing from the request: %s" % out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly: %s" % out)
-        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
-
-    def test_a_lane_whose_pr_targets_another_base_is_refused_and_nothing_moves(self):
-        for n in (101, 102):
-            self.lane(n)
-        self.host.batch_pulls[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 1, "a lane whose pull request targets another base was not refused with exit 1: %s" % out)
-        self.assertIn("#101", out, "the refusal does not name the lane whose pull request targets another base: %s" % out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly: %s" % out)
-        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
-
-    def test_stacked_lanes_requested_together_with_their_base_lane_are_allowed(self):
-        self.lane(101)
-        self.lane(102, on=101)
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 0, "stacked lanes requested together, base lane included, were refused: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[102], "batch-nightly"),
-                        "batch-nightly does not hold both stacked lanes: %s" % out)
-
-    def test_stacked_lanes_whose_shared_base_commit_is_requested_are_not_refused_for_an_outside_pr_stacked_on_that_base(self):
-        self.lane(101)
-        self.lane(102, on=101)  # lane #102 is stacked on lane #101, the base lane requested with it
-        self.lane(103, on=101)  # outside pull request #103 is stacked on lane #101 too: its commits and #102's share #101's head
-        self.assertTrue(self.ancestor(self.heads[101], self.heads[103]), "setup: outside #103 does not contain lane #101's head")
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertNotIn("holds a commit of #103", out, "the build refused a requested lane for holding a commit of outside #103, although the "
-                         "shared commit is the head of requested lane #101: %s" % out)
-        self.assertEqual(rc, 0, "stacked lanes requested with their base lane were refused because an outside pull request is stacked on that base: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-
-    def test_ready_that_rebuilds_stacked_lanes_whose_shared_base_commit_is_requested_is_not_refused_for_an_outside_pr_stacked_on_that_base(self):
-        self.lane(101)
-        self.lane(102, on=101)  # lane #102 is stacked on lane #101, the base lane requested with it
-        self.lane(103, on=101)  # outside pull request #103 is stacked on lane #101 too
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.drift_batch("nightly", [101])  # origin's batch-nightly lost lane #102: --ready rebuilds it before it lints
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "setup: batch-nightly still holds lane #102 after the drift")
-        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertNotIn("holds a commit of #103", out, "--ready refused a requested lane for holding a commit of outside #103, although the "
-                         "shared commit is the head of requested lane #101: %s" % out)
-        self.assertEqual(rc, 0, "--ready that rebuilds stacked lanes with their base lane requested exited %s: %s" % (rc, out))
-        self.assertEqual([target for target, _, _ in self.lint_calls(mocks)], ["batch-nightly"], "--ready did not lint the batch head once: %s" % out)
-        self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
-
-    def test_a_failed_body_write_on_drop_leaves_the_branch_and_the_body_agreeing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        self.fail_the_next_body_write()
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 1, "a drop whose body write was refused did not exit 1: %s" % out)
-        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
-        self.assertEqual(held, listed, "after a refused body write batch-nightly holds lanes %s but its body lists %s: %s"
-                         % (sorted(held), sorted(listed), out))
-
-    def test_a_rerun_of_the_original_set_after_a_failed_body_write_pushes_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
-        self.fail_the_next_body_write()
-        self.run_batch("--batch-drop", "nightly", "102")  # the refusal itself is the case above
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
-        self.assertEqual(self.pushes(), [], "the rerun of the original set pushed batch-nightly after a drop whose body write failed: "
-                         "the frozen set regrew silently: %s" % out)
-        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
-        self.assertEqual(held, listed, "after the rerun batch-nightly holds lanes %s but its body lists %s: %s" % (sorted(held), sorted(listed), out))
-
-    def test_a_drop_takes_the_stacked_dependents_off_a_later_batch_on_its_branch(self):
-        for n in (101, 102, 104):
-            self.lane(n)
-        self.lane(103, on=101)  # lane #103 stacks on #101: its head contains #101's head
-        self.frozen_batch("bx", [101, 102], blamed=(101,))
-        by_pr = self.frozen_batch("by", [103, 104], on="batch-bx")  # batch-by holds #101's commit through #103
-        self.assertTrue(self.ancestor(self.heads[101], "origin/batch-by"), "setup: batch-by does not hold lane #101's commit")
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-drop", "bx", "101")
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertFalse(self.ancestor(self.heads[101], "origin/batch-by"),
-                         "the drop of #101 from batch-bx left its commit on batch-by, through the stacked lane #103: %s" % out)
-        new_bx = self.head("batch-bx")
-        self.assertTrue(self.ancestor(new_bx, "origin/batch-by"), "batch-by was not rebuilt on the new head of batch-bx: %s" % out)
-        lines = block_lines(self.body(by_pr))
-        self.assertIsNotNone(lines, "batch-by's pull request holds no single frozen block after the drop: %s" % out)
-        self.assertEqual([x for x in lines if x.startswith("Lane: ")], [f"Lane: #104 {self.heads[104]}"],
-                         "batch-by's block still lists the dependent #103, or lost #104: %s" % out)
-        self.assertIn(f"On: batch-bx {new_bx}", lines, "batch-by's block does not record the new head of batch-bx: %s" % out)
-        self.assertIn("Dropped: #103", lines, "batch-by's block does not record the dependent #103 as dropped: %s" % out)
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the drop called merge.%s: a rebuild runs no lane lint and no ready check" % name)
-
-    def test_a_drop_in_a_shallow_clone_with_two_lanes_left_does_not_stop_on_an_unreadable_ancestor(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
-        pin = self.head("batch-nightly")
-        shallow = os.path.join(self.t, "shallow")
-        error = shallow_clone.make(self.bare, shallow, pin)
-        self.assertEqual(error, "", "setup: the shallow clone of batch-nightly could not be made: %s" % error)
-        self.assertTrue(shallow_clone.facts(shallow, pin)["shallow"], "setup: the clone is not shallow")
-        self.assertIsNone(merge.ancestor(shallow, self.heads[101], self.heads[103]), "setup: the shallow clone reads lane #101 against lane #103 as known")
-        rc, out = self.run_batch("--batch-drop", "nightly", "102", cwd=shallow)
-        self.assertEqual(rc, 0, "a drop in a shallow clone with two lanes left exited %s: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[103], "batch-nightly"),
-                        "the drop took a kept lane off batch-nightly: %s" % out)
-        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
-                         "the frozen block does not drop #102 with a Dropped line: %s" % out)
-
-    def test_an_unrelated_pr_body_quoting_a_lone_begin_marker_does_not_fail_a_good_drop(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
-        self.lane(990)  # an ordinary lane pull request, not a batch: its body quotes the begin marker on a line of its own
-        self.host.batch_pulls[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
-        self.assertIsNone(block_raw(self.host.batch_pulls[990]["body"]), "setup: the quoted marker is read as a whole block")
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 0, "a good drop exited %s because an unrelated pull request quotes a lone begin marker: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-
-    def test_a_batch_whose_block_is_unreadable_is_named_when_restack_cannot_rebuild_it(self):
-        for n in (101, 102, 103, 104):
-            self.lane(n)
-        self.frozen_batch("nightly", [101, 102], blamed=(102,))
-        late = self.frozen_batch("late", [104], on="batch-nightly")
-        self.host.batch_pulls[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertIn(f"#{late}", out, "the drop did not name batch-late, whose frozen block it cannot read: %s" % out)
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-
-    def test_a_build_records_the_base_sha_in_the_block(self):
-        for n in (101, 102):
-            self.lane(n)
-        base = self.head("main")
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        self.assertEqual(block_base(self.host.created[0]["body"]), base,
-                         "the block does not record Base: the main sha the batch was built on: %s" % out)
-
-    def test_a_drop_after_main_moves_rebuilds_on_the_base_recorded_at_build(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        self.blame_lane("nightly", 102)  # a red run blames #102 on the built batch, so the drop below is allowed
-        recorded = self.head("main")
-        self.main_moves()
-        moved = self.head("main")
-        self.assertNotEqual(moved, recorded, "setup: main did not move after the build")
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
-        self.assertFalse(self.ancestor(moved, "origin/batch-nightly"),
-                         "the drop rebuilt batch-nightly on main's live tip, not on the base recorded at build: %s" % out)
-        self.assertTrue(self.ancestor(recorded, "origin/batch-nightly"), "the drop left batch-nightly off the base recorded at build: %s" % out)
-
-    # A stacked lane whose base lane moved, a kill between a drop's body write and its push, a repair of a stacked batch after its
-    # restack failed, and a fork pull request among the open ones.
-
-    def killed_drop(self, numbers, number):
-        """A frozen batch of `numbers` whose --batch-drop of `number` was killed after its body write: the branch keeps the lane and the body
-        lists it dropped, the state a kill leaves. -> the batch's pull request number. The kill is not a Stop, so no handler in the run catches it."""
-        for n in numbers:
-            self.lane(n)
-        pr = self.frozen_batch("nightly", numbers, blamed=(number,))
-
-        class Killed(BaseException):
-            pass
-        with unittest.mock.patch.object(merge, "push_branch", side_effect=Killed()), self.assertRaises(Killed):
-            self.run_merge("--batch-drop", "nightly", str(number))
-        held, listed = self.lanes_on_branch_and_listed(pr, numbers)
-        self.assertEqual((held, listed), (set(numbers), set(numbers) - {number}), "setup: the kill did not leave batch-nightly whole with the body shrunk")
-        return pr
-
-    def test_a_stacked_lane_is_refused_when_its_base_lane_gained_a_commit_after_it_was_stacked(self):
-        self.lane(101)
-        self.lane(102, on=101)  # stacked on #101's first commit
-        self.advance(101)  # #101 gets a second commit, which #102 does not hold
-        self.record_pushes()
-        rc, out = self.run_batch("--batch-build", "nightly", "102")
-        self.assertEqual(rc, 1, "a lane holding an old commit of open lane #101, which the request leaves out, was not refused with exit 1: %s" % out)
-        self.assertIn("#101", out, "the refusal does not name #101, whose commit the lane holds: %s" % out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly: %s" % out)
-        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
-
-    def test_stacked_lanes_requested_with_their_base_lane_after_it_gained_a_commit_are_allowed(self):
-        self.lane(101)
-        self.lane(102, on=101)
-        self.advance(101)
-        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 0, "stacked lanes requested with their base lane, which has a second commit, were refused: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[102], "batch-nightly"),
-                        "batch-nightly does not hold both stacked lanes: %s" % out)
-
-    def test_a_rerun_build_of_the_shrunk_set_after_a_kill_rebuilds_the_branch_and_exits_0(self):
-        pr = self.killed_drop((101, 102, 103), 102)
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "103")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the rerun build of the shrunk set left dropped lane #102 on batch-nightly: %s" % out)
-        self.assertEqual(rc, 0, "the rerun build of the shrunk set exited %s: %s" % (rc, out))
-        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
-        self.assertEqual(held, listed, "after the rerun build batch-nightly holds lanes %s but its body lists %s: %s" % (sorted(held), sorted(listed), out))
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the rerun build called merge.%s: a batch build runs no lane lint and no ready check" % name)
-
-    def test_a_rerun_drop_of_the_same_lane_after_a_kill_leaves_the_branch_and_the_body_agreeing(self):
-        pr = self.killed_drop((101, 102, 103), 102)
-        rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
-        self.assertEqual(held, listed, "after a rerun drop of #102 batch-nightly holds lanes %s but its body lists %s (the run exited %s): %s"
-                         % (sorted(held), sorted(listed), rc, out))
-
-    def test_a_repair_of_a_stacked_batch_after_a_failed_restack_does_not_keep_the_dropped_lane(self):
-        for n in (101, 102, 104):
-            self.lane(n)
-        self.lane(103, on=101)  # stacked on #101: batch-by holds #101's commit through #103
-        self.frozen_batch("bx", [101, 102], blamed=(101,))
-        by_pr = self.frozen_batch("by", [103, 104], on="batch-bx")
-        with unittest.mock.patch.object(merge, "restack", return_value=1):  # the restack of batch-by fails after the drop of #101
-            self.run_batch("--batch-drop", "bx", "101")
-        self.assertFalse(self.on_origin(self.heads[101], "batch-bx"), "setup: the drop of #101 left it on batch-bx")
-        self.assertTrue(self.on_origin(self.heads[101], "batch-by"), "setup: the failed restack left batch-by without #101's commit")
-        by_before = self.head("batch-by")
-        rc, out = self.run_batch("--batch-build", "by", "103", "104", "--on", "batch-bx")
-        if rc == 0:
-            self.assertFalse(self.on_origin(self.heads[101], "batch-by"),
-                             "the repair of batch-by exited 0 and batch-by still holds dropped #101 through stacked lane #103: %s" % out)
-            self.assertNotIn(f"Lane: #103 {self.heads[103]}", block_lines(self.body(by_pr)) or [],
-                             "the repair of batch-by exited 0 and its block still lists dependent #103: %s" % out)
-        else:
-            self.assertTrue("#101" in out or "#103" in out, "the refused repair names neither #101 nor its dependent #103: %s" % out)
-            self.assertEqual(self.head("batch-by"), by_before, "the refused repair moved batch-by: %s" % out)
-
-    def test_a_drop_of_a_stacked_batch_after_a_failed_restack_rebuilds_on_the_running_head_and_keeps_the_dropped_lane_off(self):
-        for n in (101, 102, 104):
-            self.lane(n)
-        self.lane(103, on=101)  # stacked on #101: batch-by holds #101's commit through #103
-        self.frozen_batch("bx", [101, 102], blamed=(101,))
-        self.frozen_batch("by", [103, 104], on="batch-bx", blamed=(103,))
-        with unittest.mock.patch.object(merge, "restack", return_value=1):  # the restack of batch-by fails after the drop of #101
-            self.run_batch("--batch-drop", "bx", "101")
-        self.assertFalse(self.on_origin(self.heads[101], "batch-bx"), "setup: the drop of #101 left it on batch-bx")
-        self.assertTrue(self.on_origin(self.heads[101], "batch-by"), "setup: the failed restack left batch-by without #101's commit")
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "by", "103")  # a drop on the stacked batch, whose On sha is now behind batch-bx
-        self.assertEqual(rc, 0, "the drop of #103 from batch-by exited %s: %s" % (rc, out))
-        self.assertFalse(self.on_origin(self.heads[101], "batch-by"),
-                         "the drop of #103 rebuilt batch-by on its recorded On sha, not on batch-bx's running head, and brought back #101's commit, "
-                         "which batch-bx dropped: %s" % out)
-        self.assertTrue(self.ancestor(self.head("batch-bx"), self.head("batch-by")),
-                        "the drop of #103 did not rebuild batch-by on the running head of batch-bx: %s" % out)
-
-    def test_a_fork_pr_whose_head_branch_is_not_on_origin_does_not_stop_an_unrelated_build(self):
-        self.lane(101)
-        self.host.add_pr(555, "contrib-branch-not-on-origin")  # a fork's pull request: its branch is not on origin
-        rc, out = self.run_batch("--batch-build", "nightly", "101")
-        self.assertEqual(rc, 0, "a fork pull request whose branch is not on origin stopped the build of #101: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly"), "batch-nightly does not hold lane #101: %s" % out)
-
-    def test_a_fork_pr_on_its_own_main_does_not_blame_an_unrelated_lane(self):
-        self.lane(101)
-        self.host.add_pr(555, "main")  # a fork's pull request from its own main: the branch is read by name, so it resolves to origin's main
-        rc, out = self.run_batch("--batch-build", "nightly", "101")
-        self.assertNotIn("#101 contains the head of #555", out, "the build blamed #101 for a head of fork pull request #555: %s" % out)
-        self.assertEqual(rc, 0, "a fork pull request on its own main refused the build of #101: %s" % out)
-        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-
-    def test_a_stacked_refusal_names_its_base_pr_while_a_fork_pr_is_open(self):
-        self.lane(101)
-        self.lane(102, on=101)
-        self.host.add_pr(555, "contrib-branch-not-on-origin")
-        rc, out = self.run_batch("--batch-build", "nightly", "102")
-        self.assertEqual(rc, 1, "a lane stacked on an open lane without it was not refused with exit 1: %s" % out)
-        self.assertIn("#101", out, "the refusal of #102 does not name its base lane #101: %s" % out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly: %s" % out)
-
-    # Heal: a rebuild of a drifted batch branch is a push to a batch that may be ready. It returns the batch to draft once, before its push,
-    # as a drop does. A refused return warns and the heal goes on. A rerun that pushes nothing never calls to_draft.
-
-    def test_a_build_rerun_that_heals_a_drifted_ready_batch_returns_it_to_draft_once_before_its_push(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])  # ready
-        drifted = self.drift_batch("nightly", [101])  # origin's batch-nightly lost lane #102; the body still lists it
-        seen = []
-        self.host.on_to_draft = lambda n: seen.append(self.head("batch-nightly"))
-        self.record_pushes()
-        with self.no_lint_or_ready_check() as mocks:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(self.host.to_drafts, [pr], "the heal of a drifted ready batch did not return it to draft once: %s" % out)
-        self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch-nightly: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "the heal did not put lane #102 back on batch-nightly: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the heal left the batch PR ready: %s" % out)
-        self.assertIn("merge --batch-build nightly --ready", out, "the heal does not say the batch needs --ready again: %s" % out)
-        self.assertEqual(self.host.readies, [], "the heal called Host.ready: %s" % out)
-        self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
-        for name, mock in mocks.items():
-            self.assertFalse(mock.called, "the heal called merge.%s: a build runs no lane lint and no ready check" % name)
-
-    def test_a_drop_rerun_that_heals_a_ready_batch_returns_it_to_draft_once_before_its_push(self):
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        pr = self.killed_drop((101, 102, 103), 102)  # the lanes are made here; the return to draft was refused, then the push was killed: still ready
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
-        self.host.to_draft_refuse = None
-        drifted = self.head("batch-nightly")
-        seen, before = [], len(self.host.to_drafts)
-        self.host.on_to_draft = lambda n: seen.append(self.head("batch-nightly"))
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-drop", "nightly", "102")
-        self.assertEqual(self.host.to_drafts[before:], [pr], "the rerun drop that heals a ready batch did not return it to draft once: %s" % out)
-        self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch-nightly: %s" % out)
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the rerun drop left dropped lane #102 on batch-nightly: %s" % out)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
-        self.assertEqual(rc, 0, "the rerun drop exited %s: %s" % (rc, out))
-
-    def test_a_refused_return_to_draft_on_a_heal_warns_and_the_heal_still_pushes(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])  # ready
-        self.drift_batch("nightly", [101])
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
-                      "the refused return to draft on a heal does not warn, with its reason: %s" % out)
-        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "a refused return to draft blocked the heal of batch-nightly: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
-        self.assertEqual(rc, 0, "the heal with a refused return to draft exited %s, not 0: %s" % (rc, out))
-
-    def test_a_refused_return_to_draft_on_a_heal_of_a_ready_batch_still_says_it_needs_ready_again(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])  # ready
-        self.drift_batch("nightly", [101])  # origin's batch-nightly lost lane #102: the heal rebuilds it, and the batch is still ready
-        self.host.to_draft_refuse = "no mark-draft route is open to this session"
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-        self.assertEqual(self.host.to_drafts, [pr], "setup: the heal did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the refused return to draft changed the batch PR's draft flag: %s" % out)
-        self.assertIn("merge --batch-build nightly --ready", out,
-                      "the heal of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
-        self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
-
-    def test_green_control_a_same_set_rerun_that_pushes_nothing_never_calls_to_draft(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102])  # ready, and origin's batch-nightly holds both lanes
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
-        self.assertEqual(self.pushes(), [], "the same-set rerun pushed batch-nightly: %s" % out)
-        self.assertEqual(self.host.to_drafts, [], "a rerun that pushes nothing called to_draft: %s" % out)
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
-        self.assertEqual(rc, 0, "the same-set rerun exited %s: %s" % (rc, out))
-
-    # Green control: the fixtures and the push recorder work on main, where no batch code exists.
-
-    def test_green_control_fixtures_hold_the_frozen_batch_and_the_recorder_logs_a_push(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101])
-        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly"), "control: the fixture batch does not hold lane #101")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "control: the fixture batch holds lane #102, which it never merged")
-        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101])]), "control: the fixture body is not the frozen block")
-        self.record_pushes()
-        sha = self.advance(102)
-        self.assertTrue(any(line.split()[1:] == [sha, "refs/heads/lane-102"] for line in self.pushes()),
-                        "control: the push recorder logged no push of lane-102: %s" % self.pushes())
-
-    def test_green_control_the_draft_fixtures_hold_and_to_draft_flips_the_flag(self):
-        self.lane(101)
-        pr = self.frozen_batch("nightly", [101], draft=True)
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "control: frozen_batch(draft=True) is not a draft")
-        self.assertTrue(self.host.created[-1]["draft"], "control: create_pr(draft=True) did not record the draft flag")
-        self.assertEqual(self.host.ready(pr), (True, ""), "control: ready() did not succeed")
-        self.assertFalse(self.host.batch_pulls[pr]["draft"], "control: ready() did not clear the draft flag")
-        self.assertEqual(self.host.to_draft(pr), (True, ""), "control: to_draft() did not succeed")
-        self.assertTrue(self.host.batch_pulls[pr]["draft"], "control: to_draft() did not set the draft flag")
-        self.assertEqual(self.host.to_drafts, [pr], "control: to_draft() did not record its call")
-
-    def test_a_build_takes_a_config_path_and_hands_it_to_batch_build(self):
-        """--config PATH goes with --batch-build, and batch_build gets PATH as its config. The control is a build with no --config: it gets
-        the default path."""
-        real = merge.batch_build
-        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
-            self.assertEqual(rc, 0, "control: a plain build exited %s: %s" % (rc, out))
-            self.assertEqual(passed_to(build, real, "config"), ".github/stamp.json",
-                             "control: a plain build did not hand batch_build the default config path: %s" % out)
-            build.reset_mock()
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--config", "alt.json")
-            self.assertEqual(rc, 0, "--config alt.json beside --batch-build exited %s, so batch_build did not run: %s" % (rc, out))
-            self.assertEqual(build.call_count, 1, "batch_build ran %d times for one build: %s" % (build.call_count, out))
-            got = passed_to(build, real, "config")
-            self.assertEqual(got, "alt.json", "batch_build got config %r, not the --config path: %s" % (got, out))
-
-    def test_each_option_outside_the_batch_route_is_refused_beside_batch_build(self):
-        """The nine options in `refused` are each refused beside --batch-build with the stand-alone text, and batch_build never runs for
-        them. The control is the build with no extra option: it reaches batch_build. --release-check goes last, so its value is not read
-        as a PR."""
-        refused = (
-            ("7", "--batch-build", "nightly", "101"),
-            ("--batch-build", "nightly", "101", "--confirm"),
-            ("--batch-build", "nightly", "101", "--unlock"),
-            ("--batch-build", "nightly", "101", "--role", "coordinator"),
-            ("--batch-build", "nightly", "101", "--reviewed"),
-            ("--batch-build", "nightly", "101", "--review-record"),
-            ("--batch-build", "nightly", "101", "--lane-lint"),
-            ("--batch-build", "nightly", "101", "--idle-lanes"),
-            ("--batch-build", "nightly", "101", "--release-check", "5"),
-        )
-        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
-            rc, out = self.run_batch("--batch-build", "nightly", "101")
-            self.assertEqual(rc, 0, "control: a plain build exited %s: %s" % (rc, out))
-            self.assertEqual(build.call_count, 1, "control: a plain build did not reach batch_build: %s" % out)
-            for argv in refused:
-                with self.subTest(argv=argv):
-                    build.reset_mock()
-                    rc, out = self.run_batch(*argv)
-                    self.assertIn("--batch-build and --batch-drop each stand alone", out,
-                                  "%s beside --batch-build was not refused by the stand-alone check: %s" % (" ".join(argv), out))
-                    self.assertEqual(rc, 2, "%s beside --batch-build exited %s, not 2: %s" % (" ".join(argv), rc, out))
-                    self.assertEqual(build.call_count, 0, "batch_build ran beside %s" % " ".join(argv))
-
-    def assert_accepted_beside_build(self, *option):
-        """`merge --batch-build NAME PR OPTION` exits 0 and calls batch_build once, as the build alone does. Main accepts these options beside
-        --batch-build, so the stand-alone check must not refuse them."""
-        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
-            rc, out = self.run_batch("--batch-build", "nightly", "101", *option)
-            self.assertEqual(rc, 0, "%s beside --batch-build exited %s, not 0: %s" % (" ".join(option), rc, out))
-            self.assertEqual(build.call_count, 1, "%s beside --batch-build did not reach batch_build once: %s" % (" ".join(option), out))
-
-    def test_a_session_name_is_accepted_beside_batch_build(self):
-        self.assert_accepted_beside_build("--session", "lane-x")
-
-    def test_an_undo_check_reason_is_accepted_beside_batch_build(self):
-        self.assert_accepted_beside_build("--undo-check-unknown-ok", "checked by hand")
-
-    def test_a_base_red_reason_is_accepted_beside_batch_build(self):
-        self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+        self.host.batch_pulls[101]["draft"] = True
+        rc, out, err = self.run_args("101", "--ready")
+        self.assertEqual(rc, 0, "--ready alone on a lane draft exited %s: %s" % (rc, out + err))  # old code: --ready goes with --batch-build only
+        self.assertEqual(self.host.readies, [101], "--ready alone did not ask the host to mark #101 ready once: %s" % (out + err))
+        self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after --ready: %s" % (out + err))
+        self.assertFalse(getattr(self.host, "merged", False), "--ready merged #101: %s" % (out + err))
+        self.run_args("101", "--ready")  # the second run finds #101 ready already
+        self.assertEqual(self.host.readies, [101], "a second --ready on a ready lane asked the host to mark it ready again")
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
@@ -21053,201 +18258,6 @@ def unit_failed_line(name):
     """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
     return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
 
-class BatchDraftRuns(BatchFreeze):
-    """merge --batch-build reads each lane's draft run at the lane's head, before it builds, pushes or readies anything (decision
-    lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A failed windows or macOS run refuses the batch, names the lane and its link,
-    and pushes nothing. A run not finished, or no touched row, refuses --ready unless --lint-unknown-ok gives a reason (a plain build takes
-    no such flag). The reads are one check-runs read per lane head, and the batch's own head is never read. Each case scripts the rows of
-    the lane heads in draft_rows; FakeHost's default passes the others."""
-
-    def passing_rows(self, *numbers):
-        """Rows for each lane in `numbers`: its touched job passed, and it ran no test job."""
-        return {self.heads[n]: [draft_row("touched")] for n in numbers}
-
-    def script(self, rows):
-        self.host.draft_rows, self.host.draft_reads = rows, []
-
-    def test_a_failed_windows_run_on_one_lane_refuses_the_build_and_pushes_nothing(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        rows = self.passing_rows(101, 103)
-        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)]
-        self.script(rows)
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
-        self.assertEqual(rc, 1, "a failed windows run on lane #102 did not refuse the build (exit %s):\n%s" % (rc, out))
-        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
-        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
-        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly:\n" + out)
-        self.assertEqual(self.pushes(), [], "the refused build pushed:\n" + out)
-        self.assertEqual(self.host.created, [], "the refused build opened a pull request:\n" + out)
-
-    def test_a_failed_macos_run_on_a_lane_refuses_ready_before_the_batch_is_rebuilt_or_pushed(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready would rebuild it and push
-        rows = self.passing_rows(101)
-        rows[self.heads[102]] = [draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)]
-        self.script(rows)
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
-        self.assertEqual(rc, 1, "a failed macOS run on lane #102 did not refuse --ready (exit %s):\n%s" % (rc, out))
-        self.assertIn("#102", out, "the refusal does not name lane #102:\n" + out)
-        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
-        self.assert_untouched(pr, snap, out)
-        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
-
-    def test_a_build_reads_one_check_run_list_per_lane_head_and_no_status_and_never_the_batch_head(self):
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.script(self.passing_rows(101, 102, 103))
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
-        self.assertEqual(rc, 0, "a build of three passing lanes exited %s:\n%s" % (rc, out))
-        reads = self.host.draft_reads
-        self.assertEqual(sorted(check_run_reads(reads)), sorted(self.heads.values()),
-                         "the build did not read each lane head's check runs once, and nothing else:\n" + out)
-        self.assertEqual([r for r in reads if r.endswith("/status")], [], "the build read commit statuses, which the draft run does not use:\n" + out)
-
-    def test_a_ready_reads_each_lane_head_and_never_the_batch_head(self):
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        batch_head = self.head("batch-nightly")
-        self.script(self.passing_rows(101, 102))
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        reads = check_run_reads(self.host.draft_reads)
-        self.assertEqual(sorted(reads), sorted([self.heads[101], self.heads[102]]), "--ready did not read each lane head's check runs once:\n" + out)
-        self.assertNotIn(batch_head, reads, "--ready read the batch's own head's check runs:\n" + out)
-        self.assertEqual(self.host.readies, [pr], "--ready with every lane green did not mark the batch PR ready once:\n" + out)
-        self.assertEqual(rc, 0, "--ready with every lane green exited %s:\n%s" % (rc, out))
-
-    def unfinished_lane_setup(self, rows_102=None):
-        """Lanes #101 and #102 in a draft batch-nightly, reset to main so --ready rebuilds and pushes it. #102's draft rows are `rows_102`
-        (default: its touched job still running). -> the batch's pull request number and its snapshot."""
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.drift_batch("nightly", [])
-        rows = self.passing_rows(101)
-        rows[self.heads[102]] = [draft_row("touched", status="in_progress")] if rows_102 is None else rows_102
-        self.script(rows)
-        return pr, self.snapshot(pr)
-
-    def plain_build(self, rows_by_lane):
-        """Lanes #101, #102 and #103 built as a plain batch (no --ready), each lane's draft rows from `rows_by_lane` (a lane not named
-        passes its touched job). No ready check and no lint runs. -> (rc, output)."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.script({self.heads[n]: rows_by_lane.get(n, [draft_row("touched")]) for n in (101, 102, 103)})
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            return self.run_batch("--batch-build", "nightly", "101", "102", "103")
-
-    def test_a_plain_build_with_a_lane_whose_touched_run_is_unfinished_builds_the_batch(self):
-        """A plain build checks only a failed run. An unfinished run is for --ready, so the plain build opens the batch's pull request."""
-        rc, out = self.plain_build({102: [draft_row("touched", status="in_progress")]})
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
-        self.assertEqual(rc, 0, "a plain build refused lane #102 for an unfinished touched run, which only --ready checks (exit %s):\n%s" % (rc, out))
-        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
-
-    def test_a_plain_build_with_a_lane_whose_draft_rows_are_missing_builds_the_batch(self):
-        """A lane with no touched row is unknown, which only --ready checks: the plain build opens the batch's pull request."""
-        rc, out = self.plain_build({102: []})
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
-        self.assertEqual(rc, 0, "a plain build refused lane #102 for missing draft rows, which only --ready checks (exit %s):\n%s" % (rc, out))
-        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
-
-    def test_a_plain_build_with_a_failed_lane_and_an_unfinished_one_refuses_before_any_push(self):  # control: green on the old code
-        rc, out = self.plain_build({101: [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)],
-                                    103: [draft_row("touched", status="in_progress")]})
-        self.assertEqual(rc, 1, "a plain build with a failed lane did not refuse (exit %s):\n%s" % (rc, out))
-        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
-        self.assertEqual(self.pushes(), [], "the refused plain build pushed:\n" + out)
-        self.assertEqual(self.host.created, [], "the refused plain build opened a pull request:\n" + out)
-
-    def test_a_plain_build_takes_no_lint_unknown_ok_so_it_cannot_lift_an_unfinished_lane(self):  # control: green on the old code
-        for n in (101, 102):
-            self.lane(n)
-        self.script({self.heads[101]: [draft_row("touched")], self.heads[102]: [draft_row("touched", status="in_progress")]})
-        self.record_pushes()
-        with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--lint-unknown-ok", "the run is still going")
-        self.assertEqual(rc, 2, "a plain build took --lint-unknown-ok (exit %s):\n%s" % (rc, out))
-        self.assertEqual(self.pushes(), [], "the plain build with --lint-unknown-ok pushed:\n" + out)
-
-    def test_a_ready_with_an_unknown_lane_refuses_without_a_reason_and_names_the_flag(self):  # control: green on the old code
-        pr, snap = self.unfinished_lane_setup(rows_102=[])
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(rc, 1, "--ready with lane #102's draft rows missing did not refuse (exit %s):\n%s" % (rc, out))
-        self.assertIn("--lint-unknown-ok", out, "the refusal of missing draft rows cannot be lifted by name:\n" + out)
-        self.assert_untouched(pr, snap, out)
-        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
-
-    def test_a_ready_with_an_unknown_lane_goes_on_with_a_reason_and_the_reason_is_logged(self):  # control: green on the old code
-        pr, _ = self.unfinished_lane_setup(rows_102=[])
-        reason = "no touched run for lane 102 yet"
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
-        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the missing draft rows:\n" + out)
-        self.assertEqual(self.host.readies, [pr], "--ready with a reason for missing draft rows did not mark the batch PR ready once:\n" + out)
-        self.assertEqual(rc, 0, "--ready with a reason for missing draft rows exited %s:\n%s" % (rc, out))
-
-    def test_a_ready_with_a_skipped_touched_row_and_no_test_rows_is_refused_without_a_reason(self):
-        """A skipped touched job, as a ready lane's is, proves no touched test ran: --ready refuses it as unknown, as it refuses missing rows."""
-        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched", "skipped")])
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertEqual(rc, 1, "--ready passed lane #102, whose touched job was skipped, so no touched test ran (exit %s):\n%s" % (rc, out))
-        self.assertIn("--lint-unknown-ok", out, "the refusal of a skipped touched job cannot be lifted by name:\n" + out)
-        self.assert_untouched(pr, snap, out)
-        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
-
-    def test_a_ready_with_a_failed_lane_and_a_reason_still_refuses_and_names_the_job(self):  # control: green on the old code
-        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)])
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "the macos run is still going")
-        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed macOS run on --ready (exit %s):\n%s" % (rc, out))
-        lane = [line for line in out.splitlines() if "#102" in line]
-        self.assertTrue(lane, "the refusal does not name lane #102:\n" + out)
-        self.assertIn("failed", "\n".join(lane), "the refusal of lane #102 does not say its run failed:\n" + out)
-        self.assertFalse(any("unknown" in line or "not finished" in line for line in lane), "a failed lane is named as unknown or unfinished:\n" + out)
-        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
-        self.assert_untouched(pr, snap, out)
-        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
-
-    def test_a_ready_with_an_unfinished_lane_is_refused_without_a_reason_and_pushes_nothing(self):
-        pr, snap = self.unfinished_lane_setup()
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
-        self.assertEqual(rc, 1, "an unfinished draft run did not refuse --ready without a reason (exit %s):\n%s" % (rc, out))
-        self.assertIn("--lint-unknown-ok", out, "the refusal of an unfinished draft run cannot be lifted by name:\n" + out)
-        self.assert_untouched(pr, snap, out)
-        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
-
-    def test_a_ready_with_an_unfinished_lane_goes_on_only_with_a_reason_and_the_reason_is_logged(self):
-        pr, _ = self.unfinished_lane_setup()
-        reason = "the windows run is still going"
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
-        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "--ready did not read lane #102's draft runs at its head:\n" + out)
-        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the unfinished draft run:\n" + out)
-        self.assertEqual(self.host.readies, [pr], "--ready with a reason did not mark the batch PR ready once:\n" + out)
-        self.assertEqual(rc, 0, "--ready with a reason for an unfinished draft run exited %s:\n%s" % (rc, out))
-
 
 class DraftRunJudge(unittest.TestCase):
     """merge.Host.draft_run_state judges one head's draft rows (decision lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A touched job
@@ -21285,307 +18295,6 @@ class DraftRunJudge(unittest.TestCase):
                 self.assertEqual(state, "fail", "a re-run that failed after a passed run was judged %r, not fail: %s" % (state, lines))
                 self.assertIn(job_link(DRAFT_RUN, 5), "\n".join(lines), "the failure does not name the newer run's link: %s" % lines)
 
-class LeftOutHost(FakeHost):
-    """FakeHost plus the reads `merge --reviewed` makes, so a batch build can name the done pull requests it leaves out: the open pull list and the
-    repo's issue comments through `pages` (Host.issue_comments and reviewed_read parse them, as in production), each head's CI, and whether one head
-    contains another, read from the checkout's history as Host.holds_head reads it. `list_error` fails the open list read. Any other read is a failed case."""
-
-    issue_comments = merge.Host.issue_comments  # the real parse of the comment list, served by pages below (one home)
-
-    def __init__(self, root, other):
-        super().__init__(root, other)
-        self.comments, self.list_error = [], None  # comments: the repo's issue comments, oldest first
-
-    def pages(self, rel, key=None, fields=None):
-        if rel == "pulls":
-            if self.list_error:
-                raise merge.Stop(self.list_error)
-            return [batch_pull(n, p.get("sha") or merge.origin_head(self.root, p["branch"]), base=p["base"], draft=p["draft"], head_ref=p["branch"])
-                    for n, p in sorted(self.batch_pulls.items()) if p["state"] == "OPEN"]
-        if rel == "issues/comments":
-            return list(self.comments)
-        raise AssertionError("unexpected read: " + rel)
-
-    def head_state(self, n, sha=None):
-        return "green"
-
-    def commit_read(self, sha):
-        raise merge.Stop("no commit read in this case")
-
-    def holds_head(self, head, other):
-        """True when `other` (a sha, or the base branch's name) contains `head`: the ancestry Host.holds_head's compare reads as ahead or identical."""
-        ref = other if re.fullmatch(r"[0-9a-f]{40}", other) else f"origin/{other}"
-        return subprocess.run(["git", "merge-base", "--is-ancestor", head, ref], cwd=self.root, capture_output=True).returncode == 0
-
-class LeftOutBatch(CloudSession):
-    """`merge --batch-build` names each pull request that `merge --reviewed` reads done on the batch's base, that the batch's lane set does not
-    name and that no other open pull request holds: `merge: #N left out of batch NAME: <reason>`, reason prose (the newest record is docs-only),
-    conflict (its head merges onto the batch base with a conflict) or none. A failed list read prints `merge: left-out list unknown (why)` and
-    the batch still builds. The lines end the output, one per pull request, in number order. A build, a same-set rerun and a --ready run each print
-    them. The batch fixtures are BatchFreeze's, read from it (one home); this class holds no copy of them. Each case's first assert names its claim."""
-
-    lane = BatchFreeze.lane
-    frozen_batch = BatchFreeze.frozen_batch
-    read_run = BatchFreeze.read_run
-    run_batch = BatchFreeze.run_batch
-    no_lint_or_ready_check = BatchFreeze.no_lint_or_ready_check
-    ancestor = BatchFreeze.ancestor
-
-    def setUp(self):
-        super().setUp()
-        self.host = LeftOutHost(self.co, self.other)
-        self.heads = {}  # lane PR number -> its head sha on origin, as lane() and conflicting_lane() leave it
-        self.runs = {}  # the run answers read_run gives: none are scripted here, so a read of one is a failed case
-        self.host.cited_run = self.read_run
-
-    def pull_ref_lane(self, n):
-        """Pull request #n whose head is on origin only as refs/pull/<n>/head, with no branch: a commit off origin/main that the clone never
-        fetches. The host reports that head as the pull request's head (its `sha`). -> the head."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", f"pull-{n}", "origin/main")
-        put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"lane {n}")
-        sh(o, "git", "push", "-q", "origin", f"pull-{n}:refs/pull/{n}/head")
-        self.host.add_pr(n, f"pull-{n}")
-        self.heads[n] = self.host.batch_pulls[n]["sha"] = sh(o, "git", "rev-parse", f"pull-{n}")
-        return self.heads[n]
-
-    def conflicting_lane(self, n, ref_only=False):
-        """Lane PR #n: a commit on origin's main as it was before one more commit that edits shared.txt. origin's main then gets that commit, so
-        git's merge of lane #n onto main conflicts on shared.txt. With `ref_only`, the head is pushed to refs/pull/<n>/head alone, as
-        pull_ref_lane does. -> the lane's head."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        old = sh(o, "git", "rev-parse", "origin/main")
-        sh(o, "git", "checkout", "-q", "-B", "main-moved", "origin/main")
-        put(os.path.join(o, "shared.txt"), "main side\n")
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", "main edits shared.txt")
-        sh(o, "git", "push", "-q", "origin", "HEAD:main")
-        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", old)
-        put(os.path.join(o, "shared.txt"), f"lane {n} side\n")
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"lane {n} edits shared.txt")
-        sh(o, "git", "push", "-q", "origin", f"lane-{n}:refs/pull/{n}/head" if ref_only else f"lane-{n}")
-        self.host.add_pr(n, f"lane-{n}")
-        self.heads[n] = sh(o, "git", "rev-parse", f"lane-{n}")
-        if ref_only:
-            self.host.batch_pulls[n]["sha"] = self.heads[n]
-        return self.heads[n]
-
-    def record(self, n, head=None, **fields):
-        """Pull request n's review record, at `head` (default: its lane head), as the repo's comment list gives it."""
-        self.host.comments.append(review_comment(900 + n, n, record_text(n=n, head=head or self.heads[n], **fields)))
-
-    def lint(self, n, head=None):
-        """Pull request n's lane-lint PASS at `head` (default: its lane head)."""
-        self.host.comments.append(lint_of(n, head or self.heads[n]))
-
-    def done(self, n, **fields):
-        """Pull request n's record, a PASS at its lane head, and the lane-lint PASS that a done record needs: `merge --reviewed` reads it done."""
-        self.record(n, **fields)
-        self.lint(n)
-
-    def build(self, *argv):
-        """-> (rc, out) of merge.main in the clone. The clone fetches origin first, as a run's own fetches leave each head in it."""
-        sh(self.co, "git", "fetch", "-q", "origin")
-        return self.run_batch(*argv)
-
-    def left_out(self, out):
-        """The left-out lines of a run's output, in order: each `left out of batch` line and each `left-out list unknown` line."""
-        return [l for l in out.splitlines() if " left out of batch " in l or l.startswith("merge: left-out list unknown")]
-
-    def assertLeftOut(self, out, want, claim):
-        """The run's left-out lines are `want`, and they end the output."""
-        self.assertEqual(self.left_out(out), want, f"{claim}: %s" % out)
-        if want:
-            self.assertEqual(out.splitlines()[-len(want):], want, f"{claim}: the left-out lines do not end the output: %s" % out)
-
-    def test_a_done_pr_no_batch_holds_is_named_none(self):
-        """A done record, net value zero, in no batch: the build's last line names that pull request none."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.done(103, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, PASS"),
-                  guard="yes", net="zero")
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request no batch holds is not named")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_docs_only_done_pr_is_named_prose(self):
-        """A done pull request whose newest record is docs-only is named `prose`."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.done(103, kind="docs-only", rounds=())
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: prose"], "a docs-only done pull request is not named prose")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_done_pr_whose_head_conflicts_with_the_batch_base_is_named_conflict(self):
-        """A done pull request whose head merges onto the batch base tip with a conflict is named `conflict`."""
-        self.conflicting_lane(103)
-        for n in (101, 102):
-            self.lane(n)
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request that conflicts with the base is not named conflict")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_done_pr_whose_head_the_clone_lacks_is_named_none(self):
-        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 merges clean onto the base, so it is named
-        none, and no left-out list unknown line is printed."""
-        for n in (101, 102):
-            self.lane(n)
-        self.pull_ref_lane(103)
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request whose head the clone lacks is not named none")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_done_pr_whose_head_the_clone_lacks_and_that_conflicts_is_named_conflict(self):
-        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 conflicts with the base, so it is named
-        conflict, and no left-out list unknown line is printed."""
-        self.conflicting_lane(103, ref_only=True)
-        for n in (101, 102):
-            self.lane(n)
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request whose head the clone lacks and that conflicts is not named conflict")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_each_left_out_pr_gets_its_own_line_in_number_order(self):
-        """Two left-out done pull requests get one line each, ascending by number, with their own reasons."""
-        for n in (101, 102, 103, 106):
-            self.lane(n)
-        self.done(106, kind="docs-only", rounds=())
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none", "merge: #106 left out of batch nightly: prose"],
-                           "two left-out done pull requests do not each get a line in number order")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_done_pr_in_the_lane_set_is_not_named(self):
-        """A done pull request inside the lane set gets no line. The control, #103 left out, is named: the line is printed only for it."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.done(101)
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request in the lane set is named, or the control is not")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_pr_another_open_pr_holds_is_not_named(self):
-        """#103 is done, and open #104 holds its head (#104 is a lane on #103). #103 gets no line. The control, #105, is done and held by nothing: named."""
-        for n in (101, 102, 103, 105):
-            self.lane(n)
-        self.lane(104, on=103)
-        self.done(103)
-        self.done(105)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #105 left out of batch nightly: none"], "a done pull request another open pull request holds is named, or the control is not")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_pr_that_is_not_done_is_not_named(self):
-        """#103's latest record is FAIL and #104's record is for an older head (stale): neither is done, so neither is named. The control, #105, is named."""
-        for n in (101, 102, 103, 104, 105):
-            self.lane(n)
-        self.record(103, rounds=("Round 1: reviewer, sonnet, FAIL",))
-        self.lint(103)
-        self.record(104, head=REVIEW_OLD_HEAD)
-        self.lint(104)
-        self.done(105)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #105 left out of batch nightly: none"], "a pull request that is not done is named, or the control is not")
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-
-    def test_a_rerun_of_the_same_set_names_the_left_out_pr(self):
-        """The first build has no done pull request outside the set. A later run of the same set, after #103 is done, names it last."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertEqual(rc, 0, "the first build exited %s: %s" % (rc, out))
-        self.done(103)
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "the same-set rerun does not name a done pull request left out")
-        self.assertEqual(rc, 0, "the rerun exited %s: %s" % (rc, out))
-
-    def test_a_ready_run_names_the_left_out_pr(self):
-        """A --ready run on a built batch names a done pull request outside its frozen set, last."""
-        for n in (101, 102, 103):
-            self.lane(n)
-        self.frozen_batch("nightly", [101, 102], draft=True)
-        self.done(103)
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.build("--batch-build", "nightly", "--ready")
-        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "--ready does not name a done pull request left out")
-        self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
-
-    def test_a_failed_list_read_keeps_the_batch_and_says_unknown(self):
-        """The open list read fails. The batch still builds, and its last line says the left-out list is unknown, with the reason."""
-        for n in (101, 102):
-            self.lane(n)
-        self.host.list_error = "reading the pull requests failed: HTTP 500"
-        rc, out = self.build("--batch-build", "nightly", "101", "102")
-        self.assertIn("merge: batch nightly built", out, "a failed list read stopped the batch build: %s" % out)
-        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        self.assertLeftOut(out, ["merge: left-out list unknown (reading the pull requests failed: HTTP 500) " + merge.UNKNOWN_CITE],
-                           "a failed list read is not printed as an unknown left-out list")
-
-    def mid_list_read_raises(self, err):
-        """A build of 101 and 102 with 103 and 104 done code pull requests outside the set. The merge-tree read of the second candidate (the
-        one merge_reason makes from left_out_lines) raises `err`; the first candidate's read is real. -> (rc, out, escaped, merge_tree_calls),
-        where `escaped` is the exception that left the run, or None, and `out` is what the run printed before it ended."""
-        for n in (101, 102, 103, 104):
-            self.lane(n)
-        self.done(103)
-        self.done(104)
-        sh(self.co, "git", "fetch", "-q", "origin")
-        real_git, calls = merge.git, []
-
-        def raise_on_second(cwd, *a, **kw):
-            if sys._getframe(1).f_code.co_name == "merge_reason" and a[:1] == ("merge-tree",):
-                calls.append(a)
-                if len(calls) == 2:
-                    raise err
-            return real_git(cwd, *a, **kw)
-        out, err_buf, rc, escaped = io.StringIO(), io.StringIO(), None, None
-        with unittest.mock.patch.object(merge, "git", raise_on_second):
-            try:
-                rc = self.run_merge("--batch-build", "nightly", "101", "102", stdout=out, stderr=err_buf)[0]
-            except SystemExit as e:
-                rc = e.code
-            except (OSError, subprocess.TimeoutExpired) as e:
-                escaped = e
-        return rc, out.getvalue() + err_buf.getvalue(), escaped, calls
-
-    def assert_mid_list_read_prints_one_unknown_line(self, err, reason_part, claim):
-        """Shared asserts for a left-out read that raises `err` on the second candidate: the seam was reached, no exception left the run, the
-        batch result stands with exit 0, exactly one unknown line names the reason, and no list line is printed (the first candidate's line
-        is dropped with the rest, because the list is unknown and a partial list would read as a full one)."""
-        rc, out, escaped, calls = self.mid_list_read_raises(err)
-        self.assertEqual(len(calls), 2, "%s: the second candidate's merge-tree read was reached %d times, want 2: the case did not hit its seam: %s" % (claim, len(calls), out))
-        self.assertIsNone(escaped, "%s: the read's %s escaped the batch run as a traceback instead of an unknown line: %r" % (claim, type(err).__name__, escaped))
-        self.assertIn("merge: batch nightly built", out, "%s: the batch result line is missing: %s" % (claim, out))
-        self.assertEqual(rc, 0, "%s: the exit code is %s, want the batch's 0: %s" % (claim, rc, out))
-        unknown = [l for l in out.splitlines() if l.startswith("merge: left-out list unknown (")]
-        self.assertEqual(len(unknown), 1, "%s: want exactly one left-out list unknown line, got %d: %s" % (claim, len(unknown), out))
-        self.assertIn(reason_part, unknown[0], "%s: the unknown line does not name the read's failure: %s" % (claim, unknown[0]))
-        self.assertTrue(unknown[0].endswith(") " + merge.UNKNOWN_CITE), "%s: the unknown line does not end with the cite: %s" % (claim, unknown[0]))
-        self.assertEqual([l for l in out.splitlines() if " left out of batch " in l], [],
-                         "%s: a left out line is printed although the list is unknown: %s" % (claim, out))
-
-    def test_a_read_that_times_out_mid_list_prints_no_list_line_and_one_unknown_line(self):
-        """The left-out read's merge-tree raises TimeoutExpired on the second candidate. The batch line and exit 0 stand, one unknown line
-        names the timeout, and no list line is printed, not even the first candidate's."""
-        self.assert_mid_list_read_prints_one_unknown_line(subprocess.TimeoutExpired(["git", "merge-tree"], 30), "timed out",
-                                                          "a left-out read that times out mid-list")
-
-    def test_an_os_error_mid_list_prints_no_list_line_and_one_unknown_line(self):
-        """The left-out read's merge-tree raises OSError on the second candidate. The batch line and exit 0 stand, one unknown line names
-        the error, and no list line is printed, not even the first candidate's."""
-        self.assert_mid_list_read_prints_one_unknown_line(OSError(5, "Input/output error"), "Input/output error",
-                                                          "a left-out read that raises OSError mid-list")
 
 class TouchesHost(PullsHost):
     """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),
@@ -22072,25 +18781,29 @@ class TouchesRead(Env):
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
-        # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
+        # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.
         class Sleep(FakeHost):
-            def wait_checks(self, n, sha, d, prior=None):
+            def merge(self, n, method, sha):
                 print("READY", flush=True)
                 time.sleep(60)
-                return True, ""
+                return None, "slept"
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        host, lock = Sleep(sys.argv[2], None), merge.GitLock(sys.argv[2])
+        if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
+            sys.exit(1)
+        sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call sleeps
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
-        # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
+        # A run that dies without cleanup: os._exit at the merge call after the claim push, so no `finally` runs.
         class Die(FakeHost):
-            def wait_checks(self, n, sha, d, prior=None):
-                if prior is not None:  # the wait after the claim push; the head's own wait comes first
-                    os._exit(9)
-                return True, ""
+            def merge(self, n, method, sha):
+                os._exit(9)
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        host, lock = Die(sys.argv[2], None), merge.GitLock(sys.argv[2])
+        if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
+            sys.exit(1)
+        sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call dies
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),

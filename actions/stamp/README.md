@@ -339,10 +339,10 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
    after the local base branch moves. `merge.deleteBranch` is a boolean. When it is true, the
    command deletes the head branch on origin after the merge. It deletes the local branch too,
-   unless a worktree holds it or it has local-only commits. The same run also deletes the lane
-   branches the batch took in: `merge-deletes-batch-lanes`, a merge deletes its batch's lane branches.
-6. `merge.keepBranches` is an optional list of branch names. The lane cleanup never deletes a name
-   in the list. Name each long-lived branch that must survive a merge.
+   unless a worktree holds it or it has local-only commits. It deletes no other branch
+   (decision `merge-deletes-batch-lanes`: a merge deletes its own branch only).
+6. `merge.keepBranches` is an optional list of branch names. The merge tool checks it for a valid shape, and its
+   branch delete does not read it (debt `long-lived-head-lost-in-batch`).
 7. `merge.standingGrant` is an optional boolean, read from the base branch. It is the owner's
    standing merge grant for the repo: `standing-merge-grant`, the coordinator's standing merge grant.
    Absent means true. When it is false, a cloud session's `merge <pr> --confirm` stops.
