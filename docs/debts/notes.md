@@ -2273,3 +2273,5 @@
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
 - review-range-parent-any-hash-n: every `#N` after `Merge after` on a line counts as a parent, so a cite in that sentence adds a parent whose merge base the start must hold (merge/merge.py parent_prs) Fix: none — rare and harmless.
 - review-range-any-backticked-diff: a backticked `git diff A B` anywhere in the body counts as a review range, not only the one the lane asks its reviewer to read (merge/merge.py REVIEW_RANGE) Fix: none — rare and harmless.
+- review-range-single-backtick-only: the lane lint judges only a single-backticked `git diff A B` range (merge/merge.py REVIEW_RANGE, review_range_starts). A wrong range in a fenced block with no inner backticks, or in plain text, passes with "holds no range". An end of `HEAD` is refused, and the message names the fix. Fix: none — rare and harmless.
+- review-range-two-parents-unpinned: no refusal test uses two parents, so the loop in check_review_ranges that checks rule 2 over every parent is unpinned (merge/test_lane_lint.py). Fix: none — a test-author adds one case.
