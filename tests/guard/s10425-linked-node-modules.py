@@ -344,6 +344,9 @@ NMSTAND = os.path.join(ROOT, "nmstand")                 # a root with no workspa
 NMBRACE = os.path.join(ROOT, "nmbrace")                 # a root whose workspaces field is a brace glob, a link
 NMNEG = os.path.join(ROOT, "nmneg")                     # a root that lists `!packages/a` before its glob, a link
 NMNEG2 = os.path.join(ROOT, "nmneg2")                   # a root that lists `!packages/a` after its glob, a link
+NMWSLINK = os.path.join(ROOT, "nmwslink")               # a root whose node_modules is a real folder, with a member that has a link
+NM_WSLINK_MEMBER = os.path.join(NMWSLINK, "packages", "linked")  # that member: its own node_modules is a link to NMTARGET
+NM_WSLINK_PLAIN = os.path.join(NMWSLINK, "packages", "plain")    # a member of that root with no node_modules of its own
 NM_WS_PKG = os.path.join(NMWS, "packages", "a")         # a workspace package, with its own package.json
 NM_WS_OUT = os.path.join(NMWS, "tools", "x")            # a folder the workspaces field does not name
 NM_STAND_NESTED = os.path.join(NMSTAND, "nested")       # a package under the root with no workspaces field
@@ -357,7 +360,10 @@ NM_WS_ROOTS = (
     (NMBRACE, ["packages/{a,b}"], ("a", "b", "c"), True),
     (NMNEG, ["!packages/a", "packages/*", "packages/a"], ("a", "b"), True),
     (NMNEG2, ["packages/*", "!packages/a"], ("a", "b"), True),
+    (NMWSLINK, ["packages/*"], ("linked", "plain"), False),
 )
+# (root, member) pairs whose member's own node_modules is a link to NMTARGET. Each root's node_modules is set above.
+NM_WS_LINKED_MEMBERS = ((NMWSLINK, "linked"),)
 
 
 def _build_linked_nm_workspaces():
@@ -371,13 +377,15 @@ def _build_linked_nm_workspaces():
             _make_dir_link(NMTARGET, os.path.join(root, "node_modules"))
         else:
             write(os.path.join(root, "node_modules", "pkg.js"), "module.exports = {};\n")
+    for root, member in NM_WS_LINKED_MEMBERS:
+        _make_dir_link(NMTARGET, os.path.join(root, "packages", member, "node_modules"))
     write(os.path.join(NM_WS_OUT, "package.json"), NM_MEMBER_PKG)
     write(os.path.join(NMSTAND, "package.json"), NM_PKG)
     write(os.path.join(NM_STAND_NESTED, "package.json"), NM_MEMBER_PKG)
     _make_dir_link(NMTARGET, os.path.join(NMSTAND, "node_modules"))
 
 
-lazy_fixture([NMWS, NMWSREAL, NMSTAND, NMBRACE, NMNEG, NMNEG2], _build_linked_nm_workspaces)
+lazy_fixture([NMWS, NMWSREAL, NMSTAND, NMBRACE, NMNEG, NMNEG2, NMWSLINK], _build_linked_nm_workspaces)
 
 nm_case("linked-nm: workspace: refuse cd packages/a, then npm install, from a linked workspace root",
         "cd packages/a && npm install", "deny", NMWS)
@@ -433,6 +441,21 @@ nm_case("linked-nm: workspace: npm version -w a --dry-run, under a linked worksp
 # command walks up to the linked root and is refused.
 nm_case("linked-nm: workspace: npm ci --no-workspaces in a member under a linked workspace root is allowed",
         "npm ci --no-workspaces", "allow", NM_WS_PKG)
+
+# THE WORKSPACES-OFF FORMS. `--workspaces=false` and `--workspaces false` turn workspaces off as `--no-workspaces`
+# does (npm 10.9.9: `npm prefix --workspaces=false` and `npm prefix --workspaces false`, run in the member, print the
+# member). The member has no node_modules of its own, so the install writes nothing through the linked root.
+nm_case("linked-nm: workspace: npm ci --workspaces=false in a member under a linked workspace root is allowed",
+        "npm ci --workspaces=false", "allow", NM_WS_PKG)
+nm_case("linked-nm: workspace: npm ci --workspaces false in a member under a linked workspace root is allowed",
+        "npm ci --workspaces false", "allow", NM_WS_PKG)
+# THE LATER WORKSPACES FLAG. The last workspaces option wins, as in npm, so `--workspaces` or `-ws` after
+# `--no-workspaces` turns workspaces on again and the walk reaches the linked root (npm 10.9.9: `npm prefix
+# --no-workspaces --workspaces` and `npm prefix --no-workspaces -ws`, run in the member, print the root).
+nm_case("linked-nm: workspace: npm ci --no-workspaces --workspaces in a member under a linked workspace root is refused",
+        "npm ci --no-workspaces --workspaces", "deny", NM_WS_PKG)
+nm_case("linked-nm: workspace: npm ci --no-workspaces -ws in a member under a linked workspace root is refused",
+        "npm ci --no-workspaces -ws", "deny", NM_WS_PKG)
 
 
 # =========================================================================== 4. environment files
