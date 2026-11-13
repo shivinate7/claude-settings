@@ -115,7 +115,8 @@ a turn end in these cases:
     newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
     shell run (Bash or PowerShell) of export_page.py printed a line `same`, or `<page id>: same`
     under --all, anywhere in its output. No commit on the folder at all counts as older. This session is the writer when the newest
-    meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
+    meta/page get names the hook's session id or the id the remote env names (override.remote_session_id),
+    bare or inside a label such as "Triage (session_x)". A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
     writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
@@ -220,6 +221,16 @@ FAIL_OPEN_FORM = "Feedback guard: page form not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
 EXPORT_SCRIPT = "export_page.py"
 EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
+WRITER_TOKEN = re.compile(override.ID_CHAR + "+")  # the one home of the id shape
+
+
+def _writer_names(writer, ids):
+    """True when the page `writer` string is one of `ids`, bare or inside a label such as "Triage (session_x)".
+    The cloud store writes the label form. Whole tokens only, so "session_9fa" is not "session_9f"."""
+    wanted = {i for i in ids if i}
+    return writer in wanted or any(t in wanted for t in WRITER_TOKEN.findall(writer))
+
+
 # A shell command that runs the export: an interpreter, then a path whose last part is export_page.py. A grep
 # of the script or a file such as test_export_page.py is no run.
 EXPORT_RUN = re.compile(r"(?:^|[\s;&|(])(?:python3?|py)(?:\.exe)?\s+(?:-\S+\s+)*[\"']?(?:\S*[/\\])?"
@@ -1335,7 +1346,8 @@ def export_check(cwd, transcript_path, session_id):
     exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
     branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
     `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
-    `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
+    `session_id` or the id the remote env names (override.remote_session_id), bare or inside a label such as
+    "Triage (session_x)". A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
@@ -1352,7 +1364,7 @@ def export_check(cwd, transcript_path, session_id):
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
     if writer:
-        is_writer = writer in (session_id, override.remote_session_id())
+        is_writer = _writer_names(writer, (session_id, override.remote_session_id()))
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
