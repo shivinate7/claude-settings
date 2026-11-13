@@ -29,8 +29,9 @@ only plain words, unexplained ids and pointers outside the item, and never to fl
 option. The ArtifactData str_replace field is one top-level string key, so only `context` occurs in
 practice (note page-judge-dead-fragment-fields).
 
-Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
-is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
+Veto (an act no override lifts): an Explore spawn with no model field or a haiku model. That is the
+Explore row of agent-model-cap, a model guard. A model above Sonnet (fable, claude-fable-5-2) is the
+ceiling, which the owner's override lifts, as in guard.py. Every other refusal is liftable.
 
 A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
 adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
@@ -322,11 +323,12 @@ def opus_scope(text, context):
 
 
 def explore_off_model(tool, args):
-    """True for an Explore spawn whose model field is neither sonnet nor opus: a model guard."""
+    """True for an Explore spawn with no model field or a haiku model: a model guard no override lifts.
+    A model above Sonnet is the ceiling, which an override lifts, as in guard.py."""
     if tool != "Agent" or str(args.get("subagent_type")).strip().lower() != "explore":
         return False
-    model = str(args.get("model") or "").lower()
-    return "sonnet" not in model and "opus" not in model
+    model = str(args.get("model") or "").strip().lower()
+    return not model or "haiku" in model
 
 
 def refuse(payload, tool, args, rule, reason):
