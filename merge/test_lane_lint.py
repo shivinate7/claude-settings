@@ -2911,7 +2911,8 @@ class LintCheckJoin(tm.CloudSession):
         rc, out = self.join(comments)
         self.assertEqual(rc, 0, out)
         reads = [l for l in tm.GhHalf.calls(self).splitlines() if l.startswith("GET issues/comments ")]
-        self.assertEqual(len(reads), 2, "the join read the comment list %d times, want 2, one per page:\n%s" % (len(reads), "\n".join(reads)))
+        # two runs (the claim run, the merge run), each reading two pages: the calls log holds no run split, so the total is pinned
+        self.assertEqual(len(reads), 2 * len(self.run_texts), "the join read the comment list %d times, want 2 per run, one per page:\n%s" % (len(reads), "\n".join(reads)))
 
     def test_a_head_that_moves_after_the_lint_read_is_refused_before_the_merge(self):
         # The lint reads the head the PR shows first, and the PASS names it. The branch then moves in origin, and the first head read still
