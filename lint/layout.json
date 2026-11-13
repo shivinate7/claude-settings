@@ -96,7 +96,7 @@
       "state": "declared"
     },
     "rules": {
-      "where": "rules",
+      "where": "claude-md",
       "item": "<!-- rule:([a-z0-9-]+) -->",
       "still-true": "cite-resolves",
       "close": "none",
@@ -152,11 +152,11 @@
       "state": "declared"
     },
     "page-copies": {
-      "where": "waiting-data",
+      "where": "external:waiting-page",
       "item": "^- (\\S+) copy of ",
       "still-true": "copy-matches-live",
       "close": "none",
-      "runs-from": ["merge-check", "stop"],
+      "runs-from": ["stop"],
       "state": "declared"
     },
     "mailbox": {
