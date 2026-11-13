@@ -8,6 +8,11 @@
   "home": "step ci-batch-mac-runner (ruling R58)",
   "id": "act-mac-runner-register",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-13T03:09:00Z",
+    "choice": "a",
+    "note": "Owner in chat 21:09 CST (relayed by the retrospective 21:10 CST): \"yes it's done and all repos and i alr told u the runner is ready too\". Secret MAC_RUNNER_READ_TOKEN set, with Administration: read, on all shivinate7 repos; runner claude-settings-mac online."
+  },
   "n": 649,
   "options": [
     {
@@ -41,10 +46,10 @@
   ],
   "owner": "lane ci-batch-mac-runner (session_013NEJL1Pg1yXejPVGo7aocY)",
   "ref": "lane ci-batch-mac-runner 15:10 CST Nov 12",
-  "reply": "Secret done 21:08 CST: you set the token read-only on all shivinate7 repos and saved it as MAC_RUNNER_READ_TOKEN (relayed by the retrospective). Step 3 needs nothing more. Still open: step 1, register the runner on your MacBook with label claude-settings-mac. This item closes when you report the runner online.",
+  "reply": "Closed 21:11 CST: both acts done. The secret has the access CI needs, and the runner is online. The batch macOS jobs move to your MacBook once PR #2970 merges.",
   "repo": "shivinate7/claude-settings",
   "short": "Register the Mac runner and add its secret",
-  "status": "open",
+  "status": "closed",
   "title": "Register your MacBook as the batch macOS runner and add its read secret",
   "why": "Batch macOS jobs move to your MacBook only after these two acts."
 }

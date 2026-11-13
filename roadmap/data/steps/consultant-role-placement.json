@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The consultant is missing from session-tiers' side-session list (about line 110) and from rule roles-pick-mode-from-request.",
  "source": "coordinator 08:47 CST Nov 12, from lane fan-prose-decisions; owner source: restart-plan R30, owner 10:54 CST Nov 11 (\"im able to spawn a retrospective or a consultant ...\"), box answer before 10:58 CST \"Add consultant role\"",
- "note": "Prose. Owner source found in docs/plans/restart-plan.md R30 (lines 160-167 on main 2a7521db9), so a step, not a page item. Unlaned.",
- "updatedAt": "2026-11-12T08:46:00-06:00"
+ "note": "Prose. Owner source found in docs/plans/restart-plan.md R30 (lines 160-167 on main 2a7521db9), so a step, not a page item. Unlaned. Lane consultant-role-record (#3057) 21:09 CST Nov 12: also cover the pick sentence at docs/decisions/session-tiers.md:8, skills/project-ops/SKILL.md:15 and templates/operating-model.md role lists (five roles); hooks/session_start.sh:21 \"No parent: pick solo, one lane or coordinator\" is read by a consultant (builder change); session-tiers.md:162 \"not a tier here\" -> \"has no tag here\". Draft #2670 overlaps #3057 on the consultant text.",
+ "updatedAt": "2026-11-12T21:12:50-06:00"
 }

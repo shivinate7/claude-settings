@@ -1,0 +1,14 @@
+{
+ "id": "sim-noise-service-list",
+ "title": "Get the 17 disabled simulator service names from the Mac",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Step sim-boot-noise-off needs the exact list the Degen coordinator disabled on Duo 3553660D; the repo and the ledger give only the count and the two kept (chronod, AppIntentsLiveEntityService).",
+ "source": "lane sim-noise-and-wallpaper (session_013NEJL1RLjiPPk24Jqci2wc) 21:09 CST Nov 12",
+ "note": "A Mac session runs `xcrun simctl spawn 3553660D launchctl print-disabled user/foreground` and sends the list to the lane. The lane builds the mechanism meanwhile and leaves the list empty in its draft PR. Routed to the coordinator (Mac route via the retrospective).",
+ "updatedAt": "2026-11-12T21:12:50-06:00"
+}

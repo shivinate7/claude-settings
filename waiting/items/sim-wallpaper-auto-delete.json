@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T03:11:00Z",
+  "context": "Goal: simulators stop filling the disk and stop crashing PosterBoard on boot.\nProblem (rule): you approved one delete of the PosterBoard snapshot store on Duo 3553660D at 20:44 CST, and the lane would make it a standing delete before every boot on every simulator, which the iOS skill's delete-nothing duty forbids.\nBased on (read): the Degen report says the Duo store reached 41 GB in 10 days and regrows after an erase, and PosterBoard crashes reloading it on every boot.\nBased on (read): skill ios-apps, Holder's duties: \"It deletes and erases nothing\".\nDeparts from: skill ios-apps (the holder deletes nothing) \u2014 the simulator test script deletes the PosterBoard snapshot store before each boot it makes.\nWhy yours: it changes a duty in the shared iOS skill and widens a delete you approved for one device.",
+  "home": "step sim-wallpaper-store-drop",
+  "id": "sim-wallpaper-auto-delete",
+  "kind": "decision",
+  "n": 674,
+  "options": [
+    {
+      "gain": "No simulator grows its snapshot store past one boot, so boots stop crashing and the disk stays free.",
+      "how": "The script deletes the snapshot store while the simulator is shut down, before each boot it makes. The skill duty names this one delete.",
+      "id": "every-boot",
+      "key": "a",
+      "label": "Delete before every boot the script makes (recommended)",
+      "lose": "Home-screen snapshots on test simulators are lost each boot. iOS rebuilds them."
+    },
+    {
+      "gain": "The skill's delete-nothing duty stays whole.",
+      "how": "Only the one delete you approved runs, on Duo 3553660D. The script deletes nothing.",
+      "id": "one-time-only",
+      "key": "b",
+      "label": "Only the one delete you approved",
+      "lose": "The store regrows on every simulator, and the boot crashes come back."
+    }
+  ],
+  "owner": "lane sim-noise-and-wallpaper (session_013NEJL1RLjiPPk24Jqci2wc)",
+  "pick": "a",
+  "ref": "lane message 21:09 CST Nov 12; Degen report row D12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Simulator snapshot store delete on each boot",
+  "status": "open",
+  "title": "Let the simulator test script delete the PosterBoard snapshot store before every boot?",
+  "why": "It widens a delete you approved for one device and changes a duty in the shared iOS skill."
+}
