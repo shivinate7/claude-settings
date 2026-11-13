@@ -1,12 +1,12 @@
 {
  "title": "A mistake reads first as a missing guard; a Stop hook spots a mistake told in a reply and its judge files the guard to triage",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 1035,
  "owner": "triage",
  "why": "Owner R16, 16:22 and 16:25 CST Nov 10 (relayed by the retrospective session): \"...any error they make might be a strong INDICATOR that a guard/something-0mechanical should be in place?\"; \"yes agreed-- that or we create a hook taht looks for this kind of prose when the session says it so taht way the HOOK/judge files it not the session itself\".",
  "note": "Rule building-mistake-names-its-guard opens: \"Read a mistake first as a missing guard or check, never as a fault to own: the way we work should make accidents hard.\" Report lines `Cause:` and `Guard:`. Inside the existing Stop hook, no new process: it spots a mistake told in a reply, and its judge files the missing guard to triage. Home: CLAUDE.md building-mistake-names-its-guard; decision guard-remedy-not-to-owner. Plan stage 3.6, commit 88c403ba7. Lane question, 12:55 CST Nov 13 (R67 express lane, session_013NEJL3fTMNnVHbgiss5Vcp, 12:54 CST): do `Cause:` and `Guard:` lines have to be required, or are they added to a guard named in prose; and do they cover Done and Next as well as Deviations? Eight green tests in lint/test_report_guard.py flip if lines are required everywhere. Triage pick (undoable, no ruling says otherwise; R16 says the report gives `Cause:` and `Guard:`): the lane's default (a): lines required in Deviations, prose clearing kept, Done and Next unchanged. Undo: drop the new check. Page item not posted: nothing in R16 forbids it, and it can be undone. Triage filing target: no record names it; see step mistake-guard-filing-target.",
- "updatedAt": "2026-11-13T12:55:29-06:00",
- "lane": "",
+ "updatedAt": "2026-11-13T14:33:35-06:00",
+ "lane": "session_013NEJL3fTMNnVHbgiss5Vcp",
  "blockedBy": []
 }

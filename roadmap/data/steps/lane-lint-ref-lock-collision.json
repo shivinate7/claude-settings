@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-ref-lock-collision",
+ "title": "Two `merge --lane-lint` runs at once in one checkout collide on git ref locks; the tool serializes or refuses the second",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "One lane lint failed with \"cannot lock ref\" while another ran in the same checkout.",
+ "source": "R67 express lane (session_013NEJL3fTMNnVHbgiss5Vcp) 14:30 CST Nov 13, via the coordinator 14:38.",
+ "note": "Filed 14:33 CST Nov 13. One sighting; rate unmeasured. Fix candidate (coordinator): the tool serializes or refuses a second lane lint in the same checkout. Home: merge/merge.py (one home with the merge-tool lane). Unread by triage. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:33:35-06:00"
+}

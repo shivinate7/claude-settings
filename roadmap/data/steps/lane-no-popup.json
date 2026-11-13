@@ -1,12 +1,12 @@
 {
  "title": "A lane never raises a popup: each one becomes a refusal plus a question routed to its parent, then the page",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 1031,
  "owner": "triage",
  "why": "Owner R13, 16:16-16:18 CST Nov 10 (relayed by the retrospective session): \"I need it to be that lanes that coordinator spawns are either A) banned from ever having any sort of popup / request that interrupts them, or B) ... -- I strongly lean towards A though\"; 16:17 \"trying to make sure u dont misunderstand this into opening a large hole\"; 16:18 \"yes\" to this form.",
- "note": "(1) A guard refuses the question box in any session with a parent; the question goes to the parent, then the page. (2) A lane starts in a mode where an act not pre-allowed is refused, not asked (builder first confirms cloud dontAsk refuses rather than prompts; unverified). (3) An act needing the owner's typed word becomes a page item; his save on the page is the grant; agent text and coordinator relays never grant. (4) A guard refuses repository-trust, computer-folder and owner-approval card tools in a lane. Never a silent allow. Replaces 'The started session may wait on it.' in CLAUDE.md questions-go-to-owner. Home: CLAUDE.md rule questions-go-to-owner and decision questions-go-to-owner. Plan stage 3.12, branch restart-plan commit a958288e7.",
- "updatedAt": "2026-11-10T16:27:00-06:00",
- "lane": "",
+ "note": "(1) A guard refuses the question box in any session with a parent; the question goes to the parent, then the page. (2) A lane starts in a mode where an act not pre-allowed is refused, not asked (builder first confirms cloud dontAsk refuses rather than prompts; unverified). (3) An act needing the owner's typed word becomes a page item; his save on the page is the grant; agent text and coordinator relays never grant. (4) A guard refuses repository-trust, computer-folder and owner-approval card tools in a lane. Never a silent allow. Replaces 'The started session may wait on it.' in CLAUDE.md questions-go-to-owner. Home: CLAUDE.md rule questions-go-to-owner and decision questions-go-to-owner. Plan stage 3.12, branch restart-plan commit a958288e7. Lane 14:33 CST Nov 13 (coordinator 14:48): lane-no-popup (#3236) built R13 point 1 and the trust and computer-folder cards; points 2, 3 and the owner-approval cards went to a fresh lane session_013NEJKzxJ3oeRXWyYXDweYG (Sonnet medium), which first measures whether cloud `dontAsk` refuses rather than prompts (unverified in r13). Step not split per point.",
+ "updatedAt": "2026-11-13T14:33:35-06:00",
+ "lane": "session_013NEJKzxJ3oeRXWyYXDweYG",
  "blockedBy": []
 }

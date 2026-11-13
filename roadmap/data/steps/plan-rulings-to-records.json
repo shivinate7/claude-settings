@@ -1,0 +1,14 @@
+{
+ "id": "plan-rulings-to-records",
+ "title": "File each live R-ruling of the restart plan as a decision record or roadmap ruling, so lanes cite a record, not the plan",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "R55 and the plan's R-rulings live only on the retrospective's branch restart-plan, so lanes cite rulings no repo record holds.",
+ "source": "Retrospective 14:30 CST Nov 13 (its own gap).",
+ "note": "Filed 14:33 CST Nov 13. Owner: the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ). Source: plans/restart-plan.md on its branch restart-plan. Work: for each live R-ruling file a decision record or roadmap ruling and cite those ids. Unread by triage.",
+ "updatedAt": "2026-11-13T14:33:35-06:00"
+}

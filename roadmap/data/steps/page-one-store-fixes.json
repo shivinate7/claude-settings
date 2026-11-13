@@ -1,14 +1,14 @@
 {
  "id": "page-one-store-fixes",
  "title": "Follow-up to #2829: three fixes from the retrospective audit",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL1agou8xGXea9pQSAJ",
+ "lane": "session_013NEJL388SYPn5XUPacp8rS",
  "owner": "triage",
  "blockedBy": [],
  "why": "Retro audit of #2829 (12:01 CST Nov 13); coordinator 12:05 CST: a follow-up step, not part of #2829, no owner question.",
  "source": "retrospective 12:01 CST Nov 13; coordinator 12:04 and 12:05 CST",
  "note": "Todo. (1) Widen route B's triggers to name cross-account reference. (2) Add a read-only cross-account copy read to step 2's allow list. (3) Add a copy-age reader beside waiting-lag-read. Gap found: cross-account reads of the git copy (owner 11:34 CST Nov 11). Waits on the owner's answer to page item 730 if he picks git as the truth. Retro 12:08 CST Nov 13: add the three fixes to the #2829 rewrite (git home, database the live view). Coordinator 12:08 CST: #2829 rejoins the next prose batch after the rewrite. Placement of this step is the coordinator's call. Folded into the #2829 rewrite by lane page-one-store-git-home, session_013NEJL1agou8xGXea9pQSAJ (coordinator 12:10 CST Nov 13). Folded into page-data-one-store (coordinator 12:10 CST Nov 13): the three cross-account fixes go inside the #2829 rewrite by lane page-one-store-git-home. Retrospective 13:55 CST asked for a red case: the export wrote item 747 open with no answer while the page had it closed with lastAnswer. Triage read the git history 13:56 CST Nov 13: not an export defect. The export at f45b528ec (19:36 UTC) predates the owner answer (19:51 UTC) and the close (19:52 UTC); the re-export at 8bafd2240 shows 747 closed with lastAnswer, as 741 did. The real gap is staleness: a git copy is a snapshot and reads old after a page save. If the git home must stay true, it needs a refresh at each owner save or a stated age on the copy. Lane session_013NEJL1agou8xGXea9pQSAJ: no red case for lastAnswer is needed; decide the freshness question. CORRECTION 13:57 CST Nov 13 (lane page-one-store-git-home): the freshness question I raised is already ruled. The owner ruled the git copy timely, not real time (item 593 a; ruling ow-13-q-max-past-rates-a, which triage rewrote for #3212). PR #3212 takes the stated-age route (step waiting-copy-age-read, `stale_pages.py --copy-age`) beside the timely export (step waiting-export-miss-cloud). No refresh at each owner save is planned; whether one is wanted is the owner's to rule. Triage framed it as open without the past-ruling check, so the earlier note above overstates the gap. No red case for lastAnswer, as before. Owner 13:58 CST asked \"shd me hitting send on an artifact be another update trigger\": posted 13:59 CST Nov 13 as item 757 (pick-send-is-export-trigger). Send already wakes the writer; a) export the git copy on that wake (retrospective's take; cost per Send unmeasured), b) keep the timely export and stated age as ruled in item 593 a. It goes beyond item 593 a, so it needs his word. Owner 14:24 CST: item 757 a, each Send wakes the writer, which exports the git copy then (ruling own-757-a-send-exports); replaces the \"timely, not real time\" half of 593 a for a Send. Needs a step: wake on Send, then export. Owner 14:24 CST item 757 a; coordinator 14:58: went to lane page-one-store-git-home (session_013NEJL1agou8xGXea9pQSAJ). Step set ready under that lane.",
- "updatedAt": "2026-11-13T14:31:56-06:00"
+ "updatedAt": "2026-11-13T14:33:35-06:00"
 }

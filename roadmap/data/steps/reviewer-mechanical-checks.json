@@ -1,0 +1,14 @@
+{
+ "id": "reviewer-mechanical-checks",
+ "title": "The reviewer checklist gains three mechanical checks: new fixed numbers cite a ruling or measure, the red run selects tests on the base commit, test files change only by a test-author commit",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:32 CST Nov 13 shows the same faults in sessions everywhere; these three catch the most.",
+ "source": "Retrospective 14:30 and 14:32 CST Nov 13 (owner: \"the lane is super old ... it happens everywhere, what i'm trying to show you is the faults im seeing in sessions still\").",
+ "note": "Filed 14:33 CST Nov 13. (1) A builder that writes a new fixed limit (here a \"provisional 60 min cap\"; at 13:56 the Degen 7-day cooldown) must cite a ruling or a measure, or the review fails it (second case today; kin: R37 no hard fixed numbers). (2) The review record's red run must run the named tests on the BASE commit; a red run on renamed copies proves nothing; the reviewer checks the command selects more than 0 tests on base. (3) A reviewer accepted builder-written test edits against roles-each-layer-proves-once: test files change only by a test-author commit, or the record says why. Retrospective ranks (a) this step and (b) brief-matches-rulings as the two that catch the most. More owner examples will be added to this step, not new ones, unless a new fault class. It changes a reviewer's verdict: test-author red cases first, builder, reviewer. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:33:35-06:00"
+}
