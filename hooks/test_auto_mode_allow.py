@@ -139,9 +139,6 @@ BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-buil
                        ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                        ("permissions", "permission"), ("settings", "setting"),
                        ("overrides", "override"), ("any other act", "any other act"))
-# The reason flags that lift a merge check (merge/merge.py); each entry's Never covers names both.
-REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
-                        ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
@@ -227,6 +224,20 @@ def head_flag():
              and node.args and isinstance(node.args[0], ast.Constant)
              and any(k.arg == "type" and isinstance(k.value, ast.Name) and k.value.id == "head_arg" for k in node.keywords)]
     return flags[0] if len(flags) == 1 else None
+
+
+def reason_flags():
+    """The (UNDO_FLAG, RED_FLAG) pair merge.py assigns, read from its source, or None when the assignment is not there.
+    The check-lifting flags, so a renamed flag moves the Never covers test with it."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple)
+                and [t.id for t in node.targets[0].elts if isinstance(t, ast.Name)] == ["UNDO_FLAG", "RED_FLAG"]
+                and isinstance(node.value, ast.Tuple) and len(node.value.elts) == 2
+                and all(isinstance(v, ast.Constant) for v in node.value.elts)):
+            return tuple(v.value for v in node.value.elts)
+    return None
 
 
 def allow_entry(prefix):
@@ -392,8 +403,11 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
     def test_never_covers_names_the_reason_flags(self):
         clause = never_covers(self.relayed_merge_entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
-        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
-        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+        flags = reason_flags()
+        self.assertIsNotNone(flags, "merge/merge.py must assign UNDO_FLAG, RED_FLAG to two string constants")
+        undo, red = flags
+        self.assertIn(undo, clause, "Never covers does not name the check-lifting flag %s" % undo)
+        self.assertNotIn(red, clause, "Never covers names the flag %s, which is not in its refused acts" % red)
 
     def test_never_covers_names_a_head_the_relay_did_not_name(self):
         clause = never_covers(self.relayed_merge_entry())
@@ -462,8 +476,11 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
     def test_never_covers_names_the_reason_flags(self):
         clause = never_covers(self.batch_merge_entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
-        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
-        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+        flags = reason_flags()
+        self.assertIsNotNone(flags, "merge/merge.py must assign UNDO_FLAG, RED_FLAG to two string constants")
+        undo, red = flags
+        self.assertIn(undo, clause, "Never covers does not name the check-lifting flag %s" % undo)
+        self.assertNotIn(red, clause, "Never covers names the flag %s, which is not in its refused acts" % red)
 
     def test_never_covers_names_a_merge_with_no_head_flag(self):
         clause = never_covers(self.batch_merge_entry())
