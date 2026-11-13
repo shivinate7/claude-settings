@@ -1,0 +1,60 @@
+{
+  "added": "2026-11-13T06:15:00Z",
+  "context": "Goal: the batch runner merges a batch that carries the fix for red main without your yes each time.\nProblem (rule): #3097, which you said to merge at 23:42 CST, is red because it puts a merge allow rule in settings.json, which main's tests forbid, and the real cause of the 23:18 CST refusal was the command's shape, so moving the rule may fix nothing.\nBased on (read): runner 10's transcript at 23:18 CST: the refused merge was one Bash call with a pipe, `;` parts, a variable and a redirect, and the Claude Code safety check refused it; main's merge/cloud_allow.json already allows `~/.claude/bin/merge * --confirm *`, which matches the merge typed alone with --base-red-ok.\nBased on (read): #3097's run 43375520417 fails test_the_repo_settings_json_has_no_merge_allow_rule; on main, merge allow rules live only in merge/cloud_allow.json, which only cloud sessions install.\nBased on (ruling): your Cockpit pick 178 a (2026-11-03 22:31 CST): Claude may use the red-main flag, with a logged reason, only for the batch that carries the fix.\nDeparts from: main's batch runner waits for your yes on each red-main merge \u2014 a red-main fix batch merges with no yes: by a bare command (a), a copied cloud rule (b), or a rule for local sessions too (c).\nWhy yours: you said to merge #3097 as is; closing it or moving its rule changes that word.",
+  "home": "decision auto-mode-owner-acts; decision session-tiers (cloud merge rules)",
+  "id": "red-main-merge-allow",
+  "kind": "decision",
+  "n": 685,
+  "options": [
+    {
+      "gain": "No new allow rule anywhere; the rule main already has covers it, local sessions keep asking, and the tests stay as they are.",
+      "how": "Runner 10 closes #3097 and runs each red-main merge as a Bash call of its own: `~/.claude/bin/merge <pr> --confirm --head <sha> --base-red-ok \"<reason>\"`, with no pipe, `;`, variable or redirect. Triage files a step so the batch runner's instructions say so. The next red-main fix batch is the test.",
+      "id": "bare-merge-call",
+      "key": "a",
+      "label": "Close #3097; the batch runner types the merge as one bare command (recommended)",
+      "links": [
+        {
+          "label": "PR #3097",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3097"
+        }
+      ],
+      "lose": "Untested: if the bare call is still refused, the next red-main fix batch needs your yes again, and this question comes back."
+    },
+    {
+      "gain": "Local sessions keep asking; the placement test stays.",
+      "how": "#3097's lane moves the rule and re-runs CI; runner 10 batches it.",
+      "id": "move-to-cloud-allow",
+      "key": "b",
+      "label": "Move #3097's rule into merge/cloud_allow.json",
+      "links": [
+        {
+          "label": "PR #3097",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3097"
+        }
+      ],
+      "lose": "The file already has a rule that matches this merge, so the copy likely fixes nothing for a call with pipes or redirects."
+    },
+    {
+      "gain": "Local sessions also skip the ask on a red-main merge.",
+      "how": "#3097's lane re-points the placement test; runner 10 batches it.",
+      "id": "keep-in-settings",
+      "key": "c",
+      "label": "Keep the rule in settings.json and re-point the test",
+      "links": [
+        {
+          "label": "PR #3097",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3097"
+        }
+      ],
+      "lose": "Drops main's rule that a local session never auto-allows a merge command; may still miss calls with pipes or redirects.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), relayed to runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "ref": "coordinator 00:14 CST Nov 13; runner 10 00:15 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red-main merges without a yes each time",
+  "status": "open",
+  "title": "How should the batch runner merge a fix batch onto red main without your yes each time?",
+  "why": "You said to merge #3097 at 23:42 CST; each option changes that act."
+}
