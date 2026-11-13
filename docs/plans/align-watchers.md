@@ -56,7 +56,7 @@ small, M medium, L large).
 
 | Mechanism | On main | Change | Q | Size |
 |---|---|---|---|---|
-| Stall watcher (`hooks/stall_watch.py --watch-pid`) | The hook rewrites each background Bash call to start one python watcher. The watcher loops every 0.2 s (line 278) and runs `ps` about once a second. It exits 3 after a stall (hook command, line 17). | Replace, cap or keep. Do not delete before Q1 is ruled. | 1 | L |
+| Stall watcher (`hooks/stall_watch.py --watch-pid`) | The hook rewrites each background Bash call to start one python watcher. The watcher loops every 0.2 s (line 278) and runs `ps` about once a second. It exits 3 after a stall (hook command, line 17). | Replace, cap or keep. Q1a keeps it, so do not delete it. | 1 | L |
 | Stall temp files | The hook exits 3 before `rm -f LOG BEAT`. A stalled job leaves `.log` and `.beat` files (line 17). | Remove them on every exit path. | no | S |
 | Stall Stop check (`--stop`) | Lists each quiet job once per crossing: at the first Stop after its stall crossed, against the previous Stop (`stop()`, `scan_jobs`). A job that goes quiet again after new output is listed again. | None. Test `each_stale_job_is_listed_once` holds it. | no | - |
 | `wait-pid` (`bin/wait-pid`) | One process per wait. Ownership reads run at start (record `stall-watch`; code unchecked). | Add the cost test. | no | S |
@@ -73,9 +73,9 @@ small, M medium, L large).
 | SessionStart refresh child | Inline SessionStart row (startup and resume; 20 s) starts a detached child. `hooks/session_start.sh` (10 s) runs too (checked: `settings.json`). The lock gap is in debt `refresh-lock-untested`. | Move its cost into record `merge-reinstalls-from-main`. Add the lock test. | no | S |
 | `daily_note` (SessionStart, startup; 10 s) | One python per startup. The record names no cost test. Rule 5 needs one. | Add a "no process" test. Keep the slug. | no | S |
 | Waiter guard (`hooks/guard_stream.py`) | In-process. Starts no child. Its remedy names the CI-wake notice or Monitor (checked: `WAITER_REASON`, line 248). | Record its cost. | no | S |
-| SessionEnd sweep | `janitor/session_end_sweep.py` runs `sweep.py <root> --confirm` on one repository. Timeout 55 s. Its output goes to DEVNULL (checked: lines 255 to 257). The record says the hook sweeps one repository. The run also scans every process (`sweep.py` line 1436) and lists simulators (line 1787). | Q4. | 4 | M |
-| Daily job (launchd and schtasks) | A timer by design. The installers write the job and load nothing (checked: `install_launchd.py` prints the load command; it calls no `launchctl`). Logs go to `launchd-sweep.log` and `launchd-sweep.err.log`. `hooks/daily_note.py` reads the error log. | Q4. | 4 | S |
-| Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4. | 4 | S |
+| SessionEnd sweep | `janitor/session_end_sweep.py` runs `sweep.py <root> --confirm` on one repository. Timeout 55 s. Its output goes to DEVNULL (checked: lines 255 to 257). The record says the hook sweeps one repository. The run also scans every process (`sweep.py` line 1436) and lists simulators (line 1787). | Q4 (decided). | 4 | M |
+| Daily job (launchd and schtasks) | A timer by design. The installers write the job and load nothing (checked: `install_launchd.py` prints the load command; it calls no `launchctl`). Logs go to `launchd-sweep.log` and `launchd-sweep.err.log`. `hooks/daily_note.py` reads the error log. | Q4 (decided). | 4 | S |
+| Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4 (decided). | 4 | S |
 | Agent-end reap | Runs on SubagentStop, timeout 60 s (checked: `settings.json`). Its build pass deletes trash in a detached child. That child has no time bound (record `build-dirs-reaped-at-agent-end`; the bound is unchecked). | Bound the child by time. State the cost. Split the record by stage. | no | M |
 | Agent-end payload log | Written under a lock file, capped at 200 rows. Its reader is `hooks/daily_note.py` (`agent_end_failures`) (record `agent-end-reap-stops-what-a-finished-agent-left`). | None. | no | none |
 | Repo reaper (npm `reap:worktrees`) | Removed. The sweep ignores a repository's `reap:worktrees` script (`janitor/test_sweep.py`). | None. Q7 is decided. | no | none |
@@ -83,19 +83,18 @@ small, M medium, L large).
 | `sim-lease` (`bin/sim-lease`) | A 2 s poll inside `take` (from the map; unchecked). | Keep it. Add a cost test. Fix the docstring. | no | S |
 | `sim_boot_record` | Its cost is not stated (rows are in the table above). | Record the cost. | no | S |
 | `guard.log` writer | `hooks/guard_core.py` `record()` writes one line per refusal, ask or note. It is called from `refuse()` (checked). No file cap is found by grep. `daily_note` reads its `crash` lines. | Add a rotating cap, never a trim. Record the cost. | no | S |
-| `machine-load-brake` | Its record states the cost, names the test and lists the zero children and zero files (checked: record `machine-load-brake`). | None. Copy its form for the other records. | no | none |
+| `machine-load-brake` | Its record states the cost and names family `load-brake` in `hooks/test_guard.py` as the test. This lane did not confirm the read counts (checked: record `machine-load-brake`). | None. Copy its form for the other records. | no | none |
 | Guard import wait | A 5 s sleep on import failure only (from the map; unchecked). | None. | no | none |
 
 ## 3. Merges
 
 - **One cost statement per record, and one test helper.** Today the cost sits in code docstrings, READMEs
-  and records. Item 180 fixes the form. Then one helper proves it (rule 5).
+  and records. Rule 4 gives the form. Then one helper proves it (rule 5).
 - **Stall watch is one mechanism.** The wrapper and the watcher share one record, `stall-watch`. The map
   listed them twice.
 - **`ci_wake` and `merge/merge.py` share the `gh` call and the pause seam.** They do not share the loop.
   `merge.py` has two loops of its own.
-- **Process scans.** One process scan per session end, not two (inferred from the map; unchecked). Q4
-  decides where the scan runs.
+- **Process scans.** One process scan per session end, not two (inferred from the map; unchecked). Q4 (decided) keeps the machine-wide scan in the daily job.
 - **Agent-end reap.** One record for the reap and its payload log. The process tiers keep their own record,
   `unattended-sweep-stops-proven-orphans`.
 - **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6 is open. Owner items 304 and 309 picked one shared definition, memory and disk only (rulings `load-def-shared-304a` and `load-def-memory-disk-309a`). `hooks/guard_load.py` is not on main.
@@ -104,10 +103,9 @@ small, M medium, L large).
 
 Nothing here is deleted before its owner question is ruled. Each delete names its reader check.
 
-- **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` line 81 writes it. Line 358
-  counts it for `/dw`. It is the only live evidence that the mod fires, and the record says no live read
+- **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` writes it. `/dw` counts it. It is the only live evidence that the mod fires, and the record says no live read
   has happened. Kept: `/dw` reads it, so it has a reader (Q5, ruling `watchers-log-reader-249b`).
-- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. A reader exists: `read_last_runs` in the same file (Q5, ruling `watchers-log-reader-249b`).
+- **`janitor-runs.jsonl`.** `janitor/sweep.py` writes it, in `default_run_log_path`. A reader exists: `read_last_runs` in the same file (Q5, ruling `watchers-log-reader-249b`).
 - **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
   So the run has no reader for it. The SessionEnd run skips it (decision `the-janitor-is-one-machine-wide-sweep`). Its scan cost is unchecked. Q4 is decided.
 - **Stall watcher.** Kept (Q1a, decided). Not a delete.
@@ -118,14 +116,14 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
    `janitor/GUIDE.md`. Size S. It needs no owner answer.
 2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`, on lane branch `lane/watcher-cost-tests-main`. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
-   watcher stays until Q1 is ruled.
+   watcher stays (Q1a, decided).
 4. **Log readers.** Name a reader for each log, with no delete (Q5, ruling `watchers-log-reader-249b`). Size S.
 5. **SessionEnd scope.** The SessionEnd half of Q4 (ruling `watchers-sessionend-250a`). Size M.
 6. **Decision watch log.** Append-only. Any skip on a quiet turn uses the same protected-path set as
    `--emit-prompt`, so a protected change is still judged. Size M.
 7. **Agent-end reap.** Bound the delete child by time. One process scan per session end. Size M.
 8. **Record lint.** The check for rules 4 to 8. Size M.
-9. **Stall watcher and `ci_wake`.** Replace or cap, per Q1 and Q3. Size L.
+9. **Stall watcher and `ci_wake`.** Cap or replace the long-lived watch, if the owner rules it open (rule 1; step `watchers-plan-lanes`). Q3 keeps `ci_wake` as a named exception. Size L.
 
 Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
@@ -145,7 +143,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 **Q5. Logs with no reader. Decided** by ruling `watchers-log-reader-249b` (Cockpit item 249, pick b: "Name a reader for each"). The answer time is not on record. Each log gets a named reader in its record, and none is deleted. `hooks/daily_note.py` reads the agent-end payload log and the launchd error log. Keep `guard.log`, with a rotating cap.
 
-**Q6. Load definition. Open.** Owner items 304 and 309 picked a: "One shared definition" (ruling `load-def-shared-304a`, 2026-11-06 15:24 CST) and "Memory and disk only" (ruling `load-def-memory-disk-309a`, 2026-11-06 15:45 CST). Ruling `sims-load-brake-only` (2026-11-12 21:59 CST) does not supersede 309a as written. Its supersedes field names only the 2026-11-02 ruling on the 18 Pro. It names the load brake as the only limit on simulator count, so it leans on the load definition without changing it. 309a stays open. `sim-lease` already states its own definition.
+**Q6. Load definition. Open.** Owner items 304 and 309 picked a: "One shared definition" (ruling `load-def-shared-304a`, 2026-11-06 15:24 CST) and "Memory and disk only" (ruling `load-def-memory-disk-309a`, 2026-11-06 15:45 CST). Ruling `sims-load-brake-only` (2026-11-12 21:59 CST) does not supersede 309a as written. Its supersedes field names only the 2026-11-02 ruling on the 18 Pro. 309a says the later ruling "may supersede parts", and `sims-load-brake-only` does not list 309a in its supersedes field. Partial supersession is unresolved, so 309a stays open. `sim-lease` already states its own definition.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
