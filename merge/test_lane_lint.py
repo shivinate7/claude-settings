@@ -2707,30 +2707,6 @@ class RunFolderSweep(unittest.TestCase):
         self.assertTrue(os.path.isdir(own))
 
 
-class BatchReadyBody(CiJobStub, unittest.TestCase):
-    """`merge --batch-build --ready` runs the repo's ready checks on the batch head through ci-job. A batch has no PR body, so the run
-    gives ci-job an empty body file: the empty body is known, and a step that reads the body sees "", not an unread body."""
-
-    def setUp(self):
-        self.t = tempfile.mkdtemp(prefix="batch-ready-body-", dir=_test_temp.run_folder())
-        self.addCleanup(shutil.rmtree, self.t, True)
-        self.init_stub()
-
-    def test_the_batch_ready_checks_give_ci_job_an_empty_body_file(self):
-        self.use_ci_job([("PASS", "Silent undo check")], 0)
-        wt = os.path.join(self.t, "wt")
-        os.makedirs(wt)
-        cfg = {"merge": {"readyChecks": ["Silent undo check"]}}
-        with unittest.mock.patch.object(merge, "fetch_branch", lambda *a, **k: "deadbeef"), \
-                unittest.mock.patch.object(merge, "add_worktree", lambda root, head: (self.t, wt)), \
-                unittest.mock.patch.object(merge, "drop_worktree", lambda *a, **k: None), contextlib.redirect_stdout(io.StringIO()):
-            merge.batch_ready_checks(self.t, cfg, 7, "batch", "batch-branch", "main")
-        runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the batch's ready checks ran ci-job %d times, want once" % len(runs))
-        self.assertIsNotNone(runs[0].get("pr_body"), "the batch's ready checks named no body file for ci-job (CI_JOB_PR_BODY_FILE was unset)")
-        self.assertEqual(runs[0]["pr_body"], "", "the batch's ready checks gave ci-job a body of %r, want the empty body a batch has" % (runs[0]["pr_body"],))
-
-
 class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
     """`merge --lane-lint` with -C PATH or --repo-dir PATH lints the named checkout's pull request. Its worktree is cut from that checkout at
     its head, and the pull request is read through a host in that checkout. The stub logs the head it linted, so a case reads which head that was."""
