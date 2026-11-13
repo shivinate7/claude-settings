@@ -483,11 +483,12 @@ PFR_HELD = ("held-ancestor", "held-record-other-head", "held-off-history", "held
             "held-label-round", "held-label-head")
 
 
-def _pfr_step(*args):
-    """One git step of the history fixture. A failed step stops the run here, not as a red case."""
-    done = run_vcs(PFR_HIST, *args)
+def _pfr_step(*args, where=PFR_HIST):
+    """One git step of a fixture checkout (PFR_HIST unless `where` names another). A failed step stops the run here,
+    not as a red case."""
+    done = run_vcs(where, *args)
     if done.returncode != 0:
-        sys.exit("fixture setup failed in _build_pfr_history: git %s: %s" % (" ".join(args), done.stderr.strip()))
+        sys.exit("fixture setup failed: git %s in %r: %s" % (" ".join(args), where, done.stderr.strip()))
     return done.stdout.strip()
 
 
@@ -783,12 +784,12 @@ def pfr_held_cost_case():
     return True, "no git read with no report held, and the held transcript's count saw %d" % len(held_reads)
 
 
-def pfr_fix_refuse(name, command, transcript, lacks=PFR_FIX_BRANCH):
+def pfr_fix_refuse(name, command, transcript, lacks=PFR_FIX_BRANCH, cwd=PUSHFEAT, env_path=None):
     """A push onto a PR's head branch after its fix check is recorded. The refusal tells the lane to open a new
     branch and a new PR for the next fix, and names neither branch. `lacks` is the branch the push writes, which
-    the refusal must not name."""
+    the refusal must not name. `cwd` is the checkout the push runs in, `env_path` the PATH it runs on, if any."""
     sh("push-needs-review-record: " + name, command, "deny", rule=PFR_RULE, lacks=lacks,
-       carries=("new branch", "PR"), cwd=PUSHFEAT, transcript=transcript)
+       carries=("new branch", "PR"), cwd=cwd, env_path=env_path, transcript=transcript)
 
 
 pfr_fix_refuse("a fix check PASS for PR 1464 posted, then a push to its head branch", PFR_FIX_PUSH,
