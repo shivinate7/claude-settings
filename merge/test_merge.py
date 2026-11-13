@@ -2552,13 +2552,14 @@ class CutLanes(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("is not valid", out)
 
-    def test_the_preview_says_the_merge_also_deletes_the_lane_branches(self):
-        # Ruling 6: the then-line of the preview names the lane branches, when deleteBranch is on.
+    def test_the_preview_says_the_merge_deletes_the_pr_branch_and_names_no_lane(self):
+        # The then-line of the preview names the PR's own branch when deleteBranch is on, and no lane: batch lanes are not cut.
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
         move = [l for l in out.splitlines() if "move local main" in l]
         self.assertEqual(len(move), 1, out)
-        self.assertIn("lane", move[0])
+        self.assertIn("delete the branch", move[0])
+        self.assertNotIn("lane", move[0])
 
     def test_the_preview_without_deleteBranch_names_no_lane_branches(self):  # control
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
