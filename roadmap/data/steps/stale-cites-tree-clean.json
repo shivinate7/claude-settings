@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "`stale_cites --tree` reports 158 findings on main (lane fan-prose-waiting-page, 09:55 CST Nov 12), none in that lane's files.",
  "source": "lane fan-prose-waiting-page, 09:55 CST Nov 12",
- "note": "Prose. Needs its own lane. Ready, no lane. Lane report 10:49 CST Nov 12 (via coordinator): 114 of 158 findings fixed on four branches (PRs coming); 44 left in files open lanes hold, fixed in a second pass after those merge. 08:22 CST Nov 13, runner 10 (prose judge on batch 129): decisions claims-carry-backing and lanes-run-no-full-ci-job cite merge.py line numbers that are stale. Exact lines are in runner 10's coordinator report; not yet read here.",
- "updatedAt": "2026-11-13T08:22:51-06:00"
+ "note": "Prose. Needs its own lane. Ready, no lane. Lane report 10:49 CST Nov 12 (via coordinator): 114 of 158 findings fixed on four branches (PRs coming); 44 left in files open lanes hold, fixed in a second pass after those merge. 08:22 CST Nov 13, runner 10 (prose judge on batch 129): decisions claims-carry-backing and lanes-run-no-full-ci-job cite merge.py line numbers that are stale. Exact lines are in runner 10's coordinator report; not yet read here. 08:24 CST Nov 13: the two merge.py line-cite finds from batch 129 have their own step, merge-line-cites-to-symbols.",
+ "updatedAt": "2026-11-13T08:23:19-06:00"
 }
