@@ -22,9 +22,12 @@ if ! git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" > /dev/null; then
   git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" ||
     { echo "ruling-kind: UNKNOWN, cannot fetch base $BASE_REF"; exit 1; }
 fi
+# The file list is lint/rule_audit.py RULE_FILES, the one home, read from the action's own checkout.
+rule_list="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import rule_audit; print(chr(10).join(p.replace(chr(92), "/") for p in rule_audit.RULE_FILES))' "$action_root/lint")" ||
+  { echo "ruling-kind: UNKNOWN, cannot read RULE_FILES from lint/rule_audit.py"; exit 1; }
 rules=()
 for d in "$root" "$action_root"; do
-  for f in CLAUDE.md output-styles/shiv-stylisms.md; do rules+=(--rules-file "$d/$f"); done
+  while IFS= read -r f; do rules+=(--rules-file "$d/$f"); done <<< "$rule_list"
 done
 if [ -z "$RECORDS_DIR" ]; then
   # The layout's folder, passed as --dir so the lint still refuses a folder that does not exist.

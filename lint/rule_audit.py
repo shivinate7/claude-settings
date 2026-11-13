@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """CI check: every rule anchor maps to a mechanism, or an argued `unmechanized`.
 
-RULE_FILES names the files read for anchors: CLAUDE.md, and the output style that holds the
-rules for the main session's replies. The anchors of all files form one list, so a slug
+RULE_FILES names the files read for anchors: CLAUDE.md, the output style that holds the
+rules for the main session's replies, and the skill and folder-rule files a rule moves into when it
+leaves CLAUDE.md. The anchors of all files form one list, so a slug
 used in two files reads as a duplicate.
 
 CLAUDE.md says to turn each rule into a hook or a check, and calls itself "the fallback, not
@@ -88,7 +89,14 @@ NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";r
 NODE_LIST_TIMEOUT = 10
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
-RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
+RULE_FILES = [
+    "CLAUDE.md",
+    os.path.join("output-styles", "shiv-stylisms.md"),
+    os.path.join("skills", "waiting-page", "SKILL.md"),
+    os.path.join("skills", "fresh-prose", "SKILL.md"),
+    os.path.join("skills", "design-review", "SKILL.md"),
+    os.path.join(".claude", "rules", "hooks.md"),
+]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "checks.yml")
 
@@ -102,7 +110,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
-RULE_FLOOR = 98
+RULE_FLOOR = 127
 UNMECHANIZED_EXPECTED = 62
 JUDGMENT_EXPECTED = 26
 REASON_MIN_WORDS = 8

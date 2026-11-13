@@ -255,7 +255,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 
 ## Editing
 
-* A rule in `CLAUDE.md`: edit the file. Wrap the sentence in a `<!-- rule:<slug> --> ` anchor if
+* A rule: edit the rule file that holds it. The rule files are the ones `RULE_FILES` in `lint/rule_audit.py` names. Wrap the sentence in a `<!-- rule:<slug> --> ` anchor if
   you want `lint/rule_audit.py` to hold you to naming its enforcement (a guard rule, a check, a
   CI step, or `unmechanized` or `judgment` plus a reason) in `lint/rule_mechanisms.json`.
   All the guard rules, checks, and their design rationale live as comments and numbered

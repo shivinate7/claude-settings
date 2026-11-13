@@ -148,6 +148,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 GEN = os.path.join(HERE, "hook_catalog.py")
 INLINE_JSON = os.path.join(HERE, "hook_catalog_inline.json")
+sys.path.insert(0, HERE)
+import test_rule_homes  # noqa: E402  the files a rule anchor may sit in (lint/test_rule_homes.py)
 PAGE = os.path.join(ROOT, "docs", "catalog.md")
 TABLE = os.path.join(ROOT, "docs", "decisions", "agent-model-cap.md")
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
@@ -159,6 +161,7 @@ sys.path.insert(0, HERE)
 from test_settings_matcher import SETTINGS, JUDGE_TYPES, judge_hooks  # noqa: E402  one home for settings.json, the judge walk and its hook types
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 from hook_catalog import pull_request_run  # noqa: E402  one home for the records waiver: the generator's own rule for a waived run
+import rule_audit  # noqa: E402  the rule file list, one home (lint/rule_audit.py RULE_FILES)
 
 
 def read(path, encoding="utf-8-sig"):
@@ -1214,6 +1217,19 @@ class RecordsPage(Tree):
         self.assert_no_gist({"decisions/fm-closed.md": fm_record("id: 1", tail="\ntitle: body\n"),
                              "decisions/fm-open.md": "---\nid: D-3\ntitle: Never closed\n\nSome prose.\n"})
 
+    def test_a25_a_rule_moved_into_a_destination_file_keeps_its_mandate_row(self):
+        # Control first: a marker in a file that no rule file names (notes/) is no mandate.
+        stray = "# Notes\n\nA stray note.<!-- rule:stray-note-rule -->\n"
+        self.assertNotIn("stray-note-rule", listed(self.rows({"notes/stray.md": stray})).get("Mandates", []))
+        for n, rel in enumerate(test_rule_homes.DESTINATIONS):
+            slug = "moved-mandate-%d" % n
+            with self.subTest(file=rel):
+                text = ("---\nname: moved\ndescription: Moved rule.\n---\n\n# Moved\n\n"
+                        "Ask one question at a time.<!-- rule:%s -->\n" % slug)
+                rows = [(r["gist"], r["link"]) for r in self.rows({rel: text})
+                        if r["section"] == "Mandates" and r["slug"] == slug]
+                self.assertEqual(rows, [("Ask one question at a time.", "../" + rel)])
+
 
 # A lane is named like any branch. Only refs/heads/main is main, so a lane whose name starts with main is still a lane.
 LANE_RUNS = ("retire-run-records-waiver", "fix/main", "main-fix")
@@ -1665,11 +1681,12 @@ class RealRecords(unittest.TestCase):
                 problems.append("%s %s: link %r does not resolve" % (r["section"], r["slug"], r["link"]))
         self.assertFalse(problems, "\n".join(problems))
 
-    def test_r11_every_rule_marker_in_claude_md_has_one_mandate_row_in_order(self):
+    def test_r11_every_rule_marker_in_a_rule_file_has_one_mandate_row_in_order(self):
         ids = []
-        for line in unfenced_lines(read(os.path.join(ROOT, "CLAUDE.md"))):
-            ids += [i for i in RULE_MARK.findall(line) if i not in ids]
-        self.assertTrue(ids, "no rule marker in CLAUDE.md, so the scan proves nothing")
+        for rel in rule_audit.RULE_FILES:  # the files the page reads, in the same order (the one home: lint/rule_audit.py)
+            for line in unfenced_lines(read(os.path.join(ROOT, rel))):
+                ids += [i for i in RULE_MARK.findall(line) if i not in ids]
+        self.assertTrue(ids, "no rule marker in the rule files, so the scan proves nothing")
         self.assertEqual([r["slug"] for r in self.rows() if r["section"] == "Mandates"], ids)
 
     def test_r12_every_gist_is_filled_in(self):

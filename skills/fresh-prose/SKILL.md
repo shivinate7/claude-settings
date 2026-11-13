@@ -43,7 +43,7 @@ A reason, "we chose X because Y", cannot be checked by a machine. Write the fact
 reason. A check or a person then compares that fact with the repo. A reason with no named fact
 is not yet on the ladder.
 
-## Superseded text
+## Rewrite, never annotate
 
 When a fact changes, rewrite the claim in place and add no "was X, now Y" line
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
@@ -51,6 +51,14 @@ its own record (`git-one-record-per-question`).
 The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale_cites.py`).
 STALE001 fires on a tracked Markdown line that names a file the same pull request deleted or renamed.
 STALE002 fires on a line that cites a Python file and a name the pull request removed from that file.
+
+## Record rules
+
+Never allocate a numbered record on a branch. Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Ids, not paths. A path breaks when its file moves.<!-- rule:git-cite-by-id --> Give each record its own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One record per question. When its ruling changes, rewrite the record in place. Open a record only for a new question.<!-- rule:git-one-record-per-question -->
+
+## Published numbers
+
+If this repo lints markdown, give every published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers -->
 
 ## Proof
 

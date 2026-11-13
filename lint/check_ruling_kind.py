@@ -32,10 +32,11 @@ except ImportError:  # actions/ruling-kind runs this file in a tree without hook
     _nowindow = subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import rule_audit  # noqa: E402  the one home of the rule file list
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
-RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
+RULE_FILES = tuple(p.replace(os.sep, "/") for p in rule_audit.RULE_FILES)  # the one home of the list (lint/rule_audit.py)
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")

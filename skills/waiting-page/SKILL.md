@@ -296,6 +296,14 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 - The writer keeps the page on main's code (see "Keep the page on main's code").
 - The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo").
 
+## Questions to the owner
+
+Bring each question to me. The question names what the session does meanwhile, or that it waits. Keep working on what does not depend on the answer. Do not ask for a pick that `parallelism-keep-going` (keep going) lets you take with no question. Take it and name it under Done.
+
+Send each question to the page writer in the same turn (see Chat first); an owner chat answer closes the item. A lane sends its question to its parent in the same turn.
+
+Before asking, read the repo's CLAUDE.md for standing grants. A grant the owner gives in chat lands in the repo's CLAUDE.md or the merge tool's config, never only in a handoff. The Read the answers section holds how a save on the page grants its item and which session reads each answer. Decision `questions-go-to-owner` (questions go to the owner) holds what the built-in advisor (`advisorModel`) may do.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as

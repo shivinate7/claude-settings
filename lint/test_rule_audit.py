@@ -23,6 +23,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import test_rule_homes  # noqa: E402  the files a rule anchor may sit in (lint/test_rule_homes.py)
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -84,7 +85,23 @@ def check_map(mechanism):
     return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
 
 
-class RuleAuditTests(unittest.TestCase):
+class RuleFileTree:
+    """Mixin for a TestCase. `rule_tree` writes the named files under a run folder and reads them back through
+    rule_text(). Every RULE_FILES entry is written, empty when the case names none, so the reader never meets a
+    missing file, whatever the list holds."""
+
+    def rule_tree(self, files):
+        root = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel in sorted(set(files) | {p.replace(os.sep, "/") for p in rule_audit.RULE_FILES}):
+            path = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(files.get(rel, ""))
+        return rule_audit.rule_text(root)
+
+
+class RuleAuditTests(RuleFileTree, unittest.TestCase):
 
     def test_single_mapped_rule_is_clean(self):
         problems = run()
@@ -249,14 +266,8 @@ class RuleAuditTests(unittest.TestCase):
         self.assertTrue(any("more than the pinned 0" in p for p in problems), problems)
 
     def _rule_files(self, claude_md, style_md):
-        """Write both RULE_FILES under a temp root and read them back through rule_text()."""
-        root = tempfile.mkdtemp()
-        for rel, body in zip(rule_audit.RULE_FILES, (claude_md, style_md)):
-            path = os.path.join(root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(body)
-        return rule_audit.rule_text(root)
+        """CLAUDE.md and the output style, read back through rule_text()."""
+        return self.rule_tree({"CLAUDE.md": claude_md, "output-styles/shiv-stylisms.md": style_md})
 
     def test_anchor_only_in_the_style_file_is_read(self):
         style = "- Lead with the result.<!-- rule:style-only-rule -->\n"
@@ -877,13 +888,11 @@ REFUSAL_UNCITED_EXEMPT = {
 
 
 def cite_homes(root=rule_audit.ROOT):
-    """-> (decision slugs, rule anchors), read from the repo as it is now."""
+    """-> (decision slugs, rule anchors), read from the repo as it is now. The anchors are read from every
+    RULE_FILES entry, the one list of rule files, so an anchor that moves to a skill is still a home."""
     decisions_dir = os.path.join(root, "docs", "decisions")
     decisions = {name[:-3] for name in os.listdir(decisions_dir) if name.endswith(".md")}
-    anchors = set(rule_audit.claude_md_anchors(rule_audit.read(os.path.join(root, "CLAUDE.md"))))
-    for path in glob.glob(os.path.join(root, "output-styles", "*.md")):
-        anchors.update(rule_audit.claude_md_anchors(rule_audit.read(path)))
-    return decisions, anchors
+    return decisions, set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
 
 
 def cites(text, homes):
@@ -3403,6 +3412,49 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+# A rule that leaves CLAUDE.md for a destination file (lint/test_rule_homes.py) is still a rule: the audit reads
+# the file, maps the anchor through rule_mechanisms.json, and reads a slug repeated across files as a duplicate.
+MOVED = "**Ask.** Ask one question at a time, and never batch them.<!-- rule:moved-rule-under-test -->\n"
+MOVED_MAP = {"rules": {**GOOD_MAP["rules"],
+                       "moved-rule-under-test": {"mechanism": {"kind": "guard", "ref": "agent-model-cap"}}}}
+
+
+def many_rules(n):
+    return "".join("**Bulk %d.** Do thing %d.<!-- rule:bulk-rule-%d -->\n" % (i, i, i) for i in range(n))
+
+
+BULK_MAP = {"rules": {**GOOD_MAP["rules"],
+                      **{"bulk-rule-%d" % i: {"mechanism": {"kind": "guard", "ref": "agent-model-cap"}}
+                         for i in range(30)}}}
+
+
+class DestinationRuleFileTests(RuleFileTree, unittest.TestCase):
+
+    def test_rule_files_reads_every_destination_file(self):
+        listed = [p.replace(os.sep, "/") for p in rule_audit.RULE_FILES]
+        self.assertIn("CLAUDE.md", listed)  # control: the file every audit has read
+        self.assertEqual([p for p in test_rule_homes.DESTINATIONS if p not in listed], [],
+                         "RULE_FILES does not read these destination files")
+
+    def test_rule_moved_into_a_destination_file_is_seen_and_mapped(self):
+        in_claude = self.rule_tree({"CLAUDE.md": GOOD_MD + MOVED})
+        self.assertEqual(run(md=in_claude, rule_map=MOVED_MAP), [])  # control: the same rule in CLAUDE.md
+        moved = self.rule_tree({"CLAUDE.md": GOOD_MD, "skills/waiting-page/SKILL.md": MOVED,
+                                "skills/fresh-prose/SKILL.md": "# Fresh prose\n\nNo rule in this file.\n"})
+        self.assertEqual(run(md=moved, rule_map=MOVED_MAP), [])
+
+    def test_slug_repeated_in_a_destination_file_is_a_duplicate(self):
+        for rel in test_rule_homes.DESTINATIONS:
+            with self.subTest(file=rel):
+                problems = run(md=self.rule_tree({"CLAUDE.md": GOOD_MD, rel: GOOD_MD}))
+                self.assertTrue(any("duplicate" in p and "shared-trees-no-destructive-git" in p for p in problems),
+                                problems)
+
+    def test_every_rule_in_a_large_destination_file_is_seen(self):
+        bulk = self.rule_tree({"CLAUDE.md": GOOD_MD, "skills/design-review/SKILL.md": many_rules(30)})
+        self.assertEqual(run(md=bulk, rule_map=BULK_MAP), [])
 
 
 if __name__ == "__main__":

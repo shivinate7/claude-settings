@@ -1,6 +1,6 @@
 # actions/stamp
 
-One shared engine for CLAUDE.md's rule `git-slug-then-claim-number`. The rule: "Never
+One shared engine for the `git-slug-then-claim-number` rule (skills/fresh-prose/SKILL.md). The rule: "Never
 allocate a numbered record on a branch. Write a slug. Claim the number at merge." This
 folder names no repo. It states record shapes, config fields, and a contract. Each repo
 reads its own tree and writes its own config.

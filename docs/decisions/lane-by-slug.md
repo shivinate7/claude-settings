@@ -12,7 +12,7 @@ Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: the guard refuses
 - A PowerShell call is judged the same way.
 - An echo, a grep, a log search, a git note, a tag message and a PR list search are not messages, so they are allowed. A bare squash merge, and a merge subject that names a slug, are allowed.
 
-Why: same class as CLAUDE.md `git-slug-then-claim-number`. A session number is handed out in one chat and means nothing outside it. A branch slug names the same lane for every reader.
+Why: same class as skills/fresh-prose/SKILL.md `git-slug-then-claim-number`. A session number is handed out in one chat and means nothing outside it. A branch slug names the same lane for every reader.
 
 Protected by the `lane-by-slug` block in `hooks/test_guard.py`.
 

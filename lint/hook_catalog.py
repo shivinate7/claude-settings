@@ -16,7 +16,7 @@ The root is `--root DIR`, else the folder in the environment variable HOOK_CATAL
 this script is in. It is never the working folder.
 
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
-for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
+for settings.json. The records page is read from the rule files that lint/rule_audit.py RULE_FILES names (the `<!-- rule:<id> -->` markers) and the .md
 files in the record folders that lint/layout.json lists. A root with no record gets no records page. A record
 that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
@@ -66,6 +66,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+from rule_audit import RULE_FILES  # noqa: E402  the one home of the files a rule anchor sits in
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
@@ -518,7 +519,7 @@ OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in {folders}. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in the rule files that `lint/rule_audit.py` RULE_FILES names, and the files in {folders}. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
@@ -697,14 +698,17 @@ def collect_records():
     """({section: [(slug, gist, link text, link)]}, problems). A page is written only when no problem stands."""
     rows = {name: [] for name in SECTIONS}
     problems = []
-    if has_file("CLAUDE.md"):
-        text = read("CLAUDE.md")
-        problems += history_problems("CLAUDE.md", text)
+    for rule_file in RULE_FILES:
+        rel = rule_file.replace(os.sep, "/")
+        if not has_file(rel):
+            continue
+        text = read(rel)
+        problems += history_problems(rel, text)
         for rule, gist in mandates(text):
             if gist:
-                rows["Mandates"].append((rule, gist, "CLAUDE.md", "../CLAUDE.md"))
+                rows["Mandates"].append((rule, gist, rel, "../" + rel))
             else:
-                problems.append("CLAUDE.md: the rule %s has no text before its marker" % rule)
+                problems.append("%s: the rule %s has no text before its marker" % (rel, rule))
     notes = layout.path(ROOT, "debt-notes")  # the notes tier: one line per unlikely finding, not a record
     for kind, folder in listed_folders():
         base = os.path.join(ROOT, *folder.split("/"))

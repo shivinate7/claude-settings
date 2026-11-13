@@ -1,6 +1,6 @@
 name: Record stamp
 description: >
-  Check the records (CLAUDE.md rule git-slug-then-claim-number: "Never allocate a numbered
+  Check the records (skills/fresh-prose/SKILL.md rule git-slug-then-claim-number: "Never allocate a numbered
   record on a branch. Write a slug. Claim the number at merge."). Mode "check" runs
   stamp.mjs --check and nothing else, on any branch or pull request, with contents: read. A
   pending record on the default branch fails it. The claim itself runs in merge/merge.py. The

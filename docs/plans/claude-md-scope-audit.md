@@ -111,7 +111,7 @@ Method: a one-line Python count on the worktree file. Words are whitespace token
 | Designs, memory, comments | 72 | Design rule: sessions that make a design. Memory: every session. Comments: repos with code. | No | No | Design rule: fit unclear, stay global until step 2. Memory and comments: stay global. | Each rule sits with its own kind of work. |
 | **Speak plainly** | | | | | | |
 | Ids and one name per thing | 219 | Every reply, plan and doc | No | No (a style rule) | Stay global. Skill `fresh-prose` covers docs and records only, so it would miss replies and plans. `GLOSSARY.md` already holds the terms. | Global keeps one line. Terms live in the glossary. |
-| Prose rules (no explanation in a paragraph; rewrite superseded text in place) | 26 | Every writer | No | No | Stay global. The "Superseded text" section of `fresh-prose` covers docs only. | Stated once. |
+| Prose rules (no explanation in a paragraph; rewrite superseded text in place) | 26 | Every writer | No | No | Stay global. The "Rewrite, never annotate" section of `fresh-prose` covers docs only. | Stated once. |
 | **Output** | | | | | | |
 | Write plainly | 11 | Every reply | No | No | Output style `output-styles/shiv-stylisms.md`. It already holds the reply rules, and `RULE_FILES` reads it. | Reply style in the output style only. |
 | Replies and evidence | 82 | Every reply | No | Yes: never paste a passing run's output; answers go to a home | Stay global. | Each rule once. |
