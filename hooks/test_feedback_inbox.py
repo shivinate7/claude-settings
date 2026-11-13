@@ -1235,6 +1235,64 @@ def case_page_mail_send_to_address_proves_nothing():
                         "fb-0958-7", "98")
 
 
+def case_page_mail_send_exit_code_result_does_not_count():
+    """A mail send whose tool_result reads `Exit code 1`, with no is_error, did not send: the shell's nonzero exit is a
+    failed result, as the report guard reads it (`^Exit code [1-9]`). An `Exit code 0` result is no failure."""
+    failed = page_run(new_cfg(), "page-exit-one", [("98: a", (PAGE_ITEM,))],
+                      [owner_rec("98: a"), mail_rec("Ruling on page item 98: a", tool_id="m1"),
+                       result_rec("m1", "Exit code 1\nmail: no session cloud/session_x")])
+    expect_send_missing("page: a mail send whose result reads Exit code 1, with no is_error, does not prove 98",
+                        failed, "fb-0958-7", "98")
+    passed = page_run(new_cfg(), "page-exit-zero", [("98: a", (PAGE_ITEM,))],
+                      [owner_rec("98: a"), mail_rec("Ruling on page item 98: a", tool_id="m1"),
+                       result_rec("m1", "Exit code 0\nSent to cloud/session_x")])
+    expect_silent("page: a mail send whose result reads Exit code 0 still proves 98", passed)
+
+
+def case_page_mail_send_fd_redirect_proves_nothing():
+    """A redirect is no part of the body. `2>&1` is a file-descriptor number and a redirect, so the echo's text is
+    `build ok` and the send does not prove item 2. `> f` sends the echo's text to a file, so the pipe carries nothing."""
+    fd_redirect = page_run(new_cfg(), "page-fd", [("2: a", ("- fb-0958-9 [page] -> page:2",))],
+                           [owner_rec("2: a"),
+                            used_rec("Bash", {"command": 'echo "build ok" 2>&1 | mail send --to pw --kind inform --body-file -'},
+                                     tool_id="e1"),
+                            result_rec("e1", "ok")])
+    expect_send_missing("page: an echo with 2>&1 piped into mail send does not prove item 2", fd_redirect,
+                        "fb-0958-9", "2")
+    file_redirect = page_run(new_cfg(), "page-redirect", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                             [owner_rec("5: a"),
+                              used_rec("Bash", {"command": "echo 5 > f | mail send --to pw --kind inform --body-file -"},
+                                       tool_id="e1"),
+                              result_rec("e1", "ok")])
+    expect_send_missing("page: an echo 5 > f piped into mail send does not prove item 5", file_redirect,
+                        "fb-0958-11", "5")
+
+
+def case_page_grep_quoting_a_heredoc_does_not_swallow_the_send():
+    """A quoted `<<EOF` on an earlier line of the same Bash call is a grep's text, not a heredoc. It must not take the
+    real send's heredoc for its own body: the send's body names item 5, so the send proves it."""
+    command = ('grep -n "<<EOF" f\n'
+               "mail send --to pw --kind inform --body-file - <<'EOF'\n"
+               "Ruling on page item 5: a\n"
+               "EOF")
+    p = page_run(new_cfg(), "page-grep-heredoc", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                 [owner_rec("5: a"), used_rec("Bash", {"command": command}, tool_id="e1"), result_rec("e1", "ok")])
+    expect_silent("page: an earlier grep of \"<<EOF\" does not swallow the send's heredoc; its body names 5", p)
+
+
+def case_page_mail_send_false_alarms_pass():
+    """Two shapes that send and must pass. An echo whose line ends in a backslash continues into `mail send`, so the
+    pipe carries 5. `python3 bin/mail send` runs the mail script, as `bin/mail send` does."""
+    for label, command in (
+            ("an echo 5 piped into a mail send on a continued line",
+             "echo 5 | \\\nmail send --to pw --kind inform --body-file -"),
+            ("python3 bin/mail send with a heredoc naming 5",
+             "python3 bin/mail send --to pw --kind inform --body-file - <<'EOF'\nRuling on page item 5: a\nEOF")):
+        p = page_run(new_cfg(), "page-false-alarm", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                     [owner_rec("5: a"), used_rec("Bash", {"command": command}, tool_id="e1"), result_rec("e1", "ok")])
+        expect_silent("page: %s passes" % label, p)
+
+
 CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # a cloud send_message failure
 # A failed local SendMessage (unknown name) has no is_error flag: the text is this JSON, and the user record's
 # toolUseResult carries success false. The name here is a fixture, since the real message is not fixed.
@@ -4458,6 +4516,10 @@ CASES = (
     case_page_mail_send_proof_passes,
     case_page_mail_send_refusals_block,
     case_page_mail_send_to_address_proves_nothing,
+    case_page_mail_send_exit_code_result_does_not_count,
+    case_page_mail_send_fd_redirect_proves_nothing,
+    case_page_grep_quoting_a_heredoc_does_not_swallow_the_send,
+    case_page_mail_send_false_alarms_pass,
     case_page_send_with_error_result_does_not_count,
     case_page_send_with_ok_result_still_counts,
     case_page_error_result_of_another_call_does_not_cancel_the_send,
