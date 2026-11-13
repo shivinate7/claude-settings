@@ -84,7 +84,7 @@
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
-                          commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A PR whose newest review record is missing or does not parse FAILs (post it with --review-record first). A FAIL step refuses. An unknown refuses unless
+                          commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A PR whose newest review record is missing or does not parse FAILs (print it with --review-record and post it as a comment first). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
@@ -3185,7 +3185,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit() and not is_integration_pr(info):  # a batch's integration PR carries no record of its own; a failed read is a Stop, never a pass
             bodies = [r[0] for r in host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[0].get(n, [])]
             if newest_review_record(bodies, n) is None:
-                fails.append(f"#{n} has no review record that parses (the newest is missing, unreadable or names another pull request). Post it with `merge --review-record` at the reviewed head, then run `merge --lane-lint {n}` again.")
+                read = "the newest review record comment does not parse, or names another pull request" if bodies else "the review record comment is missing"
+                fails.append(f"#{n}: {read}. Print the record with `merge --review-record {n} --head <sha> ...`, post its lines as a comment on #{n}, then run `merge --lane-lint {n}` again.")
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
