@@ -98,7 +98,7 @@ line starts `stale-cites: report, `. It has two halves, and STALE005 lines first
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
-Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 below, which makes it 4). That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
+Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 below) and no anchor line (STALE011 below), either of which makes it 4. That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
 a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
@@ -125,7 +125,8 @@ A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --
 once, and each file a line anchor names once more, even when that file is a .md. STALE011 adds no read there: it
 reuses that read of a cited .py. In a range, STALE011 reads a cited .py's blob at head through the one `cat-file`,
 and only for an added line that has a `.py:N` anchor, a code span and a code-looking symbol: a Markdown-only range
-with such a line starts 4 (the 3 and that `cat-file`), and one with none starts 3. It writes no file and prints no report.
+with such a line starts 4 (the 3 and that `cat-file`), and one whose anchor lines name no symbol, or that has no
+anchor line, starts 3. A line that holds both a symbol and an anchor still adds only the one `cat-file`. It writes no file and prints no report.
 """
 import argparse
 import ast
@@ -1300,10 +1301,11 @@ def def_lines(tree):
 
 class AnchorFacts:
     """What `anchor_drift` reads of a cited file, once per path. `fetch(path)` is the file's bytes, or None when no
-    tracked file has the path."""
+    tracked file has the path. `reported(path)` is True when the run already printed that the file does not parse (the
+    names read of a touched .py), so the line is not said twice."""
 
-    def __init__(self, fetch):
-        self.fetch, self.facts, self.unparsed = fetch, {}, set()
+    def __init__(self, fetch, reported=lambda path: False):
+        self.fetch, self.reported, self.facts, self.unparsed = fetch, reported, {}, set()
 
     def get(self, path):
         """None when the path is no tracked file; (line count, None) when it does not parse; else
@@ -1357,7 +1359,9 @@ def anchor_drift(text, facts, folder="", symbols=None):
         if facts.get(home)[1] is None:
             if home not in facts.unparsed:
                 facts.unparsed.add(home)
-                unknowns.append(UnknownText("%s does not parse at the revision read; its symbols were not checked" % home))
+                if not facts.reported(home):
+                    unknowns.append(UnknownText(
+                        "%s does not parse at the revision read; its symbols were not checked" % home))
             continue
         first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
         cites.setdefault(bisect.bisect_right(ends, run.start()), []).append((home, first, last))
@@ -1386,13 +1390,15 @@ class AnchorReader:
     class State:
         def __init__(self, rng, pages):
             self.rng, self.pages = rng, pages
-            self.facts = AnchorFacts(lambda path: rng.batch.get("%s:%s" % (rng.head, path)))
+            self.facts = AnchorFacts(lambda path: rng.batch.get("%s:%s" % (rng.head, path)),
+                                     lambda path: any(u.startswith("%s does not parse" % path) for u in rng.unknowns))
             self.md, self.folder, self.fresh, self.seen = None, "", False, None  # fresh False: not counted yet
 
     def prepare(self, rng):
-        """None when no touched page gains a line with a `.py:N` anchor in it and a backtick."""
+        """None when no touched page gains a line with a `.py:N` anchor and a code-looking symbol in a code span."""
         pages = [md for md in sorted(rng.md_base)
-                 if any("`" in text and ANCHOR_CANDIDATE.search(text) for _, text in rng.added_lines.get(md, ()))]
+                 if any("`" in text and ANCHOR_CANDIDATE.search(text) and code_symbols(text)
+                        for _, text in rng.added_lines.get(md, ()))]
         return self.State(rng, pages) if pages else None
 
     def needs_tree(self, state):
@@ -1480,7 +1486,7 @@ def find_stale(rng):
         files = markdown_files(rng.tree, excludes)
     else:  # only the pages some reader names, and only those readers read them
         active = judges
-        files = [md for r, state in judges for md in r.pages(state) if governed(md, excludes)]
+        files = list(dict.fromkeys(md for r, state in judges for md in r.pages(state) if governed(md, excludes)))
     for md in files:
         text = read_markdown(rng.batch, rng.head, md)
         for reader, state in active:
