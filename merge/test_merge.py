@@ -14677,11 +14677,9 @@ class ReviewRecordForm(unittest.TestCase):
     def test_the_parser_refuses_an_unknown_role(self):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: qa-reviewer, sonnet, PASS",))))
 
-    def test_the_parser_accepts_docs_only_with_guard_yes(self):
-        # a docs-only change with Guard or check yes owes no round, as its review row says (decision agent-model-cap, the review rows; owner
-        # ruling 2026-11-13 14:19 CST: the parser and the CLI both accept it)
-        rec = parse_text(self, record_text(rounds=(), kind="docs-only", guard="yes"))
-        self.assertEqual((rec["kind"], rec["guard"], rec["rounds"]), ("docs-only", "yes", []))
+    def test_the_parser_refuses_docs_only_with_guard_yes(self):
+        # a docs-only change has no guard or check (decision docs-only-prs-skip-review)
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(), kind="docs-only", guard="yes")))
 
     def test_the_parser_refuses_a_short_head(self):
         for head in (REVIEW_HEAD[:39], REVIEW_HEAD[:7]):
@@ -15048,6 +15046,12 @@ class ReviewFixRules(unittest.TestCase):
         self.assertEqual(state, "open", "a fix check PASS with no round recorded must not read done")
         self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
 
+    def test_a_normal_guard_no_fix_pass_with_no_round_recorded_is_open_and_says_no_round(self):
+        # as main reads it: a fix check PASS with no round recorded has no round to count as passing, for a change that owes a round too
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=(), kind="normal", guard="no")
+        self.assertEqual(state, "open", f"a normal, guard no fix check PASS with no round recorded reads {state}: {why!r}")
+        self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
+
     def test_a_fix_pass_after_round_three_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no")
         self.assertEqual(state, "done", f"a fix check PASS after round 3 of a change with no guard must read done: {why!r}")
@@ -15337,14 +15341,12 @@ class ReviewArgs(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
-    def test_docs_only_takes_guard_yes_and_no(self):
-        # a docs-only change with Guard or check yes owes no round, as its review row says (owner ruling 2026-11-13 14:19 CST: the parser and
-        # the CLI both accept it). Each guard value prints a record, and the record reads back with the guard it was given.
-        for guard in ("yes", "no"):
-            with self.subTest(guard=guard):
-                rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", guard)
-                self.assertEqual(rc, 0, f"--kind docs-only --guard {guard} was refused:\n" + out + err)
-                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
+    def test_docs_only_takes_no_guard_or_check(self):
+        # a docs-only change has no guard or check, so --guard yes is a usage error; --guard no is the control
+        _out, err = self.assert_usage_error("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "yes")
+        self.assertIn("so --guard must be no", err)
+        rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "no")
+        self.assertEqual(rc, 0, out + err)
 
     def test_preview_and_confirm_take_no_review_record(self):
         # Q1 a, pinned: the review flags add no refusal to the preview or the confirm, so a pull request with no record runs as before.
@@ -16260,6 +16262,44 @@ class ReviewNoRestart(ReviewEnv):
     def test_a_first_record_that_skips_round_one_is_refused(self):
         # The control is test_the_first_record_on_a_pull_request_is_accepted: round 1 alone is accepted as a first record. Round 3 alone is not.
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with())
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_a_fix_check_only_record_after_an_earlier_record_with_no_round_is_refused(self):
+        # Control: the same fix check after an earlier record that holds a failed round 1 is accepted (test_a_fix_check_only_record_that_passes_after_round_one_is_accepted).
+        # The refusal below comes from the earlier record holding no round at all.
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        with_round = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(with_round))
+        self.assert_accepted(rc, out, err)
+        no_round = record_text(head=REVIEW_OLD_HEAD, rounds=())
+        rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(no_round))
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_round_three_after_an_unparseable_earlier_comment_is_accepted_with_no_type_error(self):
+        # Control: round 3 after the two FAIL records is accepted. The comment below starts with the record marker, so the repo's comment read
+        # keeps it, and its Kind line does not parse: the parser reads it as None. The new record must be accepted beside it with no TypeError.
+        round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        unparseable = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 2: reviewer, sonnet, FAIL",), kind="bogus")
+        for body in (round_one, round_two):
+            parse_text(self, body)
+        self.assertIsNone(review_fn(self, "parse_review")(unparseable), "fixture: the broken comment parses, so it is no unparseable earlier comment")
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, round_two))
+        self.assert_accepted(rc, out, err)
+        try:
+            rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with(round_one, unparseable, round_two))
+        except TypeError as exc:
+            self.fail(f"round 3 after an unparseable earlier comment raised TypeError: {exc}")
+        self.assert_accepted(rc, out, err)
+
+    def test_round_three_after_a_passed_fix_check_on_a_failed_round_two_is_refused(self):
+        # Control: round 3 after the failed round 2 alone is accepted, so the refusal below comes from the passed fix check that follows it.
+        # The fix check holds no round line, and its fix diff starts at round 2's head.
+        round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        fix_check = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two))
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two, fix_check))
         self.assert_refused_with_no_record(rc, out, err)
 
 class ReviewFixAfterRoundThree(ReviewEnv):

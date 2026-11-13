@@ -33,7 +33,6 @@ SHIPPED_ROWS = (
     ("delete-only", "no", "1", "1", "no"),
     ("delete-only", "yes", "1", "3", "yes"),
     ("docs-only", "no", "0", "3", "no"),
-    ("docs-only", "yes", "0", "3", "yes"),
 )
 # (kind, Guard or check, rounds as P and F letters, fix check as P, F or None, net value, the state the policy gives).
 MATRIX = (
@@ -74,10 +73,6 @@ MATRIX = (
     ("docs-only", "no", "P", None, "not owed", "done"),
     ("docs-only", "no", "F", None, "not owed", "open"),
     ("docs-only", "no", "FFF", None, "not owed", "done"),
-    ("docs-only", "yes", "", None, "not owed", "done"),
-    ("docs-only", "yes", "F", None, "not owed", "open"),
-    ("docs-only", "yes", "FFF", None, "not owed", "open"),
-    ("docs-only", "yes", "FFF", None, "zero", "done"),
 )
 # The normal, no rows of MATRIX: the controls a missing or unreadable row must still give (the old code gives the same for them).
 NORMAL_NO = tuple(row for row in MATRIX if row[:2] == ("normal", "no"))
@@ -288,6 +283,37 @@ class ReviewRowsFallback(unittest.TestCase):
         self.assertEqual(state, "open", f"a one-row table owing 2 rounds reads a round 1 PASS as {state}, the rows are not read: {why!r}")
         self.assertIsNotNone(getattr(hook_guard, "REVIEW_POLICY_FALLBACK", None),
                              "hooks/guard.py names no review policy fallback constant, so the built-in rule is not named")
+
+
+class ReviewRowsFallbackRule(unittest.TestCase):
+    """Case 4: with no readable review row, the verdict comes from REVIEW_POLICY_FALLBACK alone. The pointer checkout is a folder with no
+    record, so the fallback is the only rule read, and every kind, Guard or check and round combination must give the policy's verdict."""
+
+    def test_the_fallback_holds_the_shipped_rows(self):
+        shipped = {(kind, guard): (int(owed), int(last), net == "yes") for kind, guard, owed, last, net in SHIPPED_ROWS}
+        self.assertEqual(hook_guard.REVIEW_POLICY_FALLBACK, shipped,
+                         "REVIEW_POLICY_FALLBACK is not the shipped review rows, so a change with no readable row gets another policy")
+
+    def test_with_no_readable_record_the_fallback_gives_the_policy_verdict_for_every_kind_guard_and_round(self):
+        no_record = tempfile.mkdtemp(dir=tm.run_folder())
+        self.assertIsNone(hook_guard.review_policy_table(no_record), "the empty folder holds a readable review row table, so the fallback is not what is read here")
+        with pointed_at(no_record):
+            self.assertEqual(merge.review_policy("normal", "yes"), hook_guard.REVIEW_POLICY_FALLBACK[("normal", "yes")],
+                             "merge.review_policy does not read the fallback when no review row is readable")
+            for kind, guard, letters, fix, net, want in MATRIX:
+                with self.subTest(kind=kind, guard=guard, rounds=letters, fix=fix, net=net):
+                    state, why = state_of(self, no_record, kind, guard, letters, fix, net)
+                    self.assertEqual(state, want, f"with no readable record, review_state gives {state} for {kind}, Guard or check {guard}, "
+                                                  f"rounds {letters or 'none'}, not the policy's {want}: {why!r}")
+
+
+class ReviewCapTie(unittest.TestCase):
+    """The review cap is one number in two files: hooks/guard.py's REVIEW_POLICY_CAP bounds the review rows, and merge/merge.py's
+    REVIEW_LAST_ROUND bounds the rounds (rule roles-review-cap-three). A row may not name a last round the merge tool does not stop at."""
+
+    def test_the_guard_row_cap_is_the_merge_tool_last_round(self):
+        self.assertEqual(hook_guard.REVIEW_POLICY_CAP, merge.REVIEW_LAST_ROUND,
+                         "hooks/guard.py REVIEW_POLICY_CAP and merge/merge.py REVIEW_LAST_ROUND differ, so a row can name a round the merge tool does not stop at")
 
 
 if __name__ == "__main__":
