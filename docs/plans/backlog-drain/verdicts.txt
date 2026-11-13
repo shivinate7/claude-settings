@@ -356,7 +356,7 @@ PR	verdict	kind	step	head	reason
 2950	fresh	-	orchestrator-mixed-merge-refused	dad2aa8aa8f8	fresh: runner 10 (under 48 h, not reviewed)
 2952	keep	code	convert-time-pinned-tests	a7e9f634e54e	pinned clocks; merges clean
 2953	keep	code	page-wakes-and-relays	e7c607ed6f1d	R18 item 1 only page writer watches page; merge first
-2955	rebuild	code	page-wakes-and-relays	2f738dabf875	wakes field never added to page.html itemFields; rebuild on top of 2953
+2955	rebuild	code	page-wakes-and-relays	2f738dabf875	wakes field never added to page.html itemFields; rebuild on top of 2953; UPDATE lane page-wakes-and-relays 12:27 CST Nov 13: rebuilt as stacked follow-up draft PR #3205 (base pwr-item-names-wakers-b; wakes listed in page.html itemFields and drawn; design review PASS; handed to the batch runner); close #2955 only after #3205 is on main. #3006 untouched, waits on item 713
 2956	fresh	-	guard-pr-runs-windows-shards	f4caf08ecce3	fresh: runner 10 (under 48 h, not reviewed)
 2958	keep	code	convert-time-pinned-tests	25c05532449c	CPU-time ratio; merges clean
 2959	keep	code	convert-time-pinned-tests	fbe24129ec2f	stamp watchdog; merges clean
