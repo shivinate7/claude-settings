@@ -744,12 +744,15 @@ def answered_problem(text):
 # word on the line exempts it. A cite is one of a closed list, found anywhere on the line with code spans unwrapped.
 _W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
 _MAIN = r"main(?![\w-])"
-# A branch-like use of main: the line end, a punctuation mark (a possessive 's included), or a function word that
-# continues the comparison comes next. A noun after it ("main window", "main menu") names a thing, not the branch.
+# After "the main", a branch-like use needs the line end, a punctuation mark (a possessive 's included), or a function
+# word that continues the comparison next; any other word is a noun ("the main window" names a thing, not the branch).
+# With no "the" before it, main is the branch whatever follows ("same as main window" is a claim).
 _MAIN_NEXT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:branch|in|on|at|for|with|and|or|but|so|because|since|while|which|that|is|was|did"
               r"|does|had|as|by|from|to|per|too|now|today|yet|already|after|before|until|when|if|where|overall|again|still"
               r"|also|anyway|either|this|one)(?![\w-]))")
-_MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()" + _MAIN_NEXT
+_MAIN_NAME_GUARD = r"(?!\.[A-Za-z])(?!\()"  # main.py and main() are a file and a call name, never the branch
+_MAIN_REF = (r"(?:the\s+" + _MAIN + _MAIN_NAME_GUARD + _MAIN_NEXT
+             + r"|(?<!\bthe\s)" + _MAIN + _MAIN_NAME_GUARD + r")")
 _OWN = r"main['\u2019]s\s+own(?![\w-])"
 MAIN_CLAIM_RE = re.compile(
     _W + r"(?:not\s+a\s+regression|no\s+regressions?)(?![\w-])(?!\s+(?:testing|tests?|suites?)\b)"
