@@ -757,6 +757,24 @@ class DebtRetireInLint(unittest.TestCase):
                          "a plain plan of checks no longer plans the debt Retire step")
 
 
+class TokenValue(unittest.TestCase):
+    """A step env that maps ${{ github.token }} reads as a value: a plan has no runner token, so the value is empty. An unknown
+    there would refuse every lint run of a job whose step maps the token (bin/ci-job's values map, its one home)."""
+
+    def test_f8_a_step_env_of_github_token_is_planned_not_unknown(self):
+        root = tempfile.mkdtemp(prefix="token-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "init", "-q", "-b", "main", root], check=True, env=ENV)
+        path = os.path.join(root, "wf.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(step("reads token", "echo ok", env={"GH_TOKEN": "${{ github.token }}"})))
+        done = plan_job("lane", "--plan", "--base", "HEAD", "--workflow", path, cwd=root)
+        states = by_step(done.stdout.splitlines())
+        self.assertIn("reads token", states, "scope: the plan names no 'reads token' step: " + done.stdout + done.stderr)
+        self.assertEqual(states["reads token"], "would run",
+                         "the plan reads the step's ${{ github.token }} env as unknown, not as a value")
+
+
 def launcher(patch):
     """A `python3 -c` launcher: the code in `patch` runs first, then ci-job runs in this process with the argv it was given."""
     return patch + "\nimport runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')\n"
