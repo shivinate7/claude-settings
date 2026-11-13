@@ -312,6 +312,49 @@ mtc_allow("a prose line, Deadline 15:00 CST for the merge, 10 minutes ahead is a
 mtc_allow("a prose line, Meet at 14:00 CST tomorrow, 10 minutes ahead is allowed: prose, not a header",
           "Meet at 14:00 CST tomorrow", clock="2026-11-13T13:50:00-06:00")
 
+# ---- a dated header in a bracket, a paren, or a dash form. The date sits in the label, before the time, so the stamp is
+# a dated instant with no window: 16:36 on the clock's own day is 9 hours 28 minutes ahead at 07:08, and is refused.
+MTC_DATED_CLOCK = "2026-11-13T07:08:00-06:00"  # 07:08 CST on 2026-11-13, the clock of the dated cases below
+MTC_DATED_NOON_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST on 2026-11-13, the clock of the next-day case below
+mtc_refuse("a bracket dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "[coordinator 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+mtc_refuse("a paren dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "(coordinator 2026-11-13 16:36 CST) x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+mtc_refuse("a dash dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "[coordinator - 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+# Refused: the next day's date, 2026-11-14 12:30, is 23 hours 47 minutes ahead at 12:43 on 2026-11-13.
+mtc_refuse("a bracket dated header on the next day, 2026-11-14 12:30 CST at 12:43 on 2026-11-13, is refused",
+           "[coordinator 2026-11-14 12:30 CST] x", clock=MTC_DATED_NOON_CLOCK, carries=("12:43 CST",))
+# Refused, a control: the comma form keeps its date, so it is refused 9 hours 28 minutes ahead at 07:08.
+mtc_refuse("a comma dated header in a bracket 9 hours 28 minutes ahead at 07:08 stays refused",
+           "[coordinator, 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+# Passes: each dated form stamped at the clock's own minute, 1 minute ahead, and 1 minute behind. A dated stamp is
+# refused only when more than 1 minute ahead, so 1 minute ahead passes.
+mtc_allow("a bracket dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "[coordinator 2026-11-13 07:08 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "[coordinator 2026-11-13 07:09 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "[coordinator 2026-11-13 07:07 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "(coordinator 2026-11-13 07:08 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "(coordinator 2026-11-13 07:09 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "(coordinator 2026-11-13 07:07 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "[coordinator - 2026-11-13 07:08 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "[coordinator - 2026-11-13 07:09 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "[coordinator - 2026-11-13 07:07 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header at the clock's own minute, 12:43 CST at 12:43 on 2026-11-13, is allowed",
+          "[coordinator 2026-11-13 12:43 CST] x", clock=MTC_DATED_NOON_CLOCK)
+mtc_allow("a bracket dated header 1 minute ahead is allowed: 12:44 CST at 12:43 on 2026-11-13",
+          "[coordinator 2026-11-13 12:44 CST] x", clock=MTC_DATED_NOON_CLOCK)
+mtc_allow("a bracket dated header 1 minute behind is allowed: 12:42 CST at 12:43 on 2026-11-13",
+          "[coordinator 2026-11-13 12:42 CST] x", clock=MTC_DATED_NOON_CLOCK)
+
 
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
 # The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
