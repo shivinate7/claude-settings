@@ -10,7 +10,7 @@ The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see 
 (owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs the model of its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows. An Agent
 or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
-The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
+The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant. A plain ask with no length lifts only the session's own Opus spawns, until the owner's next typed prompt (task-scoped per own-761-d-task-scoped-opus, 14:21 CST Nov 13).
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
@@ -72,7 +72,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and guard | no model; plain code | n/a |
-| local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
+| local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a plain Opus ask with no length writes the turn file, which the next typed prompt removes (no model call); a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -217,7 +217,7 @@ model is refused, and the owner's typed override lifts it, the same for Sonnet a
 under the 2026-10-21 grant). An Agent or Task spawn that sets model opus is refused under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer or
 design-reviewer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` marker (the step-up names the forms), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
-it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
+it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`; with no length, until the owner's next typed prompt) or a step grant lifts the spawn refusal. The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
