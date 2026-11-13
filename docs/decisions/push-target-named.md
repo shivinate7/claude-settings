@@ -14,7 +14,7 @@ Rule `push-target-named` in `hooks/guard.py` refuses an agent's `git push` unles
   - `none`: every push.
   - a named branch: a push whose destinations (`push_destinations`) are not all that branch, a glob, or a destination that cannot be resolved (a detached HEAD).
   - a push that sends tags (`--tags`, with or without a refspec) under a named branch: refused with the same reason. Every tag reaches the remote, which no branch covers.
-  - a push to main under a brief that names another branch: refused, not asked. An agent has no one to answer an ask. The owner's side of this ruling is pending (coordinator default).
+  - a push to main under a brief that names another branch: refused, not asked. An agent has no one to answer an ask. Owner, 2026-11-13 00:50 CST, Cockpit item 672 pick a, relayed by triage at 00:51 CST: refuse it. The same pick, item 673 a, adds the `Push to:` line to rule `roles-brief-contents`; triage sends that edit to the owner's Windows session.
   - no usable line, or a brief that cannot be read (no transcript path, a missing file, a folder, an empty file): refused, with the remedy "stop and report that the brief names no push target". An ask inside an agent has no one to answer it, so no line is a deny, not an ask.
 - The remedy never names the destination branch (`git-remedy-never-names-target`).
 - Passes: a dry run (`read_verb`), a call with no valid `agent_id` (the top-level session), and a forced push, which keeps its own refusal (`force-push`). The override lifts it (`owner-override`).
