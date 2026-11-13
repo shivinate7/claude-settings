@@ -16,8 +16,7 @@
 - ask-alone-sl-chdir-refuses: sl, chdir and Push-Location are not harmless leads, so a chain starting with them over-refuses; owner ruling names only Set-Location (hooks/guard.py harmless_lead) Fix: none — owner decides. Until: 2026-11-25
 - ask-alone-tail-args-unchecked: echo and Write-Host tail arguments are not checked, so a PowerShell (...) subexpression tail counts harmless and asks alone (hooks/guard.py) Fix: none — rare and harmless. Until: 2026-11-19
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
-- bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py) Fix: none — rare and harmless. Until: 2026-11-20
-- bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges bare in a merge-tool repo with no bare-merge ask; merge-checks still guards it (hooks/guard.py)
+- bare-merge-reads-folder-not-repo: gh pr merge -R other/repo, and an MCP merge or auto-merge naming another repo, asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py, hooks/guard.py) Fix: none — rare and harmless. Until: 2026-11-20
 - bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py) Fix: none — rare and harmless. Until: 2026-11-21
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py) Fix: none — rare and harmless. Until: 2026-11-22
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py) Fix: none — rare and harmless. Until: 2026-11-23
@@ -30,16 +29,6 @@
 - shell-write-basetemp: `python3 -m pytest --basetemp=F` writes F and is not read as a write (hooks/guard_frozen.py _shell_write_hit). Fix: none — a review finding with no incident. Until: 2026-11-22
 - frozen-sed-pattern-refused: `sed -n '/rm x/p' F` only reads F, yet it is refused as a write to F (hooks/guard_frozen.py _shell_write_hit). Fix: none — a false alarm only refuses. Until: 2026-11-22
 - frozen-git-rm-cached-refused: `git rm --cached X && cat X` is refused as a write, because the cat segment names X (hooks/guard_frozen.py _shell_write_hit). Fix: none — rare, and the refusal is a minor false alarm. Until: 2026-11-21
-- ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
-- bare-merge-reads-folder-not-repo: gh pr merge -R other/repo, and an MCP merge or auto-merge naming another repo, asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py, hooks/guard.py)
-- bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
-- bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
-- base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
-- blind-git-fixtures-unaudited: other blind-command fixtures, such as make_blind_git, are not audited for the PATH shim gap (janitor/test_sweep.py)
-- builder-fstring-path-unread: an f-string path, such as `open(f'tests/x_{n}.py','w')` in a python body, is not read (hooks/guard_frozen.py _py_hit)
-- builder-join-unresolved-refused: `os.path.join(tmpdir,'tests','test_x.py')` is refused, because an unresolved path part is dropped and the rest reads as a test path. A false alarm (hooks/guard_frozen.py _join_path)
-- builder-patch-format-unread: `patch tests/x.py < d.diff`, `git checkout --theirs tests/x`, `ruff format tests/` and `black .` are not refused for a builder (hooks/guard.py builder_shell_test_hit)
-- builder-path-forms-unread: `Path('tests').joinpath(...)`, string `+` paths, `dd of=`, `sort -o` and `touch` of a test path are not read (hooks/guard_frozen.py _py_paths, _shell_write_hit)
 - cap-basename-false-alarm: a heredoc writing a fixture named settings.json with the cap key asks, because is_settings_file tests the basename only (hooks/guard.py)
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
 - cap-write-by-python-unseen: a cap write made by a Python script, or text piped or written to a script and run later, is not asked (hooks/guard_frozen.py)
