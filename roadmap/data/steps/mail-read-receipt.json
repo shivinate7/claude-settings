@@ -1,0 +1,14 @@
+{
+ "id": "mail-read-receipt",
+ "title": "The git mailbox tells a sender whether its message was read",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 09:06 CST Nov 13, relayed by the retrospective, his words: \"D20 -- i'm pretty sure read receipts exist, and anyways we're leaving anthropic's messaging system for our own right? can't we add read receipts there\". So D20 (no read receipt) is built in our own mailbox, not raised upstream.",
+ "source": "owner 09:06 CST Nov 13 via retrospective 09:07 CST",
+ "note": "Shape (retrospective): mail take already removes the message file in a commit on refs/heads/mail, so a command such as mail status <id> can print open, or taken with the time and taker, read from git. Homes: decision session-messages, hooks/mail.py. Check, red first: a taken message reads taken with its taker; an untaken one reads open.",
+ "updatedAt": "2026-11-13T09:08:36-06:00"
+}
