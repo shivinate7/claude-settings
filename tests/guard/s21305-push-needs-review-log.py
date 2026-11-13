@@ -26,6 +26,7 @@ PFR_MODEL = "claude-sonnet-5-5"
 PFR_FIX_SHA = "fedcba9876543210fedcba9876543210fedcba98"   # the reviewed head of a fix check, never the Head
 PFR_HEAD_A = "08462577333eefc425e50c60f85514b699c8bdf0"    # a real lane's head: the Head its first-review FAIL record names
 PFR_HEAD_B = "5b77f144394703c567bd335f63d6d887e3e71cf1"    # the same lane's later head, which its second-review report names
+PFR_UNRESOLVED_HEAD = "7e57c0de7e57c0de7e57c0de7e57c0de7e57c0de"   # 40 hex, names no commit of the fixture
 PFR_MODEL_2871 = "claude-haiku-5-5"                        # the model that ran that lane's first reviewer
 PFR_GH_ROOT = "gh -R shivinate7/claude-settings"           # a repo flag before the verb, as gh reads it
 PFR_GH_LONG = "gh --repo shivinate7/claude-settings"       # the long form of the same repo flag
@@ -484,7 +485,8 @@ PFR_HELD = ("held-ancestor", "held-record-other-head", "held-off-history", "held
 # Reports read after the PR is known, each naming the head it reviewed: a stale round 1 FAIL at B, then a round 1 at the
 # live head D2. The names are built in _build_pfr_history, after the commits, as the held names are.
 PFR_STALE = ("stale-fail-fresh-pass-recorded", "stale-fail-fresh-pass-unrecorded", "stale-fail-record-off-history",
-             "stale-fail-own-record-fresh-pass-recorded")
+             "stale-fail-own-record-fresh-pass-recorded", "stale-fail-descendant-log-before",
+             "stale-fail-unresolved-descendant-log")
 
 
 def _pfr_step(*args):
@@ -568,6 +570,8 @@ def _build_pfr_history():
     # C is off A on main, so it is a sibling of B and no descendant of it.
     stale_fail = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_b, PFR_FINDING)
     fresh_pass = pfr_report(pfr_verdict("PASS", 1), "Reviewed at head %s" % sha_d2, PFR_FINDING)
+    if run_vcs(PFR_HIST, "cat-file", "-e", PFR_UNRESOLVED_HEAD + "^{commit}").returncode == 0:
+        sys.exit("fixture setup failed in _build_pfr_history: the unresolved head names a commit of the history")
     stale = {
         # The fresh round's record is posted at D2. The stale FAIL at B has no record of its own.
         "stale-fail-fresh-pass-recorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
@@ -587,6 +591,15 @@ def _build_pfr_history():
                                                      + pfr_call("toolu_rev2", fresh_pass)
                                                      + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL,
                                                                                          "PASS")], head=sha_d2)),
+        # Only a log posted after the report can supersede it. This one is posted at D2 before the FAIL is read.
+        "stale-fail-descendant-log-before": pfr_pr()
+                                            + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
+                                                                              head=sha_d2))
+                                            + pfr_call("toolu_rev1", stale_fail),
+        # The log's head names no commit, so git cannot show it descends from B. The FAIL stays.
+        "stale-fail-unresolved-descendant-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                                + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
+                                                                                  head=PFR_UNRESOLVED_HEAD)),
     }
     for name in PFR_STALE:
         write(pfr_path(name), "".join(line + "\n" for line in stale[name]))
@@ -781,6 +794,14 @@ pfr_ask("a round 1 FAIL at head B, then a round 1 FAIL record at head C, no desc
 # The control: each reviewed head has its record, so no report is left and the push passes.
 pfr_allow("a round 1 FAIL at head B with its record posted at B, then a round 1 PASS at D2 with its record posted at D2, "
           "then the push", PFR_PUSH, pfr_path("stale-fail-own-record-fresh-pass-recorded"), cwd=PFR_HIST)
+# A log posted before the stale FAIL is read cannot supersede it, even at a descendant head.
+pfr_ask("a round 1 PASS logged at descendant D2 before a round 1 FAIL at head B is read, no record of the FAIL, "
+        "then the push", PFR_PUSH, pfr_path("stale-fail-descendant-log-before"), cwd=PFR_HIST,
+        carries=("fresh round", "live head", "--review-record"))
+# A log whose head names no commit is not shown to descend from B. A failed ancestry read keeps the FAIL asked.
+pfr_ask("a round 1 FAIL at head B, then a round 1 PASS logged at a head that names no commit, then the push", PFR_PUSH,
+        pfr_path("stale-fail-unresolved-descendant-log"), cwd=PFR_HIST,
+        carries=("fresh round", "live head", "--review-record"))
 
 
 PFR_COST_LABEL = ("push-needs-review-record: a push reads git for a held report only when one is held, and the count "
