@@ -1898,17 +1898,15 @@ WALK_SUITES = {
                              "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
-    # hooks/guard.py: the walk of the tracked tree, minus the whole hooks/test_guard.py and merge/test_merge.py, which each
-    # time out at 180 s on the clean source (measured, step mutation-tests-for-cost).
+    # hooks/guard.py: the walk of the tracked tree, minus the whole hooks/test_guard.py and GUARD_MODULE_DROPPED_SUITES (slow
+    # or unusable suites, timed in step mutation-tests-for-cost).
     "hooks/guard.py": [
-        "hooks/test_agent_brief.py", "hooks/test_call_judge.py", "hooks/test_checks_never_raise.py",
-        "hooks/test_config_watch.py", "hooks/test_guard_beat.py", "hooks/test_guard_load_os.py",
-        "hooks/test_precompact_handoff.py", "hooks/test_probe.py", "hooks/test_question_form.py",
-        "hooks/test_question_form_option_labels.py", "hooks/test_shared_names.py", "hooks/test_wrappers.py",
+        "hooks/test_agent_brief.py", "hooks/test_call_judge.py", "hooks/test_config_watch.py",
+        "hooks/test_guard_load_os.py", "hooks/test_precompact_handoff.py", "hooks/test_probe.py",
+        "hooks/test_question_form.py", "hooks/test_question_form_option_labels.py", "hooks/test_shared_names.py",
         "janitor/test_install_launchd.py", "janitor/test_install_schtasks.py", "janitor/test_session_end_sweep.py",
-        "janitor/test_sweep.py", "lint/test_ci_scope.py", "lint/test_layout.py", "lint/test_now_central.py",
-        "lint/test_report_guard.py", "lint/test_report_guard_stamped.py", "lint/test_rule_audit.py",
-        "lint/test_settings_matcher.py", "lint/test_stale_cites.py"],
+        "lint/test_ci_scope.py", "lint/test_now_central.py", "lint/test_rule_audit.py",
+        "lint/test_settings_matcher.py"],
 }
 
 
@@ -2048,6 +2046,9 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertNotIn("merge/test_merge.py", printed, "the whole merge/test_merge.py takes minutes per mutant")
         self.assertTrue([line for line in printed if line.startswith("hooks/test_guard.py::")],
                         "hooks/guard.py prints at least one hooks/test_guard.py::<family> line")
+        for name in ("hooks/test_guard_beat.py", "lint/test_report_guard.py", "hooks/test_checks_never_raise.py",
+                     "lint/test_layout.py", "hooks/test_wrappers.py", "lint/test_report_guard_stamped.py"):
+            self.assertNotIn(name, printed, "%s is slow or unusable on the unparsed copy: its control run spends the budget" % name)
 
     def test_a_suite_that_loads_a_table_module_inside_a_function_is_kept(self):
         """lint/test_hook_catalog.py imports guard_merge inside a test method, so the import walk finds it only

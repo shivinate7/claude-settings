@@ -3613,13 +3613,20 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
-    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
-    "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
+    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets the four quick families that read them
+    # (14 to 37 s each). `paths` (104 s) and `diff` (41 s) are left out for their time.
+    "hooks/guard.py": ["write", "model-cap", "cite", "hook-bypass"],
 }
-# Whole suites a row's module never runs, each timing out at 180 s on the clean source of that module, which leaves no
-# budget for any mutant (step mutation-tests-for-cost: 0 of 10 mutants ran in 6 runs of 300 s).
+# Suites a row's module never runs, so the clean-source control of every suite fits the 300 s budget with time left for
+# mutants (step mutation-tests-for-cost: 0 of 10 mutants ran in 6 runs of the walk's 26 suites and in 3 runs with 30; the
+# 30 suites take 905 s one after another). Dropped for guard.py: merge/test_merge.py (times out at 180 s); the walk suites of
+# 42 to 144 s (test_guard_beat 144, test_report_guard 107, test_checks_never_raise 71, test_sweep 59, test_stale_cites 42);
+# and the three that read not green on the unparsed copy the report mutates (test_layout, test_wrappers and
+# test_report_guard_stamped assert on guard.py's own text, which the unparse changes).
 GUARD_MODULE_DROPPED_SUITES = {
-    "hooks/guard.py": ["merge/test_merge.py"],
+    "hooks/guard.py": ["merge/test_merge.py", "hooks/test_guard_beat.py", "lint/test_report_guard.py",
+                       "hooks/test_checks_never_raise.py", "janitor/test_sweep.py", "lint/test_stale_cites.py",
+                       "lint/test_layout.py", "hooks/test_wrappers.py", "lint/test_report_guard_stamped.py"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
