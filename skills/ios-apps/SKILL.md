@@ -141,7 +141,7 @@ Pick the shape by what the test proves. Extends decision `test-practices` (P1: a
 | What the test proves | Shape | Runs where |
 | --- | --- | --- |
 | A rule (a sum, a parse, a sort, a state change) | Swift Testing in the Kit, through `swift test`. No view, no simulator. | `make kit-test`, CI and Mac |
-| A screen looks right | Render test: build the view, render it to an image at each size and theme the app ships in, and check the image. It never launches the app. | `make kit-test` or the app's unit target, CI and Mac |
+| A screen looks right | Render test: build the view, render it to an image at each size and theme the app ships in, and check the image. It never launches the app. | `make kit-test`, CI and Mac |
 | A press, a gesture or a move between screens works | XCUITest smoke: one or two cases per screen. | `make ui-test`, Mac, once per batch |
 
 - Never test a rule through the UI, and never launch the app to see a layout. Each costs a simulator for what a faster shape proves.
