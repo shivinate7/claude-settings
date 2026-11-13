@@ -6,4 +6,4 @@
 
 **Decision.** `an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop (`other-checkout`, the ceiling).
 
-**Retire.** Resolve a path built from a string join, an f-string or a bound name, and read `os.open`, `subprocess` and deletes as writes. Closed when `hooks/test_guard.py` holds a red case that refuses each form into another checkout.
+**Retire.** When `hooks/test_guard.py` holds a red case that refuses each form into another checkout, the debt is closed. To retire it, resolve a path built from a string join, an f-string or a bound name, and read `os.open`, `subprocess` and deletes as writes.
