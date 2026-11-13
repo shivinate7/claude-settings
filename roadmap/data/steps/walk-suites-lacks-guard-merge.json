@@ -1,14 +1,14 @@
 {
  "id": "walk-suites-lacks-guard-merge",
  "title": "Main's Mutation CI report fixture suite is red: skills/roadmap/test_build.py imports guard_merge but WALK_SUITES lacks it",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3z1KHLrVx2oPkwP9g",
  "owner": "triage",
  "blockedBy": [],
  "why": "A fourth red on main that no step named, so the red-main fix list is incomplete and the next merge may still read red.",
  "source": "Coordinator 17:29 CST Nov 13: lane rebuild-2123 read it from a git archive of main ab27336489, and the stack lane saw the same suite red; unchecked by triage and the coordinator.",
- "note": "Filed 17:30 CST Nov 13. Commit e34f11e755 made skills/roadmap/test_build.py import guard_merge, but WALK_SUITES at hooks/test_mutate_ci.py:1916 does not list it, so the Mutation CI report fixture suite fails. Triage grep of the roadmap record found no step naming WALK_SUITES or that commit. Fix: add guard_merge to WALK_SUITES with a case, test first. A test-file change: test-author red case first, builder, reviewer. The coordinator starts the lane; the red-main lane's baseline read of main is pending. Relations: macos-reach-rows-test-red, cost-pins-two-decisions-no-reader, hook-catalog-regen-main (the other reds on main). Past rulings not checked. Not started.",
- "updatedAt": "2026-11-13T17:30:28-06:00"
+ "note": "Filed 17:30 CST Nov 13. Commit e34f11e755 made skills/roadmap/test_build.py import guard_merge, but WALK_SUITES at hooks/test_mutate_ci.py:1916 does not list it, so the Mutation CI report fixture suite fails. Triage grep of the roadmap record found no step naming WALK_SUITES or that commit. Fix: add guard_merge to WALK_SUITES with a case, test first. A test-file change: test-author red case first, builder, reviewer. The coordinator starts the lane; the red-main lane's baseline read of main is pending. Relations: macos-reach-rows-test-red, cost-pins-two-decisions-no-reader, hook-catalog-regen-main (the other reds on main). Past rulings not checked. Not started. Lane 17:31 CST Nov 13 (coordinator 17:32): started, session_013NEJL3z1KHLrVx2oPkwP9g (lane walk-suites-guard-merge, Sonnet medium; tags cs-step:walk-suites-lacks-guard-merge, cs-topic:red-main).",
+ "updatedAt": "2026-11-13T17:31:44-06:00"
 }
