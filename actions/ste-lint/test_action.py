@@ -1233,14 +1233,13 @@ def step_line(stdout):
 
 rc, stdout, log, shas, _ = ci_job_case(short_change)
 line = step_line(stdout)
-# A stale pin under --lint is drift: judged against the stable head, else the local copy, with exit 3 and FAIL. A pinned remote
-# step gets no pin note (decision action-pins-follow-sessions).
+# A stale pin under --lint is a note on the step's PASS line, judged against the stable head, else the local copy, exit 0
+# (decision action-pins-follow-sessions: drift under --lint is a note, not an exit).
 check("ci-job pinned tree, pass: scope, the lint passed and the log holds the pin's drift line",
       "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
-check("ci-job pinned tree, pass: the ste-lint step reads FAIL with no `pin note`",
-      line.startswith("FAIL ") and "pin note" not in line, stdout)
-check("ci-job pinned tree, pass: the line holds no drift line marker", PIN_NOTE_MARKER not in line, stdout)
-check("ci-job pinned tree, pass: the job exits 3, the stale pin", rc == 3, stdout)
+check("ci-job pinned tree, pass: the ste-lint step reads PASS and its line carries the drift as a pin note",
+      line.startswith("PASS ") and PIN_NOTE_MARKER in line, stdout)
+check("ci-job pinned tree, pass: the job exits 0, the stale pin is a note under --lint", rc == 0, stdout)
 rc, stdout, log, shas, _ = ci_job_case(default_change)
 line = step_line(stdout)
 check("ci-job pin note, failing lint: scope, the drift is in the log and the lint FAILs",
