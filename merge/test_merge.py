@@ -159,6 +159,9 @@ class FakeHost:
             raise merge.Stop(self.files_error)
         return list(self.changed)
 
+    def pages(self, rel, key=None, fields=None):  # the open pull list reviewed_read reads; none open unless a case scripts one (LeftOutHost serves its own)
+        return []
+
     def pr(self, n):
         self.pr_calls.append(n)
         if n in self.batch_pulls:  # a batch case's pull request, read from its own entry
@@ -20545,6 +20548,8 @@ class LeftOutHost(FakeHost):
     """FakeHost plus the reads `merge --reviewed` makes, so a batch build can name the done pull requests it leaves out: the open pull list and the
     repo's issue comments through `pages` (Host.issue_comments and reviewed_read parse them, as in production), each head's CI, and whether one head
     contains another, read from the checkout's history as Host.holds_head reads it. `list_error` fails the open list read. Any other read is a failed case."""
+
+    issue_comments = merge.Host.issue_comments  # the real parse of the comment list, served by pages below (one home)
 
     def __init__(self, root, other):
         super().__init__(root, other)
