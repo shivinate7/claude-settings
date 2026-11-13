@@ -1152,6 +1152,7 @@ class MacHold(MailCase):
             code, out, err = cli_in_process(reader, "read", "--addr", "cloud/sess-b")
         self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
         self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
+        self.assertIn("held", err, "the held read printed no refusal: %r" % err)
         self.assertNotIn("MAILBOX_HOLD_OFF", err, "the held refusal names the variable that lifts the hold: %r" % err)
 
     def test_only_one_lifts_the_hold(self):

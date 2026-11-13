@@ -23,7 +23,7 @@ Ruling: every message between sessions goes through the git mailbox, cloud to cl
 The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
 The mailbox is read at turn start, so it cannot wake anyone.
 The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
-Local-computer checks: measured on a Mac only; Windows unmeasured.
+Local-computer checks: measured on a Mac only; the mail round trip alone is also measured on Windows (11:52 CST Nov 12), and the other Windows checks are unmeasured.
 
 Why:
 
