@@ -6285,6 +6285,8 @@ def judge(payload) -> None:
             if str(matched).endswith(question_form.PAGE_ONLY_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "stops-named-in-holds":
+            refuse(tool, "deny", "stops-named-in-holds", question_form.PAGE_REASONS["stops-named-in-holds"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
         if item_writes:

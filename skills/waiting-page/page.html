@@ -426,8 +426,21 @@ body.sheet-open { overflow: hidden; }
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
-/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
-@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+/* Three tabs fit a 320 phone on one row: the label is 15px and each count box holds two digits. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border. */
+@media (max-width: 400px) { .tabs a { padding-inline: 5px; gap: 3px; font-size: 15px; } .tabs .cnt { min-width: 2.5ch; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+/* With Designs shown the bar is four tabs. They stay on one row while they fit, and wrap with Designs above the tab list when they do not, never scrolled sideways: below 500px the padding, gaps and reserved count boxes shrink, and below 400px the label shrinks too. The wrap is in reverse so the tab list stays on the bottom row, on the border. */
+@media (max-width: 500px) {
+  .tabs:has(#tabD:not([hidden])) { flex-wrap: wrap-reverse; gap: 2px; }
+  .tabs:has(#tabD:not([hidden])) .tl { gap: 2px; }
+  .tabs:has(#tabD:not([hidden])) a { padding-inline: 6px; gap: 3px; font-size: 15px; }
+  .tabs:has(#tabD:not([hidden])) .cnt { min-width: 2.5ch; }
+  .tabs:has(#tabD:not([hidden])) .hcue { min-width: 3.5ch; gap: 2px; }
+}
+@media (max-width: 400px) {
+  .tabs:has(#tabD:not([hidden])) a { padding-inline: 3px; gap: 2px; font-size: 14px; }
+  .tabs:has(#tabD:not([hidden])) .cnt { min-width: 1.5ch; }
+  .tabs:has(#tabD:not([hidden])) .hcue { min-width: 3ch; }
+}
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -951,6 +964,118 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }
+/* Health tab (read only): docs/design/health-tab.html is the mockup. Every rule is under .hv or a name only this tab uses, so nothing above reaches it. */
+/* Grade marks: four shapes, each in its own colour, drawn as inline SVG in currentColor so forced-colors mode keeps the shape. */
+.gr { flex: none; display: block; width: 16px; height: 16px; }
+.gr.ok { color: var(--good); }
+.gr.iss { color: var(--due); }
+.gr.bad { color: var(--holds); }
+.gr.unm { color: var(--muted); }
+.gr .cut { stroke: var(--surface); }
+/* The tab's cue: the broken mark and its count, in a fixed box so the tab never changes width. */
+.tabs .hcue { display: inline-flex; align-items: center; gap: 3px; min-width: 4.5ch; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--holds); }
+.tabs .hcue:empty { display: none; }
+.tabs .hcue .gr { width: 13px; height: 13px; }
+.tabs .hcue.u { color: var(--muted); }
+.hv { display: grid; gap: 16px; min-width: 0; }
+.hv-top { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.hv-top h2 { font: 700 18px/1.25 var(--body); }
+.hv-top .intro { font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+/* The key: each grade word shows here once, with its mark and its count. Rows show the mark only. */
+.hv .gkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; font-size: 14.5px; }
+.hv .gkey li { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; }
+.hv .gkey b { font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+.hv .gkey .zero { color: var(--muted); }
+.hv .gkey .zero b { font-weight: 400; }
+/* The column icons: their words show in the table head on a wide box, and here on a narrow one. */
+.hv .ikey { display: none; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; color: var(--muted); }
+.hv .ikey span { display: inline-flex; align-items: center; gap: 6px; }
+.ci { flex: none; width: 14px; height: 14px; color: var(--muted); }
+/* The coverage line: does the table name every hook, check and skill? */
+.hv .cov { display: grid; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14.5px; }
+.hv .cov .ln b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
+.hv .cov .ln.u { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--due); font-weight: 600; }
+.hv .cov .ln.u .rg { flex: none; border-color: var(--muted); }
+.hv .cov details { font-size: 14px; color: var(--muted); }
+.hv .cov summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.hv .cov .left { display: grid; gap: 6px; margin: 0 0 8px; }
+.hv .cov .left div { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 8px; }
+.hv .cov .left div > span:first-child { white-space: nowrap; }
+.hv .cov .left code, .hv .ht code { font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
+.hv .cov .left code { color: var(--ink); }
+.hv .cov pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob .hrg { flex: none; border-color: var(--muted); }
+.hv-top .readat { border-top: 1px solid var(--line); padding-top: 2px; }
+/* The fails-silently band: the rows whose check breaks with no record. */
+.hv .quiet { display: grid; gap: 6px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: inset 4px 0 0 var(--muted); font-size: 14.5px; }
+.hv .quiet h3 { display: inline-flex; align-items: center; gap: 8px; font: 700 15px/1.3 var(--body); }
+.hv .quiet p { color: var(--muted); }
+.hv .quiet ul { display: flex; flex-wrap: wrap; gap: 0 16px; margin: 0; padding: 0; list-style: none; }
+.hv .quiet a { display: inline-flex; align-items: center; min-height: 32px; color: var(--acc); }
+@media (pointer: coarse) { .hv .quiet a { min-height: 44px; } }
+.fo { flex: none; display: inline-block; width: 15px; height: 15px; vertical-align: -2px; color: var(--muted); }
+/* The table is a real table with explicit roles: on a narrow box its rows become grids, and WebKit drops a table's roles when its display changes. */
+.ht { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; line-height: 1.45; }
+.ht th, .ht td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.ht thead th { border-top: 0; padding-block: 8px; font: 600 13px/1.3 var(--body); color: var(--muted); background: var(--chip); }
+.ht thead th.gch { width: 44px; }
+.ht thead th.whh { width: 18%; }
+.ht thead th.whyh { width: 30%; }
+.ht thead th.mkh { width: 21%; }
+.ht .gc { padding-top: 12px; }
+.ht .wh { font-weight: 700; color: var(--ink); }
+.ht .wh .fo { margin-left: 4px; }
+.ht .why, .ht .gold { color: var(--ink); }
+.ht .mk, .ht .mk code { color: var(--muted); }
+.ht .mk code { display: inline; }
+.ht .ci { display: none; }
+.ht tr:target { background: var(--acc-soft); }
+/* Tablet box: the grade and the name on the first line, the why under it, then makes and good side by side. */
+@container (max-width: 999px) {
+  .hv .ikey { display: flex; }
+  .ht, .ht tbody { display: block; }
+  .ht thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .ht tbody tr { display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .ht th, .ht td { padding: 0; border: 0; }
+  .ht .gc { grid-column: 1; grid-row: 1; padding-top: 4px; }
+  .ht .wh, .ht .why { grid-column: 2 / -1; }
+  .ht .mk, .ht .gold { display: flex; gap: 6px; align-items: flex-start; padding-top: 4px; }
+  .ht .mk { grid-column: 2; }
+  .ht .gold { grid-column: 3; }
+  .ht .ci { display: block; margin-top: 2px; }
+}
+/* Phone box: one column under the mark. */
+@container (max-width: 559px) {
+  .hv-top, .hv .quiet { padding-inline: 12px; }
+  .ht tbody tr { grid-template-columns: 18px minmax(0, 1fr); gap: 2px 10px; padding: 10px 12px; }
+  .ht .mk, .ht .gold { grid-column: 2; }
+  .hv .cov .left div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+@media (forced-colors: active) { .gr .cut { stroke: Canvas; } .hv .quiet { border-left: 4px solid CanvasText; } }
+/* The tier's order, said once under its head. Wide, it sits beside the head; on a phone it wraps under it. */
+.tier > header { flex-wrap: wrap; gap: 2px 14px; }
+.tier > header .tsub { flex: 1 1 24ch; margin: 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+/* What the answer stops, on a Blocking card and in a group head: ink and weight, so it reads beside the muted "waited". */
+.top .stops, .bundle > header .gst { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bundle > header .gst { margin-left: 12px; font-size: 14px; white-space: nowrap; }
+/* A group member whose repo is not its sub-group's: the weight and colour of "goes with No. 4". */
+.top .inrepo { font-weight: 600; color: var(--acc); overflow-wrap: anywhere; }
+/* One sub-group per repo inside a tier: a neutral letter tile, the name, a count and a solid rule, unlike the seen divider's eye and dotted rule. */
+.subgrp { display: grid; gap: 12px; padding-top: 6px; min-width: 0; }
+.subhead { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
+.subhead .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subhead .ct { font: 600 12px var(--mono); color: var(--muted); }
+.subhead .rule { flex: 1 1 0; min-width: 24px; border-top: 1px solid var(--line); }
+.rmark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--chip); color: var(--ink); display: grid; place-items: center; font: 800 12px/1 var(--wm); }
+/* The rail: each repo's run of chips starts with the same tile and the name, and the run wraps as one so a phone row never ends on a lone tile. */
+.rrun { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
+@media (min-width: 961px) { .rrun { display: flex; flex-direction: column; gap: 4px; } }
+.rrepo { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
+.rrepo .rmark { width: 20px; height: 20px; font-size: 11px; }
+/* The name shows at every size: two repos may share a first letter, so the tile alone never names a repo. */
+.rrepo .rn { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (pointer: coarse) { .rrepo { min-height: 44px; } }
+@media (min-width: 961px) { .rrepo { min-height: 26px; margin-top: 4px; } .chips-n > .rrun:first-child .rrepo { margin-top: 0; } .rrepo .rn { max-width: none; } }
 </style>
 
 <header class="hdr"><div class="in">
@@ -958,13 +1083,14 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   <div class="who"><h1 class="repo" id="repoName">Questions</h1></div>
 </div></header>
 
-<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
+<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a><a href="#" id="healthTab" role="tab" aria-selected="false" aria-controls="hPanel" tabindex="-1" hidden>Health <span class="hcue" id="hCue"></span></a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
 <div class="in main" id="qView" role="tabpanel" aria-labelledby="tabQ">
   <nav class="rail" id="rail" aria-label="Overview"></nav>
   <div class="list" id="list"><div class="empty">Loading the items waiting on you…</div></div>
 </div>
 
 <div class="in svwrap" id="sPanel" role="tabpanel" aria-labelledby="tabStatus" hidden><section class="sv" id="sView" aria-label="Status"></section></div>
+<div class="in svwrap" id="hPanel" role="tabpanel" aria-labelledby="healthTab" hidden><section class="sv" id="hView" aria-label="Health"></section></div>
 
 <section class="in asks" id="asks" aria-labelledby="asksH">
   <div class="asks-head"><h2 id="asksH"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct" id="askCount" hidden></span></h2>
@@ -1011,7 +1137,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "stops", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1158,7 +1284,7 @@ function applyIdentity() {
 // The title is "<repo> Cockpit" on both tabs; with no repo name it is "Cockpit". `part` names the tab in the header only.
 function setTitle() {
   const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
-  const part = state.tab === "s" ? "Status" : "Questions";
+  const part = { s: "Status", h: "Health" }[state.tab] || "Questions";
   document.title = (name ? name + " " : "") + "Cockpit";
   // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
   $("repoName").textContent = name || part;
@@ -1206,8 +1332,22 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
-const feed = { items: false, answers: false, receipts: false, all: [] };
+// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it. feed.meta and feed.metaFailed (the meta read failed) tell the
+// repo split that "this repo" is settled: until one is true the list and the rail draw their loading state (holdingForMeta), so no card moves when the meta lands.
+const feed = { items: false, answers: false, receipts: false, meta: false, metaFailed: false, all: [] };
+const metaSettled = () => feed.meta || feed.metaFailed;
+// The repo split reads the meta only when it arrived before the page settled. A meta that arrives after a failed read or after the wait below is ignored
+// here until reload, so no drawn card or head moves; the identity (brand, name in the header) still reads it.
+const metaKnown = () => feed.meta && !feed.metaFailed;
+// A store that goes quiet is time-limited at about 10 s (db.d.ts). When items are in and the meta has neither arrived nor failed by then, the page treats the
+// meta as failed. The timer starts once, with the first items, and is cleared when the meta settles.
+const META_WAIT_MS = 10000;
+let metaTimer = null;
+function armMetaWait() {
+  if (metaTimer !== null || metaSettled() || !state.items.length) return;
+  metaTimer = setTimeout(() => { metaTimer = null; if (!metaSettled()) { feed.metaFailed = true; render(); } }, META_WAIT_MS);
+}
+function settleMeta() { if (metaTimer !== null) { clearTimeout(metaTimer); metaTimer = null; } }
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
   // The last Send is the newest answer anywhere, a closed item's last answer included.
@@ -1235,24 +1375,97 @@ function sinkSent(it) {
   state.sunk.add(it.id); return true;
 }
 const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
+// What an answer stops: the entries of `stops`, each counted once. A group counts the union of its members' lists, so its head shows the number it sorts by.
+const stopsOf = (it) => (Array.isArray(it.stops) ? [...new Set(it.stops.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()))] : []);
+const stopsUnion = (it, read) => [...new Set(mates(it).flatMap((x) => stopsOf(read(x))))];
+// The sort inputs of an item, kept from the first render after load (an arrival: from its first render), so a writer's update on the open page moves no card
+// (ux-order-holds-still). A reload works them out again. The tier stays live, as an item that gains `holds` must still change tier.
+const sortKeys = {};
+function freezeKeys() {
+  if (!state.known) return;
+  state.items.forEach((it) => { if (!(it.id in sortKeys)) sortKeys[it.id] = { rank: it.rank, stops: stopsOf(it), added: it.added, by: it.by, repo: it.repo }; });
+}
+const K = (it) => sortKeys[it.id] || { rank: it.rank, stops: stopsOf(it), added: it.added, by: it.by, repo: it.repo };
+// This repo: meta/page `repo` (owner/name) when set, else the repo whose name part is the page's identity name. An item with no `repo` is this repo's.
+const repoSlug = (s) => (typeof s === "string" && /^[\w.-]+\/[\w.-]+$/.test(s.trim()) ? s.trim() : "");
+const nameOfRepo = (r) => String(r).split("/").pop();
+const splitMeta = () => (metaKnown() ? state.meta : null);
+const ownSlug = () => repoSlug(splitMeta() && splitMeta().repo);
+const ownName = () => (ownSlug() ? nameOfRepo(ownSlug()) : splitMeta() && splitMeta().identity && typeof splitMeta().identity.name === "string" ? splitMeta().identity.name.trim().slice(0, 40) : "");
+const isOwnRepo = (r) => {
+  const l = r.trim().toLowerCase(), own = ownSlug().toLowerCase(), name = ownName().toLowerCase();
+  if (own) return l === own || (!l.includes("/") && l === name);
+  return !!name && nameOfRepo(l) === name;
+};
+// "" is this repo; any other repo is its `owner/name` as written. The list, the rail and the cards draw only once the meta has settled (holdingForMeta).
+// With no meta in use (a failed read, or a wait that ran out), identity is unread, so there is no name to match: an item with no `repo` is this repo's and no head is drawn for it alone.
+const repoKey = (it) => { const r = K(it).repo; return typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
+// A group sits once, under the repo of its member that stops the most, this repo on a tie, then A to Z.
+function groupRepo(it) {
+  const m = mates(it);
+  if (m.length < 2) return repoKey(it);
+  return m.map((x) => [repoKey(x), stopsOf(K(x)).length]).sort((a, b) => b[1] - a[1] || (a[0] === "" ? -1 : b[0] === "" ? 1 : 0) || a[0].localeCompare(b[0]))[0][0];
+}
+// How each repo on the page reads: its name part, or its whole slug when two repos share a name part.
+function repoLabels() {
+  const keys = [...new Set(state.items.filter((i) => !isRuling(i)).map(repoKey))];
+  const own = ownSlug() || (state.items.map((i) => i.repo).find((r) => typeof r === "string" && r.trim() && isOwnRepo(r)) || "").trim();
+  const names = keys.map((k) => (k ? nameOfRepo(k) : ownName() || (own ? nameOfRepo(own) : "this repo")));
+  const label = {};
+  keys.forEach((k, i) => { label[k] = names.filter((n) => n.toLowerCase() === names[i].toLowerCase()).length > 1 ? (k || own || names[i]) : names[i]; });
+  return label;
+}
+const repoLabel = (key) => repoLabels()[key] || (key ? nameOfRepo(key) : ownName() || "this repo");
+const repoTile = (label) => (nameOfRepo(label)[0] || "?").toUpperCase();
+// The repo a group member is about, when it is not the repo its group sits under.
+const aboutOf = (it) => (it.group && mates(it).length > 1 && repoKey(it) !== groupRepo(it) ? repoLabel(repoKey(it)) : "");
+// Heads are fixed at load: a tier that drew them keeps them until reload, as sorted order does, so a Send that empties one repo leaves the rest as they are.
+const headed = {};
+function headsOn(k, plan) {
+  const on = plan.length > 1 || (plan.length === 1 && plan[0].key !== "");
+  if (on) headed[k] = true;
+  return on || !!headed[k];
+}
+// The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
+const TIER_KEY = { holds: "Most stopped work first, then triage's order, then oldest.", due: "Triage's order first, then nearest deadline, then oldest.", calm: "Triage's order first, then decisions, then oldest.", stands: "Triage's order first, then oldest." };
+const tierKey = (k, plan) => (plan.length > 1 && plan.some((g) => g.key === "") ? "This repo first. " : "") + TIER_KEY[k];
 function sorted() {
-  const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
+  freezeKeys();
+  const by = { holds: [], due: [], calm: [], stands: [], answered: [], repos: {} };
   state.items.forEach((it) => { if (isSunk(it) && itemAway(it)) return; by[isSunk(it) ? "answered" : tierOf(it)].push(it); });
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
-  const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
-  const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
-  const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
+  const age = (it) => Math.min(...mates(it).map((x) => ts(K(x).added)));
+  const dl = (it) => Math.min(...mates(it).map((x) => ts(K(x).by)));
+  const byAge = (a, b) => age(a) - age(b) || ts(K(a).added) - ts(K(b).added) || a.n - b.n;
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
-  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
+  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(K(x).rank) ? K(x).rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
+  // Blocking puts what stops the most work first; the number is the group's union, the same one its head shows.
+  const byStops = (a, b) => stopsUnion(b, K).length - stopsUnion(a, K).length;
   // Inside a tier, an arrival after load comes first, then new items before seen ones; each part keeps the order above.
   const part = (f) => (a, b) => (isArrival(a) ? 0 : 1) - (isArrival(b) ? 0 : 1) || (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
-  by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
-  by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
-  by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
-  by.stands.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
+  const keys = {
+    holds: part((a, b) => byStops(a, b) || byRank(a, b) || byAge(a, b)),
+    due: part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)),
+    calm: part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)),
+    stands: part((a, b) => byRank(a, b) || byAge(a, b)),
+  };
+  // One sub-group per repo: this repo first, then each other repo at its first item's place by the tier's key, A to Z on a tie. A group never splits.
+  Object.keys(keys).forEach((k) => {
+    const items = by[k].sort(keys[k]), taken = new Set(), repos = new Map();
+    items.forEach((it) => {
+      if (taken.has(it.id)) return;
+      const m = it.group ? items.filter((x) => x.group === it.group) : [it], r = groupRepo(it);
+      m.forEach((x) => taken.add(x.id));
+      if (!repos.has(r)) repos.set(r, []);
+      repos.get(r).push(...m);
+    });
+    by.repos[k] = [...repos.entries()].map(([key, list]) => ({ key, items: list }))
+      .sort((a, b) => (b.key === "") - (a.key === "") || keys[k](a.items[0], b.items[0]) || a.key.localeCompare(b.key));
+    by[k] = by.repos[k].flatMap((g) => g.items);
+  });
   return by;
 }
 
@@ -1281,7 +1494,7 @@ const isAnswered = (it) => isSaved(it) || isByWait(it);
 // The answer record that sets a card's place in the Answered section: its answers record, else (answered by its wait) lastAnswer.
 const sentOf = (it) => state.answers[it.id] || (answeredByWait(it) && lastOf(it)) || {};
 const waitUrl = (w) => "https://github.com/" + w.repo + (w.run ? "/actions/runs/" + w.run : "/pull/" + w.pr);
-// The page has no repo slug of its own, so the words never name the repo: the link's address holds it. A run reads as "a CI run", never by its id (ux-machine-text-hidden).
+// The words never name the repo: the link's address holds it. A run reads as "a CI run", never by its id (ux-machine-text-hidden).
 const waitWords = (w) => (w.pr ? "PR #" + w.pr : "a CI run");
 // The link holds the whole phrase after "waits on", so the words read as one link and its arrow and screen-reader words follow.
 const waitLink = (w, pre) => h("a", { href: waitUrl(w), target: "_blank", rel: "noopener" }, (pre || "") + waitWords(w), h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab"));
@@ -1719,6 +1932,9 @@ function replyMark(it) {
     : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
 const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-label": ACT_NAME.park + " No. " + it.n, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
+const andList = (xs) => (xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
+// The count of what an answer stops. The names go to a screen reader and the title; the item's `holds` line says them in words.
+const stopsMark = (list, cls) => h("span", { class: "stops" + (cls ? " " + cls : ""), title: "Stops until you answer: " + andList(list) }, "stops " + list.length, h("span", { class: "sr" }, ": " + andList(list)));
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
@@ -1730,7 +1946,11 @@ function buildCard(it) {
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (newReply(it)) top.children[0].after(replyMark(it));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
+  // A Blocking card shows what its answer stops. A group member shows none: its group head counts the union once.
+  if (T === "holds" && !sunk && !saved && !(it.group && mates(it).length > 1)) { const n = K(it).stops; if (n.length) top.append(" ", stopsMark(n)); }
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
+  const about = aboutOf(it);
+  if (about) top.append(h("span", { class: "inrepo" }, "about " + about));
   // A lane and a wait share one span, so "waits on" is said once. The link is the wait only.
   const wt = waitsOf(it), lane = laneOf(it);
   if (lane && wt) top.append(h("span", { class: "onlane waits" }, "waits on lane " + lane + " and ", waitLink(wt)));
@@ -1890,7 +2110,7 @@ function holdView(ids, back) {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), aboutOf(it), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1943,7 +2163,7 @@ function reconcile(parent, want) {
   [...parent.children].forEach((c) => { if (!keep.has(c)) c.remove(); });
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
 }
-const tierEls = {}, bundleEls = {}, seenHeads = {};
+const tierEls = {}, bundleEls = {}, seenHeads = {}, subEls = {};
 // Not "not answered": a seen card answered by a Send stays below the divider until reload.
 const SEEN_WORDS = "Asked before";
 // The line between a tier's new and seen items. The first one on the page shows the words; the others keep them for a screen reader (ux-label-once).
@@ -1960,19 +2180,28 @@ function seenHead(k, first) {
 }
 function tierEl(T) {
   if (!tierEls[T.k]) {
-    const count = h("span", { class: "ct" });
-    tierEls[T.k] = { el: h("section", { class: "tier", id: "tier-" + T.k, "aria-labelledby": "th-" + T.k }), count, head: h("header", {}, h("h2", { id: "th-" + T.k }, glyph(T.k), T.name, count)) };
+    const count = h("span", { class: "ct" }), line = h("p", { class: "tsub" });
+    tierEls[T.k] = { el: h("section", { class: "tier", id: "tier-" + T.k, "aria-labelledby": "th-" + T.k }), count, line, head: h("header", {}, h("h2", { id: "th-" + T.k }, glyph(T.k), T.name, count), line) };
   }
   return tierEls[T.k];
 }
+// One repo's sub-group inside a tier: a group labelled by its head (a letter tile, the repo name, the number of open cards). The tier key is in the id, as a repo shows in several tiers.
+function subEl(k, g, count) {
+  const id = "sh-" + k + "-" + (g.key ? "r-" + g.key : "own"), name = repoLabel(g.key);
+  if (!subEls[id]) subEls[id] = { el: h("section", { class: "subgrp", role: "group", "aria-labelledby": id }), head: h("p", { class: "subhead", id }) };
+  const e = subEls[id];
+  e.head.replaceChildren(h("span", { class: "rmark", "aria-hidden": "true" }, repoTile(name)), h("span", { class: "nm" }, name), h("span", { class: "ct" }, String(count)), h("span", { class: "rule", "aria-hidden": "true" }));
+  return e;
+}
 // The writer's title for a group, else the default words: a group that sank is answered, so it is not asked to be answered.
 const groupTitle = (slug, sunk) => (state.groups[slug] || {}).title || (sunk ? "Answered together" : "Answer these together");
-function bundleEl(slug, sunk) {
+// stops: the group's list, shown only in Blocking (a group in Answered or in another tier passes none).
+function bundleEl(slug, sunk, stops) {
   if (!bundleEls[slug]) bundleEls[slug] = { el: h("section", { class: "bundle", id: "group-" + slug }), head: h("header", {}) };
   const g = state.groups[slug] || {}, b = bundleEls[slug];
   const title = groupTitle(slug, sunk);
   b.el.setAttribute("aria-label", title);
-  b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
+  b.head.replaceChildren(linkIcon(), h("b", {}, title, stops && stops.length ? [" ", stopsMark(stops, "gst")] : null), h("p", {}, g.why || ""));
   return b;
 }
 // A section after the open tiers: a disclosure head (glyph, name, count), a line of its own, and a list. One builder for the rulings and the Answered
@@ -2095,8 +2324,14 @@ function answeredEl(items, place, lines, read) {
 }
 // The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
 const shownLines = () => state.lines.filter((it) => !itemAway(it));
+// Items are in but the meta has neither arrived nor failed: the page cannot say which repo is this one, so it draws no tier, card or head until it can
+// (no card moves when the meta lands). The rail waits the same way.
+const holdingForMeta = () => state.items.length > 0 && !metaSettled();
 function renderList() {
-  const list = $("list"), by = sorted(), want = [];
+  const list = $("list");
+  if (holdingForMeta()) { list.setAttribute("aria-busy", "true"); reconcile(list, [h("div", { class: "empty", role: "status" }, "Loading the items waiting on you…")]); return; }
+  list.removeAttribute("aria-busy");
+  const by = sorted(), want = [];
   // As renderAskList does: a focused element that a rebuild or a move drops gets its focus back by id (a Mark read press, and the Marked read line after it). Read first: the section builders move nodes while `want` is built.
   const a0 = document.activeElement, focusId = a0 && a0.id && list.contains(a0) ? a0.id : "";
   if (!state.items.length) {
@@ -2105,23 +2340,32 @@ function renderList() {
   const live = new Set();
   let wordsShown = false;
   // One card, or one group's frame with all its members, into body. A tier and the Answered section place their items the same way.
-  const place = (items, it, done, body) => {
+  const place = (items, it, done, body, blocking) => {
     const m = it.group ? items.filter((x) => x.group === it.group) : [it];
     if (m.length < 2) { done.add(it.id); body.push(entryFor(it)); return; }
     m.forEach((x) => done.add(x.id));
-    const b = bundleEl(it.group, isSunk(it)); live.add(it.group);
+    const b = bundleEl(it.group, isSunk(it), blocking ? stopsUnion(it, K) : null); live.add(it.group);
     reconcile(b.el, [b.head, ...m.map(entryFor)]);
     body.push(b.el);
   };
   TIERS.forEach((T) => {
     const items = by[T.k]; if (!items.length) return;
-    const te = tierEl(T), body = [], done = new Set();
+    const te = tierEl(T), body = [], plan = by.repos[T.k], heads = headsOn(T.k, plan);
     te.count.textContent = String(items.filter((i) => !isAnswered(i)).length);
-    let lined = false;
-    items.forEach((it) => {
-      if (done.has(it.id)) return;
-      if (!lined && isSeen(it)) { lined = true; body.push(seenHead(T.k, !wordsShown)); wordsShown = true; }
-      place(items, it, done, body);
+    te.line.textContent = tierKey(T.k, plan);
+    plan.forEach((g) => {
+      // The seen divider repeats inside each repo's sub-group; its words show on the first one of the page.
+      const part = [], done = new Set();
+      let lined = false;
+      g.items.forEach((it) => {
+        if (done.has(it.id)) return;
+        if (!lined && isSeen(it)) { lined = true; part.push(seenHead(T.k + "|" + g.key, !wordsShown)); wordsShown = true; }
+        place(g.items, it, done, part, T.k === "holds");
+      });
+      if (!heads) { body.push(...part); return; }
+      const sub = subEl(T.k, g, g.items.filter((i) => !isAnswered(i)).length);
+      reconcile(sub.el, [sub.head, ...part]);
+      body.push(sub.el);
     });
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
@@ -2187,6 +2431,7 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 // The wide rail chip shows `short` when it is a text of 24 characters or fewer, else the title (cut with an ellipsis by the chip).
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
+  if (holdingForMeta()) { $("rail").hidden = true; $("rail").replaceChildren(); return; }
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
   const total = state.items.length, sent = state.items.filter(isAnswered).length, ready = staged().filter((i) => !isRuling(i) && !i.park).length;
   rail.hidden = !total && !state.rulings.length;
@@ -2194,21 +2439,28 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (it.status === "closed" ? " sent filed" : isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (it.status === "closed" ? ", closed" : isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if ((isSunk(it) || it.status === "closed") && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (it.status === "closed" ? " sent filed" : isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (it.status === "closed" ? ", closed" : isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open") + (repoKey(it) ? ", about " + repoLabel(repoKey(it)) : ""), title: it.title, onclick: () => { if ((isSunk(it) || it.status === "closed") && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
-  const chipRow = (list) => {
-    const row = h("div", { class: "chips-n" }), seen = new Set();
+  const chipsOf = (list, into) => {
+    const seen = new Set();
     list.forEach((it) => {
       if (seen.has(it.id)) return;
       const m = it.group ? list.filter((x) => x.group === it.group) : [it];
       m.forEach((x) => seen.add(x.id));
-      row.append(m.length > 1 ? h("span", { class: "pairchips", title: groupTitle(it.group, isSunk(it)) }, m.map(chip)) : chip(it));
+      into.append(m.length > 1 ? h("span", { class: "pairchips", title: groupTitle(it.group, isSunk(it)) }, m.map(chip)) : chip(it));
     });
+    return into;
+  };
+  const chipRow = (list) => chipsOf(list, h("div", { class: "chips-n" }));
+  // A tier with repo sub-heads keeps its chips in the list's order, each repo's run starting with its tile and name. The run wraps as one.
+  const repoRuns = (plan) => {
+    const row = h("div", { class: "chips-n" });
+    plan.forEach((g) => { const name = repoLabel(g.key); row.append(chipsOf(g.items, h("span", { class: "rrun", role: "group", "aria-label": name }, h("span", { class: "rrepo", title: name }, h("span", { class: "rmark", "aria-hidden": "true" }, repoTile(name)), h("span", { class: "rn" }, name))))); });
     return row;
   };
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
-    const open = list.filter((i) => !isAnswered(i)).length, row = chipRow(list);
+    const open = list.filter((i) => !isAnswered(i)).length, row = headsOn(T.k, by.repos[T.k]) ? repoRuns(by.repos[T.k]) : chipRow(list);
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
@@ -3133,21 +3385,24 @@ function closeDesign(toItem) {
 $("dPrev").onclick = () => showDesign(dAt - 1); $("dNext").onclick = () => showDesign(dAt + 1);
 $("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesign(dList[dAt].it);
 $("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
-// Status hides #qView and never removes it, so a note typed on a card survives a switch. A load always opens Questions.
+// Status and Health hide #qView and never remove it, so a note typed on a card survives a switch. A load always opens Questions.
+const TABS = { q: ["tabQ", "qView"], s: ["tabStatus", "sPanel"], h: ["healthTab", "hPanel"] };
 function showTab(which) {
   state.tab = which;
-  const q = which === "q";
-  $("qView").hidden = !q; $("sPanel").hidden = q;
-  [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
+  Object.entries(TABS).forEach(([k, [tab, panel]]) => { const on = k === which; $(panel).hidden = !on; $(tab).setAttribute("aria-selected", String(on)); $(tab).tabIndex = on ? 0 : -1; });
   setTitle();
-  if (!q) document.dispatchEvent(new Event("statusshown"));
+  if (which === "s") document.dispatchEvent(new Event("statusshown"));
 }
 $("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
 $("tabStatus").onclick = (e) => { e.preventDefault(); showTab("s"); };
+$("healthTab").onclick = (e) => { e.preventDefault(); showTab("h"); };
 $("tabs").addEventListener("keydown", (e) => {
   if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
   if (!e.target.closest || !e.target.closest('[role="tab"]')) return;
-  e.preventDefault(); const to = state.tab === "q" ? "s" : "q"; showTab(to); $(to === "q" ? "tabQ" : "tabStatus").focus();
+  e.preventDefault();
+  const shown = Object.keys(TABS).filter((k) => !$(TABS[k][0]).hidden), at = shown.indexOf(state.tab);
+  const to = shown[(at + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
+  showTab(to); $(TABS[to][0]).focus();
 });
 
 /* ---------- Keys: A to C pick on the focused card, Ctrl or Cmd+Enter sends. Nothing on screen teaches them. ---------- */
@@ -3188,12 +3443,12 @@ render(); renderAsks();
     state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.lines = all.filter(isClosedLine); state.loaded = true;
     // The lines read at load are worked out once, so a mark this visit leaves its line in place until the next load.
     if (state.hidItems === null) state.hidItems = new Set(all.filter(isRead).map((i) => i.id));
-    feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
+    feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); armMetaWait(); render();
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; settleMeta(); keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => { feed.metaFailed = true; settleMeta(); render(); });
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();
 </script>
@@ -3809,5 +4064,114 @@ window.addEventListener("resize", () => {
     measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = phaseMap(); renderPlan();
   }, 150);
 });
+})();
+</script>
+
+<script>
+/* Health tab (read only). It reads window.ROADMAP_BUILD.healthMap, which the roadmap build bakes into the block above, and
+   never the artifact database. No healthMap key: the repo keeps no health map, so the tab stays out. The rows arrive worst
+   first from the build and are drawn in that order. The tab cue shows the broken count from every tab, so it draws at load. */
+(() => {
+const B = window.ROADMAP_BUILD, H = B && typeof B === "object" && B.healthMap && typeof B.healthMap === "object" ? B.healthMap : null;
+if (!H) return;
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
+const rows = Array.isArray(H.rows) ? H.rows : null;
+// The build's grade words (red, amber, grey, green) and the mark class each one draws.
+const GRADES = [["red", "bad", "Broken"], ["amber", "iss", "Has issues"], ["grey", "unm", "Not measured"], ["green", "ok", "Healthy"]];
+const CLS = Object.fromEntries(GRADES.map(([g, c]) => [g, c])), WORD = Object.fromEntries(GRADES.map(([g, , w]) => [g, w]));
+const KIND = { hook: "Hooks", check: "Checks", skill: "Skills", janitor: "Janitor scripts", merge: "Merge scripts" };
+const base = (p) => String(p).replace(/\/$/, "").split("/").pop();
+
+/* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.
+   Not measured: a dashed ring, the page's unknown shape. */
+function mark(c) {
+  const a = ` class="gr ${c}" viewBox="0 0 16 16" aria-hidden="true" focusable="false"`;
+  if (c === "ok") return `<svg${a}><circle cx="8" cy="8" r="7.5" fill="currentColor"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (c === "iss") return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1.4a6.6 6.6 0 0 0 0 13.2z" fill="currentColor"/></svg>`;
+  if (c === "bad") return `<svg${a}><path d="M5.2 0.6h5.6l4.6 4.6v5.6l-4.6 4.6H5.2L0.6 10.8V5.2z" fill="currentColor"/><path class="cut" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="2" stroke-linecap="round"/></svg>`;
+  return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg>`;
+}
+const GEAR = '<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M3 13l1.7-1.7M11.3 4.7L13 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const TARGET = '<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>';
+const EYE = '<svg class="fo" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.2 8s2.6-4.6 6.8-4.6S14.8 8 14.8 8s-2.6 4.6-6.8 4.6S1.2 8 1.2 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/><path d="M2.5 13.5l11-11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+/* The tab's cue: the broken mark and its count, or the dashed ring when the map did not read. With nothing broken it is empty. */
+const red = rows ? rows.filter((r) => r.grade === "red").length : 0;
+$("hCue").innerHTML = !rows ? `${mark("unm")}<span class="sr">, unknown</span>` : red ? `${mark("bad")}<span aria-hidden="true">${red}</span><span class="sr">, ${red} broken</span>` : "";
+$("hCue").classList.toggle("u", !rows);
+$("healthTab").hidden = false;
+
+function row(r) {
+  return `<tr role="row" id="hr${esc(r.n)}"><td role="cell" class="gc">${mark(CLS[r.grade] || "unm")}<span class="sr">${esc(WORD[r.grade] || "Not measured")}</span></td>`
+    + `<th role="rowheader" scope="row" class="wh">${esc(r.sees)}${r.quiet ? EYE + '<span class="sr">, fails with no record</span>' : ""}</th>`
+    + `<td role="cell" class="why">${esc(r.why)}</td>`
+    + `<td role="cell" class="mk">${GEAR}<span>${(r.mk || []).length ? r.mk.map((m) => `<code>${esc(m)}</code>`).join(", ") : esc(typeof r.noPart === "string" && r.noPart ? r.noPart : "No part is named for this row.")}</span></td>`
+    + `<td role="cell" class="gold">${TARGET}<span>${r.gold ? esc(r.gold) : "Not written yet."}</span></td></tr>`;
+}
+function table() {
+  const head = '<thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col" class="gch"><span class="sr">Grade</span></th><th role="columnheader" scope="col" class="whh">What you see</th><th role="columnheader" scope="col" class="whyh">Why this grade</th><th role="columnheader" scope="col" class="mkh">What makes it happen</th><th role="columnheader" scope="col">What good looks like</th></tr></thead>';
+  return `<table class="ht" role="table" id="healthTable" aria-label="Health, one row per thing you see, worst first">${head}<tbody role="rowgroup">${rows.map(row).join("")}</tbody></table>`;
+}
+// The kind words, lowercased and joined as a sentence: the known and the unknown coverage line both name the kinds through this.
+const kindList = (ks) => { const w = ks.map((k) => KIND[k].toLowerCase()); return w.length > 1 ? w.slice(0, -1).join(", ") + " and " + w[w.length - 1] : w[0] || "parts"; };
+function coverage() {
+  const c = H.coverage;
+  if (!c) return `<div class="cov" id="healthCover"><p class="ln u"><span class="rg unk" aria-hidden="true"></span>Coverage: unknown. The build could not read the list of ${kindList(Object.keys(KIND))}, so no one can tell if a part is missing here.</p>
+    <details><summary>What the build said</summary><pre>${esc(reason(H.coverageWhy || "no reason given"))}</pre></details></div>`;
+  const left = Object.keys(KIND).map((k) => [k, (c.left && c.left[k]) || []]);
+  const n = left.reduce((s, [, xs]) => s + xs.length, 0);
+  // The build lists each kind that has a part; a build without the list names the kinds the left-over list carries.
+  const names = kindList((Array.isArray(c.kinds) ? c.kinds : Object.keys(KIND).filter((k) => c.left && k in c.left)).filter((k) => KIND[k]));
+  return `<div class="cov" id="healthCover"><p class="ln">The rows name <b>${esc(c.named)}</b> of <b>${esc(c.total)}</b> ${esc(names)}.</p>`
+    + (n ? `<details><summary>Named by no row: ${n}</summary><div class="left">${left.filter(([, xs]) => xs.length).map(([k, xs]) => `<div><span>${KIND[k]} ${xs.length}</span><span>${xs.map((x) => `<code>${esc(base(x))}</code>`).join(", ")}</span></div>`).join("")}</div></details>` : "")
+    + "</div>";
+}
+function top() {
+  const count = (g) => rows.filter((r) => r.grade === g).length;
+  // The map's read text is "main abc1234, Nov 11": the date leads the line, the commit sits in the disclosure. Any other shape shows whole, never a made-up time.
+  const m = /^(\S+)\s+([0-9a-f]{7,40}),\s*(.+)$/.exec(String(H.read || "").trim());
+  const read = H.read ? `Measured ${esc(m ? m[3] : H.read)}` : '<span class="unk">Measured at an unknown time</span>';
+  const from = m ? `<li>From ${esc(m[1])} at <code>${esc(m[2])}</code>.</li>` : "";
+  return `<section class="hv-top" aria-labelledby="hvH"><h2 id="hvH">How well each part works</h2>
+    <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap.</p>
+    <ul class="gkey" aria-label="Grades">${GRADES.map(([g, c, w]) => { const k = count(g); return `<li${k ? "" : ' class="zero"'}>${mark(c)}<span>${w}</span><b>${k}</b></li>`; }).join("")}</ul>
+    <p class="ikey" aria-hidden="true"><span>${GEAR}What makes it happen</span><span>${TARGET}What good looks like</span></p>
+    ${coverage()}
+    <details class="readat" id="healthRead"><summary>${read}</summary><ul>${from}<li>The grades and the lines under them are as the health map held them then.</li><li>The build counts the parts the rows name each time it builds, and takes no other reading.</li></ul></details></section>`;
+}
+function quiet() {
+  const q = rows.filter((r) => r.quiet);
+  if (!q.length) return "";
+  return `<section class="quiet" aria-labelledby="qH"><h3 id="qH">${EYE}Fails with no record: ${q.length}</h3><p>When these checks break, nothing says so.</p>
+    <ul>${q.map((r) => `<li><a href="#hr${esc(r.n)}">${esc(r.sees)}</a></li>`).join("")}</ul></section>`;
+}
+// A map file that is not there is a repo with no health map yet. A map that is there and does not read is a broken one. The build's reason says which (the OS names a missing file).
+const MAP_FILE = "docs/health-map.json", missingMap = /No such file or directory/.test(String(H.why || ""));
+function noMap() {
+  const lead = missingMap ? "This page holds no health map yet, so no row can be graded." : "This page cannot read the health map, so no row can be graded.";
+  const verb = missingMap ? "build" : "fix";
+  return `<section class="box nob"><h3><span class="rg unk hrg" aria-hidden="true"></span>Health: unknown</h3>
+    <p>${lead} Your questions are not affected.</p>
+    <details><summary>What the build said</summary><pre>${esc(reason(H.why || "no reason given"))}</pre></details>
+    <button type="button" class="btn alt" id="hAsk">Copy the ask to ${verb} the health map</button>
+    <textarea id="hAskText" rows="4" readonly hidden aria-label="The ask to ${verb} the health map"></textarea></section>`;
+}
+// The ask names the repo as the page does (meta/page identity); with none, "this repo". It names the file once and gives the cause once:
+// the build's reason leads with the file name and ends with the path, so both are cut before the cause is added. A file that is there
+// but is not json says so in the ask's own words, so "is not valid json" is the cause that stays.
+const askText = () => {
+  const id = (typeof state !== "undefined" && state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  const badJson = /^(?:docs\/)?health-map\.json is not valid json: /.test(reason(H.why || ""));
+  const cause = reason(H.why || "no reason given").replace(/^(?:docs\/)?health-map\.json (?:does not read: |is not valid json: )?/, "").replace(/:\s*'[^']*health-map\.json'\s*$/, "").trim() || "no reason given";
+  return (missingMap ? "Build the health map for " : "Fix the health map for ") + (name || "this repo") + ": " + MAP_FILE + (missingMap ? " is not there" : badJson ? " is not valid json" : " does not read") + " (" + cause + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
+};
+$("hView").innerHTML = rows ? `<div class="hv">${top()}${quiet()}${table()}</div>` : noMap();
+const ask = $("hAsk");
+if (ask) ask.onclick = () => {
+  const text = askText(), box = $("hAskText"), label = ask.textContent;
+  const fallback = () => { box.value = text; box.hidden = false; box.select(); };
+  try { navigator.clipboard.writeText(text).then(() => { ask.textContent = "Copied"; setTimeout(() => { ask.textContent = label; }, 1400); }, fallback); } catch (e) { fallback(); }
+};
 })();
 </script>

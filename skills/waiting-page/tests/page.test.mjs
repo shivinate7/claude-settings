@@ -2139,6 +2139,233 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
 });
 
+// ---------------------------------------------------------------- repo sub-groups inside each tier (tier-sort-notes, sections 1 to 5)
+// Inside each tier, one sub-group per repo: a section role="group" labelled by its head (a letter tile, the repo name, the count).
+// This repo is meta/page `repo` (owner/name) when set, else the item repo whose name part matches identity.name, ignoring case.
+// Only the repo sub-groups are tested here. The `stops` key and its sort wait on an owner answer, so no case sorts by stops.
+// Names start "repo sub-groups:"; a control (green on the old code) starts "repo sub-groups control:".
+const SAMPLE = { identity: { name: "sample-repo" } };
+const inRepo = (id, n, repo, over = {}) => mk(id, n, { repo, ...over });
+// The sub-groups of one tier, in page order: each head's text with its whitespace removed (the tile, the name, the count) and the cards in it.
+// null when the tier is not on the page; [] when it draws no sub-group.
+const repoGroups = (page, k) => page.evaluate((key) => {
+  const tier = document.getElementById("tier-" + key);
+  if (!tier) return null;
+  return [...tier.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.card")].map((c) => c.id.slice(5)) };
+  });
+}, k);
+const headsOf = (groups) => groups.map((g) => g.head);
+const cardsOf = (groups) => groups.map((g) => g.cards);
+// The chip runs of one tier row on the rail, in order: each run's name, its first child's text with the whitespace removed (the tile and the name), and its chips.
+// null when the row is not on the rail; [] when the row has no runs.
+const railRuns = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  if (!row) return null;
+  return [...row.querySelectorAll('[role="group"][aria-label]')].map((g) => ({
+    name: g.getAttribute("aria-label"),
+    first: g.firstElementChild ? g.firstElementChild.textContent.replace(/\s+/g, "") : "",
+    chips: [...g.querySelectorAll(".nchip")].map((c) => c.id.slice(2)),
+  }));
+}, k);
+// The seen dividers of each sub-group, in page order: "w" when a divider shows its words, "sr" when only a screen reader hears them.
+const dividersIn = (page, k) => page.evaluate((key) => {
+  const tier = document.getElementById("tier-" + key);
+  if (!tier) return null;
+  return [...tier.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => [...g.querySelectorAll(".seenhead")].map((d) => (d.querySelector(".sr") ? "sr" : "w")));
+}, k);
+
+// Case 1: this repo first, then each other repo at the place of its first item. Beta's first item outranks alpha's, so place and A to Z differ.
+test("repo sub-groups: inside a tier, this repo comes first and each other repo sits at the place of its first item", async (t) => {
+  const items = [
+    inRepo("own-1", 1, "acme/sample-repo", { rank: 9 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }),
+    inRepo("alpha-1", 3, "acme/alpha", { rank: 1 }), inRepo("alpha-2", 4, "acme/alpha", { rank: 2 }),
+    inRepo("own-2", 5, "acme/sample-repo", { rank: 10 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["own-1", "own-2"], ["beta-1"], ["alpha-1", "alpha-2"]], "the sub-groups are not this repo first, then each repo at its first item's place");
+});
+
+// Case 1, full size: six repos and twelve items. Each repo is whole, this repo is first, and the rest follow their first items.
+test("repo sub-groups: a tier of six repos and twelve items keeps each repo whole, this repo first and the rest in first-item order", async (t) => {
+  const others = ["hotel", "golf", "foxtrot", "echo", "delta"]; // by rank, their first items are 0, 1, 2, 3, 4
+  const items = []; let n = 1;
+  others.forEach((name, i) => { for (const r of [i, i + 10]) items.push(inRepo(`${name}-${r}`, n++, `acme/${name}`, { rank: r })); });
+  for (const r of [20, 21]) items.push(inRepo(`own-${r}`, n++, "acme/sample-repo", { rank: r }));
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 6, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (6)`);
+  assert.deepEqual(cardsOf(groups), [["own-20", "own-21"], ["hotel-0", "hotel-10"], ["golf-1", "golf-11"], ["foxtrot-2", "foxtrot-12"], ["echo-3", "echo-13"], ["delta-4", "delta-14"]], "the six sub-groups are not this repo first, then the others in first-item order");
+});
+
+// Case 1, tie: two other repos whose first items agree on every key. Their order is A to Z, not the order the items were stored in.
+test("repo sub-groups: other repos whose first items tie on every key sit A to Z", async (t) => {
+  // Both other items carry n 2: no key the sort reads tells them apart, so only the repo name can.
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { added: at(1) }), inRepo("zeta-1", 2, "acme/zeta", { added: at(1) }), inRepo("alpha-1", 2, "acme/alpha", { added: at(1) })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3`);
+  assert.deepEqual(cardsOf(groups), [["own-1"], ["alpha-1"], ["zeta-1"]], "tied repos are not in A to Z order");
+});
+
+// Case 1, own repo: meta/page `repo` decides it. Another repo with the same name part is not this repo.
+test("repo sub-groups: the page's own repo is the meta/page repo when set, so another repo with the same name part is not this repo", async (t) => {
+  const items = [inRepo("own-cock", 1, "acme/cockpit", { rank: 9 }), inRepo("other-cock", 2, "other/cockpit", { rank: 0 }), inRepo("alpha-1", 3, "acme/alpha", { rank: 1 })];
+  const page = await open(t, { items, meta: { identity: { name: "cockpit" }, repo: "acme/cockpit" } }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3: other/cockpit is folded into this repo or dropped`);
+  assert.deepEqual(cardsOf(groups), [["own-cock"], ["other-cock"], ["alpha-1"]], "other/cockpit sits with this repo, or this repo is not first");
+});
+
+// Case 1, own repo: no meta/page repo, so the item whose name part matches identity.name, ignoring case, is this repo. A bare name counts too.
+test("repo sub-groups: with no meta/page repo, this repo is the item whose name part matches identity.name, ignoring case, and a bare name counts", async (t) => {
+  const items = [inRepo("own-case", 1, "acme/Sample-Repo", { rank: 5 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }), inRepo("own-bare", 3, "sample-repo", { rank: 7 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["own-case", "own-bare"], ["beta-1"]], "the matching items are not this repo's sub-group, first");
+});
+
+// Case 2: a tier with this repo and another draws a head for each. The tile is the first letter, the count is the sub-group's cards.
+test("repo sub-groups: a tier holding this repo and another draws one sub-head per repo: a letter tile, the repo name and the count", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 0 }), inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("beta-1", 3, "acme/beta", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(headsOf(groups), ["Ssample-repo2", "Bbeta1"], "a sub-head does not read the tile, the repo name and the count");
+});
+
+// Case 2, control: the single-repo tier is the page as it is today. Its cards come first, so a head drawn here would be the only change.
+test("repo sub-groups control: a tier holding only this repo draws no sub-head and keeps today's card order", async (t) => {
+  const items = [inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-1", 1, "acme/sample-repo", { rank: 0 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["own-1", "own-2"], "the tier's cards are not in today's order");
+  const groups = await repoGroups(page, "calm");
+  assert.equal(groups.length, 0, `tier-calm draws ${groups.length} sub-head(s) for this repo alone, not 0`);
+});
+
+// Case 2: a tier with only another repo keeps its head, so the owner sees whose the items are.
+test("repo sub-groups: a tier holding only another repo keeps its head, so the owner sees whose it is", async (t) => {
+  const items = [inRepo("beta-due", 1, "acme/beta", { by: "2030-11-30T12:00:00Z" }), inRepo("own-calm", 2, "acme/sample-repo")];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "due");
+  assert.ok(groups, "tier-due is not on the page");
+  assert.equal(groups.length, 1, `tier-due draws ${groups.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(groups), ["Bbeta1"], "the Upcoming tier's head does not read the other repo's tile, name and count");
+});
+
+// Case 3: an item with no repo field sits under this repo's name, so its sub-group has this repo's head.
+test("repo sub-groups: an item with no repo field sits under this repo's name", async (t) => {
+  const items = [mk("no-repo-item", 1, { rank: 0 }), inRepo("beta-1", 2, "acme/beta", { rank: 1 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["no-repo-item"], ["beta-1"]], "the item with no repo field is not under this repo's sub-group");
+  assert.deepEqual(headsOf(groups), ["Ssample-repo1", "Bbeta1"], "the item with no repo field has no head with this repo's name");
+});
+
+// Case 4: a group whose members sit in two repos is one sub-group. Which repo it sits under is the sort's to set, so the case does not check it.
+test("repo sub-groups: a group whose members sit in two repos stays in one sub-group", async (t) => {
+  const items = [
+    inRepo("g-own", 1, "acme/sample-repo", { group: "pair", rank: 5 }), inRepo("g-beta", 2, "acme/beta", { group: "pair", rank: 6 }),
+    inRepo("beta-solo", 3, "acme/beta", { rank: 0 }), inRepo("own-solo", 4, "acme/sample-repo", { rank: 7 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const withOwn = groups.filter((g) => g.cards.includes("g-own")), withBeta = groups.filter((g) => g.cards.includes("g-beta"));
+  assert.equal(withOwn.length, 1, `g-own is in ${withOwn.length} sub-groups, not 1`);
+  assert.deepEqual(withBeta, withOwn, "the group splits: g-beta is not in the sub-group that holds g-own");
+});
+
+// Case 5: the seen divider repeats inside each sub-group that has seen items. Its words show on the first divider of the page only.
+test("repo sub-groups: the seen divider repeats inside each repo sub-group, and its words show once on the page", async (t) => {
+  const items = [
+    inRepo("own-seen", 1, "acme/sample-repo", { added: at(5) }), inRepo("own-new", 2, "acme/sample-repo", { added: at(20) }),
+    inRepo("beta-seen", 3, "acme/beta", { added: at(6) }), inRepo("beta-new", 4, "acme/beta", { added: at(21) }),
+    sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const dividers = await dividersIn(page, "calm");
+  assert.deepEqual(dividers.map((d) => d.length), [1, 1], `the seen divider is not once per repo sub-group: ${JSON.stringify(dividers)}`);
+  assert.deepEqual(dividers.flat(), ["w", "sr"], "the seen divider's words do not show once on the page: the first divider shows them and each later one is for screen readers only");
+});
+
+// Case 6: the heads are fixed at load. Sending the last card of one repo removes that repo's head and no other.
+test("repo sub-groups: sending the last card of one repo removes only that repo's head, and the head left stays until reload", async (t) => {
+  const alpha = inRepo("alpha-1", 1, "acme/alpha", { rank: 0 });
+  const items = [alpha, inRepo("own-1", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const before = await repoGroups(page, "calm");
+  assert.ok(before, "tier-calm is not on the page");
+  assert.equal(before.length, 2, `tier-calm draws ${before.length} repo sub-groups before the send, not 2`);
+  await choose(page, alpha, "a");
+  await send(page);
+  await waitAnswered(page, [alpha.id]);
+  await card(page, alpha).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, alpha), "tier-answered", `No. ${alpha.n} did not move to the Answered section after its Send`);
+  const after = await repoGroups(page, "calm");
+  assert.equal(after.length, 1, `after the last alpha card was sent, tier-calm draws ${after.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(after), ["Ssample-repo2"], "sending the last alpha card changed this repo's head, or did not remove alpha's");
+});
+
+// Case 7: each repo's chip run in a tier row starts with its tile and name. The run keeps the order of the tier's cards.
+test("repo sub-groups: the rail row of a tier with two repos starts each repo's chip run with its tile and name", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 1 }), inRepo("alpha-1", 2, "acme/alpha", { rank: 0 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "calm");
+  assert.ok(runs, "the rail has no Whenever row");
+  assert.equal(runs.length, 2, `the Whenever row holds ${runs.length} repo chip runs, not 2`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Aalpha"], "a repo's chip run does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["own-1", "own-2"], ["alpha-1"]], "the chip runs do not follow the tier's card order");
+});
+
+// Case 7, control: the Answered section keeps no sub-groups, in the section or on the rail, and stays newest first.
+test("repo sub-groups control: the Answered section and its rail row draw no repo sub-groups and stay newest first", async (t) => {
+  const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta")];
+  const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }) };
+  const page = await open(t, { items, meta: SAMPLE, answers }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), ["ans-alpha", "ans-beta", "ans-own"], "the Answered section is not newest first");
+  assert.equal((await repoGroups(page, "answered")).length, 0, "the Answered section draws repo sub-groups");
+  assert.deepEqual(await railChipsIn(page, "answered"), ["ans-alpha", "ans-beta", "ans-own"], "the Answered rail row is not newest first");
+  assert.equal((await railRuns(page, "answered")).length, 0, "the Answered rail row draws repo chip runs");
+});
+
+// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
+test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and age", async (t) => {
+  const items = [
+    inRepo("own-1", 9, "acme/sample-repo", { added: at(1), rank: 0 }),
+    inRepo("a-seen", 1, "acme/alpha", { added: at(5), rank: 0 }), inRepo("a-r2", 2, "acme/alpha", { added: at(20), rank: 2 }),
+    inRepo("a-r1", 3, "acme/alpha", { added: at(25), rank: 1 }), inRepo("a-old", 4, "acme/alpha", { added: at(15) }),
+    inRepo("a-young", 5, "acme/alpha", { added: at(22) }), sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const arrival = inRepo("a-arrival", 6, "acme/alpha", { added: at(28), rank: 9 });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const alpha = groups.find((g) => g.cards.includes("a-r1"));
+  assert.ok(alpha, "no sub-group holds alpha's cards");
+  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-old", "a-young", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then age");
+});
+
 // ---------------------------------------------------------------- a reply or a step since the last visit
 // An item is new when its replied time is later than both the owner's last Send and the
 // viewer's last visit (waiting.visit, an ISO time the page writes on load after it reads the marks). A roadmap step is new when
@@ -9655,3 +9882,297 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// Health tab. The page draws window.ROADMAP_BUILD.healthMap, which the roadmap build bakes into its block. A case puts
+// a block with the healthMap it needs before the page's first script, so the page reads it on load.
+function withBuild(build) {
+  const block = `<script>window.ROADMAP_BUILD = ${JSON.stringify(build).replace(/</g, "\\u003c")};</script>`;
+  const at = html.indexOf("<script");
+  assert.ok(at >= 0, "page.html has no script tag to put the block before");
+  return html.slice(0, at) + block + html.slice(at);
+}
+// 20 rows, worst first as the build gives them: 3 broken, 4 with issues, 5 not measured, 8 healthy.
+const HM_GRADES = [...Array(3).fill("red"), ...Array(4).fill("amber"), ...Array(5).fill("grey"), ...Array(8).fill("green")];
+const HM_WORDS = [...Array(3).fill("Broken"), ...Array(4).fill("Has issues"), ...Array(5).fill("Not measured"), ...Array(8).fill("Healthy")];
+const HM_ROWS = HM_GRADES.map((grade, i) => ({ n: i + 1, grade, sees: `Sees ${i + 1}`, why: `Why ${i + 1}`, gold: null, quiet: false, mk: ["x.py"] }));
+const HM_COVERAGE = { total: 20, named: 20, left: { hook: [], check: [], skill: [] } };
+// A healthMap as the build writes it. A case overrides the fields it needs.
+const healthMap = (over = {}) => ({ read: "main abc1234, Nov 11", rows: HM_ROWS, counts: { red: 3, amber: 4, grey: 5, green: 8 }, coverage: HM_COVERAGE, why: null, coverageWhy: null, ...over });
+
+test("Health tab: the red count shows on the Health tab from the Questions tab, before Health opens", async (t) => {
+  const errors = [];
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }), errors });
+  if (!page) return;
+  assert.equal(await page.locator("#qView").isVisible(), true, "the Questions tab is not the first view");
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.equal(await page.locator("#healthTab").isVisible(), true, "the Health tab is not shown");
+  assert.match(await page.locator("#hCue .sr").textContent(), /3 broken/, "the tab shows no broken count");
+  assert.equal(await page.locator("#hPanel").isHidden(), true, "the Health panel is open before it was clicked");
+  assert.deepEqual(errors, [], "the page threw on load");
+});
+
+test("Health tab: rows are drawn in the order the build gives, worst first", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const words = await page.locator("#healthTable tbody tr td.gc .sr").allTextContents();
+  assert.equal(words.length, 20, "the table does not hold the 20 rows");
+  assert.deepEqual(words, HM_WORDS, "the rows are not drawn worst first");
+});
+
+test("Health tab: a map that does not read shows Health: unknown with its reason, one control, no table", async (t) => {
+  const build = { healthMap: healthMap({ read: null, rows: null, counts: null, coverage: null,
+    why: "unknown (health-map.json does not read: no such file)", coverageWhy: "unknown (the map did not read)" }) };
+  const page = await open(t, { pageHtml: withBuild(build) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.match(await page.locator("#healthTab").textContent(), /unknown/, "the tab does not say unknown");
+  await page.click("#healthTab");
+  const panel = await page.locator("#hPanel").textContent();
+  assert.match(panel, /Health: unknown/, "the panel does not say Health: unknown");
+  assert.match(panel, /health-map\.json does not read/, "the panel does not give the reason");
+  assert.equal(await page.locator("#healthTable").count(), 0, "a table was drawn for a map that did not read");
+  assert.equal(await page.locator("#hPanel button").count(), 1, "the unknown state does not have one copy control");
+});
+
+test("Health tab: a parts list that does not read gives Coverage: unknown, not a count", async (t) => {
+  const build = { healthMap: healthMap({ coverage: null, coverageWhy: "unknown (no hooks, checks or skills under the repo)" }) };
+  const page = await open(t, { pageHtml: withBuild(build) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const text = await page.locator("#healthCover").textContent();
+  assert.match(text, /Coverage: unknown/, "the coverage line does not say unknown");
+  assert.doesNotMatch(text, /name\s*\d+\s*of/, "the coverage line gives a count from a parts list that did not read");
+  assert.equal(await page.locator("#healthTable tbody tr").count(), 20, "the rows did not stay on the page");
+});
+
+test("Health tab: parts no row names are counted and listed by kind", async (t) => {
+  const coverage = { total: 90, named: 88, left: { hook: ["hooks/a.py"], check: [], skill: ["skills/zed/"] } };
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage }) }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const cover = page.locator("#healthCover");
+  assert.equal(await cover.count(), 1, "the coverage line is not drawn");
+  assert.match((await cover.locator(".ln").first().textContent()).replace(/\s+/g, " "),
+    /name 88 of 90 hooks, checks and skills/, "the named and total counts are not drawn");
+  assert.match(await cover.locator("summary").textContent(), /Named by no row: 2/, "the summary count is wrong");
+  const left = await cover.locator(".left").textContent();
+  assert.match(left, /Hooks 1/, "the hook kind has no count");
+  assert.match(left, /a\.py/, "the hook part is not listed");
+  assert.match(left, /Skills 1/, "the skill kind has no count");
+  assert.match(left, /zed/, "the skill part is not listed");
+  assert.doesNotMatch(left, /Checks/, "a kind with no parts is listed");
+});
+
+test("Health tab: parts in janitor/ and merge/ are counted and listed as Janitor scripts and Merge scripts", async (t) => {
+  const coverage = { total: 3, named: 1, left: { hook: [], check: [], skill: [], janitor: ["janitor/sweep.py"], merge: ["merge/launch.py"] } };
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage }) }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const cover = page.locator("#healthCover");
+  assert.equal(await cover.locator("summary").count(), 1, "no Named by no row line: the janitor and merge parts are not counted");
+  assert.match(await cover.locator("summary").textContent(), /Named by no row: 2/, "the summary count is wrong");
+  assert.equal(await cover.locator(".left").count(), 1, "the uncovered parts are not listed");
+  const text = await cover.locator(".left").textContent();
+  assert.match(text, /Janitor scripts 1/, "the janitor kind has no label");
+  assert.match(text, /sweep\.py/, "the janitor part is not listed");
+  assert.match(text, /Merge scripts 1/, "the merge kind has no label");
+  assert.match(text, /launch\.py/, "the merge part is not listed");
+});
+
+// The design review's fixes. Each case names one cause. The build's row carries a `noPart` reason for a row with no covers.
+const NO_PART_ROW = { n: 1, grade: "amber", sees: "A check kept outside this repo", why: "Why it is amber", gold: null, quiet: false, mk: [], noPart: "Kept in another repo, so no file names it" };
+for (const width of [320, 1280]) {
+  test(`Health tab: a row with no_part shows its reason in the made-by cell, at ${width} wide`, async (t) => {
+    const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ rows: [NO_PART_ROW] }) }), viewport: { width, height: 800 } });
+    if (!page) return;
+    assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+    await page.click("#healthTab");
+    const cell = page.locator("#hr1 td.mk");
+    assert.equal(await cell.count(), 1, "the no_part row has no made-by cell");
+    assert.match(await cell.innerText(), /Kept in another repo/, "the made-by cell of a no_part row shows no reason");
+  });
+}
+
+test("Health tab: the read line says Measured and keeps the commit inside the disclosure", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ read: "main abc1234, Nov 11" }) }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const summary = (await page.locator("#healthRead > summary").innerText()).replace(/\s+/g, " ");
+  assert.doesNotMatch(summary, /Graded at/, "the read line still says Graded at");
+  assert.match(summary, /Measured Nov 11/, "the read line does not say Measured with the date");
+  assert.doesNotMatch(summary, /abc1234/, "the commit sits on the read line, not in the disclosure");
+  assert.match(await page.locator("#healthRead > ul").textContent(), /abc1234/, "the disclosure does not hold the commit");
+});
+
+// A repo with no health map file: the page says so, and the ask names the file and the cause once.
+const NO_MAP = healthMap({ read: null, rows: null, counts: null, coverage: null,
+  why: "unknown (docs/health-map.json does not read: [Errno 2] No such file or directory)", coverageWhy: "unknown (the map did not read)" });
+
+test("Health tab: a repo with no health map says it holds no health map yet", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: NO_MAP }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const panel = (await page.locator("#hPanel").innerText()).replace(/\s+/g, " ");
+  assert.match(panel, /holds no health map yet/, "the no-map box does not say the repo holds no health map yet");
+});
+
+test("Health tab: the copied ask names the file and the cause once", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: NO_MAP }) });
+  if (!page) return;
+  await page.evaluate(() => {
+    if (navigator.clipboard) Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (s) => { window.__ask = s; } });
+  });
+  await page.click("#healthTab");
+  await page.click("#hAsk");
+  await page.waitForFunction(() => window.__ask !== undefined || !document.getElementById("hAskText").hidden);
+  const ask = await page.evaluate(() => (window.__ask !== undefined ? window.__ask : document.getElementById("hAskText").value));
+  assert.equal(ask.split("docs/health-map.json").length - 1, 1, "the ask names docs/health-map.json more than once");
+  assert.equal(ask.split("No such file or directory").length - 1, 1, "the ask gives the cause more than once");
+  assert.ok((ask.match(/could not read|does not read/g) || []).length <= 1, "the ask says could not read and does not read: the cause twice");
+});
+
+test("Health tab: at 390 wide with Designs shown, the tab bar stays on one row", async (t) => {
+  const it = mk("hd-design", 1, { designs: [{ slug: "s1", label: "Option a" }] });
+  const page = await open(t, { items: [it], designData: { s1: "<p>one</p>" }, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width: 390, height: 800 } });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.equal(await page.locator("#tabD").isVisible(), true, "the Designs tab is not shown");
+  const tops = await page.evaluate(() => ["tabQ", "tabStatus", "healthTab", "tabD"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
+  assert.equal(new Set(tops).size, 1, "the tab bar wraps onto two rows at 390, tops " + tops.join(", "));
+});
+
+// Parts that are janitor or merge scripts count in the total, so the sentence names them.
+const JM_COVERAGE = { total: 22, named: 20, left: { hook: [], check: [], skill: [], janitor: ["janitor/sweep.py"], merge: ["merge/launch.py"] } };
+
+test("Health tab: the coverage sentence names janitor scripts and merge scripts", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const line = (await page.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.match(line, /hooks, checks, skills, janitor scripts and merge scripts/, "the coverage sentence does not name the janitor and merge parts");
+});
+
+for (const width of [800, 1280]) {
+  test(`Health tab: the janitor and merge labels stay on one line with their counts, at ${width} wide`, async (t) => {
+    const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }), viewport: { width, height: 900 } });
+    if (!page) return;
+    await page.click("#healthTab");
+    await page.locator("#healthCover summary").click();
+    for (const kind of ["Janitor scripts", "Merge scripts"]) {
+      const label = page.locator("#healthCover .left > div").filter({ hasText: kind }).locator("span").first();
+      assert.equal(await label.count(), 1, kind + " has no label cell");
+      const lines = await label.evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; });
+      assert.equal(lines, 1, kind + " label wraps its count onto a second line at " + width + " wide");
+    }
+  });
+}
+
+// The tab bar at a phone width: no sideways scroll, each tab 44 px tall. Designs shown is the four tabs; hidden is three.
+// Designs shown at 320 is re-pointed: its slack is 5 px with one-digit counts, so the bar may wrap, with Designs above (as main does).
+for (const width of [320, 360, 375, 414, 430, 500]) for (const designs of [true, false]) {
+  const relaxed = designs && width === 320;
+  test(`Health tab: at ${width} wide with Designs ${designs ? "shown" : "hidden"}, the tabs ${relaxed ? "stay on one row or wrap with Designs above" : "stay on one row"} with no sideways scroll, each 44 px tall`, async (t) => {
+    const extra = designs ? { items: [mk("tb-design", 1, { designs: [{ slug: "s1", label: "Option a" }] })], designData: { s1: "<p>one</p>" } } : {};
+    const page = await open(t, { ...extra, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width, height: 800 } });
+    if (!page) return;
+    assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+    assert.equal(await page.locator("#tabD").isVisible(), designs, designs ? "the Designs tab is not shown" : "the Designs tab is shown with no designs");
+    const ids = designs ? ["tabQ", "tabStatus", "healthTab", "tabD"] : ["tabQ", "tabStatus", "healthTab"];
+    const boxes = await page.evaluate((ids) => ids.map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { top: Math.round(r.top), h: Math.round(r.height) }; }), ids);
+    const rows = new Set(boxes.map((b) => b.top)).size;
+    if (relaxed && rows === 2) {
+      assert.ok(boxes[3].top < Math.min(...boxes.slice(0, 3).map((b) => b.top)), "the wrapped bar does not put Designs above the other tabs");
+    } else {
+      assert.equal(rows, 1, `the tabs wrap onto ${rows} rows at ${width} wide`);
+    }
+    const scroll = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scroll <= width, `the page scrolls sideways at ${width} wide: scrollWidth ${scroll}`);
+    assert.ok(boxes.every((b) => b.h >= 44), `a tab is under 44 px tall at ${width} wide: ${boxes.map((b) => b.h).join(", ")}`);
+  });
+}
+
+// Two-digit counts (12 questions, 12 designs) under the page font and a forced DejaVu Sans: the bar never scrolls sideways,
+// and every tab's right edge stays on the screen. When the tabs do not fit, the bar wraps with Designs above.
+for (const width of [320, 360, 375, 390, 414, 430]) for (const font of ["page", "dejavu"]) {
+  test(`Health tab: at ${width} wide with Designs shown and counts 12 and 12, under the ${font === "page" ? "page" : "DejaVu Sans"} font, no sideways scroll and every tab on the screen`, async (t) => {
+    const items = Array.from({ length: 12 }, (_, i) => mk("tc" + i, i + 1, { designs: [{ slug: "s" + i, label: "Option " + i }] }));
+    const designData = Object.fromEntries(Array.from({ length: 12 }, (_, i) => ["s" + i, "<p>one</p>"]));
+    const page = await open(t, { items, designData, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width, height: 800 } });
+    if (!page) return;
+    if (font === "dejavu") await page.addStyleTag({ content: ':root { --body: "DejaVu Sans", sans-serif !important; font-family: "DejaVu Sans", sans-serif !important; }' });
+    assert.equal(await page.locator("#qCount").textContent(), "12", "the fixture does not show 12 questions");
+    assert.equal(await page.locator("#dCount").textContent(), "12", "the fixture does not show 12 designs");
+    if (font === "dejavu") assert.match(await page.evaluate(() => getComputedStyle(document.getElementById("tabQ")).fontFamily), /DejaVu/, "the forced font did not reach the tabs");
+    const ids = ["tabQ", "tabStatus", "healthTab", "tabD"];
+    const r = await page.evaluate((ids) => ({ scroll: document.documentElement.scrollWidth, rights: ids.map((id) => Math.round(document.getElementById(id).getBoundingClientRect().right)) }), ids);
+    assert.ok(r.scroll <= width, `the page scrolls sideways at ${width} wide: scrollWidth ${r.scroll}`);
+    assert.ok(r.rights.every((x) => x <= width), `a tab runs off the screen at ${width} wide: right edges ${r.rights.join(", ")}`);
+  });
+}
+
+test("Health tab: the coverage-unknown line names the same kinds as the known line", async (t) => {
+  const kinds = "hooks, checks, skills, janitor scripts and merge scripts";
+  const known = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }) });
+  if (!known) return;
+  await known.click("#healthTab");
+  const knownLine = (await known.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.ok(knownLine.includes(kinds), "control: the known coverage line does not name the kinds");
+  const unknown = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: null, coverageWhy: "unknown (no hooks, checks or skills under the repo)" }) }) });
+  if (!unknown) return;
+  await unknown.click("#healthTab");
+  const unknownLine = (await unknown.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.match(unknownLine, /Coverage: unknown/, "the line does not say Coverage: unknown");
+  assert.ok(unknownLine.includes(kinds), "the coverage-unknown line names fewer kinds than the known line");
+});
+
+test("Health tab: a bad-map copied ask keeps 'is not valid json' in its cause", async (t) => {
+  const INVALID_MAP = healthMap({ read: null, rows: null, counts: null, coverage: null,
+    why: "unknown (docs/health-map.json is not valid json: Expecting value: line 1 column 1 (char 0))", coverageWhy: "unknown (the map did not read)" });
+  const page = await open(t, { pageHtml: withBuild({ healthMap: INVALID_MAP }) });
+  if (!page) return;
+  await page.evaluate(() => {
+    if (navigator.clipboard) Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (s) => { window.__ask = s; } });
+  });
+  await page.click("#healthTab");
+  await page.click("#hAsk");
+  await page.waitForFunction(() => window.__ask !== undefined || !document.getElementById("hAskText").hidden);
+  const ask = await page.evaluate(() => (window.__ask !== undefined ? window.__ask : document.getElementById("hAskText").value));
+  assert.match(ask, /is not valid json/, "the copied ask drops the cause: it no longer says is not valid json");
+});
+
+test("Health tab: a build with no healthMap key draws no Health tab", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({}) });
+  if (!page) return;
+  // Green on the old code by design: it guards that a build with no health map draws no tab.
+  const tab = page.locator("#healthTab");
+  const shown = (await tab.count()) === 1 && (await tab.isVisible());
+  assert.equal(shown, false, "a build with no healthMap drew a Health tab");
+});
+
+test("Health tab: the arrow keys walk Questions, Status, Health and back", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.focus("#tabQ");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#tabStatus", "aria-selected"), "true", "Right from Questions did not reach Status");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#healthTab", "aria-selected"), "true", "Right from Status did not reach Health");
+  assert.equal(await page.locator("#hPanel").isVisible(), true, "Health is selected but its panel is hidden");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#tabQ", "aria-selected"), "true", "Right from Health did not wrap to Questions");
+});
+
+test("Health tab: Status still opens and keeps its Records Health card, with no Health panel", async (t) => {
+  // Green on the old code by design: it guards the Status tab against the new tab.
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  await page.click("#tabStatus");
+  assert.match(await page.locator("#svRec").textContent(), /Health/, "the Records card lost its Health part");
+  assert.equal(await page.locator("#hPanel").isHidden(), true, "Status opened the Health panel");
+});

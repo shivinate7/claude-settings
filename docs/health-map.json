@@ -1,0 +1,271 @@
+{
+  "read": "main c85a832e2, Nov 11",
+  "blind_spot": "checks that fail open with no record (rows 3, 5, 11, 20)",
+  "rows": [
+    {
+      "n": 1,
+      "sees": "A question shows on your page",
+      "grade": "amber",
+      "why": "159 changes in 7 days; 14 were fixes. 12 open debts: the judge misses a past ruling. How often you use the page is not measured.",
+      "gold": "Each question shows at the next build. No open debt. Page use is measured.",
+      "covers": [
+        "hooks/question_form.py",
+        "hooks/call_judge.py",
+        "skills/waiting-page"
+      ]
+    },
+    {
+      "n": 2,
+      "sees": "Your answer reaches the session",
+      "grade": "amber",
+      "why": "38 changes; 3 were fixes. One answer needed a second press. A peer's brief was saved as your words.",
+      "gold": "One press sends it. Only your own words are saved as yours.",
+      "covers": [
+        "hooks/local_time.py",
+        "hooks/feedback_*.py"
+      ]
+    },
+    {
+      "n": 3,
+      "sees": "Page answers copy to git",
+      "grade": "red",
+      "why": "The copy was 11 hours old on Nov 11. The writer check misses the stored shape. No test goes red on it. An unknown writer passes with no word.",
+      "gold": "The copy is under 1 hour old. A test goes red on a missed shape. An unknown writer is refused and logged.",
+      "quiet": true,
+      "covers": [
+        "lint/check_artifact_cites.py"
+      ]
+    },
+    {
+      "n": 4,
+      "sees": "A pull request or batch merges",
+      "grade": "amber",
+      "why": "186 changes; 25 were fixes. About 20 open debts. A job that timed out counted as not red.",
+      "gold": "A timed-out job counts as red. Few open debts, and none that blocks a merge.",
+      "covers": [
+        "hooks/guard_merge.py",
+        "hooks/required_check.py",
+        "lint/check_silent_undo.py",
+        "merge/merge.py",
+        "merge/launch.py",
+        "merge/repaired_merges.py"
+      ]
+    },
+    {
+      "n": 5,
+      "sees": "CI goes green or red, and a wake tells the session",
+      "grade": "red",
+      "why": "No push run on main has finished since Nov 9, 11:56 CST; 11 were cancelled. Windows shards hit the 20-minute cap and never run on a pull request. The CI wake never fires in the cloud.",
+      "gold": "Each push to main ends green or red inside 20 minutes. Every shard runs on a pull request. The wake fires on every machine.",
+      "quiet": true,
+      "covers": [
+        "hooks/ci_wake.py",
+        "hooks/action_pin.py",
+        "hooks/pin_note.py",
+        "skills/ci-hygiene"
+      ]
+    },
+    {
+      "n": 6,
+      "sees": "A lane starts",
+      "grade": "amber",
+      "why": "2 of 3 lanes started from main, not from the branch their brief named.",
+      "gold": "Every lane starts from the branch its brief names.",
+      "covers": [
+        "hooks/agent_brief.py",
+        "hooks/blind_brief.py",
+        "hooks/guard_branch_worktree.py",
+        "hooks/guard_pointer.py",
+        "hooks/own_session.py",
+        "lint/check_shared_resources.py",
+        "lint/check_ios_mockup.py",
+        "skills/project-ops",
+        "skills/design-explore",
+        "skills/impeccable",
+        "skills/ios-apps"
+      ]
+    },
+    {
+      "n": 7,
+      "sees": "A session compacts and resumes",
+      "grade": "amber",
+      "why": "4 open debts. The handoff guards fire often.",
+      "gold": "A resumed session loses no ruling. A handoff guard fires only on a real miss.",
+      "covers": [
+        "hooks/precompact_handoff.py",
+        "hooks/reread_check.py",
+        "hooks/session_start.sh"
+      ]
+    },
+    {
+      "n": 8,
+      "sees": "A hook refuses an act",
+      "grade": "amber",
+      "why": "287 changes; 38 were fixes. About 48 of 120 debts name a guard file. Only 3 guards have a canary test that proves they go red.",
+      "gold": "Each guard has a canary that goes red on its defect. Few debts name a guard.",
+      "covers": [
+        "hooks/guard*.py",
+        "hooks/mutate_*",
+        "hooks/override.py",
+        "hooks/probe.py",
+        "hooks/shared_names.py",
+        "hooks/rm_prompt_answer.py",
+        "hooks/route_match.py",
+        "lint/check_hook_dup_names.py"
+      ]
+    },
+    {
+      "n": 9,
+      "sees": "A refusal that was wrong",
+      "grade": "red",
+      "why": "62 false-alarm notes; 22 say “Fix: none”. Whether the Nov 10 cull ran is unknown. The log lives on one machine.",
+      "gold": "Each false alarm gets a fix or a ruling. The cull runs, and says so. One log for every machine.",
+      "covers": [
+        "hooks/refusal_note.py",
+        "hooks/daily_note.py"
+      ]
+    },
+    {
+      "n": 10,
+      "sees": "Sessions message each other",
+      "grade": "amber",
+      "why": "4 round trips so far. One message showed as sent and was never stored. 5 messages ever, 1 of them real. The wake is not built. Off by default, by your ruling. 35 tests, none for a lost message, the off switch or a second account.",
+      "gold": "No message is lost. Tests cover a lost message, the off switch and a second account.",
+      "covers": [
+        "hooks/mail.py",
+        "hooks/sendmessage_state.py"
+      ]
+    },
+    {
+      "n": 11,
+      "sees": "The end-of-turn report is checked",
+      "grade": "amber",
+      "why": "110 changes; 15 were fixes. The reply judge reads every fifth stop and never refuses.",
+      "gold": "Each report is read. A miss is refused once, with the reason.",
+      "quiet": true,
+      "covers": [
+        "hooks/reply_judge.py",
+        "lint/report_guard.py",
+        "lint/check_unknown_reads_contract.py"
+      ]
+    },
+    {
+      "n": 12,
+      "sees": "Spend per session",
+      "grade": "grey",
+      "why": "No spend record in git. The share of work on Haiku is not measured.",
+      "gold": "Spend per session and per model is in git, and read each week.",
+      "covers": [],
+      "no_part": "no spend record exists yet, so no part measures it"
+    },
+    {
+      "n": 13,
+      "sees": "The model cap refuses a spawn",
+      "grade": "amber",
+      "why": "9 changes; 2 were fixes. 3 open debts.",
+      "gold": "No spawn runs above its role's model without your grant. No open debt.",
+      "covers": [
+        "hooks/config_watch.py",
+        "lint/check_agent_models.py",
+        "lint/check_skill_model_rows.py"
+      ]
+    },
+    {
+      "n": 14,
+      "sees": "Review rounds and verdicts",
+      "grade": "grey",
+      "why": "How many review rounds really run is not measured.",
+      "gold": "Rounds and verdicts are counted per change. No change passes 3 rounds.",
+      "covers": [
+        "lint/check_red_run.py",
+        "lint/check_plan_refuter.py",
+        "skills/design-review"
+      ]
+    },
+    {
+      "n": 15,
+      "sees": "The roadmap and the Status tab",
+      "grade": "amber",
+      "why": "1,520 steps. The upkeep list looks for the status “active”, which no step has. 352 of 391 steps in progress were not touched in over 24 hours.",
+      "gold": "The upkeep list finds every live step. No step in progress sits untouched for a day.",
+      "covers": [
+        "skills/roadmap"
+      ]
+    },
+    {
+      "n": 16,
+      "sees": "Cleanup and stall alerts",
+      "grade": "amber",
+      "why": "The Windows sweep went red twice on main. 515 branches on origin.",
+      "gold": "The sweep is green on every platform. Only open lanes keep a branch.",
+      "covers": [
+        "hooks/stall_watch.py",
+        "hooks/sim_boot_record.py",
+        "hooks/proc_env.py",
+        "hooks/git_reads.py",
+        "hooks/git_bash.py",
+        "hooks/_nowindow.py",
+        "hooks/wait_common.py",
+        "janitor/*.py"
+      ]
+    },
+    {
+      "n": 17,
+      "sees": "Docs and the map stay true",
+      "grade": "amber",
+      "why": "The map covers 6 of about 194 code files (3%).",
+      "gold": "The map covers every code file. A stale cite fails CI.",
+      "covers": [
+        "lint/check_glossary.py",
+        "lint/check_health_map.py",
+        "lint/check_layout.py",
+        "lint/check_record_slugs.py",
+        "lint/check_debt_retire.py",
+        "lint/check_cost_pins.py",
+        "skills/fresh-prose",
+        "skills/plain-english-map"
+      ]
+    },
+    {
+      "n": 18,
+      "sees": "A CLAUDE.md rule is enforced",
+      "grade": "amber",
+      "why": "38 of 121 rules are enforced (31%). 58 have no guard or check (48%).",
+      "gold": "Each rule that a mistake can break has a guard or a check.",
+      "covers": [
+        "hooks/ruling_home.py",
+        "lint/check_claude_md_size.py",
+        "lint/check_ruling_kind.py",
+        "skills/compliance-check"
+      ]
+    },
+    {
+      "n": 19,
+      "sees": "Your edits reach every machine",
+      "grade": "amber",
+      "why": "Cloud installs: 24 of 24 OK. Your own machines: not measured. A long cloud session keeps the copy it started with.",
+      "gold": "Each machine runs main from its next session start, and each is measured.",
+      "covers": [
+        "hooks/denial_note.py",
+        "lint/check_hook_stubs.py",
+        "lint/check_landed_dirs.py",
+        "lint/check_mod_versions.py",
+        "lint/check_python_floor.py",
+        "merge/install_from_main.sh"
+      ]
+    },
+    {
+      "n": 20,
+      "sees": "A judge flags a decision or prose edit",
+      "grade": "grey",
+      "why": "The prose judge lets an edit through when the model call fails. How often is not measured.",
+      "gold": "A judge error is logged and counted on this tab.",
+      "quiet": true,
+      "covers": [
+        "hooks/prose_judge.py",
+        "hooks/decision_watch.py",
+        "lint/check_comment_narration.py"
+      ]
+    }
+  ]
+}

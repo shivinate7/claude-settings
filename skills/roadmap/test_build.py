@@ -4652,5 +4652,128 @@ class SharedTagNames(unittest.TestCase):
                 self.assertFalse(build.repo_tag_names(tag, slug))
 
 
+class HealthMap(Fixture):
+    """The Health tab's data: docs/health-map.json baked into the roadmap block as healthMap, worst grade first, with
+    the coverage line. Each case builds from main, as the page writer's build does."""
+
+    def row(self, n, grade, covers, **extra):
+        return {"n": n, "sees": "Sees %d" % n, "grade": grade, "why": "Why %d" % n, "covers": covers, **extra}
+
+    def put_map(self, rows, **top):
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "health-map.json").write_text(json.dumps({"rows": rows, **top}), encoding="utf-8")
+
+    def put_files(self, *rels):
+        for rel in rels:
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+
+    def hm(self):
+        """healthMap of a build from main. The key is asserted first, so a build with none fails on that cause."""
+        page, _ = self.build_from_main()
+        h = build_info(page).get("healthMap")
+        self.assertIsNotNone(h, "the build from main wrote no healthMap key for a repo that holds a map")
+        return h
+
+    def test_a_repo_with_no_map_and_no_check_has_no_key(self):
+        # Green on the old code by design: it guards that a repo with no health map gets no key and no tab.
+        page, _ = self.build_from_main()
+        self.assertNotIn("healthMap", build_info(page))
+
+    def test_rows_come_worst_first_and_keep_draft_order_inside_a_grade(self):
+        grades = ["green", "amber", "grey", "red", "amber", "red", "green", "grey"]
+        self.put_files("hooks/a.py")
+        self.put_map([self.row(n, g, ["hooks/a.py"]) for n, g in zip([8, 3, 5, 1, 2, 7, 4, 6], grades)])
+        h = self.hm()
+        self.assertEqual([(r["grade"], r["n"]) for r in h["rows"]],
+                         [("red", 1), ("red", 7), ("amber", 3), ("amber", 2), ("grey", 5), ("grey", 6),
+                          ("green", 8), ("green", 4)],
+                         "rows are not worst first, or the map's own order inside a grade is lost")
+        self.assertEqual(h["counts"], {"red": 2, "amber": 2, "grey": 2, "green": 2})
+
+    def test_a_row_carries_its_gold_quiet_flag_and_part_names(self):
+        self.put_files("hooks/a.py", "skills/zed/SKILL.md")
+        self.put_map([self.row(1, "red", ["hooks/a.py", "skills/zed", "hooks/guard*.py"], gold="Good is this.",
+                               quiet=True),
+                      self.row(2, "amber", ["hooks/a.py"])], read="main abc1234, Nov 11")
+        h = self.hm()
+        first, second = h["rows"]
+        self.assertEqual((first["gold"], first["quiet"], first["mk"]),
+                         ("Good is this.", True, ["a.py", "zed", "guard*.py"]),
+                         "a row lost its gold line, its quiet flag, or its part names")
+        self.assertEqual((second["gold"], second["quiet"]), (None, False))
+        self.assertEqual(h["read"], "main abc1234, Nov 11")
+
+    def test_the_coverage_line_lists_each_part_no_row_names(self):
+        self.put_files("hooks/a.py", "hooks/b.py", "lint/check_c.py", "skills/zed/SKILL.md", "skills/yak/SKILL.md")
+        self.put_map([self.row(1, "amber", ["hooks/a.py", "skills/zed"])])
+        coverage = self.hm()["coverage"]
+        self.assertIsNotNone(coverage, "coverage is None although the parts list reads")
+        self.assertEqual((coverage["total"], coverage["named"]), (5, 2), "the named and total counts are wrong")
+        self.assertEqual(coverage["left"], {"hook": ["hooks/b.py"], "check": ["lint/check_c.py"],
+                                            "skill": ["skills/yak/"]},
+                         "the parts no row names are not listed by kind")
+
+    def test_a_janitor_or_merge_part_with_no_row_is_named_under_its_own_kind(self):
+        # The check scans janitor/ and merge/. Their parts must not raise in the build, and each is listed under its kind.
+        self.put_files("hooks/a.py", "janitor/sweep.py", "merge/launch.py")
+        for rel in ("lint", "skills"):
+            (self.repo / rel).mkdir(exist_ok=True)  # hooks/, lint/ and skills/ must exist for the parts to read
+        self.put_map([self.row(1, "red", ["hooks/a.py"])])
+        self.on_main()
+        try:
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        except Exception as e:
+            self.fail("the build raised %s (%s) on a janitor or merge part with no row" % (type(e).__name__, e))
+        self.assertIn(code, (0, None), out)
+        h = build_info(self.out.read_text(encoding="utf-8")).get("healthMap")
+        self.assertIsNotNone(h, "the build wrote no healthMap key")
+        coverage = h["coverage"]
+        self.assertIsNotNone(coverage, "coverage is None although the parts list reads")
+        self.assertEqual((coverage["total"], coverage["named"]), (3, 1), "the janitor and merge parts are not counted")
+        self.assertEqual({k: v for k, v in coverage["left"].items() if v},
+                         {"janitor": ["janitor/sweep.py"], "merge": ["merge/launch.py"]},
+                         "the janitor and merge parts are not listed under their own kinds")
+
+    def test_a_map_that_does_not_read_is_unknown_with_why_never_zero(self):
+        self.put_files("hooks/a.py")
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "health-map.json").write_text("{not json", encoding="utf-8")
+        h = self.hm()
+        self.assertIsNone(h["rows"], "rows are drawn from a map that did not read")
+        self.assertIsNone(h["counts"], "counts are drawn from a map that did not read")
+        self.assertIsNone(h["coverage"], "a coverage count is drawn from a map that did not read")
+        self.assertTrue(h["why"].startswith("unknown ("), h["why"])
+        self.assertIn("not valid json", h["why"])
+
+    def test_a_repo_that_keeps_the_check_but_lost_its_map_says_unknown(self):
+        self.put_files("lint/check_health_map.py")
+        h = self.hm()
+        self.assertIsNone(h["rows"], "rows are drawn with no map to read")
+        self.assertIn("does not read", h["why"], h["why"])
+
+    def test_a_parts_list_that_does_not_read_gives_unknown_coverage_and_keeps_the_rows(self):
+        self.put_map([self.row(1, "red", ["hooks/a.py"])])  # the fixture repo holds no hooks, checks or skills
+        h = self.hm()
+        self.assertEqual(len(h["rows"]), 1, "the rows were dropped with the parts list")
+        self.assertIsNone(h["coverage"], "a coverage count is drawn from a parts list that did not read")
+        self.assertTrue(h["coverageWhy"].startswith("unknown ("), h["coverageWhy"])
+
+    def test_the_block_holds_the_key_in_the_one_roadmap_block(self):
+        self.put_files("hooks/a.py")
+        self.put_map([self.row(1, "red", ["hooks/a.py"])])
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--block", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        block = self.out.read_text(encoding="utf-8")
+        self.assertEqual(block.count("window.ROADMAP_BUILD = "), 1, "the block does not hold one ROADMAP_BUILD")
+        found = re.search(r"window\.ROADMAP_BUILD = (\{.*\});</script>", block)
+        self.assertIsNotNone(found, "the block holds no ROADMAP_BUILD JSON on one line")
+        info = json.loads(found.group(1))
+        self.assertIn("healthMap", info, "the block has no healthMap key")
+        self.assertEqual(info["healthMap"]["counts"]["red"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
