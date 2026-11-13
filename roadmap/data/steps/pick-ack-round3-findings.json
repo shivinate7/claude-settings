@@ -1,0 +1,14 @@
+{
+ "id": "pick-ack-round3-findings",
+ "title": "File #2932's round 3 debts and notes in the debt store",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Round 3 of #2932 (pick-ack-past-ruling) left two debts and three notes; the lane handed in at 11:05 CST Nov 13.",
+ "source": "lane pick-ack-past-ruling (session_013NEJL1Bx5gQkzUWiKgjPk3) 11:05 CST Nov 13",
+ "note": "DEBT 1: the Cost paragraph of decision pick-cites-ruling-before-send and the hooks/call_judge.py docstring say question_form.past_rulings starts at most 1 git process; it starts up to 4 (hooks/question_form.py line 10; the test pins 2). DEBT 2: with no decision slug cited, ruled_candidates sends every decision, debt and step index line to the judge, about 303k characters (about 75k tokens) per judged pick; the Cost paragraph states no size. NOTES: (3) docs say send_message only and \"a page item cite is unread\", while the code covers three tools and reads page answers (lint/rule_mechanisms.json questions-go-to-owner; notes line pick-check-known-limits; agent-model-cap row; records row pick-word-list-unmeasured); (4) a decisions/<slug>.md cite reads as <slug>.md, one spurious \"not among the records read\" line; (5) send_later is in guard.py's matcher but outside PICK_TOOLS, so a pick sent that way is unjudged. Record-writer lane, after #2932 merges. Depends on step triage-picks-judged waiting on #2932 too.",
+ "updatedAt": "2026-11-13T11:07:44-06:00"
+}
