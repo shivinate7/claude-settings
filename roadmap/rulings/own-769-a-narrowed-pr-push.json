@@ -1,0 +1,10 @@
+{
+ "id": "own-769-a-narrowed-pr-push",
+ "at": "2026-11-13T16:00:35-06:00",
+ "title": "A green PR run is enough for the push skip; main runs only the suites the PR skipped (reading pending)",
+ "ruling": "Owner 15:59 CST Nov 13, to the consultant, page item 769 pick a: a passing PR run is enough. Main runs only the suites the PR skipped. READING PENDING: the option text clashes with itself. \"Main runs only the suites the PR skipped\" means main still runs a large part of the suites (the narrowed-out ones), but the gain and lose lines say most merges skip most jobs and an untouched suite is not re-run on main until a later change touches it. The consultant asked the owner which he means (16:00 CST); the owner has not answered. Do not build until he does. Extends ruling push-skip-proven-tree (729 a, tree-equal skip) to a narrowed PR run.",
+ "quote": "a (recommended): a passing PR run is enough. Main runs only the suites the PR skipped.",
+ "source": "Owner chat with the consultant 15:59 CST Nov 13, relayed 16:00 CST; filed by triage. The option text was written by the consultant and carried by triage into item 769.",
+ "status": "open",
+ "step": "push-skip-proven-tree"
+}
