@@ -459,9 +459,9 @@ class RetireRun(Case):
 
 
 class WrongRefusalNote(Case):
-    """A prose debt closes on a notes line: the same change adds a line to docs/debts/notes.md that carries the debt's slug,
-    names decision cull-guard-wrong-refusals, and says `wrong refusal` (owner ruling 2026-11-10 15:04 CST). A runnable Retire
-    is judged by its test."""
+    """Covers a prose debt closed by a notes line that names a wrong refusal, because a wrong refusal closes a prose debt
+    that way. The same change adds a line to docs/debts/notes.md that carries the debt's slug, names decision
+    cull-guard-wrong-refusals, and says `wrong refusal`. A runnable Retire is judged by its test."""
 
     DECISION = "cull-guard-wrong-refusals"
     NOTE = "- d-prose: a wrong refusal by a guard. Decision: %s.\n" % DECISION
