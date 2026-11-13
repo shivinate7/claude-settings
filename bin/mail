@@ -104,8 +104,7 @@ def main(argv):
         print("MAILBOX_REPO is not set", file=sys.stderr)
         return 2
     if mail.held(env):
-        print("mail is held on this platform until its round trip passes (step session-mailbox-followups); "
-              "set %s=1 for the check" % mail.HOLD_OFF, file=sys.stderr)
+        print("mail is held on this platform until its round trip passes (step mail-mac-unhold)", file=sys.stderr)
         return 2
     addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
     if not addrs:

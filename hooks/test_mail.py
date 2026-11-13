@@ -697,6 +697,7 @@ class Offline(MailCase):
                                 "control: the turn never read the remote: %d git starts" % len(starts.git_starts()))
         self.assertFalse([line for line in lines if line.startswith(UNKNOWN)],
                          "a healthy empty store printed 'mail unknown:': %r" % lines)
+        self.assertEqual(lines, [], "a store with no mail ref printed a line: %r" % lines)
 
 
 class Cost(MailCase):
@@ -1077,7 +1078,7 @@ class SshBatchDefault(MailCase):
 
 
 class MacHold(MailCase):
-    """Step session-mailbox-followups: until its own round trip passes, a Mac gets nothing from the settings.json default.
+    """Step mail-mac-unhold: until its own round trip passes, a Mac gets nothing from the settings.json default.
     The turn-start line and the `mail` command are both held there. MAILBOX_HOLD_OFF=1 lifts the hold, for the owner's
     check card and for every other case in this file (fixture_env sets it)."""
 
@@ -1130,6 +1131,7 @@ class MacHold(MailCase):
             code, out, err = cli_in_process(reader, "read", "--addr", "cloud/sess-b")
         self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
         self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
+        self.assertNotIn("MAILBOX_HOLD_OFF", err, "the held refusal names the variable that lifts the hold: %r" % err)
 
     def test_only_one_lifts_the_hold(self):
         for value in ("0", "false", ""):
