@@ -4918,9 +4918,19 @@ ANSWERS_REASON = ("this call would write an answer on the waiting page. An answe
 GIT_VALUE_OPTIONS = ("-m", "-F", "-C", "-c", "--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message")
 
 
+def _answers_name():
+    """The answers collection name (lint/layout.py WAITING_ANSWERS), or "" when the layout cannot be imported: an
+    install with no lint folder beside hooks/ must not crash every shell call, so the rule then allows."""
+    try:
+        return _layout_module().WAITING_ANSWERS
+    except ImportError:
+        return ""
+
+
 def _answers_word(word, cwd):
     """shell_write_hit's predicate: True for a word that names a path in the answers folder."""
-    if not isinstance(word, str) or _layout_module().WAITING_ANSWERS not in word:
+    name = _answers_name()
+    if not isinstance(word, str) or not name or name not in word:
         return False
     import question_form
     return question_form.is_answers_path(word, cwd)
@@ -4971,7 +4981,8 @@ def _answers_path_at(word, where):
 
 def answers_shell_hit(raw, cwd):
     """The answers path the shell command writes, else ''."""
-    if not isinstance(raw, str) or _layout_module().WAITING_ANSWERS not in raw:
+    name = _answers_name()
+    if not isinstance(raw, str) or not name or name not in raw:
         return ""   # the one cheap read: a command that never says "answers" writes none
     return (shell_write_hit(raw, cwd, _answers_path_at, follow_cd=True, literal_cd=True)
             or (interpreter_may_write(raw) and interpreter_write_hit(raw, cwd, _answers_path_at, literal_cd=True))

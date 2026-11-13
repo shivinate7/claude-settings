@@ -4,7 +4,7 @@
 
 The guard refuses a session's write into the answers of the waiting page (rule `answers-session-write`). It is pick 2 of decision `waiting-page-one-store` (taken by the coordinator, 2026-11-12 11:43 CST, as an undoable pick).
 
-- Owner rulings: item 635 pick a (2026-11-12 15:46 CST) allows a delete of an answer; item 699 pick b (2026-11-13 11:08 CST) merges this guard as built, and has a separate guard built for a record that credits him with a pick a session made.
+- Owner rulings. Cockpit item 635, pick a (2026-11-12 15:46 CST, on whether a delete passes): an `ArtifactData` delete of an answer passes. Cockpit item 699, pick b (2026-11-13 11:08 CST): this guard merges as built. Step `owner-credit-guard` builds a separate guard, which stops a record from crediting him with a pick a session made.
 - An answer is the owner's own reply. The page reads it as his grant, so a session that writes one forges a grant he never gave.
 - Incident class: Claude writing an answer by mistake in normal work, for example while it tests another rule: six existing test families write an answers record only to test another rule. `SKILL.md` "Read the answers" said "this sentence is the only guard" before this rule.
 - The rule judges four surfaces, through one path test and one field test in `hooks/question_form.py` (`is_answers_path`, `answers_write_hit`):
