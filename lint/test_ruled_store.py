@@ -8,7 +8,10 @@ The store is roadmap/rulings/<id>.json on origin/roadmap. Each case builds a rea
 the module's functions or runs its CLI. RULED_STORE_UNDER_TEST overrides the module path, as a mutant run needs.
 hooks/test_session_start.py and hooks/test_question_form.py import this file as `fixture` for the same helpers.
 """
+import contextlib
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -130,6 +133,14 @@ def entry_lines(lines):
     return lines[1:-1]
 
 
+def git_starts(trace):
+    """The git commands a GIT_TRACE file records, one per git start; [] when the file was never written."""
+    if not os.path.exists(trace):
+        return []
+    with open(trace, encoding="utf-8") as handle:
+        return [line.split("built-in: git ", 1)[1].strip() for line in handle if "built-in: git " in line]
+
+
 class RepoCase(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="ruled_store_", dir=run_folder())
@@ -144,6 +155,13 @@ class RepoCase(unittest.TestCase):
         if main is not None:
             fixture.point_ref(repo, fixture.MAIN_REF, main, self.root)
         return repo
+
+    def store_with(self, name, entries, steps=None, main=None):
+        """A repo whose origin/roadmap holds `entries` ({id: entry}) and the step files `steps`, and whose origin/main
+        is the tree `main` when one is given."""
+        files = fixture.ruling_files(entries)
+        files.update(steps or {})
+        return self.make_repo(name, store=files, main=main)
 
 
 class RuledEntriesTests(RepoCase):
@@ -515,17 +533,15 @@ class SessionLinesTests(RepoCase):
         self.assertEqual(listed, ["cst", "cdt"], "newest first by instant, got %r" % listed)
 
 
-def step_file(slug, status):
-    """The roadmap step file a store ref carries for `slug`, with its status."""
-    return {"roadmap/data/steps/%s.json" % slug: '{"slug": "%s", "status": "%s"}' % (slug, status)}
+def step_file(slug, status, **over):
+    """The roadmap step file a store ref carries for `slug`, with its status and any keys in `over` (a `lane`, say;
+    None is written as null). With no `over`, the file has no lane key."""
+    body = {"slug": slug, "status": status}
+    body.update(over)
+    return {"roadmap/data/steps/%s.json" % slug: json.dumps(body)}
 
 
 class CheckStoreTests(RepoCase):
-    def store_with(self, name, entries, steps=None):
-        files = fixture.ruling_files(entries)
-        files.update(steps or {})
-        return self.make_repo(name, store=files)
-
     def test_a_clean_store_has_no_problem(self):
         repo = self.store_with("clean", {"ok": fixture.entry("ok")})
         self.assertEqual(ruled_store.check_store(repo), [], "a clean store has a problem")
@@ -645,6 +661,207 @@ class CheckStoreTests(RepoCase):
                       "check did not name the open entry on a done step")
 
 
+LANDED = {"path": "docs/rules.md", "contains": RULING_LAND}  # its text is on main in ON_MAIN, not in NOT_ON_MAIN
+ON_MAIN = {"docs/rules.md": RULING_LAND + "\n"}
+NOT_ON_MAIN = {"docs/rules.md": "Nothing here yet.\n"}
+OLD_AT = "2019-03-01T09:00:00-06:00"  # an old entry is still listed: the stale list has no age limit
+
+
+def stale_id(line):
+    """The entry id that a `stale` output line names: its first word, without a trailing colon."""
+    return line.split()[0].rstrip(":")
+
+
+def stale_ids_of(lines):
+    return [stale_id(line) for line in lines]
+
+
+def stale_line(lines, rid):
+    """The `stale` output line that names entry `rid`, or None."""
+    return next((line for line in lines if stale_id(line) == rid), None)
+
+
+def tree_digest(root):
+    """{relative path: sha256 of its bytes} for each file under `root`, so a test can tell what a run wrote."""
+    digest = {}
+    for folder, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.join(folder, name)
+            with open(path, "rb") as handle:
+                digest[os.path.relpath(path, root)] = hashlib.sha256(handle.read()).hexdigest()
+    return digest
+
+
+class StaleEntriesTests(RepoCase):
+    """`stale REPO` prints one line per open entry whose step is done, or whose step file has no lane, while main
+    still lacks the ruling. The cases run the CLI in a child process, so a subcommand that is missing shows as an
+    exit code and no lines, never as an exception in this run."""
+
+    def stale_run(self, repo):
+        """(the child process, its non-empty output lines) of `stale REPO`."""
+        proc = subprocess.run([sys.executable, MODULE, "stale", repo], capture_output=True, text=True, timeout=60)
+        return proc, [line for line in proc.stdout.splitlines() if line.strip()]
+
+    def test_control_the_existing_readers_see_the_fixture_the_cases_expect(self):
+        repo = self.store_with("control", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "busy": fixture.entry("busy", step="step-doing"),
+            "absorbed": fixture.entry("absorbed", step="step-done", lands_in=LANDED),
+            "shut": fixture.entry("shut", step="step-done", status="closed"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-doing", "doing", lane="lane-a")}, main=ON_MAIN)
+        opened = ruled_store.open_entries(ruled_store.ruled_entries(repo), repo)
+        self.assertEqual(sorted(ids(opened)), ["busy", "stale"],
+                         "control: open_entries did not keep the two open entries")
+        self.assertIn("step step-done is done but entry stale is still open", ruled_store.check_store(repo),
+                      "control: check_store did not flag the open entry on the done step")
+
+    def test_an_open_entry_on_a_done_step_is_listed_and_one_already_on_main_is_not(self):
+        repo = self.store_with("done", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "absorbed": fixture.entry("absorbed", step="step-done", lands_in=LANDED),
+        }, steps=step_file("step-done", "done"), main=ON_MAIN)
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "stale did not list the open entry whose step is done: %r" % lines)
+        self.assertIn("done", stale_line(lines, "stale"),
+                      "the line for the done-step entry does not say its step is done: %r" % lines)
+        self.assertNotIn("absorbed", stale_ids_of(lines),
+                         "stale listed an entry whose ruling is already on main: %r" % lines)
+
+    def test_an_open_entry_on_a_step_that_is_not_done_but_has_a_lane_is_not_listed(self):
+        repo = self.store_with("busy", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "busy": fixture.entry("busy", step="step-doing"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-doing", "doing", lane="lane-a")})
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines),
+                      "control: stale did not list the open entry whose step is done: %r" % lines)
+        self.assertNotIn("busy", stale_ids_of(lines),
+                         "stale listed an entry whose step is doing and has a lane: %r" % lines)
+
+    def test_an_open_entry_on_a_step_that_is_doing_with_no_lane_is_listed(self):
+        cases = (("lane is null", {"lane": None}), ("lane is missing", {}), ("lane is empty", {"lane": ""}))
+        for index, (label, over) in enumerate(cases):
+            with self.subTest(case=label):
+                repo = self.store_with("nolane-%d" % index, {"stale": fixture.entry("stale", step="step-doing")},
+                                       steps=step_file("step-doing", "doing", **over))
+                proc, lines = self.stale_run(repo)
+                self.assertIn("stale", stale_ids_of(lines),
+                              "stale did not list an open entry whose step is doing and %s: %r" % (label, lines))
+                self.assertIn("lane", stale_line(lines, "stale"),
+                              "the line for the no-lane entry does not name the lane: %r" % lines)
+
+    def test_a_closed_entry_is_not_listed_even_when_its_step_is_done(self):
+        repo = self.store_with("shut", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "shut": fixture.entry("shut", step="step-done", status="closed"),
+        }, steps=step_file("step-done", "done"))
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "control: stale did not list the open entry on a done step: %r"
+                      % lines)
+        self.assertNotIn("shut", stale_ids_of(lines), "stale listed a closed entry: %r" % lines)
+
+    def test_an_open_entry_with_no_step_is_not_listed(self):
+        repo = self.store_with("nostep", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "bare": fixture.entry("bare"),
+        }, steps=step_file("step-done", "done"))
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "control: stale did not list the open entry on a done step: %r"
+                      % lines)
+        self.assertNotIn("bare", stale_ids_of(lines), "stale listed an entry that names no step: %r" % lines)
+
+    def test_an_open_entry_whose_step_file_is_missing_is_not_listed(self):
+        repo = self.store_with("nofile", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "gone": fixture.entry("gone", step="step-gone"),
+        }, steps=step_file("step-done", "done"))
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "control: stale did not list the open entry on a done step: %r"
+                      % lines)
+        self.assertNotIn("gone", stale_ids_of(lines), "stale listed an entry whose step file is missing: %r" % lines)
+
+    def test_an_old_entry_on_a_done_step_is_listed_however_old_it_is(self):
+        repo = self.store_with("old", {"old": fixture.entry("old", at=OLD_AT, step="step-done")},
+                               steps=step_file("step-done", "done"))
+        proc, lines = self.stale_run(repo)
+        self.assertIn("old", stale_ids_of(lines),
+                      "stale did not list an open entry from %s on a done step: %r" % (OLD_AT, lines))
+
+    def test_every_stale_entry_is_listed_in_a_full_store_not_only_the_newest_five(self):
+        entries = {"s%02d" % day: fixture.entry("s%02d" % day, at="2026-11-%02dT09:00:00-06:00" % day,
+                                               step="step-done")
+                   for day in range(1, 13)}
+        repo = self.store_with("full", entries, steps=step_file("step-done", "done"))
+        proc, lines = self.stale_run(repo)
+        self.assertEqual(sorted(stale_ids_of(lines)), sorted(entries),
+                         "stale did not list all twelve stale entries: %r" % lines)
+
+    def test_stale_exits_zero_and_prints_nothing_when_nothing_is_stale(self):
+        empty = {
+            "closed only": self.store_with("closed-only",
+                                           {"shut": fixture.entry("shut", step="step-done", status="closed")},
+                                           steps=step_file("step-done", "done")),
+            "no roadmap": self.make_repo("no-roadmap", main={"README.md": "main\n"}),
+        }
+        for label, repo in empty.items():
+            with self.subTest(case=label):
+                proc, lines = self.stale_run(repo)
+                self.assertEqual(proc.returncode, 0, "stale exited %d on %s, want 0: %s"
+                                 % (proc.returncode, label, proc.stderr.strip()))
+                self.assertEqual(lines, [], "stale printed lines on %s: %r" % (label, lines))
+
+    def test_stale_starts_only_the_git_reads_the_store_needs(self):
+        full = self.store_with("cost-full", {
+            "a": fixture.entry("a", step="step-done", lands_in=LANDED),
+            "b": fixture.entry("b", step="step-doing"),
+            "c": fixture.entry("c"),
+            "d": fixture.entry("d", step="step-done", status="closed"),
+            "e": fixture.entry("e", lands_in=LANDED),
+            "f": fixture.entry("f", step="step-done"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-doing", "doing", lane="lane-a")},
+            main=NOT_ON_MAIN)
+        bare = self.store_with("cost-bare", {"a": fixture.entry("a"), "b": fixture.entry("b"),
+                                             "c": fixture.entry("c")})
+        read_trace = os.path.join(self.root, "read.trace")
+        with mock.patch.dict(os.environ, {"GIT_TRACE": read_trace}):
+            ruled_store.ruled_entries(full)
+        control = sorted(start.split()[0] for start in git_starts(read_trace))
+        self.assertEqual(control, ["cat-file", "ls-tree"], "control: one read of the store started git %r" % control)
+        cases = (("with lands_in and steps", full, ["cat-file", "cat-file", "cat-file", "ls-tree"]),
+                 ("with neither", bare, ["cat-file", "ls-tree"]))
+        for index, (label, repo, want) in enumerate(cases):
+            with self.subTest(case=label):
+                trace = os.path.join(self.root, "stale-%d.trace" % index)
+                with mock.patch.dict(os.environ, {"GIT_TRACE": trace}):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        ruled_store.main(["stale", repo])
+                got = sorted(start.split()[0] for start in git_starts(trace))
+                self.assertEqual(got, sorted(want), "stale started git %r %s, want %r" % (got, label, sorted(want)))
+
+    def test_stale_starts_no_process_but_git_and_writes_no_file(self):
+        repo = self.store_with("procs", {
+            "a": fixture.entry("a", step="step-done", lands_in=LANDED),
+            "b": fixture.entry("b", step="step-doing"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-doing", "doing", lane="lane-a")},
+            main=NOT_ON_MAIN)
+        with mock.patch.object(subprocess, "Popen", wraps=subprocess.Popen) as popen:
+            ruled_store.ruled_entries(repo)
+            control = [call[0][0] for call in popen.call_args_list]
+            popen.reset_mock()
+            before = tree_digest(self.root)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                ruled_store.main(["stale", repo])
+            started = [call[0][0] for call in popen.call_args_list]
+        after = tree_digest(self.root)
+        self.assertTrue(control and all(os.path.basename(argv[0]) == "git" for argv in control),
+                        "control: the existing read did not start git through subprocess.Popen: %r" % control)
+        self.assertTrue(started, "stale started no process at all, so it reads nothing")
+        others = sorted({os.path.basename(argv[0]) for argv in started} - {"git"})
+        self.assertEqual(others, [], "stale started a process other than git: %r" % others)
+        changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
+        self.assertEqual(changed, [], "stale wrote or changed files under the test tree: %r" % changed)
+
+
 class CostAndCliTests(RepoCase):
     def test_reading_the_store_starts_one_ls_tree_and_one_cat_file(self):
         repo = self.make_repo("cost", store=fixture.ruling_files(
@@ -653,8 +870,7 @@ class CostAndCliTests(RepoCase):
         with mock.patch.dict(os.environ, {"GIT_TRACE": trace}):
             entries = ruled_store.ruled_entries(repo)
         self.assertEqual(len(entries), 6, "control: the six entries did not all read")
-        with open(trace, encoding="utf-8") as handle:
-            starts = [line.split("built-in: git ", 1)[1].strip() for line in handle if "built-in: git " in line]
+        starts = git_starts(trace)
         self.assertEqual(len(starts), 2, "git starts for one read: %r" % starts)
         self.assertTrue(any("ls-tree" in start for start in starts), "no ls-tree start: %r" % starts)
         self.assertTrue(any("cat-file --batch" in start for start in starts), "no cat-file --batch start: %r" % starts)
