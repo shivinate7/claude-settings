@@ -601,6 +601,19 @@ def spo_cp_own_file_case():
                                                                    "of it is allowed")
 
 
+def spo_cp_top_level_case():
+    """Agent A writes src.py. The top-level session (no agent_id) copies it to c.py with cp: the file is the
+    session's own now, as any write of that call makes it, so agent B's run of c.py is allowed."""
+    fx = spo_fixture("cp-top")
+    src = os.path.join(fx["scratch"], "src.py")
+    dest = os.path.join(fx["scratch"], "c.py")
+    problems = [spo_scope(fx, "cp-mv 9", src)] + spo_wrote(fx, "cp-mv 9", SPO_WRITER, src, PY_TEXT)
+    problems += spo_wrote(fx, "cp-mv 9", None, dest, PY_TEXT, tool="Bash", command="cp %s %s" % (src, dest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_allowed("cp-mv 9, B's run of the top-level session's copy", got, reason))
+    return spo_result(problems, "the top-level session's cp of agent A's file clears the record, and B's run is allowed")
+
+
 def spo_cp_unrecorded_case():
     return spo_cp_keeps_cases("cp-keeps-none", "cp-mv 8", None, "agent B's copy of a file with no recorded writer is "
                                                                 "B's, and B's run of it is allowed")
@@ -1473,6 +1486,8 @@ spo_register("scratchpad-owner: cp-mv 3 agent B copies agent A's file with cp, a
              spo_cp_own_case)
 spo_register("scratchpad-owner: cp-mv 7 agent B copies its own file with cp, and runs the copy: allowed",
              spo_cp_own_file_case)
+spo_register("scratchpad-owner: cp-mv 9 the top-level session's cp of agent A's file, then agent B's run of the copy: "
+             "allowed", spo_cp_top_level_case)
 spo_register("scratchpad-owner: cp-mv 8 agent B copies a file with no recorded writer with cp, and runs the copy: "
              "allowed", spo_cp_unrecorded_case)
 spo_register("scratchpad-owner: cp-mv 4 agent B's mv of agent A's file to m.py, approved by the owner: A's run of "
