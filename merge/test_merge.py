@@ -17034,11 +17034,12 @@ class ReviewGuardHostFiles(unittest.TestCase):
             fn(7, 1)
 
 class ReviewGuardCost(ReviewEnv):
-    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
-    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+    """`--review-record` without --fix-check makes exactly three gh reads, for a pull request of up to 100 files: the pull request, then its files
+    list (one page up to 100 files), then its comments (issues/comments). They are counted at the one seam every call goes through (PullsHost in
+    count mode), as ReviewedList counts its reads."""
 
-    def test_the_record_makes_two_gh_reads(self):
-        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+    def test_the_record_makes_three_gh_reads(self):
+        # a PR of 100 files is one page, so its whole list is still one read: three reads for any PR of up to 100 files
         hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
         for guard, files in (("no", None), ("yes", None), ("no", hundred)):
             with self.subTest(guard=guard, files=len(files) if files else 1):
@@ -17047,7 +17048,7 @@ class ReviewGuardCost(ReviewEnv):
                                              "--round", "1:reviewer:sonnet:PASS", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
-                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", "issues/comments"], "the record's gh reads, in order")
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
