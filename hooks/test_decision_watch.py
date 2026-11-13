@@ -20,11 +20,15 @@ import subprocess
 import sys
 import tempfile
 import time
+import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 MODULE_PATH = os.environ.get("DECISION_WATCH_UNDER_TEST") or os.path.join(HERE, "decision_watch.py")
 
 _spec = importlib.util.spec_from_file_location("decision_watch_under_test", MODULE_PATH)
@@ -1976,6 +1980,69 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
                           local_turn="2026-11-01T12:00:00-06:00")
 
 
+# The cost of one invoke_model call: one `claude` child and no other, and one isolation temp root
+# made and removed inside the call. Once per call, on success, timeout and start failure alike.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def setUp(self):
+        # The isolation root is made under self.sub (tempfile.tempdir), so self.sub holds nothing
+        # but what invoke_model leaves. The config is a scratch dir, never the machine's own.
+        self.sub = tempfile.mkdtemp(dir=self.base)
+        self.cfg = tempfile.mkdtemp(dir=self.base)
+        prior = tempfile.tempdir
+        tempfile.tempdir = self.sub
+        self.addCleanup(setattr, tempfile, "tempdir", prior)
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def call(self, stub):
+        with mock.patch.object(dw._nowindow, "run", stub):
+            return dw.invoke_model("P")
+
+    def assert_one_claude_and_clean(self, stub):
+        argvs = stub.argvs()
+        self.assertEqual(cost_probe.names(argvs), ["claude"],
+                         "one model call starts exactly one child, the claude binary; got %r" % (argvs,))
+        cwd = stub.calls[0][1].get("cwd") or ""
+        self.assertEqual(os.path.realpath(os.path.dirname(cwd)), os.path.realpath(self.sub),
+                         "the isolation root is made under this case's folder; cwd is %r" % cwd)
+        self.assertEqual(cost_probe.leftovers(self.sub), [],
+                         "the isolation root is removed when the call ends; this is left behind")
+
+    def test_a_reply_starts_one_claude_child_and_leaves_no_temp_folder(self):
+        stub = cost_probe.StubRun(result=_FakeCompletedProcess(0, json.dumps({"result": json.dumps(ALLOW)}), ""))
+        verdict, error = self.call(stub)
+        self.assertIsNone(error, "a valid reply is no error")
+        self.assertEqual(verdict, ALLOW)
+        self.assert_one_claude_and_clean(stub)
+
+    def test_a_timeout_starts_one_claude_child_and_leaves_no_temp_folder(self):
+        stub = cost_probe.StubRun(error=subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT),
+                                  fails=lambda argv: "-p" in argv)
+        verdict, error = self.call(stub)
+        self.assertIsNone(verdict)
+        self.assertTrue(error, "a timeout is an error, not a verdict")
+        self.assert_one_claude_and_clean(stub)
+
+    def test_a_start_failure_starts_one_claude_attempt_and_leaves_no_temp_folder(self):
+        stub = cost_probe.StubRun(error=FileNotFoundError(2, "No such file or directory", "claude"),
+                                  fails=lambda argv: "-p" in argv)
+        verdict, error = self.call(stub)
+        self.assertIsNone(verdict)
+        self.assertTrue(error, "a start failure is an error, not a verdict")
+        self.assert_one_claude_and_clean(stub)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2050,6 +2117,8 @@ def main():
         case_unread_zone_less_line_reads_as_local_under_cst,
     ):
         run_case(case)
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
