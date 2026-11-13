@@ -5,7 +5,8 @@ for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, SUBORDINATORS
 STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
-in step with the text.
+in step with the text. The one exception is the "as" branch of lead_opens_clause, which is quadratic in the count of "as"
+in one clause (note pe-as-branch-quadratic).
 
 sentences(text, mask) -> [(start, end)]: the spans tile the text and each keeps its terminator. `mask` holds one bool per
 character, True inside a code span or a quote: the parser reads those characters as blanks and reads no quote itself.
