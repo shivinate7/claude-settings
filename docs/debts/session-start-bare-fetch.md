@@ -1,0 +1,6 @@
+# SessionStart hook fetches every branch
+
+- **What.** The `SessionStart` hook in `settings.json` runs a bare `git fetch -q origin`, which fetches every branch (2,715 remote-tracking refs counted on 2026-11-12). It is a second copy of the `fetch --prune origin` in `hooks/session_start.sh`, and the two can run at once. It also ties main and stable freshness to unrelated ref errors. One D/F conflict makes the fetch fail, so the hook logs "fetch of origin/main failed" and skips the fast-forward and the `ls-remote`. The README's `git ls-remote` cost claim is unproven: test case 34 of `merge/test_install_from_main.sh` counts only `fetch` lines.
+- **Where.** `settings.json`, the `SessionStart` command with `fetch -q origin` (line 182). `hooks/session_start.sh` (about line 70). README, the "Cost, per session start or resume" paragraph (about lines 394-400).
+- **Decision.** `merge-reinstalls-from-main` (the SessionStart refresh that moves the pinned checkout).
+- **Retire.** Make the hook one fetch with a narrow glob refspec for `main` and `stable`. Re-point test case 47 and test case 34 of `merge/test_install_from_main.sh` to that form, and have case 34 count `ls-remote` too. The file passes with the new form.
