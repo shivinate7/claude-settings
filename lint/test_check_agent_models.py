@@ -122,7 +122,7 @@ class PinEqualsRow(unittest.TestCase):
         # Sonnet and opus pins clear the Haiku floor, so these fail only on the pin-equals-row rule.
         cases = (("reviewer", "sonnet", "haiku"), ("reviewer", "claude-sonnet-5-5", "haiku"),
                  ("reviewer", "opus", "haiku"), ("Explore", "sonnet", "haiku"),
-                 ("Plan", "sonnet", "opus"), ("designer", "sonnet", "opus"), ("design-reviewer", "sonnet", "opus"))
+                 ("Plan", "sonnet", "opus"), ("designer", "sonnet", "opus"), ("design-reviewer", "opus", "sonnet"))
         for role, pin, row in cases:
             with self.subTest(role=role, pin=pin):
                 self.assertRow(role, row)
@@ -133,7 +133,7 @@ class PinEqualsRow(unittest.TestCase):
 
     def test_pin_equal_to_its_row_passes(self):
         cases = [("Plan", "opus", "opus"), ("Plan", "claude-opus-5-5", "opus"), ("designer", "opus", "opus"),
-                 ("design-reviewer", "opus", "opus"), ("builder", "sonnet", "sonnet")]
+                 ("design-reviewer", "sonnet", "sonnet"), ("builder", "sonnet", "sonnet")]
         cases += [(role, model, "haiku") for role in ("Explore", "claude-code-guide", "test-author", "reviewer",
                                                        "record-writer") for model in MODELS]
         for role, model, row in cases:
@@ -292,9 +292,10 @@ AGENT_ROWS = ("| Explore, claude-code-guide | haiku | xhigh |", "| test-author |
               "| designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |",
               "| refuter (`agents/refuter.md`) | opus, the owner's ruling of 2026-11-06 12:43 CST, waiting-page item 279, pick d (decision `plan-refuter`) | high |")
 # The reviewer's round 3 row is not here: own-r3-reviewer-sonnet-high moves it to Sonnet high, checked by ReviewerRoundThree.
+# The builder's round 3 row is not here either: own-758-b moves the builder's third try to its own row, Sonnet.
 ROUND_ROWS = ("| reviewer | 1 guard | sonnet | xhigh |", "| reviewer | 1 other | haiku | xhigh |",
               "| reviewer | 2 | sonnet | high |",
-              "| reviewer | fix verifier | sonnet | xhigh |", "| builder | 3 | opus | high |")
+              "| reviewer | fix verifier | sonnet | xhigh |")
 
 
 class ReviewerRoundThree(unittest.TestCase):
@@ -308,8 +309,9 @@ class ReviewerRoundThree(unittest.TestCase):
 
 # The prose must not say a reviewer can have round 3 on Opus (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST,
 # sharpened 14:07 CST). A match is `round 3`, then up to 80 characters with no period, then `opus`, in the agent, record, guidance
-# and skill folders. The sentence of a match decides it: a sentence that names the builder is the builder's third try, which stays
-# on Opus, and is left out. The filter is by sentence, because one line can hold a reviewer sentence and a builder sentence.
+# and skill folders. The sentence of a match decides it: a sentence that names the builder is the builder's third try, and is left
+# out. Owner ruling own-758-b (2026-11-13 14:24 CST) puts that try on Sonnet, so this exemption goes once the prose says so: the
+# record and CLAUDE.md still say Opus (reported under Input Needed). The filter is by sentence, because one line can hold both kinds.
 ROUND_THREE_OPUS = re.compile(r"round 3[^.]{0,80}opus", re.IGNORECASE)
 ROUND_THREE_PATHS = ("agents", "docs/decisions", "CLAUDE.md", "skills")
 
@@ -344,18 +346,27 @@ def git_grep_round_three():
     return result.stdout.splitlines()
 
 
+def git_grep_round_three_any():
+    """The `git grep -n` lines for `round 3`, whatever follows it, in the folders of ROUND_THREE_PATHS: the scope the Opus search reads.
+    A git error raises, so the case errors and never passes unread (verification-report-unknown-reads)."""
+    result = subprocess.run(["git", "grep", "-niE", "round 3", "--", *ROUND_THREE_PATHS], cwd=ROOT, capture_output=True, text=True)
+    if result.returncode not in (0, 1):  # 1 is no match; anything else is a failed read
+        raise RuntimeError("git grep failed (exit %d): %s" % (result.returncode, result.stderr.strip()))
+    return result.stdout.splitlines()
+
+
 class ReviewerRoundThreeOpus(unittest.TestCase):
     def test_the_search_reads_the_round_three_lines(self):
-        # Scope before verdict: the search finds round 3 and Opus lines at all, so an empty verdict below means no reviewer
-        # sentence, not a search that reads nothing. The builder's third try still names round 3 on Opus, so this holds after the change.
-        self.assertTrue(git_grep_round_three(), "git grep finds no `round 3 ... opus` line, so the verdict below proves nothing")
+        # Scope before verdict: the folders hold round 3 lines at all, so an empty Opus verdict below means no reviewer
+        # sentence on Opus, not a search that reads nothing. It does not depend on any one line that the ruling changed.
+        self.assertTrue(git_grep_round_three_any(), "git grep finds no `round 3` line in the prose folders, so the verdict below proves nothing")
 
     def test_no_reviewer_sentence_names_round_three_on_opus(self):
         hits = round_three_opus_hits(git_grep_round_three())
         self.assertEqual(hits, [], "a reviewer sentence still names round 3 on Opus: %r" % (hits,))
 
     def test_the_filter_leaves_out_the_builder_and_keeps_the_reviewer(self):
-        # The filter's own fixtures: the builder's third try stays on Opus, and a reviewer's round 3 on Opus does not.
+        # The filter's own fixtures: the builder's third try is left out (own-758-b puts it on Sonnet; see the comment above), and a reviewer's round 3 on Opus is kept.
         builder = "x.y/z.md:1:The builder's third try runs on Round 3 of 3 on opus."
         reviewer = "x.y/z.md:2:Round 3 on Opus: the reviewer is refused."
         self.assertEqual(round_three_opus_hits([builder]), [], "the builder's third-try sentence is not left out")
