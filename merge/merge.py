@@ -1349,7 +1349,7 @@ class Host:
         if self.pull_heads_fetch is None:
             self.pull_heads_fetch = git(self.cwd or ".", "fetch", "-q", "origin", "+refs/pull/*/head:refs/remotes/origin/pull/*")
         if self.pull_heads_fetch[0]:
-            raise Stop(f"{why}: git fetch of the pull request heads failed: {' '.join(self.pull_heads_fetch[1].split())[:300]}")
+            raise Stop(f"{why} {READ_CITE}: git fetch of the pull request heads failed: {' '.join(self.pull_heads_fetch[1].split())[:300]}")
 
     def fetch_lost_work_refs(self):
         """-> (code, output) of this run's one fetch of every branch of origin into LOST_WORK_REFS, pruned, so a branch deleted on origin leaves no ref. The
@@ -1365,9 +1365,10 @@ class Host:
         one fetch of a head the clone still lacks after those; then one git process per read, which is 8 done x 12 open = 0 compares, where it was 96.
         Any failed fetch or read, a head no remote holds and a shallow clone that cuts the history raise Stop: unknown, never clear."""
         root = self.cwd or "."
-        why = f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}"
+        what = f"cannot read whether {other[:9]} holds {head[:9]}"
+        why = f"{what} {READ_CITE}"
         try:
-            self.fetch_pull_heads(why)
+            self.fetch_pull_heads(what)
             refs = []
             for x in (head, other):
                 if re.fullmatch(r"[0-9a-f]{40}", x):
