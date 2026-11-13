@@ -452,3 +452,208 @@ def page_writer_id(records):
 def page_read_ran(records):
     """True when the main session ran an ArtifactData get of meta/page, whatever its result named."""
     return _page_reads(records)[0]
+
+
+# ---- the finish of a background job or agent: the one reader hooks/stall_watch.py and hooks/guard_merge.py share.
+# agent_state reads an Agent or Task spawn. A Workflow agent has no such spawn, so workflow_agent below reads its finish.
+# No watcher side effects: each function reads what it is given. The notice tag (hooks/shared_names.py
+# TASK_NOTIFICATION_TAG) is a parameter, since lint/ does not import hooks/. A tag of None reads no notice.
+TERMINAL = ("completed", "failed", "killed", "stopped")
+RUNNING, FINISHED, UNKNOWN = "running", "finished", "unknown"
+LAUNCHED = "async_launched"
+STOP_TOOL = "TaskStop"
+TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
+TOOL_USE_ID = re.compile(r"<tool-use-id>(.*?)</tool-use-id>", re.S)
+TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
+STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
+
+
+def text_of(content):
+    """The text of a message content: a string, or the text and tool_result strings of a list."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
+def notice_blocks(text, tag):
+    """[(task id, tool use id, status)] for each <task-notification> block in text. An id or the status the block
+    does not carry is None; the status is lower-cased and stripped. A block with neither id is left out."""
+    blocks = []
+    if not tag or not isinstance(text, str):
+        return blocks
+    for note in text.split(tag)[1:]:
+        tid, uid, st = TASK_ID.search(note), TOOL_USE_ID.search(note), TASK_STATUS.search(note)
+        if tid or uid:
+            blocks.append((tid.group(1).strip() if tid else None, uid.group(1).strip() if uid else None,
+                           st.group(1).strip().lower() if st else None))
+    return blocks
+
+
+def closed_by_notice(text, tag):
+    """The task ids of the <task-notification> blocks in text with a terminal status."""
+    return [tid for tid, _uid, st in notice_blocks(text, tag) if tid and st in TERMINAL]
+
+
+def stopped_ids(content):
+    """The id a TaskStop result closes: its message starts 'Successfully stopped task: <id>'. The
+    result is a JSON string with a message field; the whole id is matched, never a prefix."""
+    content = text_of(content)
+    try:
+        body = json.loads(content)
+        msg = body["message"] if isinstance(body, dict) else content
+    except Exception:
+        msg = content
+    m = STOPPED.match(msg) if isinstance(msg, str) else None
+    return [m.group(1)] if m else []
+
+
+def notice_text(rec):
+    """The text a record can carry a notice in: a queued_command attachment's prompt, a queue-operation's
+    content, or a user message's content."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        att = rec.get("attachment")
+        return att.get("prompt") if isinstance(att, dict) else ""
+    if kind == "queue-operation":
+        return rec.get("content")
+    if kind == "user":
+        return text_of((rec.get("message") or {}).get("content"))
+    return ""
+
+
+def agent_state(records, tool_use_id, tag):
+    """RUNNING, FINISHED or UNKNOWN for the Agent or Task spawn whose call id is `tool_use_id`.
+    FINISHED: the result is a plain tool_result (no toolUseResult) or a toolUseResult with a terminal status
+    (a foreground spawn), or a background launch whose agent id a terminal notice or a TaskStop result later closed.
+    RUNNING: an async_launched result and no such close. UNKNOWN: anything else the read cannot place, never
+    FINISHED: no result, an error result, a toolUseResult of another shape, a launch with no agentId, or a notice
+    that names the spawn with no or a non-terminal status. A notice names the spawn by its tool use id or its agent id.
+    `records` are the main session's, in order."""
+    found = None
+    for i, rec in enumerate(records):
+        for res in tool_results(rec):
+            if res.get("tool_use_id") == tool_use_id:
+                found = (i, rec, res)
+    if found is None or found[2].get("is_error") is True:
+        return UNKNOWN
+    at, rec, _res = found
+    if "toolUseResult" not in rec:
+        return FINISHED
+    launch = rec["toolUseResult"]
+    if not isinstance(launch, dict):
+        return UNKNOWN
+    status = launch.get("status")
+    if isinstance(status, str) and status.strip().lower() in TERMINAL:
+        return FINISHED
+    agent = launch.get("agentId")
+    if status != LAUNCHED or not isinstance(agent, str) or not agent:
+        return UNKNOWN
+    stops, unclear = set(), False
+    for later in records[at + 1:]:
+        for tid, uid, st in notice_blocks(notice_text(later), tag):
+            if tid == agent or uid == tool_use_id:
+                if st in TERMINAL:
+                    return FINISHED
+                unclear = True
+        for use in tool_uses(later):
+            if use.get("name") == STOP_TOOL and isinstance(use.get("id"), str):
+                stops.add(use["id"])
+        for res in tool_results(later):
+            if res.get("tool_use_id") in stops and agent in stopped_ids(res.get("content")):
+                return FINISHED
+    return UNKNOWN if unclear else RUNNING
+
+
+# ---- the finish of a Workflow agent: it has no Agent or Task spawn in the transcript, so agent_state cannot place it.
+# This is the one reader of a Workflow agent's finish; hooks/guard_merge.py resume_finished_hit calls agent_state for a
+# spawn and workflow_agent for a name no spawn holds. Its run's journal, beside the transcript at
+# <transcript minus .jsonl>/subagents/workflows/<runId>/journal.jsonl, holds a `started` line (agentId, label) and,
+# once the agent finishes, a `result` line. A stopped agent leaves only the `started` line (measured, run
+# wf_cc6c76b5-d5f), so the run record <transcript minus .jsonl>/workflows/<runId>.json settles it: its status is
+# `killed` for a stopped run and `completed` for a finished one (same run). Its role is `agentType` in
+# agent-<agentId>.meta.json beside the journal; a meta with `spawnedWithWorktree` true marks an agent spawned with
+# isolation worktree (measured, run wf_19ac2aae-ebb).
+WORKFLOWS_DIR = os.path.join("subagents", "workflows")
+RUN_RECORDS_DIR = "workflows"
+RUN_RECORD_FINISHED = ("killed", "completed")
+_AGENT_ID = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _agent_meta(run_dir, agent_id):
+    """The agent's meta file as a dict, or {} when the id is no plain file name, or the file is missing, unreadable or
+    not an object."""
+    if not _AGENT_ID.fullmatch(agent_id):
+        return {}
+    try:
+        with open(os.path.join(run_dir, "agent-%s.meta.json" % agent_id), encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _run_record_state(transcript, run):
+    """FINISHED when the run record's status is killed or completed, RUNNING when the record is missing, UNKNOWN when
+    it is unreadable, is not an object, or holds another status."""
+    path = os.path.join(os.path.splitext(transcript)[0], RUN_RECORDS_DIR, run + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            record = json.load(f)
+    except FileNotFoundError:
+        return RUNNING
+    except Exception:
+        return UNKNOWN
+    status = record.get("status") if isinstance(record, dict) else None
+    if isinstance(status, str) and status.strip().lower() in RUN_RECORD_FINISHED:
+        return FINISHED
+    return UNKNOWN
+
+
+def workflow_agent(transcript, target):
+    """(state, agent_type, worktree) for the Workflow agent that `target` names by its agentId or its started line's label, or
+    None when no journal beside `transcript` names it. The latest started line that matches wins: a later line in a
+    journal, and a run whose journal was written later. state is FINISHED when the journal holds a result line for the
+    id. With only a started line, the run record settles it (_run_record_state): FINISHED when killed or completed,
+    RUNNING when there is no record, UNKNOWN when it cannot be read. State is also UNKNOWN when a journal in the folder
+    exists but cannot be read and none names the target. agent_type is the meta file's agentType, or None. worktree is
+    True when the meta shows spawnedWithWorktree true. Reads only that transcript's own folders, and only when called:
+    one directory listing and one read per journal, then for the one agent that wins, one meta read, and one run-record
+    read when it has no result line."""
+    root = os.path.join(os.path.splitext(transcript)[0], WORKFLOWS_DIR)
+    try:
+        runs = [entry for entry in os.scandir(root) if entry.is_dir()]
+    except OSError:
+        return None
+    journals = []
+    for entry in runs:
+        path = os.path.join(entry.path, "journal.jsonl")
+        try:
+            journals.append((os.stat(path).st_mtime_ns, entry.name, entry.path, path))
+        except OSError:
+            continue
+    best, unreadable = None, False
+    for _mtime, name, run_dir, path in sorted(journals):
+        try:
+            records = read_transcript(path)
+        except OSError:
+            unreadable = True
+            continue
+        results = {rec.get("agentId") for rec in records if rec.get("type") == "result"}
+        for rec in records:
+            agent_id = rec.get("agentId")
+            if (rec.get("type") == "started" and isinstance(agent_id, str) and agent_id
+                    and target in (agent_id, rec.get("label"))):
+                best = (name, run_dir, agent_id, agent_id in results)
+    if best is None and unreadable:
+        return UNKNOWN, None, False
+    if best is None:
+        return None
+    run, run_dir, agent_id, has_result = best
+    meta = _agent_meta(run_dir, agent_id)
+    kind = meta.get("agentType")
+    state = FINISHED if has_result else _run_record_state(transcript, run)
+    return (state, kind.strip() if isinstance(kind, str) and kind.strip() else None,
+            meta.get("spawnedWithWorktree") is True)

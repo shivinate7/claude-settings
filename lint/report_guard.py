@@ -166,7 +166,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, closed_by_notice, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -232,7 +232,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+from shared_names import LANE_TAG, TASK_NOTIFICATION_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -767,14 +767,8 @@ def agent_pin(role):
 
 
 def _closed_by_notice(text):
-    """The agent ids a completion notice in `text` closes: stall_watch's parser, the one home.
-    It loads on first use, and a missing module closes nothing, so a spawn stays running."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-    try:
-        from stall_watch import closed_by_notice
-    except ImportError:
-        return []
-    return closed_by_notice(text)
+    """The agent ids a completion notice in `text` closes, read by lint/_transcript.py, the one home of the notice reader."""
+    return closed_by_notice(text, TASK_NOTIFICATION_TAG)
 
 
 class Spawned(dict):

@@ -100,6 +100,11 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
+    sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import _transcript  # the one reader of a job's finish: notices, TaskStop results (lint/_transcript.py)
+except ImportError:  # without it no notice can close a job: Stop prints nothing on stdout and names it on stderr
+    _transcript = None
+try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
@@ -376,21 +381,7 @@ def hook():
     return 0
 
 
-TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
-TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
-STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
-TERMINAL = ("completed", "failed", "killed", "stopped")
-
-
-def text_of(content):
-    """The text of a message content: a string, or the text and tool_result strings of a list."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
-    return "\n".join(p for p in parts if isinstance(p, str))
 
 
 ISO_Z = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d+))?Z$")
@@ -439,10 +430,10 @@ def scan_jobs(transcript):
                     att = rec.get("attachment")
                     notice = att.get("prompt") if isinstance(att, dict) else None
                     if isinstance(notice, str):
-                        done.update(closed_by_notice(notice))
+                        done.update(_transcript.closed_by_notice(notice, TASK_NOTIFICATION_TAG))
                     continue
                 content = rec["message"]["content"]
-                text = text_of(content)
+                text = _transcript.text_of(content)
             except Exception:  # a bad or half-written line is skipped
                 continue
             tur = rec.get("toolUseResult")
@@ -475,39 +466,14 @@ def scan_jobs(transcript):
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
             elif kind == "user":
-                done.update(closed_by_notice(text))
+                done.update(_transcript.closed_by_notice(text, TASK_NOTIFICATION_TAG))
                 if isinstance(content, list):  # only the result of a TaskStop call of this session
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
-                            done.update(stopped_ids(b.get("content")))
+                            done.update(_transcript.stopped_ids(b.get("content")))
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
                 k in agents)
              for k, v in jobs.items() if k not in done}, prev_stop)
-
-
-def closed_by_notice(text):
-    """The ids of the <task-notification> blocks in text with a terminal status."""
-    ids = []
-    if not TASK_NOTIFICATION_TAG:
-        return ids
-    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
-        tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip().lower() in TERMINAL:
-            ids.append(tid.group(1).strip())
-    return ids
-
-
-def stopped_ids(content):
-    """The id a TaskStop result closes: its message starts 'Successfully stopped task: <id>'. The
-    result is a JSON string with a message field; the whole id is matched, never a prefix."""
-    content = text_of(content)
-    try:
-        body = json.loads(content)
-        msg = body["message"] if isinstance(body, dict) else content
-    except Exception:
-        msg = content
-    m = STOPPED.match(msg) if isinstance(msg, str) else None
-    return [m.group(1)] if m else []
 
 
 AGENT_ID = re.compile(r"[\w-]+\Z")
@@ -565,7 +531,10 @@ def open_call(path, size):
 
 
 def stop():
-    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
+    if _transcript is None:  # every finished job would look open: stdout stays silent, stderr names the cause
+        print("stall_watch: lint/_transcript.py could not be loaded, so Stop lists no jobs", file=sys.stderr)
+        return 0
+    if not TASK_NOTIFICATION_TAG:  # likewise without the tag: say nothing
         return 0
     try:
         call = json.load(sys.stdin)
