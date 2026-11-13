@@ -2652,7 +2652,7 @@ CHECKS_COMMENT_WORKFLOW = ("name: checks\non: push\njobs:\n  checks:  # don't re
 COMMENT_ONLY_WORKFLOW = "name: checks\non: push\njobs:\n  # checks:  the job is named in this comment only\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo lint\n"
 
 
-class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
+class ReviewLogLint(CiJobStub, tm.ReviewEnv):
     """`merge <pr> --review-record` runs the lane lint on the reviewed head, after every refusal before it, and prints the record only on a
     PASS (decision pr-review-record; R67, the rebuild of #1760: the lane lint follows the pinned tree). The lint is the real lane_lint, as
     `checks --lint --base origin/main` in a detached tree at the head, through the stub ci-job. The host is Env's FakeHost, on branch feat, so
@@ -2842,7 +2842,7 @@ class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
         self.assert_one_lint_run("main", head, out + err)
         self.assertEqual(rc, 0, out + err)
 
-    def test_a_fix_check_refused_before_any_lint_and_the_same_record_without_it_lints_once(self):
+    def test_a_fix_verifier_refused_before_any_lint_and_the_same_record_without_it_lints_once(self):
         self.use_ci_job(PASSING, 0)
         head = self.head()
         rc, out, err = self.record("7", "--review-record", *self.flags("--fix-check", f"{'e' * 40}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"))
@@ -2962,7 +2962,7 @@ class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
         self.use_ci_job(PASSING, 0)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = merge.lane_lint(self.co, "7", self.host, review_record=True, want_head=pushed)
+            rc = merge.lane_lint(self.co, "7", self.host, review_log=True, want_head=pushed)
         self.assertEqual(len(self.lint_calls()), 1, "the lint ran %d times, want once: %s" % (len(self.lint_calls()), err.getvalue()))
         self.assertIn(WAIT_LINE, out.getvalue() + err.getvalue(), "the record lint did not wait for GitHub to show the pushed head")
         self.assertEqual(rc, 0, "the record lint refused after GitHub showed the pushed head: " + err.getvalue())

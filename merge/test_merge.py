@@ -15116,9 +15116,9 @@ class ReviewEnv(Env):
     """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here.
     The record's lane lint (R67) is stubbed for every class here, as a PASS that runs nothing: a stub that calls the real lint would need
     a ci-job stub, a fake host that reads and posts like GitHub, and a feat branch the fixture lacks. The lint's own cases are
-    ReviewRecordLint (merge/test_lane_lint.py), which sets REAL_LINT and keeps the real lint. Other callers of lane_lint get it unchanged."""
+    ReviewLogLint (merge/test_lane_lint.py), which sets REAL_LINT and keeps the real lint. Other callers of lane_lint get it unchanged."""
 
-    REAL_LINT = False  # True: the record's lint runs for real (ReviewRecordLint)
+    REAL_LINT = False  # True: the record's lint runs for real (ReviewLogLint)
 
     def setUp(self):
         super().setUp()
@@ -15126,7 +15126,7 @@ class ReviewEnv(Env):
             real = merge.lane_lint
 
             def pass_without_lint(*args, **kwargs):
-                return 0 if kwargs.get("review_record") else real(*args, **kwargs)
+                return 0 if kwargs.get("review_log") else real(*args, **kwargs)
 
             patch = unittest.mock.patch.object(merge, "lane_lint", side_effect=pass_without_lint)
             patch.start()
@@ -15388,7 +15388,7 @@ class ReviewArgs(ReviewEnv):
 
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head, after its lint passes (R67). It pushes nothing and takes
-    no lock. The lint is stubbed in this class (ReviewEnv), so the lint comment a PASS posts is checked by ReviewRecordLint, not here."""
+    no lock. The lint is stubbed in this class (ReviewEnv), so the lint comment a PASS posts is checked by ReviewLogLint, not here."""
 
     def test_the_record_is_printed_and_nothing_is_pushed(self):
         before, locked = self.refs(), self.lock_ref()
