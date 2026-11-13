@@ -1,0 +1,14 @@
+{
+ "id": "lost-work-f-skip-record-branch",
+ "title": "The lost-work check skips named record branches (roadmap and any branch a repo names as its record branch)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The check lists the record branch as a lost-work row every run, though it has no PR and is never merged, so a real row is scrolled past.",
+ "source": "Lane lost-work-sweep (session_013NEJL1rADjupx82bXheSsB) via the coordinator, 15:29 CST Nov 13.",
+ "note": "Filed 15:30 CST Nov 13. Small code. State f (merge/merge.py `lost_work_branches`, after PR #3170 merges) lists the record branch `roadmap` (no PR, thousands of commits ahead of main) as a recurring false row. Skip named record branches. Order: test-author red case first (an f row for a no-PR branch that is a named record branch lists no row; an ordinary no-PR branch still lists), then builder, reviewer. Depends on #3170 (head d0a0aaf1b, stacked on #3148). A check change. Past rulings not checked; the lane's reading unread by triage.",
+ "updatedAt": "2026-11-13T15:30:49-06:00"
+}
