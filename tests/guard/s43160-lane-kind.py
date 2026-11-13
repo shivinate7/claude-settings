@@ -1,10 +1,10 @@
 # section 43160
 # The lane kinds of decision agent-model-cap (owner ruling own-747-role-layout, 2026-11-13 13:51 CST). A lane's kind comes from
-# the marker line that follows its Grant line: `Guard or check: yes` makes a guard-or-check lane, `Docs only: yes` a docs lane,
-# and no marker, or any other line, a product-code-or-design lane. The effort a lane starts at is the effort of its kind's row in
-# the record, read from the record and never copied (rule lane-effort-pin). Its model is the model of that row (rule
-# lane-start-settings). This section loads after s40805, which gives role_table, role_config and REVIEW_GUARD_MARKER, and after
-# s29666, which gives the lane constants. The lane rows of the older single-row layout are not read by these cases.
+# the marker line in the block of non-blank lines that follows its Grant line: `Guard or check: yes` makes a guard-or-check lane,
+# `Docs only: yes` a docs lane, and no marker, or any other line, a product-code-or-design lane. The effort a lane starts at is the
+# effort of its kind's row in the record, read from the record and never copied (rule lane-effort-pin). Its model is the model of
+# that row (rule lane-start-settings). This section loads after s40805, which gives role_table, role_config and REVIEW_GUARD_MARKER,
+# and after s29666, which gives the lane constants. The older single-row layout (one `lane` row) is read only by the fallback cases.
 FAMILY = "rule9"  # the cases after this section keep rule 9's family
 
 # The docs-lane marker. The guard-or-check marker is REVIEW_GUARD_MARKER (s40805), the one literal of the review record's line.
@@ -37,10 +37,18 @@ def lane_brief(marker=None):
     return "\n".join([LANE_GRANT] + ([marker] if marker else []) + ["Do the task in the brief file."])
 
 
-def lane_start(name, expected, rule, config, marker, effort, model="sonnet", carries=()):
-    """One lane start under `config`: the kind marker in the prompt, the effort field and the model. Allowed when `rule` is None."""
-    add(name, expected, rule, tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=lane_brief(marker),
+def lane_start(name, expected, rule, config, marker, effort, model="sonnet", carries=(), lines=None, tags=OWN_LANE_TAGS):
+    """One lane start under `config`: the kind marker in the prompt, the effort field and the model. Allowed when `rule` is None.
+    `lines`, when given, replaces the marker: the prompt's lines between the Grant line and the brief's own line, in order."""
+    prompt = lane_brief(marker) if lines is None else "\n".join([LANE_GRANT] + lines + ["Do the task in the brief file."])
+    add(name, expected, rule, tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, tags=tags, prompt=prompt,
         effort=effort, model=model, source_url=LANE_SOURCE_URL, config=config, carries=carries)
+
+
+# A `Lane brief:` line is judged by lane-one-topic: a start that holds one carries the lane's cs-topic tag and names that topic
+# (the form of the lane-one-topic controls in s29666). The brief template puts it on the line after the Grant line.
+TOPIC_BRIEF = "Lane brief: icon-a. Topic: alpha."
+TOPIC_TAGS = OWN_LANE_TAGS + ["cs-topic:alpha"]
 
 
 # ---- Lane effort pin, by kind. The effort the pin accepts is the effort of the lane's kind's row.
@@ -74,6 +82,64 @@ lane_start("lane-start-settings: a product-code lane on sonnet is denied when it
            "lane-start-settings", LANE_KIND_MODEL_CFG, None, "medium", model="sonnet", carries="model")
 lane_start("lane-start-settings: a product-code lane on opus is denied when its kind's row names sonnet", "deny",
            "lane-start-settings", LANE_KIND_CFG, None, "medium", model="opus", carries="model")
+
+
+# ---- The kind marker is read from the block of non-blank lines after the Grant line, not from the second non-blank line alone.
+# The brief template puts `Lane brief:` on the line after Grant, so the marker is then the third line. A blank line ends the block,
+# so a marker past one is outside it and is read by no one.
+SINGLE_ROW_POINTER = role_table("lanekind-single-row", ROLE_TABLE_HEAD + "| lane | sonnet | medium |\n")
+SINGLE_ROW_CFG = role_config("lanekind-single-row", SINGLE_ROW_POINTER)
+# The fallback efforts are the guard's LANE_KIND_FALLBACK, so the fallback cases expect the value the guard falls back to.
+LANE_FALLBACK = _load_guard_module().LANE_KIND_FALLBACK
+
+
+def single_row_fixture_check():
+    """Scope before subject: the single-row record holds one `lane` row and no kind row, so the fallback cases below read
+    the fallback and not a kind row."""
+    path = os.path.join(SINGLE_ROW_POINTER, "docs", "decisions", "agent-model-cap.md")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    kind_rows = [label for label in _load_guard_module().LANE_KIND_LABELS.values() if label in text]
+    return ("| lane | sonnet | medium |" in text and not kind_rows), "the single-row record names a kind row: %r" % (kind_rows,)
+
+
+_SINGLE_ROW_FIXTURE_LABEL = "lane-kind-fixture: the single-row record holds one lane row and no kind row"
+LOG_FAMILY[_SINGLE_ROW_FIXTURE_LABEL] = "rule9"
+LOG_CHECKS = LOG_CHECKS + ((_SINGLE_ROW_FIXTURE_LABEL, single_row_fixture_check),)
+
+# A Lane brief line first in the block, then the marker: the marker is read at the third line.
+lane_start("lane-effort-pin: a guard-or-check lane with a Lane brief line before its marker is allowed at effort high", "allow",
+           None, LANE_KIND_CFG, None, "high", lines=[TOPIC_BRIEF, REVIEW_GUARD_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: a guard-or-check lane with a Lane brief line before its marker is denied at effort medium", "deny",
+           "lane-effort-pin", LANE_KIND_CFG, None, "medium", lines=[TOPIC_BRIEF, REVIEW_GUARD_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: a docs lane with a Lane brief line before its marker is allowed at effort low", "allow",
+           None, LANE_KIND_CFG, None, "low", lines=[TOPIC_BRIEF, DOCS_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: a docs lane with a Lane brief line before its marker is denied at effort medium", "deny",
+           "lane-effort-pin", LANE_KIND_CFG, None, "medium", lines=[TOPIC_BRIEF, DOCS_MARKER], tags=TOPIC_TAGS)
+# The marker is any non-blank line of the block, not only the second: a preamble line sits between the brief and the marker.
+lane_start("lane-effort-pin: a guard-or-check marker past a preamble line in the block is read, so effort high is allowed", "allow",
+           None, LANE_KIND_CFG, None, "high", lines=[TOPIC_BRIEF, "Read the brief file first.", REVIEW_GUARD_MARKER],
+           tags=TOPIC_TAGS)
+# A blank line after the Grant line ends the block: the marker past it is not read, so the lane is a product lane.
+lane_start("lane-effort-pin: a guard-or-check marker past a blank line is not read, so effort high is denied", "deny",
+           "lane-effort-pin", LANE_KIND_CFG, None, "high", lines=["", REVIEW_GUARD_MARKER])
+lane_start("lane-effort-pin: a guard-or-check marker past a blank line is not read, so effort medium is allowed", "allow",
+           None, LANE_KIND_CFG, None, "medium", lines=["", REVIEW_GUARD_MARKER])
+# Control: a blank line after the Lane brief line ends the block, so the marker past it is not read and effort medium holds.
+lane_start("lane-effort-pin: a guard-or-check marker past a blank line after a Lane brief line is not read, at effort medium",
+           "allow", None, LANE_KIND_CFG, None, "medium", lines=[TOPIC_BRIEF, "", REVIEW_GUARD_MARKER], tags=TOPIC_TAGS)
+# Under an unreadable record, and under the single-row record, a lane starts at the fallback effort of its kind.
+lane_start("lane-effort-pin: an unreadable record gives a guard-or-check lane the fallback effort, so effort high is allowed", "allow",
+           None, ROLE_UNREADABLE_CFG, None, LANE_FALLBACK["guard"][1], lines=[TOPIC_BRIEF, REVIEW_GUARD_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: an unreadable record gives a guard-or-check lane the fallback effort, so product effort is denied",
+           "deny", "lane-effort-pin", ROLE_UNREADABLE_CFG, None, LANE_FALLBACK["product"][1], lines=[TOPIC_BRIEF, REVIEW_GUARD_MARKER],
+           tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: the single-row record gives a guard-or-check lane the fallback effort, so effort high is allowed", "allow",
+           None, SINGLE_ROW_CFG, None, LANE_FALLBACK["guard"][1], lines=[TOPIC_BRIEF, REVIEW_GUARD_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: the single-row record gives a docs lane the fallback effort, so effort low is allowed", "allow",
+           None, SINGLE_ROW_CFG, None, LANE_FALLBACK["docs"][1], lines=[TOPIC_BRIEF, DOCS_MARKER], tags=TOPIC_TAGS)
+lane_start("lane-effort-pin: the single-row record gives a product lane the fallback effort, so effort medium is allowed", "allow",
+           None, SINGLE_ROW_CFG, None, LANE_FALLBACK["product"][1], lines=[TOPIC_BRIEF], tags=TOPIC_TAGS)
 
 
 # ---- The design reviewer runs Sonnet high and the designer stays Opus high (owner ruling own-756-design-reviewer-sonnet,
