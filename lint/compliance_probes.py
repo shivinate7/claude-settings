@@ -10,6 +10,7 @@
     python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py restates <child root>
+    python3 lint/compliance_probes.py hooks <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -78,10 +79,19 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   shared words passes, a record citation included. An item names the file, the line and the record, and the
   remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
   claude-settings checkout is n/a.
+hooks: the clone's settings.json `.hooks` against the live `$HOME/.claude/settings.json` `.hooks`, with
+  `SessionStart` dropped on both sides, since a cloud install rewrites it. The live file is always under the
+  home folder; CLAUDE_CONFIG_DIR is not read. Both sides print as key-sorted JSON, so key order is no
+  difference. A difference prints as a unified diff, each line indented two spaces, the clone as `clone`
+  (`-`) and the live file as `live` (`+`). A clone with no settings.json is n/a. A live file that is missing
+  or not JSON, or a clone file that is not JSON, makes the group unknown. For in shape and out, the first
+  line after the verdict is `  trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy
+  checked`: the clone is the trusted side, since install.sh writes the live file from it.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
 """
+import difflib
 import json
 import os
 import re
@@ -1113,6 +1123,42 @@ def probe_slugs(root):
     return finish("slugs", lines, "out" if bad else "in shape", 1 if bad else 0)
 
 
+def hooks_of(path, text, side):
+    """The `.hooks` of a settings.json `text` as a dict, less SessionStart. `path` and `side` name it in a refusal."""
+    try:
+        doc = json.loads(text.lstrip("\ufeff"))
+    except ValueError as err:
+        raise CannotRun("%s settings.json is not JSON: %s (%s)" % (side, err, path))
+    hooks = doc.get("hooks", {}) if isinstance(doc, dict) else None
+    if not isinstance(hooks, dict):
+        raise CannotRun("%s settings.json has no `hooks` object (%s)" % (side, path))
+    return {event: body for event, body in hooks.items() if event != "SessionStart"}
+
+
+def probe_hooks(root):
+    clone_path = os.path.join(root, "settings.json")
+    if not os.path.exists(clone_path):
+        return finish("hooks", [], "n/a - no settings.json in the clone", 0)
+    clone_text = read(root, "settings.json")
+    if clone_text is None:
+        raise CannotRun("clone settings.json cannot be read as UTF-8 (%s)" % clone_path)
+    live_path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")  # never CLAUDE_CONFIG_DIR
+    try:
+        with open(live_path, encoding="utf-8") as handle:
+            live_text = handle.read()
+    except (OSError, UnicodeDecodeError) as err:
+        raise CannotRun("live settings.json cannot be read: %s" % err)
+    pretty = lambda hooks: json.dumps(hooks, indent=2, sort_keys=True).splitlines()
+    diff = list(difflib.unified_diff(pretty(hooks_of(clone_path, clone_text, "clone")),
+                                     pretty(hooks_of(live_path, live_text, "live")),
+                                     "clone", "live", lineterm=""))
+    # The clone is the trusted copy: install.sh writes the live file from it.
+    trusts = "  trusts: clone (%s); live (~/.claude/settings.json) is the copy checked" % clone_path
+    if not diff:
+        return finish("hooks", [trusts], "in shape", 0)
+    return finish("hooks", [trusts] + ["  " + line for line in diff], "out", 1)
+
+
 def probe_words(root):
     try:
         import check_glossary  # the one home of the retired words and of how a name is read
@@ -1190,7 +1236,7 @@ def probe_words(root):
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "restates": probe_restates, "scorecard": scorecard}
+          "restates": probe_restates, "hooks": probe_hooks, "scorecard": scorecard}
 
 
 def main(argv):
