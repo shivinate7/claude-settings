@@ -16,7 +16,7 @@ FAMILY = "simulator"
 #   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
 #                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
 #   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
-#                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
+#                          and `sim-lease` is the Mac's one queue for phone simulators (decision sim-test-is-the-one-boot-path,
 #                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
 #                          device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
