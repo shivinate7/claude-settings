@@ -5,7 +5,7 @@ Dies when steps feedback-log-tends-itself and prose-tending-move-stores ship.
 
 Refuter: refuter opus, 2026-11-12, REVISE
 
-Revision taken for gaps (a) to (e), settled below. Simpler route declined: `external:` and `copy-matches-live` are in use, and dropping `delete` would change lint/tending.py, which this step leaves alone.
+Revision taken for gaps (a) to (e), settled below. Simpler route declined: `external:` and `copy-matches-live` are in use, and dropping `delete` would change lint/tending.py, which this revision adds.
 
 ## Contract (lint/layout.json, key "tending")
 
@@ -17,7 +17,7 @@ A `declared` store is named but no call point runs it yet.
 
 ### Stores at this head
 
-All ten are `declared`. Each item is a regex, described here in words. Its group 1 is the id, except in `decisions`, where it is the home path.
+All ten are `declared`. Each item is a regex, described here in words. Its group 1 is the id, except in `decisions` and `docs`, where it is the home path.
 
 | Store | Where | Item | Still true | Close | Runs from |
 |---|---|---|---|---|---|
@@ -59,9 +59,11 @@ An external store never lists `merge-check`. CI has no file to read for it, and 
   `where: external:<name>` has no file: the caller supplies the text.
 
 Call points at this head: only the merge check. The `checks` job in `.github/workflows/checks.yml` runs
-the fixture suite and `lint/tending.py --point merge-check`. No hook, script or compaction step imports the
-runner. The next step, feedback-log-tends-itself, is not merged. Its branch imports the runner in
-`hooks/feedback_guard.py` for the Stop hook, and in `hooks/precompact_handoff.py` for the compaction note.
+the fixture suite and `lint/tending.py --point merge-check`. At this head no hook, script or compaction step
+imports the runner. The next step, feedback-log-tends-itself, is not merged. Its branch imports the runner
+only in `hooks/feedback_guard.py`, in `tend_text` and `close_settled`. The Stop hook reaches it there. The
+compaction note reaches it through `feedback_guard`, which `hooks/precompact_handoff.py` imports and whose
+`needs_work_ids` calls `tend_text`.
 No step named here wires `triage-status`. A store is `live` only once a call point runs it, so the step
 that first makes a store running from `triage-status` live wires that point.
 
@@ -72,8 +74,10 @@ No new timer, watcher or long-lived process. The merge check adds two steps to t
 the module in the process they already run. None does yet.
 
 Files written: the store's own file, by the close step only, and only where a verdict changed. The merge
-check writes none. Reads: the store file, and the git reads its `home-held` test makes. A run lists the refs
-once and reads each home once.
+check writes none. Reads: the store's files, none for an external store, whose text the caller supplies. The tests read
+more: the rule files for a `rule:` home, the record folders for `cite-resolves`, and the live source for
+`copy-matches-live`. The runner also reads the layout files and loads the `hooks/` modules it imports on
+first use, plus the git reads that `home-held` makes. A run lists the refs once and reads each home once.
 
 Proof, in `lint/test_tending.py`:
 - `test_import_starts_no_thread_or_timer` and `test_import_starts_no_child_process`: importing the runner
