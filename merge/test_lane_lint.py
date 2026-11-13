@@ -917,6 +917,7 @@ class CrossMeasure(LaneFixture):
     the merge.sh call log (tree_calls)."""
 
     contains = LaneLint.contains  # the ancestor read the stack cases use: one home, LaneLint's
+    shallow_lane_checkout = LaneLint.shallow_lane_checkout  # the shallow lane checkout the shallow cases read: one home, LaneLint's
 
     def setUp(self):
         super().setUp()
@@ -967,16 +968,19 @@ class CrossMeasure(LaneFixture):
         self.assertTrue(any(re.search(r"\b%s\b" % re.escape(base), line) for line in lines),
                         "%s: no conflict line names %s: %s" % (what, base, text))
 
-    def commit_on(self, name, files, start, session=None):
+    def commit_on(self, name, files, start, session=None, body=""):
         """Commit `files` ({path: text}) on branch `name`, cut from `start` in the second clone, and push it. `session` adds that session's
-        Claude-Session trailer. -> the commit's sha."""
+        Claude-Session trailer; `body` is prose put between the subject and the trailer. -> the commit's sha."""
         o, sh = self.other, tm.sh
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", name, start)
         for path, text in files.items():
             tm.put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", with_session("%s: %s" % (name, ", ".join(sorted(files))), session))
+        message = "%s: %s" % (name, ", ".join(sorted(files)))
+        if body:
+            message = "%s\n\n%s" % (message, body)
+        sh(o, "git", "commit", "-q", "-m", with_session(message, session))
         sh(o, "git", "push", "-q", "origin", name)
         return sh(o, "git", "rev-parse", "HEAD")
 
@@ -1742,6 +1746,120 @@ class CrossMeasure(LaneFixture):
         rc, text, lints, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 0, "a session's commit on main refused a PR that names only its own session: " + text)
         self.assertEqual(len(pass_lines(text)), 1, text)
+
+    @contextlib.contextmanager
+    def git_log_over_range_fails(self):
+        """Patch merge.git so the owner check's one git log (the trailer read over origin/<base>..head) exits 128. Every other git call runs for
+        real. Yields the calls it answered, so a case reads that the injected failure ran."""
+        real_git, answered = merge.git, []
+
+        def failing(cwd, *a, input=None):
+            if a[:1] == ("log",) and any("%(trailers" in x for x in a):
+                answered.append(list(a))
+                return 128, "fatal: injected failure of the owner check's range read"
+            return real_git(cwd, *a, input=input)
+
+        with unittest.mock.patch.object(merge, "git", failing):
+            yield answered
+
+    def two_session_refusal(self):
+        """The refusal of the two-session PR (two_session_pr). -> its text, after the case's preconditions and its rc are asserted."""
+        self.two_session_pr()
+        self.assertEqual(self.session_ids_of(self.head("feat")), sorted([OWN, OTHER]), "precondition: the PR's commits do not name two sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the two-session PR passed the lane lint: " + text)
+        return text
+
+    def test_a_session_id_quoted_in_a_commit_body_is_no_second_session(self):  # control: only a real trailer counts
+        """Why: a commit that names another session in its message text, not in a Claude-Session trailer, is no second session. The control pins
+        that the owner read takes trailers only. Without that rule, a quoted id would FAIL this PR."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.commit_on("feat", {"own-b.txt": "lane 7 again\n"}, "origin/feat", body="Quotes %s from the other lane." % (SESSION_URL % OTHER))
+        self.assertIn(OTHER, tm.sh(self.other, "git", "log", "--format=%B", "origin/main..origin/feat"), "precondition: no commit names the other session in its text, so the case probes nothing")
+        self.assertEqual(self.session_ids_of(self.head("feat")), [OWN], "precondition: the PR's trailers do not name one session, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a session id quoted in a commit body refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing lane: " + text)
+
+    def test_a_trailerless_commit_beside_one_sessions_commits_passes_with_one_session(self):  # control
+        """Why: a commit with no trailer names no session, so it does not split one session's PR. The control sits between two of the session's commits."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.own_writes({"plain-b.txt": "no trailer\n"})
+        self.own_writes({"own-c.txt": "lane 7 again\n"}, session=OWN)
+        plain = tm.sh(self.other, "git", "log", "-1", "--format=%H", "origin/feat", "--", "plain-b.txt")
+        self.assertIn(plain, tm.sh(self.other, "git", "rev-list", "origin/main..%s" % self.head("feat")).split(), "precondition: the trailerless commit is not in the PR's range, so the case probes nothing")
+        self.assertNotIn("Claude-Session", tm.sh(self.other, "git", "log", "-1", "--format=%B", plain), "precondition: the commit carries a trailer, so the case probes no trailerless commit")
+        self.assertEqual(self.session_ids_of(self.head("feat")), [OWN], "precondition: the PR's trailers do not name one session, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a trailerless commit beside one session's commits refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing lane: " + text)
+
+    def test_an_unreadable_session_range_is_unknown_and_never_a_pass(self):
+        """Why: when git cannot read the range, the lint cannot say how many sessions worked the PR. It must stop unknown. A fallback to no
+        sessions would PASS this one-session PR, so the case uses one."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.use_ci_job(PASSING, 0)
+        with self.git_log_over_range_fails() as answered:
+            rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(len(answered), 1, "precondition: the owner check's range read did not run, so the case probes nothing")
+        self.assertNotEqual(rc, 0, "a PR whose session range is unreadable passed the lane lint: " + text)
+        self.assertRegex(text, r"unknown, not a pass", "an unreadable session range is not reported as unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "an unreadable session range printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable session range: " + text)
+
+    def test_a_shallow_lane_with_no_merge_base_to_main_is_unknown_and_never_a_fail(self):
+        """Why: in a shallow clone whose lane head shares no merge base with origin/main, the lane's commits cannot be read against main's
+        history. The lint must say unknown. A FAIL would name sessions that main's cut history carries, not sessions this lane worked."""
+        head = self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        self.main_moves()  # main's tip moves on, so the fork point is behind it
+        self.shallow_lane_checkout(head)
+        facts = shallow_clone.facts(self.co, head, "origin/main")
+        self.assertTrue(facts["shallow"], "precondition: the lane checkout is not shallow: " + repr(facts))
+        no_base = subprocess.run(["git", "-C", self.co, "merge-base", "origin/main", head], capture_output=True)
+        self.assertNotEqual(no_base.returncode, 0, "precondition: the lane head and origin/main share a merge base in this clone, so the case probes no fork point")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a shallow lane with no merge base to main passed the lane lint: " + text)
+        self.assertRegex(text, r"unknown, not a pass", "a shallow lane with no merge base to main is not reported as unknown: " + text)
+        self.assertNotRegex(text, r"FAIL", "a shallow lane with no merge base to main reads as a FAIL: " + text)
+        self.assertEqual(pass_lines(text), [], "a shallow lane with no merge base to main printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a shallow lane with no merge base to main: " + text)
+
+    def test_the_two_session_refusal_names_one_new_pr_in_one_session_as_the_way_out(self):
+        """Why: the refusal must tell the session how to clear it: rebuild the lane as one new PR in one session."""
+        text = self.two_session_refusal()
+        self.assertIn("one new PR in one session", text, "the two-session refusal does not name the way out, one new PR in one session: " + text)
+
+    def test_the_two_session_refusal_calls_the_session_the_lanes_session(self):
+        """Why: a session is the lane's session. The refusal must say so, so the reader knows which session it names."""
+        text = self.two_session_refusal()
+        self.assertIn("the lane's session", text, "the two-session refusal does not call the session the lane's session: " + text)
+
+    def test_the_two_session_refusal_never_calls_a_session_the_owner(self):
+        """Why: GLOSSARY gives owner to the person who owns the repos. A line that names a session must not call it the owner."""
+        text = self.two_session_refusal()
+        owner_lines = [line for line in text.splitlines() if re.search(r"(?i)session", line) and re.search(r"\bowner\b", line, re.I)]
+        self.assertEqual(owner_lines, [], "the two-session refusal calls a session the owner, and owner means the person: " + "\n".join(owner_lines))
+
+    def test_a_base_conflict_fail_survives_an_unreadable_session_range(self):
+        """Why: lane_lint collects each FAIL before its owner check. An unreadable range must stop with those FAILs listed too, not with its
+        own unknown line alone, so the base conflict stays in the refusal."""
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        head = self.own_writes({"shared-a.txt": "lane 7\n"}, session=OWN)
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the head merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.git_log_over_range_fails() as answered:
+            rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(len(answered), 1, "precondition: the owner check's range read did not run, so the case probes nothing")
+        self.assertEqual(rc, 1, "a conflicting head with an unreadable range passed the lane lint: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal beside an unreadable range")
+        self.assertEqual(pass_lines(text), [], "a conflicting head with an unreadable range printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the base conflict: " + text)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
