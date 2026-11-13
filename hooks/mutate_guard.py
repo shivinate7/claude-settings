@@ -1408,6 +1408,10 @@ MUTATIONS = [
      '    if marker_line(second, REVIEW_GUARD_MARKER):\n        return "guard"',
      '    if False:\n        return "guard"', "guard",
      "lane-effort-pin: a guard-or-check lane at effort high is allowed under the kind table"),
+    ("lane kind: a docs-only lane is read as a product lane, so it takes the product effort",
+     '    return "docs" if marker_line(second, DOCS_LANE_MARKER) else LANE_KIND_DEFAULT',
+     '    return LANE_KIND_DEFAULT', "guard",
+     "lane-effort-pin: a docs lane at effort low is allowed under the kind table"),
     ("role row labels: no lane or batch runner label is read whole, so the table splits a lane label",
      'ROLE_ROW_LABELS = tuple(LANE_KIND_LABELS.values()) + ("batch runner",)',
      "ROLE_ROW_LABELS = ()", "guard",
@@ -2987,6 +2991,10 @@ MUTATIONS = [
      'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
      'if not (k in tool_input and str(tool_input[k]).strip())]',
      "guard", "lane-start-settings: lane tag with a non-text"),
+    ("lane-start-settings: the model of the lane kind's row is not checked, so a product-code lane on sonnet is allowed when its row names opus",
+     '    if "model" not in missing and role_model_rank(tool_input["model"]) != ROLE_MODEL_RANK.index(',
+     '    if False and "model" not in missing and role_model_rank(tool_input["model"]) != ROLE_MODEL_RANK.index(',
+     "guard", "lane-start-settings: a product-code lane on sonnet is denied when its kind's row names opus"),
     # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
     # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
     # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
