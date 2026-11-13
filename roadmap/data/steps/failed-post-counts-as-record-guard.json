@@ -1,0 +1,14 @@
+{
+ "id": "failed-post-counts-as-record-guard",
+ "title": "Build the hooks/guard_merge.py half of review-record-failed-post: a failed add_issue_comment or cloud-refused gh post must not count as the posted record",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "PR #3235 does not build this half.",
+ "source": "lane review-record-readback (session_013NEJL2GJYfRpFUNEkfT6QN), PR #3235, 14:00 CST Nov 13",
+ "note": "Todo, needs its own lane. Home: step review-record-failed-post (its hooks/guard_merge.py half). Two notes filed by the lane in docs/debts/notes.md: read-back-other-pr-newest, read-back-edited-record. A guard change: test-author red cases first, builder, reviewer. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:00:52-06:00"
+}

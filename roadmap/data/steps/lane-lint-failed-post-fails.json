@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-failed-post-fails",
+ "title": "A failed lane-lint comment post makes `merge --lane-lint` FAIL, not print a note and exit 0",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The incident pattern \"PASS, then the post failed\" is in `merge --lane-lint`, not `merge --review-record` (which already posts nothing on main).",
+ "source": "lane review-record-readback (session_013NEJL2GJYfRpFUNEkfT6QN), PR #3235, 14:00 CST Nov 13",
+ "note": "Todo. merge/merge.py about line 3303 prints PASS; if the lane-lint comment post then fails, it only prints a note and exits 0. Fix: a failed post is FAILED there too, red case first. Past rulings not checked; lane review-record-readback is not doing it (PR #3235 stays as handed in).",
+ "updatedAt": "2026-11-13T14:00:52-06:00"
+}
