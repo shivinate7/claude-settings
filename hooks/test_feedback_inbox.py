@@ -215,6 +215,10 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+# settings.json env sets MAILBOX_REPO for every session; the hook under test would read the live mailbox and print a second
+# line. These cases check the Central line alone, so no child sees a store.
+for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
+    os.environ.pop(_name, None)
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(

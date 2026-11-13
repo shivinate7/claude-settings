@@ -289,6 +289,14 @@ def staged_suite_seen(run, required: str):
     return code, red, list(last)
 
 
+def parse_shard(value):
+    """Return (i, n) for a MUTATE_SHARD value "i/n" with 1 <= i <= n, else None."""
+    m = re.fullmatch(r"(\d+)/(\d+)", value.strip())
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
 def run_mutants(entries, run_one, controls=None, control_of=None):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
@@ -302,6 +310,10 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
     the printed verdict, and the tally, which both callers ran through two copies of the same
     ThreadPoolExecutor loop before this extraction.
 
+    MUTATE_SHARD=i/n (1 <= i <= n) runs only `entries[i-1::n]`, so n parallel jobs that each set one i run every
+    mutant once. The slice is cut before any skip, so a skipped mutant stays in its own shard. A malformed value
+    returns 1 before any mutant runs, and so does an empty slice: a shard that ran nothing proved nothing.
+
     `unknown`, the optional seventh field, is a reason this mutant's verdict cannot be trusted (see
     `control_verdict`). It prints `UNKNOWN <label> <reason>` with `seen` under it, counts in the tally, and
     exits 1 (decision `ci-unknown-is-red`). It is not `skip`: a skip means the mutant does not apply here and exits 0.
@@ -313,8 +325,23 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
     control, one that exits 0 with no case run, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
     raises KeyError: it never reads KILLED unchecked. A skipped entry has no control to ask for.
     """
+    shard = os.environ.get("MUTATE_SHARD")
+    if shard is not None:
+        picked = parse_shard(shard)
+        if picked is None:
+            print("ERROR MUTATE_SHARD=%r is not i/n with 1 <= i <= n" % shard)
+            return 1
+        whole = len(entries)
+        entries = entries[picked[0] - 1::picked[1]]
+        print("MUTATE_SHARD=%s: %d of %d mutations run in this shard" % (shard, len(entries), whole))
+        if not entries:
+            print("Nothing ran: shard %s holds no mutation" % shard)
+            return 1
     jobs = job_count()
     controls = controls or {}
+    if shard is not None and control_of is not None:
+        used = {control_of(entry) for entry in entries}  # a shard runs only the controls its own mutants read
+        controls = {key: fn for key, fn in controls.items() if key in used}
     keys = list(controls)
     print("%d mutations, %d at a time" % (len(entries), jobs))
     survivors = 0
@@ -590,7 +617,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
     narrow its cases."""
     file, family = split_suite(rel)
     env = {k: v for k, v in os.environ.items()
-           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "GUARD_FAMILY")}
+           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "MUTATE_SHARD", "GUARD_FAMILY")}
     if family:
         env["GUARD_FAMILY"] = family
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
