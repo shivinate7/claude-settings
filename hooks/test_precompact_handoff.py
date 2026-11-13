@@ -640,7 +640,7 @@ def case_nudge_reads_messages_not_total():
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
-        check("messages: total 334,000 blocks at the one checkpoint (bucket 0)",
+        check("messages: total 334,000 blocks at the top checkpoint (bucket 0)",
               is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
