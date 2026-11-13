@@ -56,8 +56,8 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
-| coordinator (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33, "all three stay on opus for now until 3.7"); stays on Opus after R52 | not ruled; model default |
-| triage (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33); stays on Opus after R52 | not ruled; model default |
+| coordinator, standing session (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33, "all three stay on opus for now until 3.7"); stays on Opus after R52 | not ruled; model default |
+| triage, standing session (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33); stays on Opus after R52 | not ruled; model default |
 | batch runner, in this repo and in child repos (decision `session-tiers`; overrides the separate-sessions row below) | claude-sonnet-5-5, the owner's ruling of 2026-11-12 13:07 CST (R52), which ends his Opus hold of 2026-11-11 13:52 CST for this role only; it becomes the default when its batches show no wrong drop, no wrong merge and no stalled batch against the Opus runs before it | medium, the owner's ruling of 2026-11-12 13:07 CST (R52) |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
 | lane (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
