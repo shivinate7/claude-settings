@@ -27,14 +27,14 @@
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
-                          sha. A review log whose every round and Fix check line is FAIL runs no lint: it prints, and posts no lane-lint comment
-                          (owner, 2026-11-13 21:01 UTC, ruling own-764-b-fail-only-record). Any other log first runs the lane lint (as --lane-lint does,
+                          sha. A review log with at least one round, every round and Fix check line FAIL, runs no lint: it prints, and posts no lane-lint comment
+                          (ruling own-764-b-fail-only-record). Any other log first runs the lane lint (as --lane-lint does,
                           the same checks and the same lane-lint comment on a PASS) on that
                           head, last, after every refusal here and for every kind, docs-only too, and prints the record only on a PASS: the record
                           alone on stdout, every lint line on stderr. A FAIL stops with its failing steps and no record. An unknown (ci-job exit 2,
                           a timeout, an unread draft run) stops as "unknown, not a pass", with no record and no --lint-unknown-ok. A head whose tree has
-                          no `checks` job runs no lint: one stderr line says why, and the record prints. Cost per printed record: one lane lint
-                          (bounded by LINT_SECONDS; wall time unmeasured), plus one comment post. A usage error or an earlier refusal costs nothing. Run it as a background command.
+                          no `checks` job runs no lint: one stderr line says why, and the record prints. Cost per record with a PASS line: one lane lint
+                          (bounded by LINT_SECONDS; wall time unmeasured), plus one comment post. A FAIL-only record costs none of it. A usage error or an earlier refusal costs nothing. Run it as a background command.
                           It posts only that lint comment: the lane posts the review record as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -4406,7 +4406,7 @@ def build_parser():
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
-    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head. A log with any PASS line lints the head first (the lane lint, which posts its lane-lint comment on a PASS) and prints only on a PASS; a log whose every round and fix verifier line is FAIL prints with no lint; run it as a background command")
+    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head. A log with a PASS line, or no round, lints the head first (the lane lint, which posts its lane-lint comment on a PASS) and prints only on a PASS; a log with at least one round, every round and fix verifier line FAIL, prints with no lint; run it as a background command")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
@@ -4625,7 +4625,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 if not ok:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            # A review log whose every round and fix verifier line is FAIL skips the lint (owner, ruling own-764-b-fail-only-record), so a FAIL on a lint-red head is recorded; any PASS line lints first
+            # A review log with at least one round, every round and fix verifier line FAIL, skips the lint (owner, ruling own-764-b-fail-only-record), so a FAIL on a lint-red head is recorded; any PASS line lints first
             fail_only = bool(a.round) and all(r[3] == "FAIL" for r in a.round) and (not a.fix_check or a.fix_check[3] == "FAIL")
             if not fail_only:
                 with release_on_signals():  # the last gate: after every refusal above, for every kind (docs-only too); a signal ends the run through lane_lint's `finally`
