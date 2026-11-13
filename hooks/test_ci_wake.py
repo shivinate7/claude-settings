@@ -26,8 +26,8 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
 
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
-`gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
-status` at once, then every 30 s for 4 minutes, then at growing gaps of 120 s at most, and returns when
+`gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh api -i repos/<repo>/actions/runs/<id>`
+at once (`gh run view` takes no -i, and the quota headers come on -i), then every 30 s for 4 minutes, then at growing gaps of 120 s at most, and returns when
 the status is `completed` or when the deadline passes (55 minutes): its last pause ends at the
 deadline, never past it. A call made at its deadline
 or past it makes no read and returns at once. A failed or non-JSON read gets one retry after the
@@ -60,14 +60,15 @@ skips a .cmd stand-in (decision list-form-subprocess-ignores-a-path-shim-on-wind
 must find gh with shutil.which. The stub answers `gh api repos/O/R/pulls/N` and
 `gh api -X GET repos/O/R/pulls -F head=OWNER:BRANCH -f state=open` (it refuses any argument holding `&`) in the REST field names only (the cloud proxy
 refuses GraphQL: every `gh pr ...` call and `gh api graphql` exit 1 with the proxy's 403 text), and the --json forms of `run list --commit SHA` and `run view <id>` from a JSON fixture. `run view`
-prints only the fields `--json` names. `run watch` exits 1: the hook must never run it. The stub
+prints only the fields `--json` names; `run view --json status` exits 1, since the status read is the api route
+`gh api -i repos/O/R/actions/runs/<id>` (under -i a header block with a full quota). `run watch` exits 1: the hook must never run it. The stub
 writes every call to its own file beside the log (one file per call, so parallel calls never share one).
 A run marked in_progress_at_list reads in progress at `run list` and as its fixture says at
-`run view`. A run with ping_on_status_read: its status read (`run view <id> --json status`) first
+`run view`. A run with ping_on_status_read: its status read (the api route) first
 connects to the localhost port in GH_STUB_READY_PORT, so a case can wait for that read with one
 accept() and no polling. A run with fail_status_read: that read exits 1. A run with in_progress_reads N: its first N
-`run view <id>` reads (any --json fields, counted from the call log) show it in progress with no
-conclusion, and later reads show the fixture: a run that ends only after N reads. A run with
+reads of the run, by either route (`run view <id>` in any --json fields, or the status read), counted from the call log,
+show it in progress with no conclusion, and later reads show the fixture: a run that ends only after N reads. A run with
 early_status S shows S (such as queued) in place of in_progress for those N reads. A run with
 appears_at_list N: `run list` leaves it out until the Nth `run list` call of the case (counted from the call
 log, all PRs together). A run with unfinished_to_list N: `run list` shows it in progress, with no
@@ -264,10 +265,20 @@ def view(r, listed, n=1):
         out["jobs"] = r["jobs"]
     return out
 
+def run_read_id(args):
+    """The run id of one read of a run: `run view <id>`, or the status read `api [-i] repos/O/R/actions/runs/<id>`.
+    Else None. The -R of a call is not read: strip_repo drops it."""
+    plain = strip_repo(args)
+    if plain[:2] == ["run", "view"] and len(plain) > 2:
+        return plain[2]
+    path = next((a for a in plain[1:] if a.startswith("repos/")), "") if plain[:1] == ["api"] else ""
+    parts = path.split("/")
+    return parts[5] if len(parts) == 6 and parts[3:5] == ["actions", "runs"] else None
+
 def views_of(key):
-    """How many `run view <key>` calls the log holds, this one too (log_call ran first). Each gh
+    """How many reads of run <key> the log holds, by either route, this one too (log_call ran first). Each gh
     call is a new process, so the log is the only count that outlives one."""
-    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if strip_repo(a)[:3] == ["run", "view", key])
+    return sum(1 for a in read_log(os.environ["GH_STUB_LOG"]) if run_read_id(a) == key)
 
 def lists_of():
     """How many `run list` calls the log holds, this one too, as views_of counts."""
@@ -313,6 +324,30 @@ def rest(path, full, args, fx):
     sys.stdout.write(json.dumps([rest_pr(p) for p in want]) + "\n")
     return 0
 
+def header_block():
+    """The header block `gh api -i` prints before a body: a full quota, its reset an hour on, so no wait."""
+    return ("HTTP/2.0 200 OK\nContent-Type: application/json; charset=utf-8\nX-RateLimit-Limit: 5000\n"
+            "X-RateLimit-Remaining: 5000\nX-RateLimit-Reset: %d\n\n" % (int(time.time()) + 3600))
+
+def run_api(parts, args, fx):
+    """`gh api [-i] repos/O/R/actions/runs/<id>`: the status read of one run, answered as its fixture answers
+    `run view`. Under -i the reply starts with the header block the quota is read from."""
+    hits = [r for r in fx["runs"] if here(r, args, fx) and str(r["databaseId"]) == parts[5]]
+    if not hits:
+        sys.stdout.write('{"message":"Not Found","status":"404"}\n')
+        sys.stderr.write("gh: Not Found (HTTP 404)\n")
+        return 1
+    r = hits[0]
+    if r.get("fail_status_read"):
+        sys.stderr.write("HTTP 502: Bad Gateway\n")
+        return 1
+    if r.get("ping_on_status_read"):
+        ready_ping()
+    if views_of(parts[5]) <= r.get("in_progress_reads", 0):
+        r = dict(r, status=r.get("early_status", "in_progress"), conclusion=None)
+    sys.stdout.write((header_block() if "-i" in args else "") + json.dumps(view(r, False)) + "\n")
+    return 0
+
 def main(args):
     log_call(args)
     with open(os.environ["GH_STUB_FIXTURE"], encoding="utf-8") as f:
@@ -344,7 +379,11 @@ def main(args):
                 skip = True
             elif not a.startswith("-"):
                 words.append(a)
-        return rest(words[0] if words else "", words[0] if words else "", args, fx)
+        path = words[0] if words else ""
+        parts = path.split("/")
+        if len(parts) == 6 and parts[3:5] == ["actions", "runs"]:
+            return run_api(parts, args, fx)
+        return rest(path, path, args, fx)
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
@@ -380,11 +419,9 @@ def main(args):
             return 1
         r = hits[0]
         fields = flag(args, "--json")
-        if fields == "status" and r.get("fail_status_read"):
-            sys.stderr.write("HTTP 502: Bad Gateway\n")
+        if fields == "status":   # the status read is the api route now: it carries the quota headers under -i
+            sys.stderr.write("stub gh: the status read is gh api -i on the run, not run view\n")
             return 1
-        if fields == "status" and r.get("ping_on_status_read"):
-            ready_ping()
         if views_of(key) <= r.get("in_progress_reads", 0):
             r = dict(r, status=r.get("early_status", "in_progress"), conclusion=None)
         out = view(r, False)
@@ -655,9 +692,14 @@ def start_watcher(payload, scen, extra=None):
 
 
 def watched(res):
-    """The ids of the runs the hook waited on: one `gh run view <id> --json status` read each. The -R of
+    """The ids of the runs the hook waited on: one status read `gh api -i repos/O/R/actions/runs/<id>` each. The -R of
     a call is not compared: GH.strip_repo drops it, so the check reads the same wherever -R sits."""
-    return [c[2] for c in map(GH.strip_repo, res.calls) if c[:2] == ["run", "view"] and c[3:] == ["--json", "status"]]
+    return [GH.run_read_id(c) for c in map(GH.strip_repo, res.calls) if c[:2] == ["api", "-i"] and GH.run_read_id(c)]
+
+
+def run_reads(res):
+    """Every read of one run, by either route: `run view <id>` and the status read. The -R of a call is not compared."""
+    return [c for c in map(GH.strip_repo, res.calls) if GH.run_read_id(c)]
 
 
 def run_watches(res):
@@ -1051,7 +1093,7 @@ def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
 
 
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
-STATUS_READ = ["run", "view", "7", "--json", "status"]
+STATUS_READ = ["api", "-i", "repos/{owner}/{repo}/actions/runs/7"]   # what watch_run sends with no repo named
 T0 = 1000.0   # where the fake clock starts
 
 
@@ -1169,7 +1211,7 @@ def watch_detail(raised, clock, calls, direct):
 
 
 def case_watch_run_reads_the_status_until_completed():
-    """in_progress, in_progress, completed: three reads of `run view 7 --json status`, 30 s or more
+    """in_progress, in_progress, completed: three reads of `gh api -i repos/{owner}/{repo}/actions/runs/7`, 30 s or more
     apart, the first before any pause, none after `completed`. Never `gh run watch`, direct or by gh()."""
     label = "watch_run, in_progress twice then completed"
     mod, raised, clock, calls, direct = watch_run_on_fakes(
@@ -1178,7 +1220,7 @@ def case_watch_run_reads_the_status_until_completed():
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: never starts `gh run watch`" % label,
           direct == [] and not any(a[:2] == ["run", "watch"] for _, a in calls), detail)
-    check("%s: reads `gh run view 7 --json status` three times, and makes no other gh call" % label,
+    check("%s: reads `gh api -i repos/{owner}/{repo}/actions/runs/7` three times, and makes no other gh call" % label,
           [a for _, a in calls] == [STATUS_READ] * 3, detail)
     check("%s: reads at least 30 s apart" % label, len(times) == 3 and spaced(times), detail)
     check("%s: the first read comes before any pause" % label, times[:1] == [T0], detail)
@@ -1217,7 +1259,7 @@ def case_watch_run_at_or_past_the_deadline_reads_nothing():
         mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
         detail = watch_detail(raised, clock, calls, direct)
         check("%s: returns, no exception, no `gh run watch`" % label, raised is None and direct == [], detail)
-        check("%s: makes no gh call, so no `run view` read" % label, calls == [], detail)
+        check("%s: makes no gh call, so no status read" % label, calls == [], detail)
         check("%s: returns at once, the clock does not move" % label, clock.now == T0, detail)
 
 
@@ -1311,8 +1353,8 @@ def case_watch_run_gaps_grow_to_a_cap():
     mod, clock, calls, rel, gaps = never_ending_run()
     detail = "distinct gaps %r in %d reads" % (sorted({round(g, 1) for g in gaps}), len(rel))
     check("%s: no gap is shorter than the one before it" % label, gaps == sorted(gaps), detail)
-    check("%s: no gap is longer than %d s" % (label, BACKOFF_CAP), max(gaps) <= BACKOFF_CAP + 1e-6, detail)
-    check("%s: the gaps grow past 30 s, to 90 s or more" % label, max(gaps) >= 90, detail)
+    check("%s: no gap is longer than %d s" % (label, BACKOFF_CAP), gaps != [] and max(gaps) <= BACKOFF_CAP + 1e-6, detail)
+    check("%s: the gaps grow past 30 s, to 90 s or more" % label, gaps != [] and max(gaps) >= 90, detail)
 
 
 def case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads():
@@ -1417,7 +1459,7 @@ def case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline():  # co
 
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
-# `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
+# `run list` (by the number of the call, as the stub does), `run view` and the status read. Its `time` is the fake clock.
 def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
     """Run wait_for(SHA, cwd, deadline) in process. budget: seconds from the clock's start to the
     deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
@@ -1453,6 +1495,11 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
                 out = as_of_clock(hits[0], GH.view(hits[0], False))
                 fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
                 return 0, json.dumps({k: v for k, v in out.items() if not fields or k in fields}) + "\n", ""
+        run_id = GH.run_read_id(args)
+        if args[:1] == ["api"] and run_id:   # the status read of watch_run, which wait_for makes for each run it judges
+            hits = [r for r in runs if str(r["databaseId"]) == run_id]
+            if hits:
+                return 0, json.dumps(as_of_clock(hits[0], GH.view(hits[0], False))) + "\n", ""
         return 1, "", "stub gh: unsupported: %s" % " ".join(args)
 
     fake_shutil = types.SimpleNamespace(which=lambda name, *a, **kw: None)
@@ -1661,8 +1708,8 @@ def case_repo_without_ci_starts_no_watch():
         res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
         expect_silent(label, res)
         expect_no_watch(label, res)
-        check("%s: no run list or run view call" % label,
-              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+        check("%s: no run list, run view or status read" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0 and run_reads(res) == [], why(res))
         if asks:
             check("%s: workflow list reads -R %s" % (label, REPO_HOME),
                   any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
