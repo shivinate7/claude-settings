@@ -5,16 +5,22 @@ Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. 
 is a visible success and scope reads its output.
 
 skip=true only when the push commit's tree equals the tree of an integration PR head (a batch-* branch) whose all-jobs-passed check
-run concluded success. An integration PR is ready, and its ready run runs the Windows guard, merge and rest jobs in full, and
-ci-scope.sh sets every scope flag on for a ready pull request from a batch-* branch, so that run is the all-flags run: no job or suite
-skipped on the PR head's diff. Any error from the read, of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
+run concluded success and whose every suite job concluded success. An integration PR is ready, and its ready run runs the Windows
+guard, merge and rest jobs in full, and ci-scope.sh sets every scope flag on for a ready pull request from a batch-* branch, so that
+run is the all-flags run: no job or suite skipped on the PR head's diff. Any error from the read, of any type, writes skip=false and
+says "unknown": an unknown state runs everything, never skips.
 
-The result is read from the head's all-jobs-passed check run, not from the checks.yml run's own conclusion: a draft run skips every
-job and concludes success, and it must not stand for the ready run. A skipped check run (the draft run's) is not a result.
+The result is read from the head's check runs, not from the checks.yml run's own conclusion: a draft run skips every job and
+concludes success, and it must not stand for the ready run. A skipped check run (the draft run's) is not a result. all-jobs-passed
+also passes when jobs were skipped, so it is not enough alone: a reused run counts for a suite only if that suite's job ran and
+concluded success on that tree. The suite jobs are the jobs all-jobs-passed needs, minus the bookkeeping jobs. They are derived from
+checks.yml by lint/all_jobs_passed_rules.py (split_jobs, the one reader), never copied here. The head record's conclusion is success
+only when both hold; else it names the suite jobs that did not succeed.
 
 Input (env): PUSH_TREE (the push commit's tree sha), REPO (owner/name), GH_TOKEN, HEAD_SHA (the push commit). PRS_JSON is a stand-in
 for the read: a JSON list of integration PR heads, each {"head_branch", "tree", "status", "conclusion"}
-(lint/test_push_skip.py). Cost: one pull request list read, then per integration PR head its commit and its check runs; no file, no process kept.
+(lint/test_push_skip.py). Cost: one pull request list read, then per integration PR head its commit and one page of its check runs
+(every job, up to 100), plus one read of checks.yml; no file written, no process kept.
 """
 import functools
 import importlib.util
@@ -27,6 +33,9 @@ BATCH_PREFIX = "batch-"
 ROLLUP = "all-jobs-passed"
 PAGE = 100
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+CHECKS = os.path.join(ROOT, ".github", "workflows", "checks.yml")
+LINT = os.path.join(ROOT, "lint")
 
 
 class Unknown(Exception):
@@ -42,6 +51,27 @@ def _nightly_skip():
     return module
 
 
+@functools.lru_cache(maxsize=None)
+def suite_jobs():
+    """The jobs a ready batch run must have run its tests in: every job all-jobs-passed needs, except the bookkeeping jobs that decide,
+    skip or fan in. lint/all_jobs_passed_rules.py is the one reader of checks.yml, loaded by path since lint/ is no package. Unknown
+    when checks.yml cannot be read or yields no suite job, since an empty list would let any run stand."""
+    sys.path.insert(0, LINT)
+    try:
+        spec = importlib.util.spec_from_file_location("all_jobs_passed_rules", os.path.join(LINT, "all_jobs_passed_rules.py"))
+        rules = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rules)
+        with open(CHECKS, encoding="utf-8") as handle:
+            needed, _off, _problems = rules.split_jobs(handle.read())
+    except Exception as ex:  # a missing file, a reader import error or a parse error all leave the suite list unknown
+        raise Unknown("the suite jobs could not be read from checks.yml (%s: %s)" % (type(ex).__name__, ex))
+    bookkeeping = {"scope", rules.ALL_JOBS_PASSED_JOB, rules.FAN_IN, rules.PUSH_SKIP_JOB, rules.NIGHTLY_SKIP_JOB}
+    suites = tuple(name for name in needed if name not in bookkeeping)
+    if not suites:
+        raise Unknown("checks.yml yields no suite job")
+    return suites
+
+
 def get(path, query, env):
     api = _nightly_skip()
     url = "%s/repos/%s/%s" % (api.API, env["REPO"], path)
@@ -53,16 +83,21 @@ def get(path, query, env):
         raise Unknown("the read of %s failed (%s: %s)" % (path, type(ex).__name__, ex))
 
 
-def rollup_result(env, sha):
-    """(status, conclusion) of the newest all-jobs-passed check run on `sha` that ran, a queued one included. A skipped one is the
-    draft run's, so it is not a result. ("none", None) when no check run ran."""
-    body = get("commits/%s/check-runs" % sha, {"check_name": ROLLUP, "per_page": str(PAGE)}, env)
+def check_runs(env, sha):
+    """The check runs of `sha`: one page of every job. Unknown on a full page, since a newer run may be missing."""
+    body = get("commits/%s/check-runs" % sha, {"per_page": str(PAGE)}, env)
     runs = body.get("check_runs") if isinstance(body, dict) else None
     if not isinstance(runs, list):
         raise Unknown("the check runs read has no check_runs list")
     if len(runs) >= PAGE:
         raise Unknown("the check runs read is a full page, so a newer run may be missing")
-    ran = [r for r in runs if isinstance(r, dict) and r.get("conclusion") != "skipped"]
+    return runs
+
+
+def newest_result(runs, name):
+    """(status, conclusion) of the newest check run called `name` that ran, a queued one included. A skipped one is the draft run's,
+    or a job the run left out, so it is not a result. ("none", None) when no check run ran."""
+    ran = [r for r in runs if isinstance(r, dict) and r.get("name") == name and r.get("conclusion") != "skipped"]
     if not ran:
         return "none", None
     # A run with no started_at is queued and not started yet, so it is the newest: an older green run must not stand for it.
@@ -70,9 +105,19 @@ def rollup_result(env, sha):
     return newest.get("status"), newest.get("conclusion")
 
 
+def rollup_result(env, sha, runs=None):
+    """(status, conclusion) of the newest all-jobs-passed check run on `sha`. `runs` is the head's check runs when the caller read them."""
+    return newest_result(check_runs(env, sha) if runs is None else runs, ROLLUP)
+
+
+def suites_not_success(runs):
+    """The suite jobs whose newest check run that ran is missing or did not complete with success, sorted."""
+    return sorted(name for name in suite_jobs() if newest_result(runs, name) != ("completed", "success"))
+
+
 def read_heads(env):
     """The batch pull request heads: the stand-in when PRS_JSON is set, else the pull requests the push commit belongs to, each
-    with its head's tree and its all-jobs-passed result. Raises Unknown on anything that is not a list of records."""
+    with its head's tree and its result: the all-jobs-passed result, not success when a suite job did not succeed. Raises Unknown on anything that is not a list of records."""
     raw = env.get("PRS_JSON")
     if raw is not None:
         try:
@@ -101,7 +146,14 @@ def read_heads(env):
         tree = (commit.get("tree") or {}).get("sha") if isinstance(commit, dict) else None
         if not tree:
             raise Unknown("the commit read of a batch head has no tree")
-        status, conclusion = rollup_result(env, head["sha"])
+        runs = check_runs(env, head["sha"])
+        status, conclusion = rollup_result(env, head["sha"], runs)
+        if (status, conclusion) == ("completed", "success"):
+            # all-jobs-passed passes with skipped jobs, so a green rollup counts only when every suite job also succeeded.
+            missing = suites_not_success(runs)
+            if missing:
+                conclusion = "suite jobs not success: " + ", ".join(missing)
+                print("push-skip: batch head %s is not covered, %s" % (branch, conclusion))
         heads.append({"head_branch": branch, "tree": tree, "status": status, "conclusion": conclusion})
     return heads
 
