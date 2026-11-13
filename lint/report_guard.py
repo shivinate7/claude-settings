@@ -2947,7 +2947,11 @@ def past_ruling_problem(asked, cwd, marked=None, remedy=None):
     reason = verdict.get("reason")
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
-        return cannot_run(asked, "the review cited a record that was not in the list", marked, remedy)
+        why = "the review cited a record that was not in the list"
+        if not question_form.names_record(reason):
+            # The check ran and refused without naming a record: the marker passes only a check that could not run.
+            return (remedy or UNVETTED_REASON) % why
+        return cannot_run(asked, why, marked, remedy)
     if session_wording(reason):
         # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
         cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]

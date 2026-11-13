@@ -2278,3 +2278,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- unvetted-remedy-for-uncited: the Unvetted remedy tells a session to add an `Unvetted:` line, which no longer passes an uncited refusal (a reason that names no record); the wording is the owner's call. Until 2026-11-27.
