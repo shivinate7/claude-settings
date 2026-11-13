@@ -27,8 +27,9 @@ a turn end in these cases:
     pass unchecked and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
-    `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
-    or SendMessage naming n as a whole token, or an ArtifactData set, update or batch whose input has
+    `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message,
+    SendMessage or a Bash `mail send` whose message (for a mail send, its body only: never the `--to`
+    address) names n as a whole token (_transcript.sent_message), or an ArtifactData set, update or batch whose input has
     key n equal to the item number under collection `items` (Pages; lint/_transcript.py reads the
     transcript). The k-th block with text T anchors to the k-th owner record with text T, line ends made
     the same. Owner records are user records and queued_command attachments (_transcript.owner_text):
@@ -39,8 +40,8 @@ a turn end in these cases:
     the home is read as a ruling home is (home_path): a matching pair of backticks or quotes comes off,
     a `#anchor` drops, a trailing `:,;.` strips; then each part must match `[A-Za-z0-9._-]+`, else the
     home is malformed and blocks; checked in every block that holds one, burst or not; a `[closed]` one is never checked) has no send after the owner's
-    message: send_message or SendMessage whose message names `<owner>/<name>` as a whole token, without
-    case (REPO_HOME, _names_repo). A sentence period or a URL path after the name still counts;
+    message: send_message, SendMessage or a `mail send` whose message (body only) names `<owner>/<name>` as a
+    whole token, without case (REPO_HOME, _names_repo). A sentence period or a URL path after the name still counts;
     `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
     transcript read and the anchoring of the page check (Pages.sent takes the proof). Its stand-down systemMessage reads
     "Feedback guard: repo sends not checked" and the page one reads "page sends not checked";
@@ -758,14 +759,14 @@ def norm(text):
 
 
 def _proves(use, n):
-    """True when a tool_use sends page item n: a message naming n as a whole token, or an
-    ArtifactData write with key n == n under collection `items`."""
+    """True when a tool_use sends page item n: a send_message or `mail send` whose message (for a mail send, its
+    body only) names n as a whole token, or an ArtifactData write with key n == n under collection `items`."""
     name, tool_input = use.get("name") or "", use.get("input")
     if not isinstance(tool_input, dict):
         return False
-    if name in SEND_TOOLS:
-        msg = tool_input.get("message")
-        return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
+    msg = _transcript.sent_message(use)
+    if msg:
+        return re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
     return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
 
 
@@ -808,19 +809,17 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
                 " `items` with no out_dir); then end the turn again"
                 % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
-            " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
+            " the owner's message; send the ruling to the page writer (send_message or `mail send` naming %s, or an"
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
 
 
 def _names_repo(use, owner, name):
-    """True when a tool_use is a send whose message names owner/name as a whole token, without case.
+    """True when a tool_use is a send_message or `mail send` whose message (for a mail send, its body only) names
+    owner/name as a whole token, without case.
     The name ends at a character outside [A-Za-z0-9_-], and a period ends it only when no name
     character follows, so a sentence period or a URL path still counts."""
-    tool_input = use.get("input")
-    if (use.get("name") or "") not in SEND_TOOLS or not isinstance(tool_input, dict):
-        return False
-    msg = tool_input.get("message")
-    return isinstance(msg, str) and re.search(
+    msg = _transcript.sent_message(use)
+    return bool(msg) and re.search(
         r"(?<![A-Za-z0-9._-])%s/%s(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])" % (re.escape(owner), re.escape(name)),
         msg, re.IGNORECASE) is not None
 
@@ -834,7 +833,7 @@ def repo_problem(item_id, rest, text, k, stamp, pages):
     if pages is None or pages.sent(text, k, lambda use: _names_repo(use, *m.groups()), stamp, "repo"):
         return None
     return ("%s [repo] repo:%s: the transcript shows no send naming %s after the owner's message; send the"
-            " owner's message to that repo's triage session (send_message naming %s)" % (item_id, slug, slug, slug))
+            " owner's message to that repo's triage session (send_message or `mail send` naming %s)" % (item_id, slug, slug, slug))
 
 
 def answer_numbers(text):
@@ -866,7 +865,7 @@ def answer_problem(b, text, k, homes, pages):
     if not unsent:
         return None
     return ("the owner's chat answer at %s names page item %s, and the transcript shows no send of it to the"
-            " page writer after the owner's message; send each answer to the page writer (send_message naming"
+            " page writer after the owner's message; send each answer to the page writer (send_message or `mail send` naming"
             " the item number, or an ArtifactData write with n set to it)" % (b["stamp"], ", ".join(unsent)))
 
 

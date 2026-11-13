@@ -10,6 +10,7 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import shlex
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
@@ -368,6 +369,112 @@ def send_targets(use):
     if use.get("name") not in SEND_TOOLS or not isinstance(inp, dict):
         return set()
     return {v for v in (inp.get("session_id"), inp.get("to")) if isinstance(v, str)}
+
+
+MAIL_COMMANDS = ("mail", "mail.cmd")
+SEGMENT_CHARS = frozenset(";&|()\n")  # shlex joins a run of these into one token, such as "|\n" or "&&"
+HEREDOC_OPENER = re.compile(r"<<(?!<)-?\s*(['\"]?)([A-Za-z0-9_]+)\1")
+
+
+def _take_heredocs(command):
+    """(command with each heredoc body cut out, the bodies in order). A body runs from the line after its
+    opener to the line that is only the delimiter."""
+    lines, kept, bodies, i = command.split("\n"), [], [], 0
+    while i < len(lines):
+        kept.append(lines[i])
+        opener = HEREDOC_OPENER.search(lines[i])
+        i += 1
+        if opener:
+            body = []
+            while i < len(lines) and lines[i].strip() != opener.group(2):
+                body.append(lines[i])
+                i += 1
+            i += 1
+            bodies.append("\n".join(body))
+    return "\n".join(kept), bodies
+
+
+def _segments(command):
+    """The command's simple commands as (words, piped_in, heredoc_bodies), split on the shell's
+    separators. A word inside quotes stays one word, so an echo or grep that only mentions `mail send` has no `mail`
+    command word. Empty when the shell quoting does not parse."""
+    text, bodies = _take_heredocs(command)
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        return []
+    out, words, piped = [], [], False
+    for tok in tokens + [";"]:
+        if set(tok) <= SEGMENT_CHARS:
+            if words:
+                out.append((words, piped, []))
+            words, piped = [], tok.strip("\n") == "|"
+        else:
+            words.append(tok)
+    return _attach(out, bodies)
+
+
+def _attach(segments, bodies):
+    """Resolve each segment's `<<` delimiter and `<<<` word into body text, taking heredoc bodies in order."""
+    out, queue = [], list(bodies)
+    for words, piped, _ in segments:
+        plain, here, i = [], [], 0
+        while i < len(words):
+            if words[i] == "<<" and i + 1 < len(words):
+                here.append(queue.pop(0) if queue else "")
+                i += 2
+            elif words[i] == "<<<" and i + 1 < len(words):
+                here.append(words[i + 1])
+                i += 2
+            elif words[i] in ("<", ">", ">>", ">&", "<&"):
+                i += 2
+            else:
+                plain.append(words[i])
+                i += 1
+        out.append((plain, piped, here))
+    return out
+
+
+def _mail_send_bodies(command):
+    """The body text of each `mail send` the command runs, and nothing else of its line. The body is a heredoc or
+    here-string on the send, or what a piped echo, printf or heredoc before it writes. The `--to` address and the
+    other options are never part of it."""
+    segments, bodies = _segments(command), []
+    for n, (words, piped, here) in enumerate(segments):
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words = words[1:]
+        if len(words) < 2 or os.path.basename(words[0].replace("\\", "/")) not in MAIL_COMMANDS or words[1] != "send":
+            continue
+        body = list(here)
+        if not body and n and piped:
+            before, _, before_here = segments[n - 1]
+            if before_here:
+                body = before_here
+            elif before and os.path.basename(before[0]) in ("echo", "printf"):
+                body = [" ".join(w for w in before[1:] if not re.fullmatch(r"-[neE]+", w))]
+        bodies.extend(body)
+    return bodies
+
+
+def sent_message(use):
+    """The message text of a send tool_use, else "". For send_message / SendMessage it is input.message. For a Bash
+    tool_use that runs `mail send` (bin/mail, mail, mail.cmd) it is the body only: never the `--to` address or the
+    rest of the command line, so an address that names an item or repo proves nothing. A Bash call that only quotes
+    `mail send` (an echo, a grep) is no send. Whether the send succeeded is read from its tool_result, not here."""
+    inp = use.get("input")
+    if not isinstance(inp, dict):
+        return ""
+    name = use.get("name")
+    if name in SEND_TOOLS:
+        msg = inp.get("message")
+        return msg if isinstance(msg, str) else ""
+    command = inp.get("command")
+    if name == "Bash" and isinstance(command, str) and "send" in command:
+        return "\n".join(_mail_send_bodies(command))
+    return ""
 
 
 def result_text(block):
