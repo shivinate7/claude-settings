@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -38,6 +39,7 @@ RUN_FOLDER = _test_temp.run_folder()
 MODULE = os.path.join(HERE, "check_comment_narration.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+import check_comment_narration as cnl  # noqa: E402  the module under test, imported in process by ExampleIds
 GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
 STANDARD = os.path.join(HERE, "code_check_standard.json")
 with open(STANDARD, encoding="utf-8") as f:
@@ -68,6 +70,7 @@ FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
     "from PR #509", "PR 1234", "PR#4567",
     "reverted in 2ff288b3", "see 03d62e85", "added by 4a1b2c3", "cut at 9f8e7d6c5b",
+    "fixed in 41ddef83", "since commit 41ddef83", "fixed in `41ddef83`",
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
@@ -96,6 +99,17 @@ CLEAN = [
     "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
     "changed files only", "the user changed the value", "added to the queue after review of the input",
     "round 3 places", "used to compute the total",
+    # An example id names no commit, in a docstring or a comment. Each example marker before an id is its own case,
+    # in any letter case: dropping that marker from EXAMPLE flags its line. A list of ids after the marker joins it,
+    # joined by commas, or, and or OR.
+    "e.g. a short id such as `41ddef83`",
+    "e.g. 41ddef83", "i.e. 41ddef83", "for example 41ddef83", "for instance 41ddef83", "like 41ddef83",
+    "e.g. `aa11bb22`, 41ddef83",
+    "E.g. 41ddef83", "I.e. 41ddef83", "Such as 41ddef83", "For example 41ddef83", "For instance 41ddef83",
+    "Like 41ddef83", "LIKE 41ddef83", "e.g. 41ddef83 OR 03d62e85",
+    "Each row has a fixed width id, e.g. 41ddef83.",
+    "Ids are hex strings, such as 41ddef83, assigned when a record is added.",
+    "Ids stay short since the full hash is long, e.g. 41ddef83.",
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
@@ -137,6 +151,17 @@ def lines_of(path):
         return []
     with open(path, encoding="utf-8") as f:
         return f.read().splitlines()
+
+
+class CountedSearch:
+    """Stands in for a compiled pattern: passes each search through and counts the calls."""
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.calls = 0
+
+    def search(self, *args):
+        self.calls += 1
+        return self.pattern.search(*args)
 
 
 class Case(unittest.TestCase):
@@ -605,6 +630,90 @@ def f():
         self.base({"keep.py": "x = 1\n"})
         self.change({"hash.py": 's = "a # b"\nt = "// /* # round 2"\nu = \'#\'\nv = """#"""\n# fine\n'})
         self.assertClean()
+
+
+class ExampleIds(Case):
+    """A comma list of ids after an example marker is clean, at any length. A space-separated list flags each id
+    after the first. An id is still flagged when its clause cites a commit, even after a marker or in a list join."""
+
+    @staticmethod
+    def example_id(i):
+        """A 9-character hex id with a letter and a digit, distinct for each i below 10000."""
+        return "%04xa%04d" % (i, i)
+
+    def scan_comment(self, name, line):
+        return self.scan({name: "x = 1\n# %s\ny = 2\n" % line})
+
+    def test_short_list_after_an_example_marker_is_clean(self):
+        ids = [self.example_id(i) for i in range(3)]
+        rc, out = self.scan_comment("short.py", "e.g. " + ", ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 0, out)
+        self.assertNoHit(out, "short.py", 2)
+
+    def test_comma_list_of_400_ids_after_an_example_marker_is_clean(self):
+        ids = [self.example_id(i) for i in range(400)]
+        rc, out = self.scan_comment("comma.py", "e.g. " + ", ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 0, out)
+        self.assertNoHit(out, "comma.py", 2)
+
+    def test_space_separated_list_of_4000_ids_after_an_example_marker_flags_each_id_after_the_first(self):
+        ids = [self.example_id(i) for i in range(4000)]
+        rc, out = self.scan_comment("spaces.py", "e.g. " + " ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 1, "the list line is not flagged")
+        rows = [row for row in out.splitlines() if "commit hash:" in row]
+        self.assertEqual({row.split(": ", 1)[0] for row in rows}, {"spaces.py:2"}, "a hit is off the list line")
+        self.assertEqual(len(rows), 3999, "the first id is not skipped, or a later id is not flagged")
+        flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
+        self.assertEqual(flagged, ids[1:], "the flagged ids are not the ids after the first")
+
+    def assertCommitHashFlagged(self, cases):
+        """Each (comment, id) pair is one comment on line 2 of its own file. The check must flag that id there."""
+        rc, out = self.scan({"h%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, (text, _) in enumerate(cases)})
+        self.assertNotIn("Traceback", out)
+        rows = out.splitlines()
+        missed = [text for i, (text, ident) in enumerate(cases)
+                  if not any(row.startswith("h%d.py:2: commit hash: %s " % (i, ident)) for row in rows)]
+        self.assertEqual(missed, [], "a commit id that its clause cites is not flagged as commit hash:\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    def test_history_cite_right_after_an_example_marker_is_flagged(self):
+        self.assertCommitHashFlagged([
+            ("i.e. 41ddef83 reverted the guard", "41ddef83"),
+            ("works like 41ddef83", "41ddef83"),
+        ])
+
+    def test_history_cite_second_id_of_an_example_list_is_flagged(self):
+        self.assertCommitHashFlagged([("e.g. 41ddef83 and 03d62e85 reverted the guard", "03d62e85")])
+
+    def test_history_cite_restated_after_i_e_is_flagged(self):
+        self.assertCommitHashFlagged([("reverted in main, i.e. 41ddef83", "41ddef83")])
+
+    def test_history_cite_after_a_comparison_verb_is_flagged(self):
+        self.assertCommitHashFlagged([("behaved like 41ddef83 before the rewrite", "41ddef83")])
+
+    def test_history_cite_after_an_example_marker_then_a_past_verb_is_flagged(self):
+        self.assertCommitHashFlagged([("e.g. 41ddef83 fixed the race", "41ddef83")])
+
+    def test_history_cite_in_main_before_an_example_marker_is_flagged(self):
+        self.assertCommitHashFlagged([("Keys are kept in main, i.e. 41ddef83.", "41ddef83")])
+
+    def test_clause_lookup_does_not_grow_with_a_comma_list(self):
+        """Each id after a comma reaches the clause lookup. The lookup runs once per clause, so its search count
+        stays the same as the list grows. Counting searches stands in for a time bound, which a test may not assert."""
+        runs = {}
+        for size in (4000, 8000):
+            ids = [self.example_id(i) for i in range(size)]
+            verb = CountedSearch(cnl.CommitHash.HISTORY_VERB)
+            before = CountedSearch(cnl.CommitHash.HISTORY_BEFORE)
+            with mock.patch.multiple(cnl.CommitHash, HISTORY_VERB=verb, HISTORY_BEFORE=before):
+                hits = list(cnl.CommitHash().finditer("e.g. " + ", ".join(ids)))
+            self.assertEqual(hits, [], "a clean comma list of %d ids gives a hit" % size)
+            runs[size] = (verb.calls, before.calls)
+        self.assertGreaterEqual(sum(runs[4000]), 1, "the clause lookup never ran for the list: %r" % (runs,))
+        self.assertEqual(runs[8000], runs[4000], "the clause lookup grows with the list: %r" % (runs,))
 
 
 class Scanner(Case):
