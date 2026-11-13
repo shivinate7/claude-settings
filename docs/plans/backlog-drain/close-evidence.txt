@@ -1,6 +1,7 @@
 PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	step	reason
 1147	superseded by 3167	yes	owner ruling 2026-11-07 13:00 CST on timed tests (lands in 1177)	needs-home: 13:00 CST ruling; test-practices.md P5 still old	close-after-home-filed		timing-tests	subset of 2081
 1314	main	yes	none	none	close-ok		mcp-merge-unguarded	main already has matcher entries (settings.json:253) and scan test (lint/test_settings_matcher.py)
+1315	superseded by 3181	no		unknown	close-after-home-filed	Coordinator 12:04 CST Nov 13	ste-lint-diff-fail-closed	home #3181, not on main yet
 1377	judgment	yes	item 284 a, 282 b, 289	needs-home: item 284 a pick; no record why field-and-script design dropped	close-after-home-filed	agree close; design not on main; script-blindness lost; push archive/challenger-page-against first	challenger-page-against	older design (against field + refute_item.py); owner may want its auto-refuter script instead of "spawn one Sonnet agent" in SKILL
 1386	superseded by 2677	no		unknown	hold	coordinator 11:44 CST Nov 13: held	export-after-page-write	promise-guard half in keep 2677
 1417	superseded	yes	none	none	close-ok		ready-checks-use-pinned-tools	ancestor of 1938 (lane-lint-runs-local-tools rebuild, itself pending owner pick on design vs main's --pinned)
@@ -53,6 +54,8 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 2164	superseded	yes	coordinator dropped 03:44 CST Nov 8	none (verdict-pipe-refused.md:11)	close-ok		bg-tail-loses-verdict	ancestor of 2015
 2173	step skipped on a measured rate	no		none	close-ok	step record option-tradeoff-pushback (measure 11:41 CST Nov 8) and lane fan-prose-guard-2 11:44 CST	option-tradeoff-pushback	skip stands
 2200	superseded	yes	coordinator ruling 11:43 CST Nov 8	needs-home: that ruling	keep-open	only fix for the own-commit hole in 2326; port 24 lines onto 2326 or file a debt	review-record-past-head	subset of 2365
+2230	superseded by 3160	no		unknown	close-after-home-filed	runner 10 12:06 CST Nov 13	report-guard-spawn-model	home #3160, not on main yet
+2262	superseded by 3181	no		unknown	close-after-home-filed	Coordinator 12:04 CST Nov 13	ste-lint-run-exit-codes	home #3181, not on main yet
 2276	superseded	yes	descriptive only	none	close-ok		bg-tail-loses-verdict	ancestor of 2015
 2277	superseded	yes	coordinator picks Q1 a 17:35, Q2 a 18:53, 15:56 withdrawal, 15:18 and 16:03 readings	needs-home: all, only in 2277 decision text	keep-open	own complete record; 2365 has no record naming the stack diff; retarget first	review-record-past-head	subset of 2365
 2301	superseded	yes	Coordinator ruling 03:12 CST Nov 8 (fail-open imports break install-hooks-whole); 04:29 fold-in	needs-home: both quotes	close-after-home-filed		bg-tail-loses-verdict	ancestor of 2015
@@ -70,6 +73,9 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 2744	superseded	yes	none	none	close-ok		fan-prose-handoffs	ancestor of 2753
 2748	superseded	yes	owner 13:20 Nov 7 queue fix; coordinator 07:31, 14:56 Nov 12; decision agent-report-shas-resolve	needs-home: all four	close-after-home-filed		fan-prose-unmapped-5	inside 2913
 2750	superseded	yes	coordinator picks 07:31 07:35 CST Nov 12	needs-home: the two picks	close-after-home-filed		fan-code-handoffs	ancestor of 2774 and 2824; superseded by 2824
+2761	superseded by 3168	yes	owner screenshot 21:17 CST Nov 11; coordinator picks Nov 12	none (3168 body carries them)	close-after-home-filed	wave; ancestry to 3168 unverified	lane-title-slug	replaced by open draft 3168
+2762	superseded by 2826	yes	none	none	close-ok	wave; head is an ancestor of 2763 2764 2765 2826 2892	qform-path-program-span	replaced by 2826/2892
+2765	superseded by 2826	yes	owner 13:20 Nov 7 (step note)	none	close-ok	wave; 2826 body says "#2765 closes citing this PR"	pre-existing-needs-main-run	replaced by 2826 and 2892
 2770	superseded	yes	owner R17 16:25 16:36 CST Nov 10	none (R17 filed restart-plan.md:184)	close-ok		fan-code-workflows	ancestor of 2920
 2783	superseded	yes	owner pick 15:05 Nov 7 (decision text says coordinator pick); 07:51 Nov 12 unknown; ruling 09:16 Nov 12	needs-home: all, none on main	keep-open	2872 is stacked on 2783, and 2783 rides on 2712; retarget or merge the stack whole	fan-prose-debts	ancestor of 2872 (outside group, 1 conflict); becomes keep if 2872 closes
 2833	superseded	yes	coordinator pick 07:31 Nov 12; decisions send-message-refs-resolve, agent-report-shas-resolve	needs-home: pick and both decisions (new in PR)	close-after-home-filed		fan-prose-unmapped-5	inside 2913
