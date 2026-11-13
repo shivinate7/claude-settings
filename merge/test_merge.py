@@ -16262,6 +16262,74 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with())
         self.assert_refused_with_no_record(rc, out, err)
 
+class ReviewFixAfterRoundThree(ReviewEnv):
+    """The chain of PR #3242: round 1 FAIL (haiku), round 2 FAIL (sonnet), round 3 PASS (sonnet, net value zero) on a Guard or check change, then a
+    sonnet fix check that PASSes at a later head. A fix check after a passing round 3 is accepted, as a fix after a merge of main is (owner ruling
+    2026-11-13 14:01 CST). Each record is built with record_text() and read back by review_state at its own head."""
+
+    R1, R2, R3 = "96" * 20, "64" * 20, "a9" * 20  # the heads of rounds 1 to 3: 40 hex, distinct from every other head here
+    FIX = "ba" * 20  # the live head after the fix diff; the fix check's reviewed head is R3
+    FIXED_MODEL = merge.REVIEW_FIX_GUARD_MODEL
+
+    ROUNDS_ONE_TO_THREE = ("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, PASS")
+    ROUND_ARGV = ("--round", "1:reviewer:haiku:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:PASS", "--net-value", "zero")
+
+    def round_records(self):
+        """The records of rounds 1 to 3, oldest first. Round 3's record repeats rounds 1 and 2, as a fresh full review at a head that moved
+        after round 2 does (decision pr-review-record)."""
+        return [record_text(head=self.R1, rounds=("Round 1: reviewer, haiku, FAIL",), guard="yes"),
+                record_text(head=self.R2, rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL"), guard="yes"),
+                record_text(head=self.R3, rounds=self.ROUNDS_ONE_TO_THREE, guard="yes", net="zero")]
+
+    def chain_pulls(self, *bodies, head=FIX, commits=None):
+        """Pull request 7 at `head`, with the review comments `bodies`, oldest first. The bodies are not parsed here: whether the merge tool reads
+        them is what each case measures, so a refusal names the tool's reading and never a fixture's."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=head, commits=commits or {})
+
+    def record_argv(self, head, *extra):
+        """The argv of `--review-record` on a Guard or check change: the head, then `extra`."""
+        return ["7", "--review-record", "--kind", "normal", "--guard", "yes", "--head", head, *extra]
+
+    def fix_argv(self, reviewed, verdict="PASS", head=FIX):
+        """The argv of a sonnet fix check whose fix diff starts at `reviewed`, written for the head `head`."""
+        return self.record_argv(head, "--fix-check", f"{reviewed}:reviewer:{self.FIXED_MODEL}:{verdict}")
+
+    def test_the_242_chain_round_three_then_a_fix_check_pass_is_accepted_and_reads_done(self):
+        r1, r2, r3 = self.round_records()
+        rc, out, err = self.run_args(*self.record_argv(self.R3, *self.ROUND_ARGV), host=self.chain_pulls(r1, r2, head=self.R3))
+        self.assertEqual(rc, 0, "round 3 after a failed round 2 was refused:\n" + out + err)
+        self.assertEqual(record_state(self, posted_body(self, out), head=self.R3), "done", "the printed round 3 does not read done")
+        rc, out, err = self.run_args(*self.fix_argv(self.R3), host=self.chain_pulls(r1, r2, r3))
+        self.assertEqual(rc, 0, "a fix check PASS after a passing round 3 was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["fix"], (self.R3, "reviewer", self.FIXED_MODEL, "PASS"), "the printed fix check line is not the one given")
+        self.assertEqual(record_state(self, body, head=self.FIX), "done", "the printed fix check does not read done at the live head")
+
+    def test_a_fix_check_fail_after_a_passing_round_three_is_printed_and_leaves_the_pull_request_open(self):
+        rc, out, err = self.run_args(*self.fix_argv(self.R3, verdict="FAIL"), host=self.chain_pulls(*self.round_records()))
+        self.assertEqual(rc, 0, "a failed fix check after a passing round 3 was refused:\n" + out + err)
+        state, why = record_verdict(self, posted_body(self, out), head=self.FIX)
+        self.assertEqual(state, "open", "a failed fix check after a passing round 3 does not leave the pull request open")
+        self.assertIn("fix verifier failed", why)
+
+    def test_a_fix_check_whose_reviewed_head_is_not_the_newest_record_head_is_refused(self):
+        bodies = self.round_records()
+        for reviewed in (self.R2, self.R1, "2e" * 20):
+            with self.subTest(reviewed=reviewed):
+                rc, out, err = self.run_args(*self.fix_argv(reviewed), host=self.chain_pulls(*bodies))
+                self.assertEqual(rc, 2, f"a fix check starting at {reviewed[:9]}, not the newest record's head, was not refused:\n" + out + err)
+                self.assertEqual(out, "", "a refused fix check printed to stdout")
+                self.assertIn("--fix-check", err, "the refusal does not name --fix-check")
+                self.assertNotIn("Traceback", err)
+
+    def test_a_second_fix_check_chained_after_a_passing_fix_check_is_accepted(self):
+        first_live = "ca" * 20  # the head the first fix check was written for; the second fix check's fix diff starts here
+        first = record_text(head=first_live, rounds=(), fix=(fix_verifier_line(head=self.R3),), guard="yes")
+        host = self.chain_pulls(*self.round_records(), first, commits={self.FIX: [first_live]})
+        rc, out, err = self.run_args(*self.fix_argv(first_live), host=host)
+        self.assertEqual(rc, 0, "a second fix check after a passing fix check was refused:\n" + out + err)
+        self.assertEqual(record_state(self, posted_body(self, out), head=self.FIX), "done", "the printed second fix check does not read done")
+
 class ReviewPastHead(ReviewEnv):
     """`merge <pr> --review-record --head SHA` takes an earlier head of the pull request, one the pull request had before its live head (decision
     pr-review-record). A head the pull request never had is still refused. The live head's own record is the control for both cases."""
