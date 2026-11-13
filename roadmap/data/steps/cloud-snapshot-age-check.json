@@ -1,10 +1,10 @@
 {
   "title": "Start hook warns when the cloud snapshot is behind main",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.3645,
   "why": "A stale snapshot makes every new lane print old warnings and run old hooks.",
-  "note": "Warn once on a cloud startup when the snapshot's settings.json still holds a startup entry other than the refresh hook, and name the fix (edit the environment, save the Setup script). hooks/ lag alone does no harm (decision cloud-start-hooks-run-fresh), so it does not warn. Rulings: coordinator 2026-11-06 14:42 CST (trigger on the harm, no commit marker). PR #1363 (stale snapshot warning), round 3 passed, held by batch runner 8; step done when it merges. Measured before: 31 lanes printed the old EXECPATH line. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1363. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1363). Owner item 744 (pick-start-or-drop-snapshot-c107), 12:49 CST Nov 13 (coordinator 12:48 CST): start or drop. Ready, no lane, until he answers. OWNER 13:20 CST Nov 13, item 744 b (ruling own-744-b-start-both): start it now; c107 starts too. Needs a lane.",
-  "updatedAt": "2026-11-13T13:21:28-06:00",
-  "lane": ""
+  "note": "Warn once on a cloud startup when the snapshot's settings.json still holds a startup entry other than the refresh hook, and name the fix (edit the environment, save the Setup script). hooks/ lag alone does no harm (decision cloud-start-hooks-run-fresh), so it does not warn. Rulings: coordinator 2026-11-06 14:42 CST (trigger on the harm, no commit marker). PR #1363 (stale snapshot warning), round 3 passed, held by batch runner 8; step done when it merges. Measured before: 31 lanes printed the old EXECPATH line. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1363. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1363). Owner item 744 (pick-start-or-drop-snapshot-c107), 12:49 CST Nov 13 (coordinator 12:48 CST): start or drop. Ready, no lane, until he answers. OWNER 13:20 CST Nov 13, item 744 b (ruling own-744-b-start-both): start it now; c107 starts too. Needs a lane. Lane session_013NEJL3nsbMvrAgxfXv4x51 started (coordinator 13:24 CST Nov 13).",
+  "updatedAt": "2026-11-13T13:24:43-06:00",
+  "lane": "session_013NEJL3nsbMvrAgxfXv4x51"
 }

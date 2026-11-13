@@ -1,0 +1,14 @@
+{
+ "id": "merge-lint-fix-no-round-3",
+ "title": "merge --reviewed stops owing round 3 after a lint-only fix that follows a round-1 PASS (guard or check change)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 13:21 CST Nov 13, item 741 a (ruling own-741-a-lint-fix-no-r3). On PR #3185 the tool still said it owed the final round after lint-only edits.",
+ "source": "owner 741 a; coordinator 13:24 CST Nov 13 asked whether the tool needs a change",
+ "note": "Todo. Yes, a tool change: the merge tool counts any fix check as a fixed change (item 741 context, coordinator report on #3185). It must treat a fix check whose edits only fix lint, with no finding fixed, as not fixed, so a change that passed round 1 is done. Open: how the tool tells a lint-only fix from a finding fix. Hold the start until the retrospective answers the owner's wider question (does every change skip round 3 once a round passes it?), since the answer may widen this step. A guard or check change: test-author red cases first, builder, reviewer. Related: rounds-rules-one-record.",
+ "updatedAt": "2026-11-13T13:24:43-06:00"
+}
