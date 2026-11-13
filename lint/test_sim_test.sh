@@ -50,6 +50,8 @@
 #  - Own boot: `simctl bootstatus UDID` runs once after `simctl boot` and before the first disable call. A bootstatus that
 #    fails or hangs changes no exit code and stops no spawn. A TERM or INT during it, or during a hanging disable call,
 #    ends the tool at once with the same cleanup: the device shut down, the lease given, the lock freed.
+#  - Own boot: the whole noise step (bootstatus, then one disable call per label) is bounded by SIM_TEST_NOISE_WAIT seconds
+#    (default 90). On expiry the tool stops the step's child and goes on to xcodebuild, silently; the exit code is xcodebuild's.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -237,7 +239,7 @@ fresh() {
 # name DUO1, the Duo of slot 1. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
-  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
+  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS -u SIM_TEST_NOISE_WAIT HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
     SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 \
     STUB_CRASH_UDID="$DUO1" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
@@ -1210,6 +1212,44 @@ end_case "91 a failing bootstatus (rc 1): all 17 disable calls are still attempt
 
 hang_then_signal TERM STUB_BOOTSTATUS_HANG bootstatus_started
 end_case "92 TERM during a hanging bootstatus: the tool ends within 5 s, with the same cleanup, so a hanging bootstatus blocks no TERM"
+
+# ---- Cases 93 to 95: the whole noise step is bounded by SIM_TEST_NOISE_WAIT, and a prompt step changes nothing ----
+# no_noise_output: the run says nothing about the noise step: no spawn, bootstatus, launchctl, domain, bound or label.
+no_noise_output() { no_spawn_output && ! grep -Eq 'bootstatus|noise' "$work/run.std" "$work/run.err"; }
+# bounded_noise_case VAR SECS_VAR MARKER: a run whose stub hangs when VAR is set, with SIM_TEST_NOISE_WAIT=2 and the hang bounded
+# at 15 s, so a red case stays bounded. The tool must end within 8 s (16 polls, 0.5 s apart) with xcodebuild run, xcodebuild's
+# exit code, the booted Duo shut down, the lock freed, and no output about the noise step.
+bounded_noise_case() {
+  fresh
+  start_tool SIM_TEST_NOISE_WAIT=2 "$1=1" "$2=15" STUB_RC=65
+  need "the hang began (marker $3)" poll_for 20 test -e "$work/$3"
+  need "the tool ends within 8 s of the start of the hang (16 polls, 0.5 s apart)" poll_for 16 tool_ended
+  if ! tool_ended; then kill -KILL -- "-$tool_pid" 2>/dev/null; fi
+  finish_tool
+  need "exit code is xcodebuild's, 65" rc_is 65
+  need "steps are boot run shutdown: xcodebuild ran after the step" steps_are "boot run shutdown "
+  need "the booted Duo is shut down" has_call "simctl shutdown $DUO1"
+  need "the lock is freed" lock_gone
+  need "the run says nothing about the noise step" no_noise_output
+}
+
+bounded_noise_case STUB_BOOTSTATUS_HANG STUB_BOOTSTATUS_HANG_SECS bootstatus_started
+end_case "93 bootstatus hangs with SIM_TEST_NOISE_WAIT=2: the tool goes on to xcodebuild and ends within 8 s, with xcodebuild's exit code, the booted Duo shut down, and no output about the noise step"
+
+bounded_noise_case STUB_SPAWN_HANG STUB_SPAWN_HANG_SECS spawn_started
+end_case "94 a disable call hangs with SIM_TEST_NOISE_WAIT=2: the tool goes on to xcodebuild and ends within 8 s, with xcodebuild's exit code, the booted Duo shut down, and no output about the noise step"
+
+# Case 95 is a control: a prompt bootstatus under the default bound. The bound must change nothing here.
+fresh; run
+need "scope: 17 disable calls were made" test "$(spawn_count)" -eq 17
+need "bootstatus on the booted UDID, after the boot and before the first disable call" bootstatus_order
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+need "exit code 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "the run says nothing about the noise step" no_noise_output
+end_case "95 control: a prompt bootstatus under the default bound: all 17 disable calls run once each after bootstatus, and the exit and xcodebuild are unchanged"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
