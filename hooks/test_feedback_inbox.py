@@ -178,10 +178,11 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     or `page:<n>`. `[closed]` is a whole token after the home, and trailing text is allowed. Other kinds
     are as before.
   - Question answers. A `[question] -> answered` item, open or closed, whose answer (the words after `->`)
-    names a defect or gap (the whole words gap, wrong, broken, missing or stale) needs a home on its line:
-    `step:<slug>` on some ref, or a tracked debt or ruling file. A proposed fix in an answer has no word list
-    yet, so it is not checked. An answer with no defect word passes, and so does a defect word in the owner's
-    own message.
+    names a defect needs a home on its line. The defect list is the five words gap, wrong, broken, missing
+    and stale, whole words in any case, and no other word: should, needs to and fix are not on it. The home
+    is `step:<slug>` on some ref, or a tracked debt or ruling file, and may be wrapped in ( ), ** or [ ]. The
+    home word is read leniently: `Answered`, `answered:`, `answered,`, `answered.` and a backticked `answered`
+    all count. An answer with no defect word passes, and so does a defect word in the owner's own message.
   - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
     page item.
   - Another session's inbox is never read.
@@ -4381,6 +4382,61 @@ def case_question_answer_plain_passes():
     expect_silent("answer plain: a plain answer to an owner question that names a defect passes", p)
 
 
+LENIENT_HOME_ITEMS = (  # (label, item line): the home word in five forms, each naming the defect "wrong"
+    ("Answered", "- fb-1238-1 [question] -> Answered: the check is wrong [closed]"),
+    ("answered:", "- fb-1238-1 [question] -> answered: the check is wrong [closed]"),
+    ("answered,", "- fb-1238-1 [question] -> answered, the check is wrong [closed]"),
+    ("answered.", "- fb-1238-1 [question] -> answered. the check is wrong [closed]"),
+    ("`answered`", "- fb-1238-1 [question] -> `answered` the check is wrong [closed]"),
+)
+
+
+def case_question_home_word_is_read_leniently_blocks():
+    """A `[question] -> answered` item whose home word is `Answered`, `answered:`, `answered,`, `answered.` or a
+    backticked `answered` is still a question answered with a defect, so it blocks with no home. Red on 3af4f6f3e:
+    question_problem reads the home word exactly, so each form skips the check."""
+    for label, line in LENIENT_HOME_ITEMS:
+        expect_block("answer home: home word %s with a defect and no home blocks" % label,
+                     homed(new_cfg(), "q-lenient", (line,), text=QUESTION_OWNER), named=("fb-1238-1",))
+
+
+def case_question_defect_word_in_upper_case_blocks():
+    """The defect words match in any case, so `WRONG` names a defect and blocks with no home. Green on 3af4f6f3e,
+    which compiles the defect list with IGNORECASE. The case keeps that: a list that drops it lets this through."""
+    p = homed(new_cfg(), "q-upper", ("- fb-1238-1 [question] -> answered in chat: The check is WRONG [closed]",),
+              text=QUESTION_OWNER)
+    expect_block("answer home: a defect word in upper case blocks with no home", p, named=("fb-1238-1",))
+
+
+def case_question_should_needs_to_and_fix_are_not_defect_words_passes():
+    """The defect list is the five words and no others. An answer with should, needs to or fix, and no defect word,
+    passes with no home. Red on 3af4f6f3e: DEFECT_WORDS also holds should, needs to and fix."""
+    for text in ("we should keep it as is", "no fix needed", "yes it needs to be run twice"):
+        p = homed(new_cfg(), "q-nondefect", ("- fb-1238-2 [question] -> answered in chat: %s [closed]" % text,),
+                  text=QUESTION_OWNER)
+        expect_silent("answer defect list: %r names no defect word, passes with no home" % text, p)
+
+
+def case_question_defect_word_needs_a_whole_word_passes():
+    """Control: a defect word inside a longer word is no defect word, so `wrong_unit` passes with no home. Green on
+    3af4f6f3e, which matches whole words only. A list that drops the word boundary turns it red."""
+    p = homed(new_cfg(), "q-unit", ("- fb-1238-2 [question] -> answered in chat: it counts the wrong_unit values "
+                                   "[closed]",), text=QUESTION_OWNER)
+    expect_silent("answer defect list: a defect word inside wrong_unit names no defect, passes", p)
+
+
+def case_question_wrapped_home_passes():
+    """A real step home wrapped in ( ), ** or [ ] passes. The step is a blob on a lane branch only, and its scope is
+    read first as the step cases read it. Red on 3af4f6f3e: ruling_home._unwrap strips only backticks and quotes, so
+    each wrapper blocks."""
+    repo = step_repo()
+    expect_step_on_lane_only("answer home wrapped", repo)
+    for label, wrapped in (("parentheses", "(step:%s)"), ("bold", "**step:%s**"), ("square brackets", "[step:%s]")):
+        p = homed(new_cfg(), "q-wrap", ("- fb-1238-1 [question] -> answered in chat: the check is wrong, see %s "
+                                       "[closed]" % (wrapped % STEP_SLUG),), cwd=repo, text=QUESTION_OWNER)
+        expect_silent("answer home: a step home in %s passes" % label, p)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4580,6 +4636,11 @@ CASES = (
     case_question_answer_full_block_names_only_the_homeless_item,
     case_question_answer_naming_a_home_passes,
     case_question_answer_plain_passes,
+    case_question_home_word_is_read_leniently_blocks,
+    case_question_defect_word_in_upper_case_blocks,
+    case_question_should_needs_to_and_fix_are_not_defect_words_passes,
+    case_question_defect_word_needs_a_whole_word_passes,
+    case_question_wrapped_home_passes,
 )
 
 
