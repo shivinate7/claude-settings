@@ -3441,14 +3441,17 @@ class BaseAware(Env):
         self.assertFalse(getattr(self.host, "merged", False))
         self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
-    def test_6_undo_check_the_base_fetch_after_the_wait_and_stamp_check_use_the_base(self):
+    def test_6_undo_check_the_base_fetch_after_the_head_read_and_stamp_check_use_the_base(self):
+        marks = []
+        self.in_wait(lambda: marks.append(len(self.fetches)))  # the mark: the fetches made from the head's read on
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
+        self.assertTrue(marks, "the head read never ran, so no fetch is marked as after it")
         want = f"origin/{self.BASE}"
         self.assertTrue(self.undo_bases and all(b == want for b in self.undo_bases), self.undo_bases)
         checks = [b for m, b in self.modes if m == "check"]
         self.assertTrue(checks and all(b == want for b in checks), self.modes)
-        after_wait = [a for n, a in self.fetches if n >= 1]  # fetches made once the wait has run
+        after_wait = [a for _, a in self.fetches[marks[0]:]]  # fetches made once the head has been read
         self.assertTrue(any(f"+refs/heads/{self.BASE}:refs/remotes/origin/{self.BASE}" in a for a in after_wait), after_wait)
         self.assertFalse(any("+refs/heads/main:refs/remotes/origin/main" in a for a in after_wait), after_wait)
 
@@ -3485,38 +3488,6 @@ class BaseAware(Env):
         self.assertEqual(self.host.waits, [])  # stopped before the wait
         self.assertFalse(getattr(self.host, "merged", False))
         self.assertEqual(self.head(), claim)  # nothing pushed
-        self.assertNotIn("refs/heads/merge-lock/", self.refs())
-
-    def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
-        fake = self.host
-        class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
-            def __init__(h):
-                super().__init__(["checks"], minute=60, now=lambda: 0, pause=lambda s: None)
-                h.in_wait, h.passes = False, 0
-            def pr(h, n, *a, **k):
-                info = fake.pr(n)
-                if h.in_wait:
-                    h.passes += 1
-                    if h.passes > 1:
-                        info["base"] = "other-base"  # the second pass of the wait sees a new base
-                h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
-                return info
-            def required_names(h): return ["checks"]
-            def batch_running(h, n, base, head=None): return []  # no other pull request here: its gh reads are not this case's subject
-            def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
-            def runs(h, sha): return []
-            def base_state(h, base, flows): return "green", ""
-            def head_state(h, n, *a, **k): return "green"
-            def wait_checks(h, *a, **k):
-                h.in_wait = True
-                try:
-                    return super().wait_checks(*a, **k)
-                finally:
-                    h.in_wait = False
-            def merge(h, *a): return fake.merge(*a)
-        rc, out = self.run_merge("7", "--confirm", host=WaitHost())
-        self.assertEqual(rc, 1, out)
-        self.assertFalse(getattr(fake, "merged", False), out)
         self.assertNotIn("refs/heads/merge-lock/", self.refs())
 
 class Unlock(Env):
@@ -5246,16 +5217,6 @@ class GhHalf(Env):
         self.assertEqual(rc, 1)
         self.assertIn("still shows the head before the push", out)
         self.assertNotIn(MERGE_CALL, self.calls())
-
-    def test_a_base_that_changes_during_the_wait_reverts_the_claim_and_names_both(self):
-        def retarget():  # the first wait retargets the pull request, so the next read sees a new base
-            if self.paused and not getattr(self, "retargeted", False):
-                self.retargeted = True
-                self.set(base="integ")
-        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
-        rc, out = self.run_merge("7", "--confirm", host=self.gh_host(pause=retarget))
-        self.assertEqual(rc, 1, out)
-        assert_cites(self, "wait-base-changed", printed(out, "changed from main to integ"))
 
     def test_a_pull_request_gh_reads_blocked_gets_no_merge_call(self):
         self.set(pr_raw={"mergeable_state": "blocked"})
@@ -8735,8 +8696,7 @@ class SilentWait(Env):
         self.set(checks_seq=[[]], runs_seq=[[("check", "in_progress", None)]])
         rc, out = self.go(required=("check",))
         self.assertEqual(rc, 1, out)
-        self.assertIn("waiting on check", out)
-        self.assertIn("workflow check", out)
+        self.assertIn("a check is pending: check", out)  # the refusal names the required check it found pending; the run's own line was the wait's
 
 _real_threading = threading  # the real module. merge's `threading` name is swapped in the scan cases, this name is not
 
@@ -11153,14 +11113,14 @@ class JobCapWarning(Env):
 class StampDeadlineFloor(Env):
     """Recovery rule: a deadline under the floor does not stop the merge. The merge waits max(deadlineMinutes, floor)
     and prints one line naming the fix. The floor is the largest job timeout-minutes plus 5, clamped at 360."""
-    def test_a_deadline_under_the_largest_cap_plus_five_waits_the_floor_and_names_the_fix(self):
+    def test_a_deadline_under_the_largest_cap_plus_five_takes_the_floor_and_names_the_fix(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
         self.assertEqual(out.count(fix_line(55)), 1, out)
 
-    def test_a_deadline_at_the_largest_cap_plus_five_waits_itself_and_names_nothing(self):
+    def test_a_deadline_at_the_largest_cap_plus_five_takes_itself_and_names_nothing(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
@@ -11285,22 +11245,20 @@ def merge_stamp_text(deadline):
     return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
 
-class DeadlineRecorder(FakeHost):
-    """FakeHost that records the deadline each wait is given."""
-    def __init__(self, root, other, branch="feat"):
-        super().__init__(root, other, branch)
-        self.deadlines = []
-
-    def wait_checks(self, n, sha, d, prior=None):
-        self.deadlines.append(d)
-        return super().wait_checks(n, sha, d, prior)
-
-
 def confirmed_wait(env):
-    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each wait was given)."""
-    host = DeadlineRecorder(env.co, env.other)
-    rc, out = env.run_merge("7", "--confirm", host=host)
-    return rc, out, host.deadlines
+    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each lock take is given). The per-lane run waits on no check, so the
+    floored deadline reaches the lock alone: confirm takes it for (WAITS * deadline + 10) * 60 seconds, and this reads the deadline back from that."""
+    takes = []
+    take = env.lock.acquire
+    def record(base, ttl):
+        takes.append((ttl // 60 - 10) // merge.WAITS)
+        return take(base, ttl)
+    env.lock.acquire = record
+    try:
+        rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
+    finally:
+        del env.lock.acquire
+    return rc, out, takes
 
 
 def fix_line(floor):
@@ -11310,14 +11268,14 @@ def fix_line(floor):
 class CapReviewFloor(Env):
     """Recovery rule: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
     is read as the merge tool reads it when it sets the floor (F5)."""
-    def test_f2_a_cap_of_356_waits_the_clamped_floor_of_360_at_a_deadline_of_360(self):
+    def test_f2_a_cap_of_356_takes_the_clamped_floor_of_360_at_a_deadline_of_360(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/checks.yml": cap_workflow("356")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
 
-    def test_f2_a_cap_of_360_waits_the_clamped_floor_of_360_at_a_deadline_of_359(self):
+    def test_f2_a_cap_of_360_takes_the_clamped_floor_of_360_at_a_deadline_of_359(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(359), ".github/workflows/checks.yml": cap_workflow("360")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
@@ -14310,18 +14268,16 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    def test_run_goes_with_touches_or_with_a_batch_blame_and_nothing_else(self):
-        """--run is refused unless it goes with --touches, or with --batch-build NAME --blame PR. Each refusal names its pairing. The blame
-        route gets the run URL as given, since it reads the run by its URL."""
+    def test_run_goes_with_touches_and_nothing_else(self):
+        """--run is refused unless it goes with --touches. The refusal names its pairing, by id or by URL. The batch blame pairing is gone
+        with the batch flags, so --blame is an unknown argument."""
         url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
         # Setup first: the allowed pairing reads the run, so a refusal below cannot come from a fixture that reads nothing.
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
         self.assertEqual(rc, 0, "setup: --touches --run ID did not run:\n" + out + err)
         for argv, cause in (
-            (("--run", TOUCH_RUN), "--run goes with --touches, or with --batch-build NAME --blame PR"),
-            (("--run", url), "--run goes with --touches, or with --batch-build NAME --blame PR"),
-            (("--blame", "102", "--run", url), "--blame goes with --batch-build NAME"),
-            (("--touches", "--run", url, "--blame", "102"), "--blame goes with --batch-build NAME"),
+            (("--run", TOUCH_RUN), "--run goes with --touches"),
+            (("--run", url), "--run goes with --touches"),
             (("--case", TOUCH_CASE_A), "--case and --file go with --touches"),
             (("--file", TOUCH_GUARD), "--case and --file go with --touches"),
         ):
@@ -14330,19 +14286,6 @@ class ReviewArgs(ReviewEnv):
                 self.assertIn(cause, err, "the refusal does not name its pairing %r: %s" % (cause, out + err))
                 self.assertEqual(rc, 2, "%s exited %s, not 2: %s" % (" ".join(argv), rc, out + err))
                 self.assertNotIn("Traceback", err, out + err)
-
-    def test_the_blame_route_takes_a_run_url_as_given(self):
-        """--batch-build NAME --blame PR --run URL is accepted, and batch_blame gets PR and the URL as given: the blame route reads the run
-        by its URL, so the URL is not turned into an id."""
-        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
-        real = merge.batch_blame
-        with unittest.mock.patch.object(merge, "batch_blame", return_value=0) as blame:
-            rc, out, err = self.run_args("--batch-build", "nightly", "--blame", "102", "--run", url, host=incident_host())
-        self.assertEqual(blame.call_count, 1, "the blame route did not reach batch_blame: %s" % (out + err))
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(passed_to(blame, real, "number"), 102, "batch_blame got a different blamed PR: %s" % (out + err))
-        got = passed_to(blame, real, "url")
-        self.assertEqual(got, url, "batch_blame got %r, not the run URL as given" % got)
 
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
@@ -17836,13 +17779,6 @@ def controls(text):
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
 
-def passed_to(spy, real, name):
-    """The value a patched function was called with for its parameter `name`, read through the real function's signature, however the caller
-    passed it (by position or by keyword). `real` is the function as it was before the patch."""
-    call = spy.call_args
-    bound = inspect.signature(real).bind(*call.args, **call.kwargs)
-    bound.apply_defaults()  # a parameter the caller left out reads as its default, so the value is never a KeyError
-    return bound.arguments[name]
 
 LINT_STATES = {  # what ci-job answers for the batch head's lint, as ci_job_run returns it: state, lines, log, liftable
     "pass": ("pass", [], [], False),
