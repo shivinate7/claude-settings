@@ -249,6 +249,30 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     longer (34.75 min, run 43455790930). A 3-job split of `checks` is projected, unmeasured. Measure it
     before and after (step 15). 12 runners start only to skip. The rollup fails a skipped job, so a skip
     stays at the step (step 19).
+25. **Build batch N+1 on batch N.** Between batch N's merge and batch N+1's ready, no CI ran: 16.7, 21.5,
+    15.9, 16.1 and 9.9 min (batches 127, 129, 130, 132, 133). Draft to ready took 10.4-13.3 min. Build
+    N+1 with `--on N` (`operating-model.md`, lines 56-61; `merge.py`, lines 2299-2309). If N goes red,
+    rebuild N+1. Measure the gap before and after on the same kind of batch.
+26. **Do not run macOS twice on one tree.** `checks-macos` waited 13.4 min (run 43444354776) and 16.3 min
+    (run 43455790930) behind the push run on main that tested the same tree (4 of 4 merges). A closed
+    batch PR's run keeps going: batch-121's ran 33 min after close. Cancel a batch PR's run when the PR
+    closes. On a push to main, skip jobs that passed on the same tree (step 23). `red_base`
+    (`merge.py`, line 3531) then needs another source: the batch run or the nightly run. The 5-slot
+    limit is inferred, not read from the account.
+27. **Wake on the first red job.** `ci-done` waits for every job (`checks.yml`, line 2044 on). Linux
+    reds were acted on in about 2 min. Windows-only reds waited for the run's end: 26.3 min (batch-123),
+    21.7 min (batch-124). Wake on the first failed job on any OS, then cancel the run.
+28. **Run the Windows merge jobs on the batch PR.** Six Windows jobs run only after merge
+    (`checks.yml`, lines 1566, 1588, 1651, 1675, 1699, 1723). Batch-113's PR run was green, then main's
+    run was red on all 5 merge-tool shards (run 43348145389), and the next merge needed `--base-red-ok`.
+    They took 14.1-24.8 min, under the PR's longest path, and no Windows job waited for a runner. Step
+    17's slice rule rests on a runner limit that holds for macOS, not Windows. macOS runs the full guard
+    suite on every PR (`checks.yml`, lines 1012 and 1251). Measure before you move a job.
+29. **Batch more lanes per run.** Batches 127-132 carried 1, 2, 1, 1 lanes at about 65 min each. Batch-125
+    carried 15. Five lanes passed lane-lint on Nov 12 (14:40 UTC) and first joined a batch on Nov 13
+    (16:14). 3 of 4 red batches had 7-15 lanes, so a larger batch also fails more often. Weigh both.
+    `merge --reviewed` reads every comment since the oldest open PR (`merge.py`, line 4389): 58 pages, about
+    38 s per wake.
 
 ## Public repos
 
