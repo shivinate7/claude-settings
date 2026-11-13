@@ -155,7 +155,7 @@ PR	verdict	kind	step	head	reason
 2689	keep	code	merge-lock-expired-delete-race	4bd0f5412bbb	WAVE (reopened): carry of 1657 (17 cherry-picks + 2); 4 conflict hunks; round 3 PASS; needs fresh lint on new head; replaces 2148
 2691	keep	code	agent-asks-become-refusals	0ad3b6b0c151	relative shell write escape guard; rebase: guard.py keep both blocks (readonly-shell-write); merges clean with 2692/2693/2886
 2692	keep	code	agent-asks-become-refusals	e28b83cbdc8b	commit-trailer-model deny rule; merges clean
-2693	close	code	agent-asks-become-refusals	b5579108d978	ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-write)
+2693	keep	code	agent-asks-become-refusals	b5579108d978	KEEP: owner item 712 a (page, 12:11 CST Nov 13), ruling keep-2886-spawn-check: main readonly-shell-write misses cp, sed -i and python -c; close both pair is off. Old reason: ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-
 2695	keep	code	page-answer-session-field	f20e790fc28f	WAVE (reopened): 3 one-hunk conflicts; lane lint PASS, round 2 PASS; same SKILL.md as skill-text-once lane | needs-home: item 367 a ruling
 2696	keep	code	fan-prose-handoffs	db1785021be1	superset of 2675; fixes UNKNOWN on failed install; merges clean
 2697	keep	code	stall-watch-open-call-cap	851abe4684ed	WAVE (reopened): one conflict hunk; round 3 PASS net positive; lane-lint PASS only in body
@@ -187,7 +187,7 @@ PR	verdict	kind	step	head	reason
 2732	keep	prose	fan-code-waiting-page	e14452cc5c19	3 notes; merges clean; land with or after 2720; note says "PR 2720" (renumber if rebuilt as new PR)
 2733	close	code	fan-code-workflows	3737e02663d5	ancestor of 2920
 2734	keep	code	lane-undo-check	6df2abd4e362	WAVE (reopened): base of stack 2734-2812-2821; clean; report-only (24 of 40 red, 5 of 10 false); round 3 PASS net zero
-2735	close	code	fan-prose-debts	21fd3ba402a6	ancestor of 2757
+2735	close	code	fan-prose-debts	21fd3ba402a6	git-checked ancestor of both 2757 and 2799 (merge-base --is-ancestor, 12:15 CST Nov 13); close stands; 2799 and 2757 are not ancestors of each other
 2736	keep	code	reviewed-sends-back	5029f0d41e5f	WAVE (reopened): 12 commits; two small conflict hunks in merge.py; overlaps 2845 and 2859 (duplicate review parse): second to land hand-merges; round 3 PASS net zero | needs-home: low
 2737	keep	code	fan-code-workflows	133f9bf1e9da	judge-replay corpus; merges clean; corpus cases sendmessage_state, report_guard.past_ruling may differ from main's 11-13 judges
 2740	keep	code	past-ruling-on-send	f32feca14d7b	WAVE (reopened): 22 commits, 6 conflict hunks in 4 files; round 3 PASS net positive; carries 2195 work? lane 2195 rebuild covers SEND_TOOLS and S1: check overlap
@@ -306,7 +306,7 @@ PR	verdict	kind	step	head	reason
 2883	fresh	-	debt-retire-red-on-birth	42db1abd32ab	fresh: runner 10 (under 48 h, not reviewed)
 2884	keep	code	fixed-number-limits-census	b9861e7c9eec	WAVE (reopened): 12 commits; clean; round 3 PASS but net negative against main as written: reader should see that | needs-home: item 595 (this PR only)
 2885	keep	code	md-midline-comment-gap	8a9834c073a2	agent terse-line check (TERSE_LINE); merges clean; owner-picked (decision agent-output-terse-line); 2714 close stands
-2886	close	code	md-midline-comment-gap	9aec08d67c14	superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-decision protocol); if owner wants spawn-time refusal, keep (merges clean; add rule-list entry); 2693 close stands with it
+2886	keep	code	md-midline-comment-gap	9aec08d67c14	KEEP: owner item 712 a (page, 12:11 CST Nov 13), ruling keep-2886-spawn-check: main readonly-shell-write misses cp, sed -i and python -c; close both pair is off. Old reason: superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-de
 2887	fresh	-	sim-boot-screen-check	ffe48c64d089	fresh: runner 10 (under 48 h, not reviewed)
 2889	keep	code	merge-flow-after-anthropic	2f50a93e228c	WAVE (reopened): 9 commits; clean; HELD: merge only once Q3 i and Q4 g are on record (page items 522-525); round 3 PASS net zero | needs-home: Q3 i and Q4 g not on record
 2890	fresh	-	mailbox-all-messages	170cc9e558f3	fresh: runner 10 (under 48 h, not reviewed)
