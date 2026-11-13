@@ -5708,17 +5708,37 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
 
-    # building-mistake-names-its-guard: a mistake the reply tells carries a `Cause:` and a `Guard:` line under
-    # Deviations. MG_PUSH names no guard and holds no fault word, so the admission check passes it as it stands.
-    # Each red gives one of the two lines, or neither. Each green gives both lines, or tells no mistake.
-    def test_mg_red_mistake_without_cause_or_guard_lines_blocks(self):
+    # building-mistake-names-its-guard: a mistake the reply tells carries a `Cause:` line and a `Guard:` line under
+    # Deviations, each with text. The mg_pin cases hold what the rule does today, whether it blocks or passes. The
+    # mg_red cases and the mg_green false alarms fail on the rule as it stands, and pass once it covers them.
+    def test_mg_pin_mistake_without_cause_or_guard_lines_blocks(self):
         self.assert_blocked(mg_report(MG_PUSH))
 
-    def test_mg_red_cause_line_without_guard_line_blocks(self):
+    def test_mg_pin_cause_line_without_guard_line_blocks(self):
         self.assert_blocked(mg_report(MG_PUSH, lines=("Cause: no guard stopped a direct push to main.",)))
 
-    def test_mg_red_guard_line_without_cause_line_blocks(self):
+    def test_mg_pin_guard_line_without_cause_line_blocks(self):
         self.assert_blocked(mg_report(MG_PUSH, lines=("Guard: step:main-push-guard, queued.",)))
+
+    def test_mg_pin_shouldnt_have_straight_and_curly_apostrophe_blocks(self):
+        # The apostrophe may be straight or curly: "shouldn't" and "shouldn’t" are one negated form.
+        for text in ("I pushed the fix straight to main, which I shouldn't have done.",
+                     "I pushed the fix straight to main, which I shouldn’t have done."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_unknown_and_none_lines_block(self):
+        # `Cause: unknown` and `Guard: none` give text, but name no guard, so the mistake still blocks.
+        self.assert_blocked(mg_report("I broke main.", lines=("Cause: unknown", "Guard: none")))
+
+    def test_mg_green_should_not_have_to_pass_passes(self):
+        self.assert_allowed(mg_report("I changed the API so callers should not have to pass it."))
+
+    def test_mg_green_shouldnt_have_to_set_passes(self):
+        self.assert_allowed(mg_report("I added a default so users shouldn't have to set it."))
+
+    def test_mg_green_should_not_have_refused_passes(self):
+        self.assert_allowed(mg_report("I judged that the guard should not have refused this call."))
 
     def test_mg_green_mistake_with_cause_and_guard_lines_passes(self):
         self.assert_allowed(mg_report(MG_INBOX, lines=(
