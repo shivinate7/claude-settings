@@ -1,26 +1,34 @@
 {
   "added": "2026-11-13T17:31:00Z",
-  "context": "Goal: guards stop mistakes Claude has made, not imagined ones.\nProblem (rule): no record shows a runner dropping `--root`; the only incident behind the guard is a 1 h 16 min idle behind a foreground `--confirm`, which was a deferral. #2071's other change, a fix so `&&` inside `$( )` no longer falsely refuses a valid command, stands alone.\nBased on (ruling): your rule that a guard needs an incident (building-guard-needs-incident).\nDeparts from: main \u2014 main has no such guard; choosing b adds it.",
+  "context": "Goal: guards stop mistakes Claude is likely to make, and cost less than the harm they stop.\nProblem (rule): no record shows a runner dropping `--root`. You said building-guard-needs-incident is a judge of lift, not a hard rule, and asked whether keeping the guard loses nothing. Not quite nothing: (1) main has none of merge_calls, _call_pieces or merge_args_of, so keeping means building them, size unmeasured; (2) a guard that wrongly refuses a valid command costs a runner time, and this one's false-refusal rate is unmeasured. If both are small, keeping loses little and gains a catch for the dropped-root case. The `$( )` splitting fix in #2071 stands alone either way.\nBased on (ruling): your words 11:53 CST Nov 13 (that rule is a lift judge); decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main has no such guard; b or c adds it.",
   "home": "rule building-guard-needs-incident",
   "id": "drain-2071-guard-incident",
   "kind": "decision",
   "n": 715,
   "options": [
     {
-      "gain": "No guard without an incident; no false refusal.",
-      "how": "Drop the guard; nothing else to build. Main has no splitting code the fix could change, so #2071 closes after the ledger.",
+      "gain": "No build, no false refusals.",
+      "how": "Drop the guard. Main has no splitting code the fix could change, so #2071 closes after the ledger.",
       "id": "drop",
       "key": "a",
-      "label": "Drop the guard; nothing else to build (triage's pick)",
+      "label": "Drop the guard; nothing else to build",
       "lose": "A runner that drops `--root` is not caught."
     },
     {
       "gain": "Covers the dropped-root case.",
-      "how": "Rebuild the guard on #1811 as the lane proposes.",
+      "how": "Rebuild the guard on #1811, with its three helper pieces.",
       "id": "keep",
       "key": "b",
-      "label": "Keep the guard",
-      "lose": "A guard with no incident behind it."
+      "label": "Keep the guard as the lane proposes",
+      "lose": "Build effort and an unmeasured false-refusal rate."
+    },
+    {
+      "gain": "The choice rests on a measure, not a guess.",
+      "how": "The lane replays past runner commands through the guard first and reports the false refusals and the build size; small and clean means keep, else drop.",
+      "id": "measure",
+      "key": "c",
+      "label": "Keep it only if a replay shows no false refusals and the build is small (recommended)",
+      "lose": "One extra step before #2071 closes or merges."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
@@ -31,15 +39,20 @@
     {
       "id": "drop",
       "key": "a",
-      "label": "Drop the guard; nothing else to build (triage's pick)"
+      "label": "Drop the guard; nothing else to build"
     },
     {
       "id": "keep",
       "key": "b",
-      "label": "Keep the guard"
+      "label": "Keep the guard as the lane proposes"
+    },
+    {
+      "id": "measure",
+      "key": "c",
+      "label": "Keep it only if a replay shows no false refusals and the build is small (recommended)"
     }
   ],
   "status": "open",
-  "title": "Keep the guard merge-roots-cover from PR #2071, or drop it and keep only the command-splitting fix?",
+  "title": "Keep the guard merge-roots-cover from PR #2071 if it costs little, or drop it and keep only the command-splitting fix?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }

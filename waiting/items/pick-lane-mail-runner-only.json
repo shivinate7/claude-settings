@@ -26,6 +26,7 @@
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "coordinator 11:26 CST Nov 13; reviewer finding 9 on #3148",
+  "reply": "Recorded by the coordinator 11:49 CST Nov 13 (checked by the acting session); on step merge-tool-allow-text.",
   "repo": "shivinate7/claude-settings",
   "short": "Lane mail: runner sessions only",
   "shown": [
@@ -41,7 +42,7 @@
     }
   ],
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Send lane mail from merge --reviewed only in a batch-runner session?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

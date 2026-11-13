@@ -26,6 +26,7 @@
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "coordinator 11:29 CST Nov 13 (the retrospective is reading your earlier words on who closes; if they differ, they govern)",
+  "reply": "Coordinator told runner 10 (11:49 CST Nov 13): it is the one closer, from the evidence ledger; ruling pr-close-by-batch-runner.",
   "repo": "shivinate7/claude-settings",
   "short": "Runner 10 is the PR closer",
   "shown": [
@@ -41,7 +42,7 @@
     }
   ],
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Let batch runner 10 be the one session that closes old PRs, from the evidence ledger only?",
   "why": "The coordinator took this pick; it stands unless you choose b. Nothing closes until the ledger is final."
 }

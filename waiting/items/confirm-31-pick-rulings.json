@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:57:00Z",
+  "context": "Goal: every ruling a lane cites rests on a decision you made or accepted.\nProblem (rule): triage filed 31 rulings from PR bodies of backlog-drain's close rows. Each is a coordinator, lane or triage pick, relayed in the PR text; none is your quoted word. None blocks work. Ids: brief-write-debts-out-of-scope, carry-1479-restack-on-2712, carry-old-pr-fresh-branch, freeze-is-lane-reading, guard-imports-fail-closed, mac-db-unknown-artifact-id, merge-lock-gitlock-on-mac, merge-route-park-reopen, narrated-tail-any-filter, no-guard-artifact-comment-tools, one-playwright-install-script, page-red-ci-split-routing, page-rows-depart-520, page-tests-served-font, past-head-fail-own-commit, pr-ledger-stack-by-base-ref, prose-lane-builds-code-steps, record-first-needs-shas, record-own-rounds-withdrawn, record-slice-own-round-line, retire-run-lane-tip-deferred, review-record-drop-mcp-edit, roots-cover-guard-order, rule-anchor-counts-as-home, rule-audit-max-depth-stays-12, script-file-misses-to-own-lane, session-start-tmpdir-no-windows, sim-drive-needs-lease, tending-covers-debts-and-docs, terse-line-one-pr-with-check, yaml-hash-no-space-reads-text.\nBased on (ruling): rule building-land-design-or-abandon; your rule that a ruling cites its source.\nDeparts from: main, which holds none of these as rulings; confirming marks them as accepted by you.\nMeanwhile: nothing waits on this.",
+  "home": "roadmap/rulings (one file per id)",
+  "id": "confirm-31-pick-rulings",
+  "kind": "decision",
+  "n": 725,
+  "options": [
+    {
+      "gain": "One record of what you accepted; lanes cite them with your word behind them.",
+      "how": "The 31 rulings stay as filed, marked confirmed by you.",
+      "id": "confirm",
+      "key": "a",
+      "label": "Confirm all 31 as filed (recommended)",
+      "lose": "A ruling you would have changed stays until you spot it."
+    },
+    {
+      "gain": "You fix only the ones you disagree with.",
+      "how": "Type the ruling ids to overturn in the note box; the rest stand.",
+      "id": "overturn",
+      "key": "b",
+      "label": "Overturn some",
+      "lose": "The named rulings reopen and their lanes wait on your next word."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 11:52 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Confirm 31 filed picks",
+  "shown": [
+    {
+      "id": "confirm",
+      "key": "a",
+      "label": "Confirm all 31 as filed (recommended)"
+    },
+    {
+      "id": "overturn",
+      "key": "b",
+      "label": "Overturn some"
+    }
+  ],
+  "status": "open",
+  "title": "Do you confirm these 31 rulings, which came from coordinator, lane or triage picks and not your own words?",
+  "why": "Coordinator asked for one confirm-or-overturn item; none blocking."
+}

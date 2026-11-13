@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:53:55.796Z",
+  "choice": "a",
+  "item": "pick-1779-child-pages",
+  "label": "A: Runner 11 lanes it in each child repo (recommended)",
+  "n": 721,
+  "note": "note a bunch of data from all accounts was already exported to a branch on each child repo as common git and that needs to reflect in this, also message retro it has opinoins on this ",
+  "optionId": "child-lanes"
+}

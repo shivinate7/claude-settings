@@ -25,6 +25,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154",
+  "reply": "Coordinator started the slice lane session_013NEJL3i19kz6ssVPSoPSuK (11:49 CST Nov 13); step fix-check-after-notes-commit is doing.",
   "repo": "shivinate7/claude-settings",
   "short": "#1616: is its one slice wanted?",
   "shown": [
@@ -39,7 +40,7 @@
       "label": "Not wanted; close #1616"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Is the one slice of PR #1616 wanted: a fix-check head that differs from the reviewed head only by notes files?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }

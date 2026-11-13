@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:53:55.796Z",
+  "choice": "b",
+  "item": "drain-lane-lint-local",
+  "label": "B: Follow pinned trees",
+  "n": 714,
+  "note": "change child repos too, and message retrospective it has contrexto n this -- i believe you have to follow pinned trees rather than being local otehrwise your work won't pass CI when it tries to reach main right? or am i misunderstanding",
+  "optionId": "pinned"
+}

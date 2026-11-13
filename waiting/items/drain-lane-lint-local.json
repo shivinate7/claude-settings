@@ -25,6 +25,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154",
+  "reply": "Your pick b, 11:53 CST Nov 13: lane lint follows the pinned trees, and child repos change too. You asked whether following pins is needed so work passes CI on its way to main: yes, a lane that lints against its own checkout can pass locally and fail on CI's pinned rules, which is the loss under a. The cost is the R44 worry, a child repo stuck on old pins, so the pin must keep moving with sessions (decision action-pins-follow-sessions). Routed to the backlog-drain lane, runner 10, runner 11 and the retrospective; the acting session confirms before this closes.",
   "repo": "shivinate7/claude-settings",
   "short": "Lane lint: pinned or local?",
   "shown": [

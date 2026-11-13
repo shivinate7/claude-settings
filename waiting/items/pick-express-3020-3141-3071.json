@@ -26,6 +26,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator 11:13 CST Nov 13; retrospective 11:12 CST reading of R67 part 4",
+  "reply": "Recorded by the coordinator 11:49 CST Nov 13 (checked by the acting session); part 4 of ruling drain-first-hold.",
   "repo": "shivinate7/claude-settings",
   "short": "Express: #3020, #3141, #3071",
   "shown": [
@@ -41,7 +42,7 @@
     }
   ],
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Send #3020, #3141 and #3071 on the express lane?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }
