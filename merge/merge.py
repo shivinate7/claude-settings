@@ -3614,14 +3614,15 @@ def parse_review(text):
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
     The done rules follow roles-review-cap-three and the decision pr-review-record: a passing round, or a
-    passing sonnet fix check, ends the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix
+    passing sonnet fix check after a passed round, ends the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix
     check PASS counts as that round passing (every fix check runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS
     or absent; or Kind is delete-only, Guard or check is no and the first round is done; or Kind is docs-only with no round. Net value negative holds
     the change. A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a delete-only done names it.
     A failed round is open. The builder's third try runs the final round (a Grant line adds one more after it): a failed final round
     is done when Guard or check is no, or when Net value is zero or positive, and open while a guard or check change owes its net value.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS counts as the last recorded round passing, even when that round failed. With no round recorded it is open."""
+    rounds say. A PASS counts as the last recorded round passing, even when that round failed: Guard or check no is done. Guard or check yes is open after a
+    failed round before the final one (it owes the final round and its net value), and done after a failed final round. With no round recorded it is open."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -3646,7 +3647,9 @@ def review_state(rec, head):
     passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
     lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
-    if passed and not bad:  # a passing round or fix check ends the review, a guard or check change too
+    if passed and not bad:  # a passing round, or a fix check after a passed round, ends the review, a guard or check change too
+        if fix and not top_pass and rec["guard"] == "yes" and top < final:  # the fix PASS does not settle the final round or its net value
+            return "open", f"a guard or check change owes the final round and its net value after a fix check; round {top} is recorded"
         return "done", lead
     if top >= final:  # a passing final round is done above, so this reads a failed one
         if rec["guard"] == "no":
@@ -4363,7 +4366,7 @@ def build_parser():
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the newest review log has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
-    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round or fix check owes none")
+    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a fix check after a failed final round, owes none")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")

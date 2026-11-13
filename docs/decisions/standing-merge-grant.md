@@ -47,7 +47,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Until the cutover, nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run). After the cutover, the red-main check (decision `no-merge-onto-red-main`) is the pause.
   - Nothing merges onto a red main, except the revert of the blamed commit (`git-red-main-reverts`: while main's newest finished run is red, only that revert merges).
-  - A change merges once its review ends, on green checks (rule `roles-review-cap-three`). A passing round, or a passing fix check, ends the review for every change (record `pr-review-record`).
+  - A change merges once its review ends, on green checks (rule `roles-review-cap-three`). A passing round, or a passing fix check after a passed round, ends the review for every change. A passing fix check after a failed round ends it for a change with no guard or check. For a guard or check change, it ends it only after a failed round 3 (record `pr-review-record`).
   - A change with negative net value is held (`hold-unsafe-after-round-3`: the net-value hold). A held lane stays parked until the owner decides.
   - Until the cutover, batch lanes into one integration PR, the only PR that goes ready and runs CI
     (`git-integration-branch-merge`: how lanes join a batch). After the cutover, each lane PR merges alone on its own green run (decision `all-repos-switch-together`).
