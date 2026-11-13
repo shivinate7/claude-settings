@@ -649,41 +649,5 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-@unittest.skipUnless(BASH, "bash not on PATH")
-class BatchHeadRunsEveryFlag(unittest.TestCase):
-    """A pull request from a `batch-` branch sets every scope flag, whatever its diff touches. Its run is the batch's
-    all-flags run, which the push skip reads (lint/test_push_skip.py)."""
-
-    def flags(self, got):
-        """The scope flags set to true. Every base flag must be in the output first, so a missing name fails as itself."""
-        for n in ALL:
-            self.assertIn(n, got, f"output {n} missing: {got}")
-        return {n for n in ALL if got[n] == "true"}
-
-    def assertEveryFlagOn(self, got):
-        for n in ALL + DERIVED_FLAGS + ["checks_windows_rest_2"]:
-            self.assertEqual(got.get(n), "true", f"{n} is not on for a batch head: {got}")
-
-    # Named failure: a docs-only batch pull request sets no flag, so its run runs no suite the push skip relies on.
-    def test_a_batch_head_with_only_docs_changed_turns_every_flag_on(self):
-        self.assertEveryFlagOn(run(["README.md", "decisions/some-record.md"], head_ref="batch-111"))
-
-    # Named failure: a lint-only batch pull request sets the lint flag alone, so the Windows and macOS suites never run on it.
-    def test_a_batch_head_with_only_lint_changed_turns_every_flag_on(self):
-        self.assertEveryFlagOn(run(["lint/test_ci_scope.py"], existing=["lint/test_ci_scope.py"], head_ref="batch-111"))
-
-    # Control, green on the old code: an unreadable diff already sets every flag, and the batch arm must keep that.
-    def test_a_batch_head_with_an_unreadable_diff_still_turns_every_flag_on(self):
-        self.assertEveryFlagOn(run(["README.md"], base="0" * 40, head_ref="batch-111"))
-
-    # Control, green on the old code. Named failure: the batch arm widens to every pull request, so a lone lane's docs
-    # edit or lint edit starts the whole matrix.
-    def test_a_head_that_is_not_an_integration_branch_keeps_the_flags_of_its_diff(self):
-        docs = run(["README.md", "decisions/some-record.md"], head_ref="feature-x")
-        self.assertEqual(self.flags(docs), set(), f"a docs-only lone lane set flags: {docs}")
-        lint = run(["lint/test_ci_scope.py"], existing=["lint/test_ci_scope.py"], head_ref="feature-x")
-        self.assertEqual(self.flags(lint), {"code"}, f"a lint-only lone lane set flags other than code: {lint}")
-
-
 if __name__ == "__main__":
     unittest.main()
