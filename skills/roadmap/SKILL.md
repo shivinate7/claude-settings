@@ -86,8 +86,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `held` and `reviewRecord` are optional JSON
   bools (absent means false) that triage fills: `held` is true when the batch runner's hand-in or hold list names
-  the pull, `reviewRecord` when the pull has a posted review record. The stale-draft row skips a draft with either
-  true. A non-bool value makes the row a wrong shape. `branches`: lane branches with no open pull request.
+  the pull, `reviewRecord` when the pull has a posted review log. The stale-draft row skips a draft with either
+  true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
+  stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
 - `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
   (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".

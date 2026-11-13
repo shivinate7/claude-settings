@@ -50,7 +50,8 @@ usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch, bare or as lane/<id>, equals a live session step. A draft row whose optional `held` or
 `reviewRecord` is true is skipped: triage sets `held` from the batch runner's hand-in or hold list and `reviewRecord`
-from the pull's posted review record. A non-bool value skips the row as a wrong shape.
+from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
+pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
@@ -682,7 +683,7 @@ def live_work(path, steps, slug=None):
     branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewRecord` (the
-    pull carries a posted review record) are JSON bools that triage fills; a present non-bool value skips the row.
+    pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
     stale_drafts skips a draft pull whose `held` or `reviewRecord` is true.
     """
     if not path:
@@ -1206,7 +1207,7 @@ def stale_drafts(work):
         branch = p.get("branch")
         if p.get("draft") is not True or (branch and any(branch in lane_head_refs(s) for s in work["liveSteps"])):
             continue
-        # A pull the batch runner holds or whose review record is posted waits on a named owner, not forgotten.
+        # A pull the batch runner holds or whose review log is posted waits on a named owner, not forgotten.
         if p.get("held") is True or p.get("reviewRecord") is True:
             continue
         at = created_at(p)

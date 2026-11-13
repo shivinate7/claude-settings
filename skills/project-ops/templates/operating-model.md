@@ -24,7 +24,9 @@ A spawner is a session that starts its own agents. Each session role is a set of
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
-  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. Each item row carries
+  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. It also carries `held` (true when
+  the batch runner's hand-in or hold list names the pull) and `reviewRecord` (true when the pull has a posted review log),
+  JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
