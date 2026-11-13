@@ -89,10 +89,10 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D18 | Model-cap guards disagree | owner | same root as D7 | asked | none |
 | D19 | No session start while on Remote Control (corrected in batch 2: refused on turns another session started) | elsewhere | Claude desktop app, no home yet | raise upstream | none |
 | D20 | SendMessage has no read receipt | elsewhere | Claude harness; workaround session-messages.md:27,87; PR #2990 | raise upstream | none |
-| D21 | Item 19: ios-apps has no test-shape standard | pending | pending | open | none |
-| D22 | Item 20: the Pro lease blocks the Duo | pending | pending | open | none |
-| D23 | Item 21: builder-test-edit blocks merges with test conflicts | pending | pending | open | none |
-| D24 | Item 22: live hooks differ from the clone | pending | pending | open | none |
-| D25 | Item 23: third merge-forced restart (evidence for D3) | pending | with D3 | open | none |
-| D26 | Item 24: Words probe counts false alarms | pending | pending | open | none |
-| D27 | Correction: coordinator borrows idle lanes instead of queuing starts | pending | pending | open | none |
+| D21 | Item 19: ios-apps has no test-shape standard | new | new step ios-apps-test-shapes; extends decision test-practices P1 and P5 | to file | none |
+| D22 | Item 20: the Pro lease blocks the Duo | owner + new | bin/sim-lease:185-186; owner ruling 2026-11-02 13:51 CST "The 18 Pro never runs beside a Duo"; stating the reason in sim-lease-tool.md needs no owner | asked | none |
+| D23 | Item 21: builder-test-edit blocks merges with test conflicts | ruled | step merge-conflict-mixed-roles (R31); a test-author owns a merge with test conflicts (builders-cannot-edit-tests.md:36-38, item 420 a) | in flight | none |
+| D24 | Item 22: live hooks differ from the clone | new | new step live-hooks-diff-probe (lint/compliance_probes.py); skip hooks.SessionStart, which a cloud install rewrites | to file | none |
+| D25 | Item 23: third merge-forced restart (evidence for D3) | owner | with D3; step fix-after-fix-check; item fix-check-chain-cap pick a clashes with pr-review-record.md:77,125 | asked | none |
+| D26 | Item 24: Words probe counts false alarms | owner + new | new step words-probe-skips-kept-names (report only what the check would flag); a blanket slug skip departs from decision glossary-meets-owner-halfway | asked | none |
+| D27 | Correction: coordinator borrows idle lanes instead of queuing starts | ruled + new | borrowing lanes is ruled (session-tiers.md:143,179); new step refused-start-queues-turn; app half folds into D19 | to file | none |
