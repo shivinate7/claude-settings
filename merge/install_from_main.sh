@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # afterMerge helper (decision merge-reinstalls-from-main): move the pinned checkout <clone>-live,
-# a worktree of the clone on a detached HEAD, to the new local main, then run the install from it,
-# so the ~/.claude links point at main and never at the caller's tree. Makes the pinned checkout
+# a worktree of the clone on a detached HEAD, to origin's stable commit (the branch sessions install from;
+# it moves only to a main commit whose run is green), then run the install from it,
+# so the ~/.claude links point at stable and never at the caller's tree. Local main still
+# fast-forwards to origin/main. With no origin/stable (missing, pruned or not fetchable), the pin goes to local
+# main and the run prints one WARN line naming stable; with CLAUDE_SETTINGS_REF=main (the recovery), to local main with no WARN. Makes the pinned checkout
 # when it is missing. install.sh and install.ps1 make it too, because they also run on their own.
 # Windows (MINGW, MSYS, CYGWIN) runs install.ps1; elsewhere install.sh.
 # A step that cannot move or install prints one stderr line naming the fix and exits 1.
 #
-# The move never exposes a mix (merge-reinstalls-from-main). The new main is checked out
+# The move never exposes a mix (merge-reinstalls-from-main). The new pin commit is checked out
 # in a fresh worktree <clone>-live-<commit>, and <clone>-live becomes a link to it by one rename of
 # the link. A reader that loads through the ~/.claude links sees the old tree or the new one. The
 # old worktree stays until the next move. The first move from a plain <clone>-live directory (as
@@ -71,13 +74,13 @@ take_lock() {
 # Canonical path, so C:/x and /c/x compare equal. Prints nothing when DIR is empty or missing.
 canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
 common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
-# True when DIR is detached at main's commit.
+# True when DIR is detached at the pin commit.
 at_commit() { ! git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1 && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$commit" ]; }
 # A tracked file missing is the mark of a git worktree add killed part way: the tree lacks files,
 # it holds no one's edits. not_deletions prints DIR's other tracked changes.
 missing_files() { git -C "$1" status --porcelain --untracked-files=no 2>/dev/null | grep -qE '^(D.|.D)'; }
 not_deletions() { git -C "$1" status --porcelain --untracked-files=no 2>/dev/null | grep -vE '^(D.|.D)'; }
-# True when DIR is detached at main's commit with no tracked file missing.
+# True when DIR is detached at the pin commit with no tracked file missing.
 at_main() { at_commit "$1" && ! missing_files "$1"; }
 
 # Frees DIR of a settings.json save that only reordered keys (the app and CLI rewrite the linked file).
@@ -185,6 +188,16 @@ move_pin() {
   fi
 }
 
+REF="${CLAUDE_SETTINGS_REF:-stable}"
+ref_gone=0   # sync_main sets 1 when origin answered for main but $REF could not be fetched: a stale origin/$REF must not pin it
+# The commit the pin belongs at: origin's $REF (stable) as last fetched, else local main (origin has no $REF, or REF=main).
+pin_commit() {
+  if [ "$REF" != main ] && [ "$ref_gone" != 1 ]; then
+    c=$(git rev-parse --verify -q "refs/remotes/origin/$REF^{commit}") && { printf '%s\n' "$c"; return 0; }
+  fi
+  git rev-parse --verify -q refs/heads/main
+}
+
 # A fetch never moves local main, so the pin would install a main that a merge on GitHub left behind. This brings local main
 # to origin's: a main that is an ancestor of it fast-forwards; a main that holds a commit origin lacks is refused, because the
 # install would put unpushed work live. When origin cannot be reached, local main is the source as before, with one WARN line.
@@ -196,6 +209,11 @@ sync_main() {
     echo "install_from_main.sh: WARN: could not fetch origin main; installing local main as it is" >&2
     return 0
   fi
+  # A $REF that cannot be fetched counts as missing, even when an earlier fetch left origin/$REF behind: that copy would
+  # pin a branch origin no longer has. The pin then follows local main, and the run says so once.
+  if [ "$REF" != main ] && ! GIT_TERMINAL_PROMPT=0 $tmo git fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" >/dev/null 2>&1; then
+    ref_gone=1
+  fi
   have=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"
   want=$(git rev-parse --verify -q refs/remotes/origin/main) || return 0
   [ "$have" != "$want" ] || return 0
@@ -205,8 +223,16 @@ sync_main() {
   fi
   held=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/main$/{print w; exit}')
   if [ -n "$held" ]; then
-    git -C "$held" merge -q --ff-only "$want" >/dev/null 2>&1 \
-      || fail "cannot fast-forward main in $held to origin/main; fix that (git -C \"$held\" status), then run merge/install_from_main.sh"
+    # Try the fast-forward: a tracked change blocks it only when origin's commits touch the same file.
+    if ! git -C "$held" merge -q --ff-only "$want" >/dev/null 2>&1; then
+      if [ -n "$(git -C "$held" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        # The tracked change is someone's work: main stays where it is. A pin that follows local main (no origin/stable,
+        # or REF=main) then installs the older main; a pin that follows stable is not affected.
+        echo "install_from_main.sh: WARN: $held holds main with tracked changes that block the fast-forward, so main was not moved" >&2
+      else
+        fail "cannot fast-forward main in $held to origin/main; fix that (git -C \"$held\" status), then run merge/install_from_main.sh"
+      fi
+    fi
   else
     git update-ref refs/heads/main "$want" "$have" \
       || fail "cannot fast-forward local main to origin/main; fix that, then run merge/install_from_main.sh"
@@ -215,7 +241,9 @@ sync_main() {
 
 take_lock
 sync_main
-commit=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"   # read under the lock
+# Said after sync_main, so a refusal (which exits inside it) stays the one line it prints.
+[ "$ref_gone" != 1 ] || echo "install_from_main.sh: WARN: origin has no $REF branch (or its fetch failed), so the pin follows local main" >&2
+commit=$(pin_commit) || fail "$no_main"   # read under the lock
 if [ -L "$pin" ] && [ ! -e "$pin" ]; then rm -f "$pin"; fi   # a link whose tree is gone
 if [ ! -e "$pin" ]; then
   err=$(git worktree add -q --detach --lock --reason "$REASON" "$pin" "$commit" 2>&1) \
@@ -228,6 +256,10 @@ else
   git worktree lock --reason "$REASON" "$pin" >/dev/null 2>&1   # lock an unlocked pin; fails harmlessly when locked
 fi
 
+# origin/$REF is gone, so the pin sits at local main. The installers compare the pin with origin/$REF as last fetched, and that
+# copy is stale, so they would refuse the pin. Hand them REF=main (the recovery, the ref the pin follows) in this case; both
+# install.sh and install.ps1 read CLAUDE_SETTINGS_REF.
+[ "$ref_gone" != 1 ] || export CLAUDE_SETTINGS_REF=main
 # The installer runs under this run's lock; the EXIT trap logs the end line with its exit code.
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)

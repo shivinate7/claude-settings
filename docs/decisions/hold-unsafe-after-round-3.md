@@ -7,8 +7,15 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 - `i basically don't want worse things merging to main, but if something has made an improvement to main and it's just still unfinished then it's still good to merge to main (so say the work was 6 safety holes from before it started to now becoming 3 after the rounds, that's good to merge to main)`
 - `considering AI is judging this, we can have it be that the evaluation is moreso semantic value like if our net expected value is positive the change is allowed`
 
-`roles-review-cap-three` (a change gets three review rounds, CLAUDE.md) holds the rule that follows. This record holds what that rule lacks:
+`roles-review-cap-three` (a change gets three review rounds, CLAUDE.md) holds the short rule. This record is the home of the round rules and holds what that rule lacks:
 
+- The rounds, in one place (owner, 2026-11-10 15:44 CST, relayed by the retrospective session, corrected 16:07 CST, item 471 a). Words: `yeah i never wanted round 3 if it passed earlier and was so confused to see that it was occuring`; `agreed A -- can look into the sonnet noise thing later`.
+  - A round that passes ends review. A guard or check change that passes round 1 or 2 is done and takes no round 3, unless a fix verifier ran on it (next line).
+  - A round 2 FAIL, guard or check change or not, is open: it gets round 3.
+  - A guard or check change that gets a fix verifier PASS waits for round 3 and its net value, even after a round 2 PASS. Rounds run in order, so round 2 runs first (item 402 a, below).
+  - The net-value test runs only for an unclear case that cannot finish: a guard or check change that reaches round 3.
+  - The merge tool already reads this way (`review_state` in `merge/merge.py`). Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
+  - Not decided: whether round 1 runs Sonnet for every logic change. Deferred, as the owner said.
 - The judgment is semantic.
 - The owner's grant can allow work on a held change. A merge still needs zero or positive net value.
 - A main ask that the change turns into a refusal is a safety hole closed.

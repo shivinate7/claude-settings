@@ -10,11 +10,11 @@ Applies to: each child `CLAUDE.md` line about merging.
 
 M2. Before a merge, judge the base branch's newest completed run per event group, not only the PR's own run.
 - joyous #68 — a red scheduled run on old main blocked every joyous merge until a newer green run of the same jobs cleared it (decision `no-merge-onto-red-main`).
-Applies to: every batch merge.
+Applies to: every merge.
 
-M3. Merge only on a green run that holds for the current base tip.
+M3. Merge only on a head that is green on its own base and merges cleanly with the base tip. The head need not hold the tip.
 - claude-settings steps c97 and c150 (decision `merge-needs-current-base`).
-Applies to: every batch merge.
+Applies to: every merge.
 
 M4. Read every page of a PR's file list, or read git.
 - banchi #1042 — batch runner 9 read only the first page of 30 files, missed a deletion, and reported a script as left behind (note `pr-files-api-first-page`).
@@ -30,7 +30,7 @@ Applies to: a fix that answers one named finding.
 
 M7. Merge an append-only file by union. Rebuild a generated table; never merge it by union.
 - claude-settings `docs/debts/notes.md` merges by union; `docs/records.md` is rebuilt by the merge tool (decisions `notes-merge-union`, `records-index-at-merge`).
-Applies to: each file that two lanes edit in one batch.
+Applies to: each file that two open lanes edit.
 
 M2 and M3 are held by the merge tool. M7 is held by `.gitattributes` and the merge tool. M1, M4, M5 and M6 have no check.
 
