@@ -6,26 +6,7 @@
 // TypeScript is the one on PATH as `tsc` (a symlink or shim is followed to its package). The caller puts
 // the version pinned in lint/code_check_standard.json there, so this file names no version.
 import fs from "node:fs";
-import path from "node:path";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-
-function loadTypescript() {
-  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    const tsc = path.join(dir, "tsc");
-    if (!dir || !fs.existsSync(tsc)) continue;
-    // The first tsc on PATH is the one the caller chose: a broken one is an error, never a reason to look further.
-    const root = path.resolve(path.dirname(fs.realpathSync(tsc)), "..");
-    for (const candidate of [path.join(root, "lib", "typescript.js"), root]) {
-      try {
-        return require(candidate);
-      } catch { /* try the package root next */ }
-    }
-    throw new Error(`the typescript package is not beside ${tsc}`);
-  }
-  throw new Error("tsc is not on PATH");
-}
+import { loadTypescript } from "./typescript_on_path.mjs";
 
 let ts;
 try {

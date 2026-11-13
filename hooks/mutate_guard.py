@@ -80,6 +80,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+COMMENT_ONLY = os.path.join(HERE, "comment_only.mjs")  # the JS judge of a builder's comment-only test edit
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +93,9 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # hooks/comment_only.mjs, the JS judge that guard.py runs beside itself. guard_tree copies only .py modules,
+    # so lay_out copies this file into the guard copy's hooks folder.
+    "jsjudge": (COMMENT_ONLY, SUITE, "GUARD_UNDER_TEST", "comment_only"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2231,9 +2235,17 @@ MUTATIONS = [
     ("role-diff: an own commit HEAD no longer holds is still judged",
      '        if sha in lost:\n            continue', '        if False:\n            continue', "guard",
      "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line"),
-    ("role-diff: every path a builder changes offends",
-     '            bad = any(is_builder_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
-     "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
+    ("role-diff: a builder's test change is never refused",
+     '            bad = builder_test_refused(root, top, rel, names, old, new) or (', '            bad = False or (', "guard",
+     "builder-refuse: a python code change in a test file is denied at commit"),
+    ("comment-only: comment_only_change says every change is comments only",
+     'def comment_only_change(rel: str, old, new) -> bool:\n',
+     'def comment_only_change(rel: str, old, new) -> bool:\n    return True\n', "guard",
+     "builder-refuse: a python code change in a test file is denied at commit"),
+    ("comment-only: the javascript judge drops the line break before a token, so a collapsed return reads as a comment change",
+     "const lineBreak = out.length > 0 && LINE_BREAK.test(text.slice(node.pos, start));",
+     "const lineBreak = false;", "jsjudge",
+     "builder-refuse: a javascript block comment holding a line break, collapsed onto one line after return, is denied at commit"),
     ("role-diff: a test-author's change is judged as a builder's",
      '        elif role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
      '        elif False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
@@ -4190,6 +4202,17 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
+    if target == "jsjudge":
+        # The copied guard runs comment_only.mjs beside itself, so the mutated file goes in the copy's hooks folder,
+        # with the guard family and the lint folder it imports. The clean control replaces "" with "", so it changes nothing.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
+        tree = os.path.join(root, "hooks")
+        mutate_shared.guard_tree(tree)
+        lay_out_guard_reads(root)
+        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+        with open(os.path.join(tree, "comment_only.mjs"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(sources[target].replace(old, new, 1))
+        return os.path.join(tree, "guard.py")
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.

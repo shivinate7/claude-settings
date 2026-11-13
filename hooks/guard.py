@@ -35,7 +35,10 @@ set_override_veto and session_home_keep):
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
-                       against the commits the builder made and its working tree. The reason gives
+                       against the commits the builder made and its working tree. A change to an
+                       existing python, JS or TS test file passes when the language's tokenizer
+                       proves it changes comments only (`comment_only_change`); a mutation test, a
+                       new or deleted file and any other language are refused. The reason gives
                        the undo route and names no path. No override lifts it. SubagentStop
                        (`judge_stop`) refuses the builder's first stop the same way; a second stop
                        passes.
@@ -403,7 +406,9 @@ Other tools, in `judge` order:
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
-                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       deny. A role's write outside its scope. A builder's Edit, MultiEdit or Write of
+                       an existing test file passes when the file after the call differs from the file
+                       now in comments only (`comment_only_change`). (builders-cannot-edit-tests)
   handoff-sections     deny. A Write, Edit or MultiEdit to a session handoff (a `.md` file in
                        `<config dir>/handoffs/`) whose resulting text lacks a section that step 4 of the
                        installed `precompact_handoff_prompt.md` lists on its `handoff-sections` marker
@@ -2020,6 +2025,68 @@ def is_builder_test_rel(rel: str) -> bool:
     return is_test_rel(rel) or is_mutation_test_rel(rel)
 
 
+# ---- a builder's comment-only test change (decision builders-cannot-edit-tests, the owner's comment-only ruling).
+# The one judge is `comment_only_change`: True only when the language's own tokenizer or parser proves that the
+# two texts differ in comments alone. Every other case is False, so the test path stays refused.
+COMMENT_ONLY_SCRIPT = os.path.join(_HERE, "comment_only.mjs")
+COMMENT_ONLY_JS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx"}
+COMMENT_ONLY_TIMEOUT = 20  # seconds for one node run
+# A PEP 263 encoding line is a comment that changes how the file is read, so a change to one is no comment change.
+PY_CODING_COOKIE = re.compile(r"coding[:=]\s*[-\w.]+")
+
+
+def _python_code_tokens(text: str):
+    """The code tokens of a python text as (type, string) pairs: no comment, no blank-line token, and a
+    NEWLINE by its type alone (a last line without a line break gets an empty one). A docstring is a STRING
+    token, so it is code. Raises on text the tokenizer cannot read."""
+    import io
+    import tokenize
+    skip = (tokenize.COMMENT, tokenize.NL, tokenize.ENCODING, tokenize.ENDMARKER)
+    return [(tok.type, "" if tok.type == tokenize.NEWLINE else tok.string)
+            for tok in tokenize.generate_tokens(io.StringIO(text).readline) if tok.type not in skip]
+
+
+def _python_comment_only(old: str, new: str) -> bool:
+    # Only the cookie lines themselves are compared, so a comment added above or after a cookie is allowed.
+    cookies = lambda text: [line for line in text.splitlines()[:2] if PY_CODING_COOKIE.search(line)]  # noqa: E731
+    if cookies(old) != cookies(new):
+        return False
+    try:
+        return _python_code_tokens(old) == _python_code_tokens(new)
+    except Exception:  # tokenize.TokenError, IndentationError, SyntaxError: not provable
+        return False
+
+
+def _js_comment_only(rel: str, old: str, new: str) -> bool:
+    """One node run of hooks/comment_only.mjs (TypeScript on PATH). No node, no tsc or any error is False."""
+    import shutil
+    node = shutil.which("node")
+    if not node:
+        return False
+    try:
+        import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+        done = _nowindow.run([node, COMMENT_ONLY_SCRIPT], input=json.dumps({"name": rel, "old": old, "new": new}),
+                             capture_output=True, encoding="utf-8", errors="replace", timeout=COMMENT_ONLY_TIMEOUT)
+    except Exception:
+        return False
+    return done.returncode == 0 and done.stdout.strip() == "same"
+
+
+def comment_only_change(rel: str, old, new) -> bool:
+    """True only when `old` and `new` (the texts of the file `rel` before and after; None = the file does not
+    exist there) differ in comments alone, proven by the language's own tokenizer: `tokenize` for Python, the
+    TypeScript parser for JS and TS. False for any other language, a new or deleted file, an unreadable text or one
+    the tokenizer cannot read. A tokenizer or parser runs only when the two texts differ."""
+    if not isinstance(old, str) or not isinstance(new, str):
+        return False
+    ext = os.path.splitext(norm(rel))[1].lower()
+    if ext not in (".py", *COMMENT_ONLY_JS):
+        return False
+    if old == new:
+        return False  # the file changed in something no text shows (a mode, an invalid byte): no comment change
+    return _python_comment_only(old, new) if ext == ".py" else _js_comment_only(norm(rel), old, new)
+
+
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
@@ -2435,6 +2502,57 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
             or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
+def write_call_texts(tool_input, full: str):
+    """The whole text of the file `full` before and after a write tool call, as (old, new), or None when the
+    call is not one the guard can replay: the file is missing or not UTF-8, the call holds `content` and an edit, an edit's old string is not in the
+    file, an edit's old string is not unique (and `replace_all` is not set), or the call is no Edit, MultiEdit or Write."""
+    if not isinstance(tool_input, dict):
+        return None
+    try:
+        with open(full, encoding="utf-8") as handle:
+            disk = handle.read()
+    except Exception:
+        return None
+    has_edit = isinstance(tool_input.get("edits"), list) or "old_string" in tool_input or "new_string" in tool_input
+    if has_edit and "content" in tool_input:
+        return None  # one call that holds a whole text and an edit: which one the tool applies is not known
+    if isinstance(tool_input.get("edits"), list):
+        steps = tool_input["edits"]
+    elif "old_string" in tool_input or "new_string" in tool_input:
+        steps = [tool_input]
+    elif isinstance(tool_input.get("content"), str):
+        return disk, tool_input["content"]
+    else:
+        return None
+    text = disk
+    for step in steps:
+        if not isinstance(step, dict):
+            return None
+        old, new = step.get("old_string"), step.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            return None
+        found = text.count(old)
+        if found == 0 or (found > 1 and step.get("replace_all") is not True):
+            return None
+        text = text.replace(old, new)
+    return disk, text
+
+
+def builder_comment_write_ok(tool_input, target: str, cwd: str) -> bool:
+    """True when a builder's write tool call changes only comments of an existing test file: the file, as the
+    call leaves it, passes `comment_only_change`. A mutation test, a symlink that leads to another path, and a
+    call `write_call_texts` cannot replay are False."""
+    rel = repo_rel(target, cwd)
+    full = _expanded(target, cwd)
+    if rel is None or is_mutation_test_rel(rel):
+        return False
+    real = repo_rel(os.path.realpath(full), cwd)
+    if real is None or norm(real) != norm(rel):
+        return False
+    texts = write_call_texts(tool_input, full)
+    return texts is not None and comment_only_change(rel, texts[0], texts[1])
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2470,7 +2588,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd):
+    if builder_test_path(target, cwd) and not builder_comment_write_ok(tool_input, target, cwd):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2728,8 +2846,8 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str, top: str = "") -> str:
-    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+def file_text_at(root: str, rev, rel: str, top: str = ""):
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and None
     when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
     so the working tree is read from `top`; `top` defaults to `root`."""
     if rev is None:
@@ -2737,11 +2855,27 @@ def text_at(root: str, rev, rel: str, top: str = "") -> str:
             with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
-            return ""
+            return None
     if not rev:
-        return ""
+        return None
     answer = guard_core._git(root, "show", rev + ":" + norm(rel))
-    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+    return answer.stdout if answer is not None and answer.returncode == 0 else None
+
+
+def text_at(root: str, rev, rel: str, top: str = "") -> str:
+    """`file_text_at`, with '' for a file that does not exist there."""
+    return file_text_at(root, rev, rel, top) or ""
+
+
+def builder_test_refused(root: str, top: str, rel: str, names, old, new) -> bool:
+    """True when a builder's change to `rel` (spelled and resolved as `names`) is a test change it may not make:
+    a mutation test, or a test path whose change `comment_only_change` does not prove to be comments alone.
+    A path that resolves elsewhere, a new file and a deleted file are refused."""
+    if not any(is_builder_test_rel(n) for n in names):
+        return False
+    if is_mutation_test_rel(rel) or len({norm(n) for n in names}) != 1:
+        return True
+    return not comment_only_change(rel, file_text_at(root, old, rel, top), file_text_at(root, new, rel, top))
 
 
 def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
@@ -2770,7 +2904,7 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+            bad = builder_test_refused(root, top, rel, names, old, new) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
         if bad:
