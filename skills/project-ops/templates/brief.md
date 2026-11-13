@@ -45,6 +45,6 @@ The test-author and the builder each get their own isolated worktree (decision `
 ## Report
 
 Read each time you write from `~/.claude/bin/now-central`, never from memory.
-When the work is done, and before the report: run the self-check in decision `session-tiers` (Archiving scope). Commit the handoff to `roadmap/outbox/<slug>-handoff.md`, where `<slug>` is this lane's branch slug, and push it to the record branch. Then set this session's tag `cs-archive-ready:<slug>` with set_session_tags. Then report.
+When the work is done, and before the report: run the self-check in decision `session-tiers` (Archiving scope). Commit the handoff to `roadmap/outbox/<slug>-handoff.md` on top of the fetched record-branch tip, and push that commit to the record branch. `<slug>` is one of this lane's `cs-step` tag slugs. With no `cs-step` tag, it is the checkout's branch name without `lane/`. A slug uses letters, digits, `_` and `-`, and starts with a letter or digit. A slug with `/` is refused. A detached checkout has no branch, so it needs a `cs-step` tag. Then set this session's tag `cs-archive-ready:<slug>` with set_session_tags. Then report.
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
 no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.

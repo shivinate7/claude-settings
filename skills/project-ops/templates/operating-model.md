@@ -162,8 +162,8 @@ parent, or miss a message while busy.
 - Send a message at once in two cases: work is blocked (a PR held, a lane stopped), or the owner
   asked for something to be passed on.
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
-  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
-- Triage reads the outbox at each wake, files each item, and removes what it filed, but keeps every `*-handoff.md` file.
+  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled. A session's own handoff (`~/.claude/handoffs/<session_id>.md`) stays outside git. A lane's pushed handoff is a second file, `roadmap/outbox/<slug>-handoff.md`.
+- Triage reads the outbox at each wake, files each item, and removes what it filed. Triage keeps every `*-handoff.md` file.
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
 - A session re-reads the roster right before it sends to a standing session.
