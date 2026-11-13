@@ -32,7 +32,9 @@
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
   "ref": "retrospective 10:49 CST Nov 13; your 10:48 CST question",
+  "reply": "Coordinator took a, 10:51 CST: drain first with big batches, as a pick that can be undone. It stands unless you pick otherwise here. To override, pick b or c.",
   "repo": "shivinate7/claude-settings",
   "short": "Drain first with big batches",
   "shown": [
@@ -52,7 +54,7 @@
       "label": "Hard freeze"
     }
   ],
-  "stands": false,
+  "stands": true,
   "status": "open",
   "title": "Drain first: pause new lanes and run bigger batches until the backlog is sorted?",
   "why": "You asked at 10:48 CST whether new lanes are halted and how the drain gets done quickly without problems. The coordinator is holding non-drain starts until you answer."

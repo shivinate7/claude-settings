@@ -31,6 +31,7 @@
   ],
   "owner": "lane scratchpad-cp-keeps-writer (session_013NEJL2sGyAvwpHNCHioxLc), PR #3126",
   "ref": "coordinator 10:48 CST Nov 13",
+  "reply": "Withdrawn 10:52 CST Nov 13 by triage: nothing for you to type. #3126's run was missing because the PR conflicted with main, and GitHub starts no run on a conflicted PR. The lane merged main (head 5afe5513c), so the run starts on its own (coordinator 10:51 CST). Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Let #3126 pass lint with no test run",
   "shown": [
@@ -46,7 +47,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "Type the override that lets #3126 pass lane lint with no touched-tests run",
   "why": "The lane lint reads unknown because GitHub started no touched-tests run on #3126's head, and only your typed word lifts an unknown."
 }

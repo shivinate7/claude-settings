@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "PR #3126 (scratchpad-cp-keeps-writer, head 10d984931) has no lane-touched-tests run on any head after cb15b3758, so merge --lane-lint reads unknown and needs the owner's --lint-unknown-ok (Cockpit item 692, coordinator 10:48 CST Nov 13). #2932 hit the same class. Lanes must not kick CI by hand.",
  "source": "coordinator 10:48 CST Nov 13",
- "note": "Find why Actions starts no lane-touched-tests run on some draft pushes (trigger filter, paths, concurrency cancel or the draft rule), and fix the trigger so every pushed lane head gets one run. Related: step batch-build-reads-draft-runs (done) reads the run; step ready-pr-touched-tests measures the ready side. Done when: a draft push in a test repo or a dry-run of the workflow trigger shows the run starts for each head.",
- "updatedAt": "2026-11-13T10:48:55-06:00"
+ "note": "Find why Actions starts no lane-touched-tests run on some draft pushes (trigger filter, paths, concurrency cancel or the draft rule), and fix the trigger so every pushed lane head gets one run. Related: step batch-build-reads-draft-runs (done) reads the run; step ready-pr-touched-tests measures the ready side. Done when: a draft push in a test repo or a dry-run of the workflow trigger shows the run starts for each head. Cause found (coordinator 10:51 CST Nov 13): #3126 conflicted with main, and GitHub starts no pull_request run on a conflicted PR. Fix changes to: merge --lane-lint reads a conflicted PR and says \"PR conflicts with main: merge main\" instead of \"unknown\". The coordinator tells the lane. Item 692 withdrawn.",
+ "updatedAt": "2026-11-13T10:51:43-06:00"
 }
