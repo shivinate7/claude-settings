@@ -242,11 +242,11 @@ class ReviewGrantFlag(tm.ReviewEnv):
         self.assertEqual(body.splitlines()[4:6], ["Guard or check: no", f"Grant: {REVIEW_GRANT}"], "the Grant line is not after Guard or check:\n" + body)
         self.assertEqual(tm.parse_text(self, body).get("grant"), REVIEW_GRANT)
 
-    def test_round_four_without_a_grant_refuses_with_the_message_it_has_today(self):
+    def test_round_four_without_a_grant_refuses_with_the_round_usage_message(self):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))  # the sibling: the same rounds with the grant pass
         self.assertEqual(rc, 0, "merge refused --round 4 with --grant:\n" + out + err)
         out, err = self.assert_usage_error(*self.granted())
-        self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 3", err)
+        self.assertIn("--round: the rounds must start at 1, rise by one at a time (round 3 may follow round 1 beside a PASS --fix-check) and stop at 3", err)
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
     def test_round_five_with_a_grant_refuses(self):

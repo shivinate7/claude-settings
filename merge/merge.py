@@ -4139,7 +4139,7 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
+    malformed or out of order, round numbers skip (except 1 to 3 beside a PASS fix check, ruling r9) or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
     optional `Grant: #<pr>, <REVIEW_GRANT>` line directly after Guard or check, whose PR is the record's own; with it the rounds must reach round REVIEW_LAST_ROUND + 1, and without it
     they stop at REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
@@ -4166,7 +4166,7 @@ def parse_review(text):
     bound = grant_pr(g.group(1)) if g else None
     grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
     ceiling = REVIEW_LAST_ROUND + bool(grant)
-    rounds, last, fix = [], 0, None
+    rounds, last, fix, skipped = [], 0, None, False
     for line in lines[5 + bool(grant):-2]:
         if fix:  # nothing follows the fix check line
             return None
@@ -4180,11 +4180,15 @@ def parse_review(text):
         if not m:
             return None
         i = int(m.group(1))
-        if i not in (last, last + 1) or i < 1 or i > ceiling:
+        skip = (last, i) == (1, 3)  # ruling r9: a PASS Fix check stands in for the middle round, so this is the one skip allowed, checked once the Fix check line is read
+        if (i not in (last, last + 1) and not skip) or i < 1 or i > ceiling:
             return None
+        skipped = skipped or skip
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
     if grant and last != ceiling:  # a grant that holds no granted round is not a record
+        return None
+    if skipped and not (fix and fix[3] == "PASS"):  # no record skips a review with no fix verifier in its place
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
 
@@ -5638,7 +5642,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
                     p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
-            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
+            p.error("--round: the rounds must start at 1, rise by one at a time (round 3 may follow round 1 beside a PASS --fix-check) and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
@@ -5727,8 +5731,17 @@ def main(argv, host=None, lock=None, hosts=None):
             new_top = max((r[0] for r in a.round), default=0)
             # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
             if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
-                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
+                if a.fix_check:  # only a lower top round reaches here under a fix check
+                    print(f"merge: this record restarts the review: its top round is lower than an earlier record's on this pull request. Repeat the earlier rounds, up to round {earlier_top}, in this record. " + REVIEW_CITE, file=sys.stderr)
+                else:
+                    print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
                 return 2
+            if {r[0] for r in a.round} >= {3} and 2 not in {r[0] for r in a.round}:  # ruling r9: a record that jumps from the first round to the last skips the middle one, which only a PASS fix check on a failed first round replaces
+                prior = earlier[-1] if earlier else None
+                r1 = [v for i, _, _, v in prior["rounds"] if i == 1] if prior and max((i for i, *_ in prior["rounds"]), default=0) == 1 else []
+                if not (a.fix_check and a.fix_check[3] == "PASS" and any(v != "PASS" for v in r1)):
+                    print("merge: this record skips round 2 with no fix verifier in its place: a round 3 after round 1 needs the newest earlier record on this pull request to hold a round 1 FAIL, and --fix-check to PASS. Otherwise post every round. " + REVIEW_CITE, file=sys.stderr)
+                    return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0]:
