@@ -2271,3 +2271,5 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- review-range-parent-any-hash-n: every `#N` after `Merge after` on a line counts as a parent, so a cite in that sentence adds a parent whose merge base the start must hold (merge/merge.py parent_prs) Fix: none — rare and harmless.
+- review-range-any-backticked-diff: a backticked `git diff A B` anywhere in the body counts as a review range, not only the one the lane asks its reviewer to read (merge/merge.py REVIEW_RANGE) Fix: none — rare and harmless.
