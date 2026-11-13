@@ -1,0 +1,235 @@
+PR	verdict	kind	step	head	reason
+1034	keep	prose	craft-book	456296f55d43	shivpedia full plan (2 docs files), merges clean; PARKED until the 2026-11-20 count in decision merge-practices decides; before merge drop handoffs/craft-book.md, add Q0 to section 9, refresh section 7 (test-practices on main); counts stale
+1147	close	prose+code	timing-tests	39cfa19a477e	subset of 2081
+1314	close	code	mcp-merge-unguarded	7a46a0b94ecb	main already has matcher entries (settings.json:253) and scan test (lint/test_settings_matcher.py)
+1315	rebuild	code	ste-lint-diff-fail-closed	0f0060684bb3	ste-lint must fail (not exit 0) on unreadable diff (ruling item 276); put unshallow retry + non-zero exit on main's READ_FAILED/NO_FROM paths; re-point tests expecting exit 0; redo decision lines 21/28/45
+1349	rebuild	code	watcher-builtin-hook-survey	cfa2e589b04a	cost_probe.py + CostTests + named-exception text; 8 conflicted files, 5246 commits behind; reword hooks.md exceptions to fit CLAUDE.md timer-allowed-when-cheaper; redo plan edits; re-verify every cost row on current main
+1377	close	code	challenger-page-against	8acf4c399891	older design (against field + refute_item.py); owner may want its auto-refuter script instead of "spawn one Sonnet agent" in SKILL
+1386	rebuild	code	export-after-page-write	db0b51cec69d	rebuild promise-guard-only (promise_problem); drop label half
+1417	close	code	ready-checks-use-pinned-tools	71b0be6a71c0	ancestor of 1938 (lane-lint-runs-local-tools rebuild, itself pending owner pick on design vs main's --pinned)
+1461	close	code	lane-lint-runs-local-tools	0d0c650b5778	inside 1938; fold into 1938 rebuild
+1509	close	code	notes-fix-large-3	8de06735b541	script-file test-write reader on main (8705f9a93)
+1517	close	code	notes-fix-guard-2	145b081dd0e6	subset of 1826
+1520	close	code	notes-fix-large-3	42f0a5a0e522	inside 1618
+1536	keep	code	notes-fix-page	c904ea4d0f2b	SOURCE_RE/artifact_id fixes; 1 conflict hunk; rerun guard suites at rebase
+1552	close	code	review-rounds-rework	5cb4cfe59cc5	on main already (review_guard_marked etc); close after 1789 rebuilt without its "lands with PR #1552" line
+1555	close	code	notes-fix-large-3	4e868978469a	inside 1618
+1561	rebuild	code	pr-state-is-on-the-pr	7e81df0bdda6	small rebuild only: "held by main red <age>" on batch lines, file Nov 10 01:07 CST ruling (--lane-lint read-only; label write moves to part 4) in pr-ledger.md, README --reviewed text + skills pointers; core superseded by 2845 line
+1585	close	code	notes-fix-large-3	a66bc002e32b	superseded by 2167
+1598	close	code	notes-fix-large-3	b98415e070c1	reader on main
+1616	close	prose+code	fix-check-after-notes-commit	c3d7fd5d588a	contradicts main (one fix verifier per record; no WIDE/chain); only slice wanted: fix check whose head differs from record Head by record/notes files only (compare_files) - coordinator pick whether wanted, may be in 2365/1789 rebuilds
+1618	rebuild	code	notes-fix-large-3	0286c61657ad	Kind check (debt ruling-pr-kind-unchecked open); 19-file conflict; rebuild as two lanes (Kind check; layout.py/waiting export mark handling)
+1619	rebuild	code	notes-sightings-expiry	721ccc144f86	notes sightings/expiry reader (expire-notes, debt-flow, notes_fix_problem); item 358 lands first; 5 of 16 files conflict; re-apply CLAUDE.md edits on main text; untested on main
+1631	rebuild	code	notes-fix-large-3	bd000f55d36c	pr-ready guard (debt pr-ready-unguarded); rebuild after 2115
+1632	rebuild	code	notes-fix-large-3	e10ac1e68e22	workspace-root walk + npm_deref; main reads --prefix; debt text stale
+1636	rebuild	code	guard-path-expand-forms	1ddd703f4fe0	default-word expand (${D:-x}), _py_paths additions, test-author _own_red_run branch; 4 of 7 files conflict, 4739 commits behind; redo in main's _resolve_into tokenizer; re-home test cases
+1647	close	code	notes-fix-large-3	96ca17a84dad	main has python/node reader; extra forms (bash, source, ./f, uv run, python -m, pwsh -File) re-file as debt if wanted
+1687	rebuild	code	mcp-tools-in-guard-matcher	f4fc22ad912b	3 missing matcher names (add_issue_comment, update_issue_comment, enable_pr_auto_merge) + push-main ask for file-write tools; PR is union of 3 branches, split; 10-file conflicts; OVERLAPS 2115 rebuild (notes-fix-large-3): do once
+1692	close	code	sim-lease-gaps	25a3ca4f3d94	contained in 2061
+1706	close	code	notes-fix-large-3	85de59e5423d	subset of 2115
+1707	close	code	notes-fix-large-3	ffc9149ff9cf	subset of 1722/2115; adds false debt review-record-mcp-edit-unjudged
+1708	close	code	merge-lock-expired-delete-race	3ccb79d428fc	ancestor of 1729 and 2148
+1714	keep	code	handoff-per-agent	b032ff03946d	agent-handoff-write guard; text conflicts only; renumber decision item 14 -> 17; re-point cases into tests/guard/
+1715	rebuild	code	mutate-sweep-control	b456e502dde5	sweep half only: clean-layout control in janitor/mutate_sweep.py main(); guard half on main already; drop PR edits to mutate_guard/shared, checks.yml cap, ci-job-caps.md; filter control to target's case (not full 62 s run); retire notes.md:195 line
+1722	close	code	notes-fix-large-3	437866a47bf3	superseded by 2115
+1729	close	code	merge-lock-expired-delete-race	dc72a6b0577d	ancestor of 2148
+1732	keep	code	handoff-per-agent	6273a1a08bef	git_source_test_hit (checkout/restore --source of a test refused for builders); adjacent churn only; re-point cases into tests/guard/
+1733	rebuild	code	notes-fix-page	1f350467bc51	runs layer + low paused cell (nfp-narrow-paused-cell); 31 hunks vs main's paused cell; redo on main page.html/index.html, re-pin
+1743	close	prose	silent-undo-reads-retire-run	4ab3b1ae5710	ancestor of 1753
+1748	close	code	lane-finds-triage	d6422147c96a	opposite of owner ruling R22 point 3 (brief names a role, never a session id); superseded by 2709
+1751	close	code	review-record-provenance	c9a225c29781	patch-equivalent inside 2440 except 2 commits; closes if 2440 rebuild goes ahead
+1753	keep	code	silent-undo-reads-retire-run	b71ede7ca0a4	CI body wiring + deferred retire cite + key-line copy; 9-file conflicts; drop SESSION_LINK slice (main has SESSION_URL); needs test run after rebase; land first
+1758	close	code	notes-fix-large-3	26711383338c	subset of 2115
+1760	rebuild	code	record-post-runs-lane-lint	4c97367d58b3	review-record never runs lint; 9 of 11 files conflict; main's lane_lint posts owner lane-lint comment: decide whether review-record lint pass posts it; update stale cost/timeouts (LINT_SECONDS 3600); keep HOOK_CATALOG_ROOT drop; owner intent for step unknown
+1771	rebuild	code	coordinator-pick-needs-record	954f087a37c3	handoff "Rulings with NO HOME YET" Home: check; clean textual merge would NameError (main removed _PREMISES_HEAD, added section_heading/_premises_head/_premise_lines); rebuild on those; rerun test_ruling_home.py, test_precompact_handoff.py
+1779	rebuild	code	roadmap-blank-pages	a0a5f510802a	record_source fetch in main() only + stale_pages flags empty roadmap block (exit 1); step still todo on origin/roadmap; conflicts test_idle_lanes.py, waiting-page SKILL.md; re-run 4 test files
+1784	rebuild	code	export-after-page-write	e6e9f6458ff2	writer label as whole token (writer_ids, writer_names_id, record_id); 7 conflict regions in question_problem; keep label design; supersedes 1386 label half and overlaps 2865 (waiting-export-miss-cloud, keep): coordinator to check
+1789	rebuild	code	review-rounds-rework	f174a536172e	10-file conflicts, contradicts main (counted FAIL/WIDE, round-3 hold, haiku fix check); fold only the unknown REVIEW_MODEL refusal + findings labels into R9 rewrite (step rounds-rules-one-record); drop rest
+1805	keep	code	resume-msg-role-check	baecdac7739d	message-role-scope receiver-name lookup + verbs; re-home cases to tests/guard; recount rule_audit 61; drop dup matcher test; may owe round-3 net-value test
+1811	keep	code	runner-repos-in-parallel	3b46a73e067a	per-root gh cost tests; rebase (5 doc-text conflicts); drop brief.md lines
+1813	rebuild	code	merge-passes-settings-dir	f6f1ca00c434	per-step CLAUDE_SETTINGS_DIR; drop worktree pin machinery, reuse main's pin_tree; keep ste-lint local; port settings_pins reader if wanted; competing design on main (--pinned); pick with 1938/2001 lane-lint pinning decision
+1826	rebuild	code	notes-fix-guard-2	daa81094bac3	session_start.sh TMPDIR block; product merges clean; thread 4 params through main's hook_launch in hooks/test_session_start.py, drop PREPEND_FAKE
+1829	close	code	same group	f812874cde31	superseded by 1951
+1831	close	code	lane-lint-unshallow	936092ed5402	carried by 1916 rebuild (1916 contains 1831 head via merge commit 86a899f60); closes only because 1916 carries it - main lacks unshallow_for_lint
+1835	close	code	stall-watch-quiet-lint	593a9c5e6745	same change rebuilt in 2800 (keep, fan-prose-small-homes)
+1836	close	code	lane-lint-runs-local-tools	67af2d5fc137	inside 1938; fold into 1938 rebuild
+1839	close	code	same group	4ecbf40cd094	superseded by 1951
+1844	close	code	lane-lint-hook-suites	5a846d7588e6	on main already with later fixes
+1848	close	code	runner-repos-in-parallel	0654324c7d75	superseded by 2071 rebuild
+1849	keep	code	resume-msg-role-check	c744278156cb	msg-role false-alarm fixes (follow-up to 1805 core); mutate_guard add-add keep both; land either first
+1861	rebuild	code	idle-lane-steps-unknown	e497e48a32c5	most on main; missing: two-repo hold (off-record step with another repo's cs-repo tag) + read-once trailers (NOT_READ, trailer_ids); all 5 files conflict; alternative: close and file the residual as a small new step (delta small)
+1863	rebuild	code	draft-pr-guard-heredoc	fae8e4f7b0b6	heredoc-keep fix (debt heredoc-written-run-false-alarm); rebuild on main after 2824 merges (same functions in guard_core.py)
+1869	rebuild	code	silent-undo-checks-pr-base	cf96725102af	keep only cite-reason notes ("cite for <slug> not accepted"; check_debt_retire judged/cited_deletes/reason split; closes debt retire-excuse-silent-refusal); drop 10 base-resolution commits (main reads tracked upstream); stack on whichever of 1753/1935 merges first; reconcile with their "cite for <slug> not read" line
+1871	close	code	process-held-end-to-end	1d2054259519	inside 2067
+1873	close	code	same group	8a826f9ef4b3	1839 plus one provenance-label commit; re-apply label in 1951 rebuild only if guard/kind freeze survives
+1881	close	code	same group	5cf0a0fc8912	superseded by 1951
+1892	close	code	same group	11c2103e3dbf	superseded by 1951
+1897	rebuild	code	draft-pr-guard-heredoc	9cc1859271d3	rebuild only its extra: mutant-anchor check (precheck_errors, lint/check_mutant_anchors.py, CI step); heredoc chain comes from 1863
+1900	close	code	runner-repos-in-parallel	3eac910e1c20	superseded by 2071 rebuild
+1916	rebuild	code	lane-lint-hook-suites	702d262ebb90	other-job suite runs for lane lint (other_job_runs, fetch-retry, GIT_TRACE strip, unshallow, NOT_RUN_JOB); 54 conflict hunks; rebuild only own commits from 86a899f60; would undo main's 1844 fixes if merged as is; coordinator/owner: is other-job suite in lane lint still wanted?
+1935	keep	code	silent-undo-reads-retire-run	e6aff647e548	pre-existing-needs-main-run guard; 3-file mechanical conflicts; drop commits shared with 1753; becomes rebuild if owner wants shared clause parser first
+1938	rebuild	code	lane-lint-runs-local-tools	53dfd0e9c945	top of 1461<1836<1938 chain; contradicts main design (--pinned git archive; decisions lanes-run-no-full-ci-job, action-pins-follow-sessions: lane lint stays local); coordinator/owner pick needed: should lane lint follow pinned trees? If no, close 1938 and keep only what main lacks (yaml_scalar reader, settings_pins scan, SIGTERM cleanup + dead-run sweep)
+1951	close	code	fail-record-ancestor-head	79c49dfb8636	OVERRIDES earlier 1951 rebuild row: contained in 2365; the 2365 rebuild lane carries the core
+1958	close	prose+code	timing-tests	b870acbd04e8	subset of 2081
+1964	rebuild	code	notes-fix-page	04c7d3ab18c7	keep layout.py set-waiting-page fix + build_parser; redo records-page redirect half on main's strip_redirections
+1971	close	code	pr-backlog-clear	d37a95d84ebb	inside 2123
+1975	close	code	bg-tail-loses-verdict	76daeb155dab	ancestor of 2015
+1987	rebuild	code	notes-fix-guard-2	9f8799a97d2c	ENTRY_WRITES/ENTRY_AMEND amend guard; re-point 178 test lines into tests/guard section file red then green; redo Cost/Measure lines; must retire builders-amend-ff-pull-refused; guard change owes round 3 net-value test; close instead if owner reads "rare and harmless" as final
+1995	close	code	runner-repos-in-parallel	7ae031d80470	superseded by 2071 rebuild
+2001	close	code	lane-lint-guard-suite-install	b1b4d7dd0479	earlier layers on main in other form; new guard-suite-in-lane-lint layer contradicts main (job scope is linted job only; GUARD_SHARD jobs; touched-tests HEAVY); closing loses debts lane-lint-guard-browser-skip + notes: re-file against main design if wanted
+2002	close	prose+code	timing-tests	fd0d55ad11fd	subset of 2081
+2015	rebuild	code	bg-tail-loses-verdict	5d44cbeed150	85 commits not on main, 9-file conflicts; add --release-check to MERGE_OPTIONS; split fail-closed imports (reread_check, precompact_handoff, proc_env) into own PR
+2017	rebuild	code	lane-lint-cloud-time-limit	de1c0e755181	core on main (1d8c70b1a); unique: other_job_runs/OTHER_JOB_SECONDS/NOT_RUN_JOB/MISSING_INSTALL, ci-job unknown reads, guard rule lane-lint-foreground, testing/shallow_clone.origin; 12 conflicts; same family as 1916 (do once); re-check debts lane-lint-tree-scans-unpicked, lane-lint-guard-suite-not-run
+2024	keep	code	notes-fix-page	2ae838393d39	question-form stack; 2 test-file conflict hunks; land before 2300
+2026	rebuild	code	notes-fix-report	fe431c70808e	feedback-guard fixes (unread_note, STANDING_HOMES/GRANT_HOMES shared parts); conflicts _closed_reason; drop dup note once-home-standing-word-list
+2030	keep	code	notes-fix-report	d1e3aeadec76	split shared_names import in override.py so NOTICE_TAGS survives; test conflicts only (keep both); drop notes.md hunks main holds; "line 442" -> hooks/guard.py:644
+2033	close	code	sim-lease-gaps	090c4c93ec7f	contained in 2061
+2052	close	code	(env-walk group)	964981245f5c	subset of 2171
+2055	rebuild	code	export-check-writer-page	5b14714fa5e9	3 parts still wanted: writer from meta/page get of repo's waiting page only; close of read-back item counts as send; block text names [closed]; drop dup failed-sends part (on main); re-cut after 1784/2865 land; debts page-write-without-n, page-block-no-closed-hint open
+2061	rebuild	code	sim-lease-gaps	3ffe6bcb131a	sim lease renew/run limit/drive lease; 8-file conflicts, 4415 commits behind; ruling numbers 10-12 collide with main's; narrows ruling 1; Cost lines fail cost-line-pinned; rebuild on main; owner may need to confirm drive-lease ruling still wanted
+2063	rebuild	code	record-claim-cites-code	788ad60caf98	STALE009/STALE010 CodeClaimReader, dead_name_cites; 2 prose conflicts (reviewer.md, stale-cites-at-merge.md); rerun test_stale_cites.py; re-pin counts
+2067	rebuild	code	process-held-end-to-end	84d390d078cc	10-file conflicts; main holds round-3 ruling 402a only (PR writes item 359 pick b, contradicts); marker work on main; carry only merge confirm refusing lane tip with no done record (refuse_owed_round, owed_round, unreviewed_lane); drop item 359 text; re-point tests to tests/guard; owner item 382 pick a not on main
+2071	rebuild	code	runner-repos-in-parallel	04089d720e45	merge-roots-cover guard, stale (21 hunks / 11 files); rebuild guard-only on top of 1811; no incident behind guard seen (step deferral only) - coordinator may decide keep/drop
+2081	rebuild	code	timing-tests	0ad45a9672d0	superset of 1147/1958/2002, work still live; stale vs main: drop hooks/test_guard.py hunks, re-apply P5 wording in agents/reviewer.md:60 and test-author.md:27, re-add 19 notes lines, check janitor/test_session_end_sweep.py; code-check change owes round 3
+2083	rebuild	code	commit-refuses-conflict-markers	be1347cc86f0	unread git read must not be "no hit" (CONFLICT_MARKERS_UNREAD_KIND, read_default_base_state, push_branch_unread); 5-file conflicts; re-place ~400 test lines into tests/guard/s13406-merge.py, s33355-misc.py; redo decision cost lines
+2097	close	code	guard-relative-write-escape	5b7144657241	core on main; rest contradicts main; debts other-git-option-unread, other-python-dynamic-unread may need re-filing
+2099	close	code	git-write-after-failed-cd	c16ae94ca135	2144 (rebuild, notes-fix-large-3) carries all 2099 commits except 2 redundant ones; restate c16ae94ca Drops-lines trailers on 2144 rebuild if needed
+2115	rebuild	code	notes-fix-large-3	013da95c86f0	review-record form + head guard, MCP auto-merge/push-main asks; 21 hunks in 13 files; rebuild once; add add_issue_comment etc to matcher
+2123	rebuild	code	pr-backlog-clear	403afbc0ecb5	coordinator-scope guard (COORDINATOR_MCP_WRITE_TOOLS, read_recorded_role, merge-role-skips-raw-merge gap open); 13 conflicting files; re-home 1834 test lines into tests/guard; only enable_pr_auto_merge new in matcher
+2129	close	code	notes-fix-large-3	5a93c5193e95	subset of 2167
+2144	rebuild	code	notes-fix-large-3	9bc869753e57	git-after-cd rule (incident 2026-11-07 16:15 CST); 15 hunks in 9 files
+2146	keep	prose	pr-review-range-check	45d2ce4f8963	2 appended notes (pointer-mkdir-let-through, two-briefs-one-branch); merges clean; note 2 cites step one-worktree-per-branch (not on main, unknown)
+2148	rebuild	code	merge-lock-expired-delete-race	19510dea11f0	delete GhLock, GitLock the one backend; main changed GhLock (idempotent/landed checks, cwd); 5-file conflicts; retire debts merge-lock-expired-delete-race and unlock-delete-no-check; split ci-scope closure into own PR (probably stale)
+2156	rebuild	code	bg-tail-loses-verdict	4f479c0f75b2	glued-& reader, any-filter, lone writers; rebuild on top of rebuilt 2015; any-filter may cry wolf (owner/coordinator call: keep or drop widenings)
+2164	close	code	bg-tail-loses-verdict	af053ccf2231	ancestor of 2015
+2167	keep	code	notes-fix-large-3	a474d4bcd9d2	push-CI report check, debt push-report-before-checks; rebase 4 additive hunks; fix cite "owner 2026-11-07 13:20 CST cull-rules" (it is a coordinator ruling, pr-ledger.md:23)
+2171	keep	code	(env-walk group, name unconfirmed)	3845efe4d38e	env-file folder walk; rebase: guard.py:4737 add cwd=cwd, guard_env.py import union, re-home 469 test lines into tests/guard/s08198-env.py / s10739-env.py
+2173	rebuild	code	option-tradeoff-pushback	9309aa81d8f3	tradeoff rule (TRADEOFF_RULE, is_pick_of_one, sets_choice) conflicts in all 3 files; fixtures need with_frozen_fields and `recommended`; rebuild after 2024/2987 land or batch together
+2195	rebuild	code	past-ruling-on-send	4422fad7e739	judge_send/send_question/past_ruling_check; 7 files conflict; PAST_RULING_TIMEOUT now 60 s (budget 15+60 and settings timeout 90 wrong); re-point one-git-process test; keep main's _hooks_on_path, COMMENTS_TOOL; sendmessage_state.py is a different check
+2196	rebuild	code	cite-range-symbol-match	936dff70c8b2	STALE011 (+STALE009/010 stack of ~50 commits) not on main; 3 prose conflicts (stale-cites-at-merge.md, claims-carry-backing.md, reviewer.md); confirm earlier PRs #1539/STALE010 ride with it or are superseded; rerun STALE011 in tree mode after rebase
+2197	rebuild	code	guard-relative-write-escape	e7f7ab9c3621	relative_write_escape in worktree-home (incident 2026-11-08 mkdir ../tmp live); 13 hunks; thread anchor through main's dir_before_segment; keep design + 306 test lines; rebuild first (2234 on top). Note 2691 (agent-asks-become-refusals, keep) covers the same relative-write refusal: coordinator to check overlap
+2200	close	code	review-record-past-head	d72675b1a74b	subset of 2365
+2226	rebuild	code	draft-pr-guard-text-false-alarm	03192fb130bc	actual content: Monitor-allow change to waiter guard (WAITER_MONITOR_REASON, timeout_ms, debt monitor-ci-poll-loop) + heredoc \' reading; step name mismatches; re-apply Monitor part on main (small); re-check premise that Monitor reaches guard as Bash with timeout_ms; heredoc part after 2824 merges or split; needs fresh review
+2230	rebuild	code	report-guard-spawn-model	57fc2e3f8344	only ROLE_MODEL_RE design-reviewer lookbehind fix (?<![\w-])(?<!design ) + 2 tests wanted; other two fixes on main
+2234	rebuild	code	guard-relative-write-escape	cc3637412007	quoted script args, heredoc kept-body reading, perl -i; 20 hunks; rebuild after 2197
+2262	rebuild	code	ste-lint-run-exit-codes	ed4a70d7a50e	keep stale_run_exit (only last line "stale-cites: FAIL" zeroes exit under FAIL=false), TREE_OUT capture, action.yml fail wording; drop diff_failed (main has UNKNOWN/READ_FAILED); delete run.sh:222; ONE LANE with 1315 (same two changes); name main's exit-0 UNKNOWN as a false green per decision ci-unknown-is-red
+2276	close	code	bg-tail-loses-verdict	4cbf017f10aa	ancestor of 2015
+2277	close	code	review-record-past-head	11192dff9ba5	subset of 2365
+2297	rebuild	code	live-stream-monitor-allowed	c20c85383c5e	Monitor tool as allowed live-stream wait (MONITOR_TOOL, SHELL_COMMAND_TOOLS, stream_family); 6-file conflicts; decide Monitor at newer gates (scratchpad-owner guard.py:6463, guard_merge.py:2014, config_watch.py:520/561); same area as 2226 Monitor part: do once
+2300	rebuild	code	notes-fix-page	76228dee40c8	core: PR body read through event file in ci-job/action.yml/merge.py; drop 2024 rider and session-link skip main has; 23 hunks
+2301	close	code	bg-tail-loses-verdict	c02058d87e6b	ancestor of 2015
+2321	close	code	bg-tail-loses-verdict	87503213fb02	ancestor of 2015
+2322	rebuild	code	builder-diff-auto-merge-reflog	b7a2e2912792	take only top 8 commits 7ac111a39..b7a2e2912 (6 files), not the 1943-commit batch-66d stack; rewrite own_changes for merge_tree() tuple (tree, conflicts); move 307 test lines to tests/guard/s23264-builder-refuse.py; recount Measure line; re-point notes cites; debt builder-diff-auto-merge-reflog still open
+2347	close	code	notes-fix-page	cd80faefeea3	ancestor of 2982 (outside group, rebuild: re-shard 5-leg shoot job vs main's checks-waiting-page split); 2982 carries it
+2365	rebuild	code	review-record-past-head	e195c38be405	cumulative stack incl 1951 lineage; rebuild core only on main: open_fail_on_ancestor, one decision paragraph, tests; drop counted-FAIL/WIDE, fix-check chain, REVIEW_FIX_GUARD_MODEL, ~25 debt notes
+2440	rebuild	code	review-record-provenance	c028c1926176	64 conflict hunks/25 files; main has own live_review_state/REVIEW_CHECK_BUDGET 70 vs PR's shared 28 budget; MCP merge + draft guard already on main; rebuild core provenance (REVIEW_STAMP_SALT, cutover read, edit-route/GraphQL review-record guard, comment-post guard); maybe carry 1751's 2 extra commits (hit->bypass rename, comment reword)
+2463	close	code	lane-push-frozen-in-batch	8e1b00b61317	superseded by 3019; its debt docs/debts/push-batch-mutant-merge-dir.md not in 3019 (unknown if still real)
+2491	close	code	merge-route-author-paths	d65524fce177	already on main (e2aec35ac; guard.py merge_route_paths, mutant, tests/guard s23264)
+2500	close	code	close-replaced-at-open	6209713a48f2	stale earlier copy of 2667; overlaps fully
+2527	rebuild	prose	item-cite-carries-name	c3a1f8cb5735	report-guard half superseded by 2997; carry only prompt line in hooks/precompact_handoff_prompt.md + its test + StalledLineReplyTests case re-pointed at bare_item_cite
+2549	close	code	artifact-guard-matcher-names	e034db8de485	older rival of 2927; 2927 covers 15 tools vs 6, conflicts in 8 files; its two gaps go to 2927 rebase
+2667	rebuild	code	fan-prose-unmapped-1	eb214c9c69a3	close-replaced lines; feature not on main; re-point reopen_lines/replaced_closes to main's (n, base, kind) done triples, red then green
+2675	close	code	fan-prose-handoffs	8ee3cb28d733	superseded by 2696
+2677	keep	code	fan-code-handoffs	f3161bcdbfaa	promise guard; merges clean; trim 16 of 21 notes already on main
+2678	keep	code	fan-prose-unmapped-1	25a3c5b6b8dc	shared branch-sweep workflow (cloud branch delete, restart-plan scope k); merges clean
+2684	keep	code	fan-prose-handoffs	a1ebb982b450	artifact-cite refusal in triage push; rebase: ci-scope.sh shoot list
+2691	keep	code	agent-asks-become-refusals	0ad3b6b0c151	relative shell write escape guard; rebase: guard.py keep both blocks (readonly-shell-write); merges clean with 2692/2693/2886
+2692	keep	code	agent-asks-become-refusals	e28b83cbdc8b	commit-trailer-model deny rule; merges clean
+2693	close	code	agent-asks-become-refusals	b5579108d978	ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-write)
+2696	keep	code	fan-prose-handoffs	db1785021be1	superset of 2675; fixes UNKNOWN on failed install; merges clean
+2709	keep	code	lane-finds-triage	56fc4ded2980	brief names roles (Coordinator, Triage, Batch runner), no session id (R22 point 3); only conflict session-tiers.md Cost lines; check cost-mark lint
+2712	keep	code	fan-prose-handoffs	7ede2542073b	agent-end reap by process marker; regenerate docs/catalog.md after rebase
+2714	close	code	agent-asks-become-refusals	7ed66f06a1e0	ancestor of 2885 (stands only if 2885 stays keep)
+2720	rebuild	code	fan-code-waiting-page	6695a463d414	written-time blank/non-ISO check; code merges clean, 1 decision-file conflict (Cost line); mark read-count clause "(unmeasured)"
+2723	close	code	fan-prose-handoffs	f222d22a62af	ancestor chain to 2753
+2727	close	code	fan-prose-debts	ea833aa0027a	superseded by 2948 (outside group, 2 conflicts with main); becomes keep if 2948 closes
+2729	rebuild	code	fan-prose-unmapped-1	73fdb5b6f4ee	keep guard half (dead_pr_wait_hit, shared_names, decision dead-pr-waits, test s42907); drop build half dead_pr_waits/prStates (duplicates main waits_on_closed_pulls)
+2732	keep	prose	fan-code-waiting-page	e14452cc5c19	3 notes; merges clean; land with or after 2720; note says "PR 2720" (renumber if rebuilt as new PR)
+2733	close	code	fan-code-workflows	3737e02663d5	ancestor of 2920
+2735	close	code	fan-prose-debts	21fd3ba402a6	ancestor of 2757
+2737	keep	code	fan-code-workflows	133f9bf1e9da	judge-replay corpus; merges clean; corpus cases sendmessage_state, report_guard.past_ruling may differ from main's 11-13 judges
+2744	close	code	fan-prose-handoffs	61c34de78fd4	ancestor of 2753
+2748	close	code	fan-prose-unmapped-5	63bba812951b	inside 2913
+2749	rebuild	code	fan-code-guard-2	eb03f0e3d975	lint CPU-slot limit wanted; conflicts merge/merge.py + test_lane_lint.py; main added run_touched_tests so slot scope must be redecided
+2750	close	code	fan-code-handoffs	89fec26ec590	ancestor of 2774 and 2824; superseded by 2824
+2751	keep	code	fan-prose-debts	1c9a658278ee	fixes debt lane-ack-skips-every-reply; rebase: 1 text conflict in docs/decisions/questions-go-to-owner.md
+2752	keep	code	fan-prose-debts	9c9f76d45f98	MAP tsconfig alias reads; merges clean
+2753	keep	code	fan-prose-handoffs	f0d3c6b40b08	head of PowerShell write-read stack; merges clean; had round 1
+2756	keep	code	fan-prose-handoffs	a20d6d46cd48	waiting page Answered section closed on load; merges clean
+2757	keep	code	fan-prose-debts	de6882a03d95	notes/debts must name fix + 2 record checks; superset of 2735; rebase: 2 CI file conflicts (ci-scope.sh, checks.yml)
+2758	keep	code	fan-code-guard-2	562f6e8f014b	two-worktrees-one-branch guard; merges clean
+2766	keep	code	fan-prose-small-homes	366a9b729287	stamp unreadPendingCites refusal; merges clean
+2768	keep	code	fan-code-guard-2	4597afcb1754	archive guard ScopeStop; merges clean
+2770	close	code	fan-code-workflows	63e51f3107e2	ancestor of 2920
+2774	keep	code	fan-code-handoffs	d08e55b9a8d5	fed-write carry; conflicts hooks/guard.py, guard_env.py, builders-cannot-edit-tests.md; merge main in; merge after 2824
+2783	close	code	fan-prose-debts	200cea832768	ancestor of 2872 (outside group, 1 conflict); becomes keep if 2872 closes
+2791	keep	code	fan-code-guard-2	d09baa344fdf	branch-slug-no-git guard; merges clean
+2800	keep	code	fan-prose-small-homes	86424f2e4c0b	stall_beat.py one home for STALL_WATCH_BEAT; merges clean
+2803	keep	prose	stale-cites-tree-clean	a77d54fdee9c	plans folder cites (-68 STALE003); fix docs/plans/refusal-vs-rule.md line 81 first; merges clean
+2804	keep	prose	stale-cites-tree-clean	071d2bf493d1	13 decision records cites; merges clean
+2805	keep	prose	stale-cites-tree-clean	ee9ad636c439	4 debts + 2 design docs cites; merges clean
+2806	keep	prose	fan-code-handoffs	ee84a9a2bf8f	3 debts + notes; reword "open on PR #2750" to 2824/2774
+2807	rebuild	prose	stale-cites-tree-clean	3971c8ede171	janitor.json cites; one hunk conflict in skills/compliance-check/probes.md; trivial rebase
+2811	keep	prose	fan-prose-handoffs	997bb9270a3c	2 debts + 15 notes; merge after 2753, 2712, 2684, 2756 or reword "not yet on main" lines
+2813	keep	code	fan-code-guard-2	7b840c442bfc	python -c / PowerShell call-operator reads; merges clean
+2818	keep	code	merge-flow-after-anthropic	464ed817a1d9	merge-reads-ruleset step; one adjacent-line conflict pr-review-record.md; hand-merge keeps both
+2824	keep	code	fan-code-handoffs	9cb7972829c6	draft-pr carry + heredoc fixes; one import-line conflict in hooks/guard.py; land first
+2833	close	code	fan-prose-unmapped-5	a80ddb7f5a91	inside 2913
+2836	close	code	stop-checks-one-message	f0a531b7411a	contained in 2864
+2845	close	code	pr-state-is-on-the-pr	0df3d8f3629c	ancestor of 2869 and 2871 (siblings); close holds only while one of 2869/2871 is keep; else 2845 becomes keep. 2871 adds --lane-lint --integration, which the Nov 10 01:07 ruling rules out: ruling check before merge
+2864	keep	code	stop-checks-one-message	911211b196aa	one-message Stop change + draft-carry; one conflict checks.yml (keep both suite steps); cites owner pick b on R32 part 2 (2026-11-12 13:18 CST)
+2865	keep	code	waiting-export-miss-cloud	435856d12960	cloud writer-label match in export_check; merge before 2907
+2874	keep	prose	review-rounds-rework	05dafe8f8c4b	new draft docs/decisions/review-rounds-measure.md for owner; merges clean; changes no rule
+2875	close	code	fan-code-workflows	3bc86940a228	ancestor of 2920
+2879	keep	code	waiting-export-miss-cloud	8be73cc8a633	stale_pages.py --lag; merges clean
+2885	keep	code	md-midline-comment-gap	8a9834c073a2	agent terse-line check (TERSE_LINE); merges clean; owner-picked (decision agent-output-terse-line); 2714 close stands
+2886	close	code	md-midline-comment-gap	9aec08d67c14	superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-decision protocol); if owner wants spawn-time refusal, keep (merges clean; add rule-list entry); 2693 close stands with it
+2900	keep	prose	express-pass-owner-quotes	850d8e2b3ed4	decision docs-only-prs-skip-review Express pass owner-quote text (part 1); merges clean; files owner-quote wording so needs reviewer read
+2907	keep	code	waiting-export-miss-cloud	8f9d4a7c7265	check_waiting_copy_backup.py; merge after 2865; cites decision waiting-page-one-store which has no home (dangling)
+2913	keep	code	fan-prose-unmapped-5	8675e90e9efd	report-sha-missing + message-ref-missing guards; merges clean with main (tests not run)
+2915	close	code	prose-tending-contract	95ce08d6f18b	ancestor of 3003
+2920	keep	code	fan-code-workflows	e81bfdb34179	stacked superset of 2733/2770/2875; rebase: merge/merge.py both constants, lanes-run-no-full-ci-job.md carry main's sentence; owner item 463a ruling for mutation-test exception unverified
+2923	close	code	artifact-guard-matcher-names	1ac8c1e7a45a	commit 1 of 5, superseded by 2927
+2924	close	code	artifact-guard-matcher-names	9b29b68bd974	commits 1-2 of 5, superseded by 2927
+2925	close	code	artifact-guard-matcher-names	df186746935e	commits 1-3 of 5, superseded by 2927
+2926	close	code	artifact-guard-matcher-names	793d26ba0ac4	commits 1-4 of 5, superseded by 2927
+2927	keep	code	artifact-guard-matcher-names	3a5ed02c604a	top of 5-commit stack, 20h, needs rebase (conflicts guard.py, shared_names.py, settings.json); fold in 2549 gaps: Mac call without url, db_str_replace unknown keys; use main COMMENTS_TOOL
+2933	keep	code	convert-time-pinned-tests	8597d3eba7e9	fake clock for sleep; merges clean
+2938	close	code	challenger-page-against	33dca4c3e5bb	inside 2987
+2941	close	code	guard-false-alarm-cull	f932b3627115	superseded by 3036
+2948	keep	code	express-pass-owner-quotes	205747a52cac	merge tool part 2 (--quotes-matched, kind_misfits decision check, retires debt ruling-pr-kind-unchecked); 2 trivial conflicts (merge.py review_round_model line, test_merge.py import); also supersedes 2727 (fan-prose-debts close stands)
+2949	keep	code	convert-time-pinned-tests	0a0186050db7	growth ratio; merges clean
+2952	keep	code	convert-time-pinned-tests	a7e9f634e54e	pinned clocks; merges clean
+2953	keep	code	page-wakes-and-relays	e7c607ed6f1d	R18 item 1 only page writer watches page; merge first
+2955	rebuild	code	page-wakes-and-relays	2f738dabf875	wakes field never added to page.html itemFields; rebuild on top of 2953
+2958	keep	code	convert-time-pinned-tests	25c05532449c	CPU-time ratio; merges clean
+2959	keep	code	convert-time-pinned-tests	fbe24129ec2f	stamp watchdog; merges clean
+2962	keep	code	agent-commit-file-scope	8261779a4906	silent-undo note row-edit check (edited_notes); one test-file conflict (keep both classes); check verdict change owes review
+2967	keep	code	agent-commit-file-scope	5b9a56806c7e	brief-scope rule (agent commit/push refuses file brief does not name); merges clean; guard verdict change owes review
+2975	keep	code	convert-time-pinned-tests	264cae524616	time-pinned-ok marker; merges clean
+2987	rebuild	code	challenger-page-against	5b8ca9f176ed	v2 "Against the pick" context line; main renamed item field pick->recommended (RECOMMENDED_FIELDS) so guard would never judge; rebuild reading recommended with old pick; re-point SKILL steps/tests; may land guard and page as two PRs
+2993	keep	prose	merge-flow-after-anthropic	ed87d763f364	files owner rulings for per-lane merge cutover (4 new records + ~16 edits); 2 mechanical conflicts; cites R42 part 2 and R55 missing on main plan; state "target, not live"; files an owner ruling so needs reviewer read
+2996	close	code	prose-tending-contract	9eab18aabb49	ancestor of 3003
+2997	keep	code	item-cite-carries-name	435d838e0f00	bare_item_cite + handoff_cite_hit guard; merges clean; no test for triage "stalled step: item 7" line (unknown)
+3003	keep	code	prose-tending-contract	64111cfe4345	tending runner + feedback-log hooks + move-stores plan; superset of 2915/2996; one-line rebase in ci-scope.sh shoot list; tests not run
+3006	rebuild	code	page-wakes-and-relays	cb9376c59885	R18 item 3 vs R60 conflict (chat reply form); blocked on owner/coordinator pick: "on the page, item N" only (R18) or "Page item: <id>" + option lines (R60/main)
+3019	keep	code	lane-push-frozen-in-batch	7f112970889f	push-batch-held rule; merges clean; has tests s22670
+3021	close	code	ci-linux-windows-once	72d112d72b24	subset of 3088
+3028	keep	code	guard-false-alarm-cull	601424fea2f1	deletes Recovered/Handoff-gave report-line check; hunks fit main
+3029	keep	code	guard-false-alarm-cull	a516a55fd306	question-form guard cull; one small conflict in question_form.py docstring
+3030	keep	code	guard-false-alarm-cull	6ea9e087568e	builder plain test run via _test_temp.run_folder not refused
+3031	keep	code	guard-false-alarm-cull	dba9fe0879b3	check_ruling_kind reads Home from footer only
+3032	keep	code	guard-false-alarm-cull	0d6f7bfa76d4	gh-write-cloud heredoc reading + merge --head refusal; contains 3033
+3033	close	code	guard-false-alarm-cull	83c758e965ea	inside 3032
+3034	rebuild	code	guard-false-alarm-cull	d509685230df	scratchpad false alarms; main reworked scratchpad_owner_write; -C hunk and TREE_REFUSE_REASON rename still apply, finished-agent part redo
+3035	keep	code	guard-false-alarm-cull	99b05dd429b6	stays marks on 7 glossary rows
+3036	keep	code	guard-false-alarm-cull	9853d78517ee	narration example-id fix; page item 630 (owner pick b it cites) unverified: if it says otherwise keep 2941, close 3036
+3037	keep	code	guard-false-alarm-cull	21ad144f8f7a	frozen-path read-only forms; no overlap with 3030
+3038	keep	code	page-wakes-and-relays	5a074b4104d2	relay-grant-words rule; anchors intact; independent
+3040	keep	prose	page-wakes-and-relays	3c957137d942	2 debts + note about 3038; trivial rebase of notes.md; close if 3038 closes
+3042	close	code	ci-linux-windows-once	c877d12e5f6f	subset of 3088
+3043	keep	code	guard-false-alarm-cull	a2f593dfc82e	debt-retire accepts wrong-refusal notes line; merge before 3056
+3056	keep	prose	guard-false-alarm-cull	37675a604e3a	records side of cull; merge after 3043, 3028, 3029; fix item 13 "Until cull-report-guard merges" at batch time; duplicates 3028 note removals
+3086	keep	prose	ios-apps-test-shapes	4ff5805759a3	Test shapes section in ios-apps SKILL.md; merges clean; merge before or with 3092
+3088	keep	code	ci-linux-windows-once	600ee184e229	R61/R62 + nightly drop; one-hunk rebase checks.yml (Git mailbox wait suite step); lint/test_windows_split.py pins may need re-shape; nightly drop should land before next cron fire (17 3 * * *)
+3092	keep	code	ios-apps-test-shapes	14cfeb60012c	UITestSupport.swift.tmpl helpers + test; merges clean; new test unrun
