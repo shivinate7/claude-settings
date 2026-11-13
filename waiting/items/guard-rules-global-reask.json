@@ -1,0 +1,60 @@
+{
+  "added": "2026-11-13T17:06:00Z",
+  "context": "Goal: the two guard rules reach every repo that builds guards.\nProblem (rule): install copies hooks and skills into ~/.claude, so they run or load in every repo; a file under .claude/rules is not copied and loads only in sessions inside claude-settings. The two rules (\"build a guard only against a mistake Claude has made\", 47 words; \"trust a guard only after it goes red\", 13 words) are text, not hooks.\nBased on (read): install.sh on main links hooks, lint, skills, agents, settings.json and the CLAUDE.md pointer, and no .claude/rules.\nBased on (notes): how many other repos have guards is unmeasured.\nDeparts from: your 11:59 CST Nov 12 pick a on items 536 and 538 for these two rules \u2014 main keeps both in CLAUDE.md, and option a leaves them there; b and c move them.",
+  "home": "step global-claude-md-scope-audit; PR #2852",
+  "id": "guard-rules-global-reask",
+  "kind": "decision",
+  "n": 701,
+  "options": [
+    {
+      "gain": "Every repo keeps both rules; no gap.",
+      "how": "Both rules stay in the global CLAUDE.md, as on main today.",
+      "id": "keep-global",
+      "key": "a",
+      "label": "Keep both rules global (Recommended)",
+      "lose": "About 60 words stay in every session."
+    },
+    {
+      "gain": "About 60 words leave the global file.",
+      "how": "Both rules move to .claude/rules in claude-settings, as your 11:59 CST Nov 12 pick said.",
+      "id": "move-to-rules",
+      "key": "b",
+      "label": "Move both to claude-settings rule files",
+      "lose": "Every other repo loses both rules; a session building a check there never sees them."
+    },
+    {
+      "gain": "Reaches every repo and saves about 60 words per session.",
+      "how": "A new skill, installed in every repo, holds both rules and loads when a guard is built or trusted.",
+      "id": "move-to-skill",
+      "key": "c",
+      "label": "Move both to a new skill",
+      "lose": "A new skill to build, and a rule in a skill loads only if its description fits the task first (unmeasured)."
+    }
+  ],
+  "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
+  "pick": "a",
+  "ref": "your 11:03 CST answer and question on item 606; lane 11:05 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Two guard rules: global or not",
+  "shown": [
+    {
+      "id": "keep-global",
+      "key": "a",
+      "label": "Keep both rules global (Recommended)"
+    },
+    {
+      "id": "move-to-rules",
+      "key": "b",
+      "label": "Move both to claude-settings rule files"
+    },
+    {
+      "id": "move-to-skill",
+      "key": "c",
+      "label": "Move both to a new skill"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Keep the two guard rules in the global CLAUDE.md?",
+  "why": "You asked why these would not be global when hooks are in every repo. The difference is below. This replaces 606."
+}

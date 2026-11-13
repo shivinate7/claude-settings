@@ -9,7 +9,7 @@
   "note": "Ruling R34 (owner 11:39 CST Nov 11, \"yes i think build it -- let me know if that should be part of the standing artifact or no\"; plan 416aae9, stage 4; page item 507 a). Per G14 it is a tab on claude-settings' one page: rows of what the owner sees, what makes it happen, and how healthy, measured, else \"unknown\". A read-only audit drafts the rows now; the owner judges them; a lane builds the tab later. Row 1 drafted: the mailbox (see step session-mailbox-followups, 11:48 CST). Draft map 11:50 CST (retrospective scratchpad health-map-draft.md): 20 rows, 0 green, 14 amber, 3 red (page copy check; main CI no completed push run since Nov 9; 62 false-alarm lines in docs/debts/notes.md, 22 with \"Fix: none\"), 3 grey (spend, review rounds, decision judge). Biggest blind spot: checks that fail open with no record. Table shape set: what you see | grade | why. Owner 12:37 CST Nov 11 (relayed by the retrospective): \"it's not very pretty and i cant tell if its exhaustive, but for a temporal table i think it's fine as is for now\". The 20-row draft stands as the interim. The tab lane gets a designer first, and a check that lists each hook, check and skill that no row names, so the table is proven exhaustive (plan cd5e360). Placed ahead of the older ready steps in now (triage re-weigh 11:17 CST Nov 12, plans/reweigh-2026-11-12.md): an owner ruling not yet started.",
   "source": "owner 2026-11-11 11:39 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T13:42:08-06:00",
+  "updatedAt": "2026-11-13T11:06:09-06:00",
   "blockedBy": [],
   "order": -196
 }

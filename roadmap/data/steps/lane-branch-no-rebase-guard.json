@@ -1,0 +1,14 @@
+{
+ "id": "lane-branch-no-rebase-guard",
+ "title": "Refuse a rebase or history rewrite of a lane branch from the batch runner or another lane",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 11 planned a \"rebase of #1159\" (q_max lane qmax-stale-rules-specs) on Nov 13; the coordinator stopped it at 11:05 CST. No guard would have: guard.py rule force-push passes a lease with --force-if-includes, and nothing refuses a local rebase of a lane branch. Harm: a rewrite on a lane's branch can drop the lane's commits or invalidate its review record (decision pr-review-record).",
+ "source": "coordinator 11:05 CST Nov 13; triage read of origin/main hooks/guard.py rule force-push",
+ "note": "The guard refuses a rebase, reset or amend of a branch that is not the session's own lane branch, and a lease force-push to such a branch, in the batch runner's and lanes' sessions. Red case: the #1159 plan. Express (ruling drain-first-hold part 4: a fix that keeps work landing).",
+ "updatedAt": "2026-11-13T11:06:09-06:00"
+}

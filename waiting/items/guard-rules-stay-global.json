@@ -39,10 +39,10 @@
   "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
   "pick": "c",
   "ref": "lane global-claude-md-scope-audit, 12:57 CST Nov 12; reworded after your 15:46 CST note, with the retrospective's read",
-  "reply": "Checked install.sh on main (13:14 CST). You're right that the guard hooks reach every repo: install links hooks, lint, skills, agents and settings into ~/.claude, so they run in every session. But it doesn't install the rule file the two rules moved to, which loads only in a claude-settings session that edits hooks/. So shared guards built here keep the rules, but a session building a check inside another repo (a q_max CI check, say) loses them, and so would guard work here under merge/, bin/, actions/ or .github/. The lane's point holds for those cases only. Pick again with that in mind: a keeps them global; b keeps your 11:59 move.",
+  "reply": "Closed 11:07 CST Nov 13 by triage: you answered none of these and asked why the rules would not be global when hooks are. Item 701 answers that and asks again. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Guard rules stay global?",
-  "status": "open",
+  "status": "closed",
   "title": "The two guard rules you moved at 11:59 stay global after all",
   "why": "It reverses part of your 11:59 pick, so it needs your word. Meanwhile the lane keeps both rules global in its PR."
 }
