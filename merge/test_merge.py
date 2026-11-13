@@ -15433,6 +15433,20 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+    def test_a_fix_verifier_with_no_round_is_refused_and_prints_no_record(self):
+        # A record with a fix verifier and no round reads open ("no round is recorded"). The tool refuses it: exit 2, no
+        # record, and a message that names --round. The control, the same argv with --round, exits 0.
+        argv = ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head())
+        for verdict in ("PASS", "FAIL"):
+            with self.subTest(verdict=verdict):
+                rc, out, err = self.run_args(*argv, "--round", "1:reviewer:sonnet:PASS", "--fix-check", self.fix_value(verdict=verdict),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 0, "the control, with --round, was refused:\n" + out + err)
+                rc, out, err = self.run_args(*argv, "--fix-check", self.fix_value(verdict=verdict), host=self.earlier_host())
+                self.assertEqual(rc, 2, "a fix verifier with no --round was not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier with no --round still printed a record")
+                self.assertIn("--round", err, "the refusal does not name --round:\n" + err)
+
     def test_a_fix_check_naming_a_model_other_than_sonnet_is_refused(self):
         # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, the fix check on every pull request). The merge tool refuses the
         # record that names another model: exit 2, no record, and an error that names the fix check and sonnet. Each refusal has the sonnet
