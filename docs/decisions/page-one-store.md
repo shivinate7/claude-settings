@@ -62,7 +62,7 @@ Taken by the coordinator at 11:43 CST on 2026-11-12, as an undoable pick (no own
 ## Known gaps
 
 - The copy's age has no set bound. The owner said "timely enough (not real time)". The export check (Mechanism step 1) blocks a turn that wrote the page without a later copy (read hooks/feedback_guard.py:1332), except a cloud writer until step 1 lands. That is stricter than he asked. Unmeasured: whether that check costs more than it protects.
-- The git copy holds five collections and no `receipts` (`export_page.py`, `lint/layout.py:275`). A recovery from it loses the receipts. Whether that matters is unmeasured.
+- The git copy holds five collections and no `receipts` (`export_page.py`, `lint/layout.py:275`). A recovery from it loses the receipts. Plan item 2 adds them.
 - Two accounts: the owner winds one down by hand before using the other, and the skill's "Before you switch Claude accounts" export covers it (read `skills/waiting-page/reference/copies-and-accounts.md`). No check makes him do it.
 - The Status tab stays baked and lags until a republish.
 
@@ -84,7 +84,7 @@ Coordinator, 2026-11-13 12:14 CST, from the retrospective's blind review. This r
 2. The `receipts` collection joins the exported ones. `lint/layout.py:275` drops it today.
 3. Readers move from the page database to git: the answer check in `page_grant.py` and the Relayed Grant entry. This needs the owner's word first. Step `page-one-store-answers` holds it.
 4. Every repo registers every artifact with its account label. Each account's sessions export their own, with `export_page.py --all --account`.
-5. The cite check covers handoffs and CLAUDE.md, or they resolve links through `lint/layout.py`.
+5. The cite check covers handoffs and CLAUDE.md, or they resolve links through `lint/layout.py`. This changes the line in `waiting-data-in-repo` that the cite check does not read briefs and handoffs.
 6. The copy-age reader (step `waiting-copy-age-read`) flags a copy older than its page's last write.
 
 Done proof: a fresh clone on the other account rebuilds each page from git alone, receipts included.
