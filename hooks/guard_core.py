@@ -295,13 +295,15 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     shaped = False
     powershell = is_powershell(cmd)
     spans = () if powershell else _script_text_spans(cmd)
-    template_end = 0
+    seen, since = "", 0   # the quote open at the last step, and where it opened
     index = 0
     length = len(cmd)
     while index < length:
         char = cmd[index]
-        if quote == "`" and index >= template_end:
-            quote = ""   # a template literal never outlives its body: a stray backtick hides nothing after it
+        if quote != seen:
+            seen, since = quote, index
+        if quote and quote != BLIND and any(a <= since < b <= index for a, b, _ in spans):
+            quote = seen = ""   # a quote a script body leaves open ends with the body, and hides nothing after it
         if spans and char in ("\\", "`") and quote in ("", "'"):
             body = next((span for span in spans if span[0] <= index < span[1]), None)
             if body and char == "\\" and quote == "'":
@@ -310,7 +312,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 continue
             if body and body[2] and char == "`" and not quote:
                 current.append(char)   # a node template literal opens, and may run across lines
-                quote, template_end = "`", body[1]
+                quote = "`"
                 index += 1
                 continue
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
