@@ -25,6 +25,7 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective 10:42 CST Nov 13; your 10:41 CST question",
+  "reply": "Closed 10:47 CST Nov 13 by triage: you picked a (\"Yeah approved A\", 10:45 CST, relayed by the retrospective). Ruling backlog-drain-plan is filed. Plan home: R66 in plans/restart-plan.md. Parts 1 and 2 go to steps lane-step-dup-check and lost-work-sweep; parts 3 to 6 go to the new step backlog-drain, whose lane the coordinator starts. Until the ledger lands, the shared number is runner 10's count of open lane PRs in no batch (402 at 10:42 CST, 108 of them done). Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Plan backlog-drain for 356 built PRs",
   "shown": [
@@ -39,8 +40,8 @@
       "label": "Keep item 690's three options"
     }
   ],
-  "stands": false,
-  "status": "open",
+  "stands": true,
+  "status": "closed",
   "title": "Run plan backlog-drain: sort all 356 built PRs to a final state, mechanically?",
   "why": "You asked at 10:41 CST for the plan that gets this to the finish line mechanically. This replaces item 690."
 }

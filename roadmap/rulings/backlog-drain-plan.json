@@ -1,0 +1,10 @@
+{
+ "id": "backlog-drain-plan",
+ "at": "2026-11-13T10:45:00-06:00",
+ "title": "Run plan backlog-drain: sort all built lane PRs to a final state, mechanically",
+ "ruling": "Owner 10:45 CST Nov 13, Cockpit item 691 pick a: run plan backlog-drain. (1) Stop new repeats: step lane-step-dup-check refuses a lane brief or new session for a step with an open lane PR, unless the brief says \"continues #N\" or \"replaces #N\". (2) One ledger, roadmap/backlog/lost-prs.json, written only by a script that reruns at each batch review (step lost-work-sweep). (3) Within each step group, git cherry or patch-id closes repeats with a pointer to the kept PR. (4) One fresh Sonnet reviewer per remaining group, and per older single PR, picks keep, rebuild or close against today's main and rulings. (5) Runner 10 batches keep rows that read done, newest first; keep rows without a done record get one fresh Sonnet round 1; a lane is unarchived only when its own answer is needed. (6) Finish line: unsorted rows = 0, kept at 0 by lost-work-sweep. Plan home: R66 in plans/restart-plan.md (branch restart-plan, commit a31b11ad). Replaces item 690.",
+ "quote": "Yeah approved A",
+ "source": "owner chat with the retrospective 10:45 CST Nov 13, relayed 10:46 CST",
+ "status": "open",
+ "step": "backlog-drain"
+}
