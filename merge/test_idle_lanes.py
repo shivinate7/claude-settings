@@ -350,6 +350,21 @@ class IdleLanesCli(unittest.TestCase):
                 self.assertEqual(code, 1, "a bad unarchived_epoch %r exits %d, so a caller reads the list as read: %s" % (epoch, code, err))
                 self.assertNotRegex(out, SUMMARY_LINE)
 
+    def test_a_kept_session_with_a_bad_unarchived_epoch_is_skipped_before_the_epoch_check(self):
+        # The control is the same row with no keep list: a bad epoch reads the whole list unknown. Then keepSessions names it: the
+        # keep list skips the row before the epoch check, so no unknown line prints and the summary counts none.
+        keep = [{"id": "session_u", "reason": "kept for a reader"}]
+        for epoch in (True, -5):
+            with self.subTest(epoch=epoch):
+                self.publish([lane("session_u", "c1", unarchived_epoch=epoch)])
+                _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertTrue(before.startswith("unknown ("), "scope: the bad epoch %r is not unknown without its keep: %r" % (epoch, before))
+                self.publish([lane("session_u", "c1", unarchived_epoch=epoch)], keep=keep)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(out.splitlines(), [SUMMARY_ZERO],
+                                 "a kept session with unarchived_epoch %r printed an unknown line or was counted: %r" % (epoch, out))
+                self.assertEqual(code, 0, err)
+
     def test_an_unarchived_lane_that_waits_prints_no_line_and_is_not_counted_held(self):
         # A waiting lane is not a hold, unarchived or not. Scope first: the same unarchived lane with nothing left to wait for
         # prints its hold line, and the summary counts it held. Then each reason it waits, one at a time: its step is not done,

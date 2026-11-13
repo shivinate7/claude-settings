@@ -1110,10 +1110,32 @@ class ConfirmIdleLanes(Env):
         rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), WORKING_LANE))
         self.assert_report_after_merge(rc, out, err)
 
+    def test_fresh_live_file_with_an_unknown_report_still_exits_0(self):
+        # The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown: one unknown
+        # line, no summary, and the report's own exit is 1. The merge landed, so the confirm exits 0 as before.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
+                                                                 dict(IDLE_LANE, unarchived_epoch=-5)))
+        self.assertEqual(len([line for line in out if line.startswith("merge: #7 merged as ")]), 1,
+                         "the merge did not land: out %r, err %r" % (out, err))
+        # Scope first: the unknown line comes from the fresh read, so no owed line prints.
+        self.assertEqual([line for line in out + err if OWED_WORD.search(line)], [],
+                         "scope: the owed path ran, not the fresh read: %r" % (out + err))
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "the fresh read did not print one unknown line: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line)], "a summary printed for an unknown report: %r" % out)
+        self.assertEqual(rc, 0, "the report's exit 1 became the merge's exit code: rc %r, err %r" % (rc, err))
+
     def test_stale_live_file_prints_the_owed_line(self):
         # readAt one minute before the merge commit: the file was read before the batch landed.
         rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
         self.assert_owed_after_merge(rc, out, err)
+
+    def test_stale_owed_line_cites_its_decision(self):
+        # The owed line tells the batch runner why the pass is owed, so it cites the decision that owes it.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        owed = [line for line in out + err if OWED_WORD.search(line)][0]
+        self.assertIn("(decision session-tiers", owed, "the stale owed line cites no decision: %r" % owed)
 
     def test_read_at_equal_to_the_merge_time_prints_the_owed_line(self):
         # The boundary: "later than" is strict, so a readAt at the merge commit's own second is owed.
