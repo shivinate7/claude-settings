@@ -476,13 +476,13 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
     return None
 
 
-# ---- a review record posted as a comment (rule pr-review-record)
+# ---- a review log posted as a comment (rule pr-review-record)
 #
-# A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
+# A body whose first line is the review log marker must parse as a review log (merge/merge.py `parse_review`, the one home of the form).
 # That is the form check, `review_form_hit`: the render output as it is, or with a footer after a line exactly `---` and
 # no text between the CI line and `---`. A post, and a shell edit in place (`gh api -X PATCH`), are both judged for form. A post,
 # and an edit through the MCP update tool, must also name the pull request they go to and name that pull request's live head
-# (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is posted. The remedy is the render, which
+# (`review_log_hit`). A hand-typed head is how a review log goes stale the moment it is posted. The remedy is the render, which
 # fills the live head itself.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
 # for a post with no marker and none for a shell edit, whose route names a comment, not a pull request; a marked MCP update
@@ -493,18 +493,18 @@ REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
 UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
 # The host's file-write tools each push a commit to the `branch` they name, as `git push` does.
 FILE_WRITE_TOOLS = ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file")
-REVIEW_RENDER = "merge %s --review-record --head %s --kind <%s> --guard <%s> --round <N:ROLE:MODEL:VERDICT>"
+REVIEW_RENDER = "merge %s --review-record --head %s --kind <%s> --guard <%s> --round <N:ROLE:MODEL:VERDICT>"  # glossary-ok: --review-record is the merge tool flag the glossary keeps
 REVIEW_REASON = (
-    "Rule (pr-review-record): %s. A review record is rendered by the merge tool for the live head, never typed by hand. "
+    "Rule (pr-review-record): %s. A review log is rendered by the merge tool for the live head, never typed by hand. "  # glossary-ok: pr-review-record is the decision slug the glossary keeps
     "Remedy: run `%s` and post its output unchanged. "
-    "(decision pr-review-record, a review record names the head it reviewed)"
+    "(decision pr-review-record, a review log names the head it reviewed)"
 )
 REVIEW_FORM_REASON = (
-    "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
+    "Rule (pr-review-record): this body holds the review log marker but is not a well-formed review log. "  # glossary-ok: pr-review-record is the decision slug the glossary keeps
     "`merge --reviewed` cannot read a body that does not parse. "
     "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
     "with no text between the CI line and `---`. "
-    "(decision pr-review-record, a review record must parse)"
+    "(decision pr-review-record, a review log must parse)"
 )
 
 
@@ -525,7 +525,7 @@ def _ansi_char(found) -> str:
 
 def ansi_c_decoded(segment: str) -> str:
     """Return a bash segment with each `$'...'` word replaced by the single-quoted text bash would send: its escapes decoded
-    (`\\n`, `\\t`, `\\xHH`, `\\uHHHH`, octal, `\\\\`, `\\'`) and cut at a NUL, as bash cuts it. The review-record judge reads its
+    (`\\n`, `\\t`, `\\xHH`, `\\uHHHH`, octal, `\\\\`, `\\'`) and cut at a NUL, as bash cuts it. The review log judge reads its
     bodies from this text, so a record in that form holds its marker on its real first line. The shared tokenizer is left as
     it is: every other guard reads `$'...'` as shlex does. A PowerShell segment and an unclosed `$'` are returned as they are."""
     if "$'" not in segment or is_powershell(segment):
@@ -543,11 +543,11 @@ def ansi_c_decoded(segment: str) -> str:
 
 def review_note(why: str) -> None:
     """The one-line stderr note for a marked post the guard could not judge. The post is allowed."""
-    sys.stderr.write("review-record: not checked, " + why + "\n")
+    sys.stderr.write("review log: not checked, " + why + "\n")
 
 
 def comment_pull_request(comment_id):
-    """A selector for review_record_hit: the pull request number a conversation comment sits on, from one read of the comment."""
+    """A selector for review_log_hit: the pull request number a conversation comment sits on, from one read of the comment."""
     def read(host):
         code, out = host.api("issues/comments/%d" % comment_id)
         if code:
@@ -566,7 +566,7 @@ def _review_render(module, number, head):
 def _marked_bodies(bodies):
     """Return (module, marked bodies), or None when no body can be a record. A record is a body whose first line is the marker."""
     texts = [b for b in bodies if isinstance(b, str) and b]
-    if not any("review-record" in b for b in texts):
+    if not any("review-record" in b for b in texts):  # glossary-ok: the marker <!-- review-record --> is a kept name
         return None   # the cheap test: no marker is possible, so the merge tool is not even loaded
     module = merge_module()
     if module is None:
@@ -587,20 +587,20 @@ def _form_hit(module, marked, selector):
     if not _unparsed(module, marked):
         return None
     named = "" if callable(selector) else str(selector).strip()
-    return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
+    return "review log that does not parse", REVIEW_FORM_REASON % _review_render(
         module, named if named.isdigit() else "<pr>", "<live head>")
 
 
 def review_form_hit(bodies, selector=""):
     """Return (matched, reason) when a body that opens with the record marker does not parse, else None. An edit in place
-    is judged by this alone, and review_record_hit calls the same _form_hit. It makes no read."""
+    is judged by this alone, and review_log_hit calls the same _form_hit. It makes no read."""
     found = _marked_bodies(bodies)
     if found:
         return _form_hit(found[0], found[1], selector)
     return None
 
 
-def review_record_hit(bodies, repo: str, selector, where: str):
+def review_log_hit(bodies, repo: str, selector, where: str):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
@@ -624,11 +624,11 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     for body in marked:
         record = module.parse_review(body)
         if record["n"] != number:
-            return ("review record for pull request %d posted on %d" % (record["n"], number),
-                    REVIEW_REASON % ("this record names pull request #%d and the comment goes to #%d" % (record["n"], number), render))
+            return ("review log for pull request %d posted on %d" % (record["n"], number),
+                    REVIEW_REASON % ("this log names pull request #%d and the comment goes to #%d" % (record["n"], number), render))
         if record["head"] != live:
-            return ("review record for head %s, live head %s" % (record["head"][:12], live[:12]),
-                    REVIEW_REASON % ("this record names head %s and the live head is %s" % (record["head"][:12], live[:12]), render))
+            return ("review log for head %s, live head %s" % (record["head"][:12], live[:12]),
+                    REVIEW_REASON % ("this log names head %s and the live head is %s" % (record["head"][:12], live[:12]), render))
     return None
 
 

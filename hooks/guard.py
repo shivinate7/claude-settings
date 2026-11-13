@@ -227,7 +227,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
-  pr-review-record     deny. A marked review record posted with a wrong or hand-typed head or number, as a comment
+  pr-review-record     deny. A marked review log posted with a wrong or hand-typed head or number, as a comment
                        or as an MCP add_issue_comment or update_issue_comment (the update finds its pull request from the comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
@@ -591,7 +591,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_log_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
@@ -1857,7 +1857,7 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
     return call is not None, texts, ""
 
 
-# ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
+# ---- a review log posted as a comment (rule pr-review-record; the judge is guard_merge.review_log_hit)
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
 _COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/(\d+)/?")   # a comment edited in place, by comment id
@@ -1929,7 +1929,7 @@ def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
 
 
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
-    """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
+    """Return (matched, reason) when this segment posts a review log the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
     (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
@@ -1979,7 +1979,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         review_note("the body comes from stdin and cannot be read")
     if form_only:
         return review_form_hit(texts)
-    return review_record_hit(texts, repo, selector, where)
+    return review_log_hit(texts, repo, selector, where)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -4926,7 +4926,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
-    # 6b2. A review record posted as a comment with a hand-typed head or number (rule pr-review-record).
+    # 6b2. A review log posted as a comment with a hand-typed head or number (rule pr-review-record).
     # Cost: one pull request read per post that holds the record marker, none for any other command.
     for index, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
         piped = segments[index - 1] if index and ends[index - 1] == "|" else ""
@@ -7078,16 +7078,16 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
-    # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
+    # A review log posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
     if tool == REVIEW_COMMENT_TOOL:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "issue_number"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         number = str(number) if isinstance(number, (int, str)) and not isinstance(number, bool) else ""
         if number.isdigit():
-            posted = review_record_hit([tool_input.get("body")], repo, number, cwd)
+            posted = review_log_hit([tool_input.get("body")], repo, number, cwd)
             if posted:
                 refuse(tool, "deny", "pr-review-record", posted[1], posted[0])
-        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:  # glossary-ok: the marker <!-- review-record --> is a kept name
             review_note("the call names no pull request number")
 
     # The update tool names a comment, not a pull request. Its one comment read runs only once a marked body parses.
@@ -7095,10 +7095,10 @@ def judge(payload) -> None:
         owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         if isinstance(comment_id, int) and not isinstance(comment_id, bool):
-            edited = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
+            edited = review_log_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
             if edited:
                 refuse(tool, "deny", "pr-review-record", edited[1], edited[0])
-        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:  # glossary-ok: the marker <!-- review-record --> is a kept name
             review_note("the call names no comment id")
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
