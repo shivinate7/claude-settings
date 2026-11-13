@@ -8,31 +8,32 @@
   "options": [
     {
       "gain": "Rebuildable anywhere; cross-account reads need nothing special; no stale copy.",
-      "how": "Every page write also lands in git at once or within the turn; the page builds from git. This follows waiting-data-in-repo and your 12:03 CST words.",
+      "how": "#2829 is rewritten to that, with a timely export and the three cross-account fixes, and rejoins the next prose batch.",
       "id": "git-truth",
       "key": "a",
-      "label": "Git is the truth; the database is a live cache (recommended)",
-      "lose": "Every answer costs a git write, and 593 a is partly overturned."
+      "label": "Git is home, the database is the live view (coordinator's pick)",
+      "lose": "593 a's wording that the database is the one store is dropped."
     },
     {
       "gain": "Simplest, already half-built.",
-      "how": "#2829 rejoins the next batch; git is copied at each wake.",
+      "how": "#2829 rejoins the next batch as built.",
       "id": "db-store",
       "key": "b",
       "label": "The database is the one store; git a timely backup (593 a, #2829 as built)",
-      "lose": "Git lags, the Questions tab cannot render from git, and the cross-account gap needs the follow-up fixes."
+      "lose": "Contradicts decision waiting-data-in-repo; git lags and the Questions tab cannot render from git."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
   "ref": "retrospective 12:05 CST Nov 13",
-  "reply": "Closed as ruled, not asked: decision waiting-data-in-repo (your 14:56 and 14:58 CST Nov 2 words) already says git is each artifact's home and the claude.ai link is one account's view; 593 a fits it on timing (a timely export, not real time). #2829's sentence that the database is the one store contradicts the Nov 2 ruling, so it is rewritten: git home, database the live view. Ruling page-git-is-home. Coordinator and retrospective 12:08 CST Nov 13. Say so here if you want it otherwise.",
+  "reply": "Coordinator 12:10 CST Nov 13: stood pick, not an open question. Fresh lane page-one-store-git-home rewrites #2829 to: git is home, the database is the live view one account writes through, exported timely (593 a's timing kept), plus the three cross-account fixes. #2829 is out of batch 136. The 12:03 CST quote is the retrospective's relay; its source is asked.",
   "repo": "shivinate7/claude-settings",
-  "short": "Page data: git home or database?",
+  "short": "#2829: git home, database live view",
   "shown": [
     {
       "id": "git-truth",
       "key": "a",
-      "label": "Git is the truth; the database is a live cache (recommended)"
+      "label": "Git is home, the database is the live view (coordinator's pick)"
     },
     {
       "id": "db-store",
@@ -40,7 +41,8 @@
       "label": "The database is the one store; git a timely backup (593 a, #2829 as built)"
     }
   ],
-  "status": "closed",
-  "title": "Which of your two rulings stands for a page's data: git is the home, or the database is the one store?",
-  "why": "Two of your rulings word it differently, and #2829 is held until you say which stands."
+  "stands": true,
+  "status": "open",
+  "title": "Rewrite #2829 so git is home and the database is the live view, instead of the database being the one store?",
+  "why": "The coordinator took this pick on decision waiting-data-in-repo (your Nov 2 words) and the retrospective's reading of your 12:03 CST words; it stands unless you choose b."
 }

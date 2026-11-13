@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T18:09:00Z",
+  "context": "Goal: a debt names only a gap that is still open.\nProblem (rule): PRs #2796 and #3161 meant to delete this debt. Their reviewer found the claimed closure false: batch intake reads no review record, so a merge commit can still skip review.\nBased on (ruling): your rule that a debt is a gap Claude is likely to hit; coordinator pick 11:51 CST Nov 13.\nDeparts from: the PRs' claim, which retires the debt \u2014 a keeps it and rewrites its Retire line.",
+  "home": "ruling keep-merge-commit-skips-debt; PR #3184",
+  "id": "pick-keep-merge-skips-debt",
+  "kind": "decision",
+  "n": 731,
+  "options": [
+    {
+      "gain": "The debt stays honest about what is still unfixed.",
+      "how": "Debt merge-commit-skips-review stays true. Its Retire line names the real gap: batch intake reads no record. Built in #3184.",
+      "id": "keep",
+      "key": "a",
+      "label": "Keep the debt, rewrite its Retire line (coordinator's pick)",
+      "lose": "A debt stays on the list until batch intake reads a record."
+    },
+    {
+      "gain": "One fewer debt.",
+      "how": "#2796 and #3161 retire it, as they claimed.",
+      "id": "delete",
+      "key": "b",
+      "label": "Delete the debt as closed",
+      "lose": "Their reviewer found the claimed closure false; a real gap would go unrecorded."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "coordinator 11:50 CST Nov 13, built 12:10 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Keep debt merge-commit-skips-review",
+  "shown": [
+    {
+      "id": "keep",
+      "key": "a",
+      "label": "Keep the debt, rewrite its Retire line (coordinator's pick)"
+    },
+    {
+      "id": "delete",
+      "key": "b",
+      "label": "Delete the debt as closed"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Keep the debt merge-commit-skips-review as true, with its Retire line naming the real gap?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}
