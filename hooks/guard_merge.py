@@ -12,6 +12,7 @@ import sys
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_cd_target, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -828,6 +829,28 @@ def _script_folder(path: str, cd) -> str:
     return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
 
 
+def _call_pieces(segment: str):
+    """The calls one segment holds. The segment splitter cuts at `&&`, `||`, `;`, `|` and a newline, but not at `)` or
+    a lone `&`: an unquoted `)` closes the subshell the call sits in and an unquoted `&` sends it to the background, so
+    each ends a call, glued to a word or not, and the text after it is a call of its own. Quotes are read by
+    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), or a `)`
+    that closes a `$(` opened after the call's first word (`--root o/a=$( pwd )`). Empty pieces are dropped."""
+    pieces, start, depth = [], 0, 0
+    for index, char, quote in walk_quotes(segment):
+        if quote:
+            continue
+        if char == "(" and (depth or (segment[index - 1:index] == "$" and segment[start:index - 1].strip(" \t("))):
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        elif char == ")" or (char == "&" and segment[index - 1:index] not in ("<", ">")
+                             and segment[index + 1:index + 2] != ">"):
+            pieces.append(segment[start:index])
+            start = index + 1
+    pieces.append(segment[start:])
+    return [piece for piece in pieces if piece.strip()]
+
+
 def merge_args_of(segment: str, cd=None):
     """Return the arguments after the command word when the segment runs the merge tool, else None.
 
@@ -837,7 +860,10 @@ def merge_args_of(segment: str, cd=None):
     A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
     (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
     merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
+    A segment is judged as its first call only: `_call_pieces` cuts it at each `)` or `&` that ends a call, so neither
+    hides a flag, and merge_calls reads each piece.
     """
+    segment = (_call_pieces(segment) or [""])[0]
     tokens = segment_tokens(segment)
     if not tokens:
         return None
@@ -847,7 +873,8 @@ def merge_args_of(segment: str, cd=None):
     word = basename(tokens[index])
     rest = tokens[index + 1:]
     if word in ("merge.py", "launch.py"):
-        return rest if basename(_script_folder(tokens[index], cd)) == "merge" else None
+        folder = basename(_script_folder(tokens[index], cd))
+        return rest if folder == "merge" else None
     if word.startswith("python") or word == "py":
         script, after = _python_script(rest)
         if script is None:
@@ -862,14 +889,16 @@ def merge_calls(stripped: str, cd=None):
     """Yield (segment, arguments) for each segment of the command that runs the merge tool, and for each one inside a
     script the segment hands on (`bash -c`, `sh -c`: the one reader of those wrappers is inner_commands). The last `cd`
     target of the segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and
-    delete rules use); a script starts in its segment's folder."""
-    for segment in split_segments(stripped):
-        if not segment.strip():
+    delete rules use); a script starts in its segment's folder. A `)` or `&` that ends a call (`_call_pieces`) starts a
+    call of its own."""
+    for whole in split_segments(stripped):
+        if not whole.strip():
             continue
-        rest = merge_args_of(segment, cd)
-        if rest is not None:
-            yield segment, rest
-        tokens = segment_tokens(segment)
+        for segment in _call_pieces(whole):
+            rest = merge_args_of(segment, cd)
+            if rest is not None:
+                yield segment, rest
+        tokens = segment_tokens(whole)
         if tokens:
             for text in inner_commands(tokens):
                 yield from merge_calls(text, cd)
