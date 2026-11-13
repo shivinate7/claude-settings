@@ -152,6 +152,9 @@ add("lane-start-settings: lane with cs-step:some-slug among several tags is allo
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:some-slug", "cs-build:lane"],
     model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane with an upper-case CS-STEP:slug tag is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=CS_STEP_BASE + ["CS-STEP:some-slug"],
+    model="sonnet", source_url=LANE_SOURCE_URL, carries="cs-step")
 add("lane-start-settings: upper-case lane tag with a cs-step tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings", "cs-step:some-slug"],
