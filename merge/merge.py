@@ -351,7 +351,7 @@ RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
 PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
-RATE_LADDER = (60, 300, gh_quota.WAIT_CAP)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
+RATE_LADDER = (60, 300, gh_quota.WAIT_CAP)  # seconds, one wait per retry (standing-merge-grant). A rate-limit 403 on any `gh api` read, not only a caller that passes -i, now waits to GitHub's reset time (Host.gh adds -i to every `gh api` read). The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
@@ -1008,9 +1008,11 @@ class Host:
         if not low:
             return
         left, limit, wait = low
-        say(f"merge: the GitHub quota is low ({left} of {limit} left); " + ("not waiting inside the guard's time budget." if _READ_DEADLINE is not None else f"the next call waits {wait} s for the reset."))
-        if _READ_DEADLINE is None:
-            self.quota_until = self.now() + wait
+        if _READ_DEADLINE is not None:
+            print(f"merge: the GitHub quota is low ({left} of {limit} left); not waiting inside the guard's time budget.", file=sys.stderr, flush=True)  # stdout is the guard's JSON decision
+            return
+        say(f"merge: the GitHub quota is low ({left} of {limit} left); the next call waits {wait} s for the reset.")
+        self.quota_until = self.now() + wait
 
     def quota_pause(self):
         """Wait out a low quota noted by the last reply, then clear it. The lock is extended first, as before a rate wait; NetStop stops the call."""

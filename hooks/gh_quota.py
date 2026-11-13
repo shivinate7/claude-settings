@@ -7,7 +7,6 @@ import math
 import re
 
 WAIT_CAP = 900   # seconds: the longest wait on a quota, the last rung of merge.py's RATE_LADDER
-POLL_PACE = 30   # seconds between two reads of a poll loop; ci_wake's STATUS_PAUSE and merge.py's SETTLE_SECONDS are the same pace
 
 # What `gh api -i` prints first: the status line, the headers, a blank line. An empty body leaves no blank line: the block then runs to the end.
 _HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*(?:\n(.*?\r?\n)?\r?\n|\n?.*\Z)", re.S)
@@ -30,10 +29,10 @@ def _whole(value):
         return None
 
 
-def read(headers, now, pace=POLL_PACE):
+def read(headers, now, pace):
     """-> (remaining, limit, wait) when the quota is low, else None. `wait` is whole seconds to the reset, at most WAIT_CAP.
     The mark is derived, not fixed: the quota is low when what is left cannot cover the reads this caller makes before the reset, one every
-    `pace` seconds. Missing or unreadable headers, a Remaining outside 0..Limit, or a reset not in the future read as unknown: None, so the
+    `pace` seconds. The caller passes its own pace: no default, so no caller copies another's. Missing or unreadable headers, a Remaining outside 0..Limit, or a reset not in the future read as unknown: None, so the
     caller never waits on a quota it could not read."""
     limit, left, reset = (_whole(headers.get(k)) for k in ("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"))
     if limit is None or left is None or reset is None or limit <= 0 or not 0 <= left <= limit or reset <= now:

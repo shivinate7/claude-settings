@@ -119,19 +119,25 @@ def pauses():
         yield gap
 
 
-def watch_run(run_id, cwd, deadline, repo=""):
+def watch_run(run_id, cwd, deadline, repo="", spell=None):
     """Read the run's status until it is `completed` or the deadline passes. Reads follow `pauses`, and the last pause ends at the deadline.
     No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read gets one retry after the pause (never past the deadline);
     a second failure raises Unknown. The read is `gh api -i` on the run, because `gh run view` takes no -i: its reply carries the GitHub quota
-    headers. While the quota is low the next read waits for the reset (gh_quota.read), in the pause the schedule already takes."""
+    headers. While the quota is low the next read waits for the reset (gh_quota.read), in the pause the schedule already takes. The quota is low
+    against the gap the watch is on, not a fixed number. `spell` is one list shared by the runs of a wait: its one item is True while the quota
+    reads low, so a low spell prints one line on stderr however many runs it spans. A repo as HOST/OWNER/REPO goes to `gh api --hostname HOST`."""
     import gh_quota  # the one home of the quota read, shared with merge/merge.py
-    route = "repos/%s/actions/runs/%s" % (repo or "{owner}/{repo}", run_id)
+    spell = [False] if spell is None else spell
+    parts = repo.split("/")
+    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) > 2 else ("", repo)
+    route = "repos/%s/actions/runs/%s" % (slug or "{owner}/{repo}", run_id)
+    api = ["api", *(["--hostname", host] if host else []), "-i", route]
 
     def read():
         """-> (status, quota headers)."""
         for attempt in (0, 1):
             try:
-                rc, out, err = gh(["api", "-i", route], cwd)
+                rc, out, err = gh(api, cwd)
                 headers, body = gh_quota.split_headers(out)
                 if rc != 0:
                     raise Unknown("gh api %s exited %d: %s" % (route, rc, (err or body).strip()))
@@ -145,19 +151,19 @@ def watch_run(run_id, cwd, deadline, repo=""):
                 time.sleep(max(0, min(STATUS_PAUSE, deadline - time.monotonic())))
                 if deadline - time.monotonic() <= 0:
                     raise
-    gaps, was_low = pauses(), False
+    gaps = pauses()
     while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
         status, headers = read()
         if status == "completed":
             return
         left = deadline - time.monotonic()
         gap = next(gaps)
-        low = gh_quota.read(headers, time.time(), STATUS_PAUSE)
+        low = gh_quota.read(headers, time.time(), gap)
         if low:
             gap = max(gap, low[2])  # the reset, at most gh_quota.WAIT_CAP; the deadline still clamps it below
-            if not was_low:
+            if not spell[0]:
                 emit(["CI wait: the GitHub quota is low (%d of %d left); the next read waits for the reset." % low[:2]])
-        was_low = bool(low)
+        spell[0] = bool(low)
         if left <= gap:  # the last pause is clamped to the deadline, and the wait ends there
             time.sleep(max(0, left))
             return
@@ -291,6 +297,7 @@ def wait_for(sha, cwd, deadline, repo=""):
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
+    spell = [False]   # one low-quota spell over every run this wait watches: watch_run prints one line for it
     seen, viewed, relisted = set(), [], False
     while True:
         try:
@@ -304,7 +311,7 @@ def wait_for(sha, cwd, deadline, repo=""):
         fresh = [r for r in runs if r["databaseId"] not in seen
                  and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
         for r in fresh:
-            watch_run(r["databaseId"], cwd, deadline, repo)
+            watch_run(r["databaseId"], cwd, deadline, repo, spell)
         try:
             got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
                    for r in fresh]
