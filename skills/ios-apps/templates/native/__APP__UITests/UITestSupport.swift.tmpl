@@ -1,0 +1,22 @@
+import XCTest
+
+// The one way a UI test presses. It taps at the centre of the element's drawn frame,
+// in the window's coordinates, so it lands the same on the Duo, open or folded.
+// UI tests cover presses, gestures and navigation only. Rules belong in the Kit tests,
+// and layout in render tests (skill ios-apps, Test shapes).
+extension XCUIElement {
+    @MainActor
+    func tapCentre(in app: XCUIApplication) {
+        let window = app.windows.firstMatch
+        let origin = window.frame.origin
+        let size = window.frame.size
+        let centre = CGVector(dx: (frame.midX - origin.x) / size.width, dy: (frame.midY - origin.y) / size.height)
+        window.coordinate(withNormalizedOffset: centre).tap()
+    }
+
+    // Wait on state, never on time.
+    @MainActor
+    func waitUntilPresent(timeout: TimeInterval = 10) -> Bool {
+        waitForExistence(timeout: timeout)
+    }
+}
