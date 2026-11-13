@@ -481,6 +481,10 @@ PFR_OTHER_BRANCH = "notes-other"
 PFR_HELD = ("held-ancestor", "held-record-other-head", "held-off-history", "held-no-sha", "held-agent-trailer",
             "held-path-then-off-history", "held-base-then-head", "held-head-then-two-prs",
             "held-label-round", "held-label-head")
+# Reports read after the PR is known, each naming the head it reviewed: a stale round 1 FAIL at B, then a round 1 at the
+# live head D2. The names are built in _build_pfr_history, after the commits, as the held names are.
+PFR_STALE = ("stale-fail-fresh-pass-recorded", "stale-fail-fresh-pass-unrecorded", "stale-fail-record-off-history",
+             "stale-fail-own-record-fresh-pass-recorded")
 
 
 def _pfr_step(*args):
@@ -492,8 +496,9 @@ def _pfr_step(*args):
 
 
 def _build_pfr_history():
-    """A on main, B on PFR_BRANCH, C on main off A, each in its own commit. The push destinations' remote is set
-    up as _build_push sets it, so the checkout reads like a lane's."""
+    """A on main, B on PFR_BRANCH, C on main off A, each in its own commit, then D1 and D2 on PFR_BRANCH after B. D2 is
+    the live head of the stale-report cases: two commits past B, as a lane that pushed twice after a FAIL. The push
+    destinations' remote is set up as _build_push sets it, so the checkout reads like a lane's."""
     materialize(BRANCHREMOTE)
     make_repo(PFR_HIST, {"notes.txt": "a\n"})
     _pfr_step("remote", "add", "origin", slash(BRANCHREMOTE))
@@ -516,6 +521,15 @@ def _build_pfr_history():
         sys.exit("fixture setup failed in _build_pfr_history: A is not in the PR head's history")
     if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_c, "HEAD").returncode == 0:
         sys.exit("fixture setup failed in _build_pfr_history: C is in the PR head's history")
+    for step in ("d1", "d2"):
+        write(os.path.join(PFR_HIST, "notes.txt"), step + "\n")
+        _pfr_step("add", "-A")
+        _pfr_step(*IDENT, "commit", "-q", "-m", step)
+    sha_d2 = _pfr_step("rev-parse", "HEAD")
+    if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_b, sha_d2).returncode != 0:
+        sys.exit("fixture setup failed in _build_pfr_history: B is not in the live head D2's history")
+    if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_b, sha_c).returncode == 0:
+        sys.exit("fixture setup failed in _build_pfr_history: C descends from B, but the stale cases need a sibling")
 
     report_a = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_a, PFR_FINDING)
     report_b = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_b, PFR_FINDING)
@@ -550,16 +564,42 @@ def _build_pfr_history():
     }
     for name in PFR_HELD:
         write(pfr_path(name), "".join(line + "\n" for line in held[name]))
+    # The stale report names B, the head it reviewed. The lane then pushed twice, so the live head D2 descends from B.
+    # C is off A on main, so it is a sibling of B and no descendant of it.
+    stale_fail = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_b, PFR_FINDING)
+    fresh_pass = pfr_report(pfr_verdict("PASS", 1), "Reviewed at head %s" % sha_d2, PFR_FINDING)
+    stale = {
+        # The fresh round's record is posted at D2. The stale FAIL at B has no record of its own.
+        "stale-fail-fresh-pass-recorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                          + pfr_call("toolu_rev2", fresh_pass)
+                                          + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
+                                                                            head=sha_d2)),
+        "stale-fail-fresh-pass-unrecorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                            + pfr_call("toolu_rev2", fresh_pass),
+        # The only record is a FAIL of the same round, posted at C, which does not descend from B.
+        "stale-fail-record-off-history": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")],
+                                                                           head=sha_c)),
+        # Each reviewed head has its record: B's FAIL is recorded at B, then D2's PASS at D2.
+        "stale-fail-own-record-fresh-pass-recorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                                     + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL,
+                                                                                         "FAIL")], head=sha_b))
+                                                     + pfr_call("toolu_rev2", fresh_pass)
+                                                     + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL,
+                                                                                         "PASS")], head=sha_d2)),
+    }
+    for name in PFR_STALE:
+        write(pfr_path(name), "".join(line + "\n" for line in stale[name]))
 
 
-lazy_fixture([PFR_HIST] + [pfr_path(name) for name in PFR_HELD], _build_pfr_history)
+lazy_fixture([PFR_HIST] + [pfr_path(name) for name in PFR_HELD + PFR_STALE], _build_pfr_history)
 
 
-def pfr_ask(name, command, transcript, tool="Bash", agent_id=None, cwd=PUSHFEAT):
+def pfr_ask(name, command, transcript, tool="Bash", agent_id=None, cwd=PUSHFEAT, carries=()):
     """A push the guard asks about under push-needs-review-record, until each report's record is posted. The ask
-    names the rule, never the branch."""
+    names the rule, never the branch. `carries` names the fragments the ask text must hold."""
     sh("push-needs-review-record: " + name, command, "ask", rule=PFR_RULE, lacks=PFR_BRANCH, tool=tool,
-       cwd=cwd, agent_id=agent_id, transcript=transcript)
+       cwd=cwd, agent_id=agent_id, transcript=transcript, carries=carries)
 
 
 def pfr_allow(name, command, transcript, agent_id=None, cwd=PUSHFEAT):
@@ -725,6 +765,22 @@ pfr_allow("a FAIL naming a commit off main that PR head B does not hold, then th
 pfr_allow("a FAIL naming no sha, then the PR, then the push", PFR_PUSH, pfr_path("held-no-sha"), cwd=PFR_HIST)
 pfr_ask("a FAIL naming head B, then a PR for another branch, then the PR for B, no record, then the push", PFR_PUSH,
            pfr_path("held-head-then-two-prs"), cwd=PFR_HIST)
+
+
+# A stale report: the round 1 FAIL at head B, the PR head when it was reviewed. The lane then pushed two commits, so the
+# live head D2 descends from B. A round 1 PASS at D2 with its record posted at D2 supersedes the stale FAIL. The ask
+# text names the route for a head that moved: a fresh round at the live head, with the record command.
+pfr_allow("a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its record posted at D2, then the push",
+          PFR_PUSH, pfr_path("stale-fail-fresh-pass-recorded"), cwd=PFR_HIST)
+pfr_ask("a round 1 FAIL at head B, then a round 1 PASS at D2 with no record, then the push", PFR_PUSH,
+        pfr_path("stale-fail-fresh-pass-unrecorded"), cwd=PFR_HIST,
+        carries=("fresh round", "live head", "--review-record"))
+# A record of the same round and verdict, posted at C: C is no descendant of B, so it does not clear B's FAIL.
+pfr_ask("a round 1 FAIL at head B, then a round 1 FAIL record at head C, no descendant of B, then the push", PFR_PUSH,
+        pfr_path("stale-fail-record-off-history"), cwd=PFR_HIST)
+# The control: each reviewed head has its record, so no report is left and the push passes.
+pfr_allow("a round 1 FAIL at head B with its record posted at B, then a round 1 PASS at D2 with its record posted at D2, "
+          "then the push", PFR_PUSH, pfr_path("stale-fail-own-record-fresh-pass-recorded"), cwd=PFR_HIST)
 
 
 PFR_COST_LABEL = ("push-needs-review-record: a push reads git for a held report only when one is held, and the count "
