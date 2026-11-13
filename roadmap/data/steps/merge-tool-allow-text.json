@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Coordinator 11:26 CST Nov 13: the autoMode.allow entry \"Merge Tool Read Checks\" claims `merge --reviewed` only reads; after #3148 it also posts a lane-mail marker and sends mail in a batch-runner session. An allow entry that misdescribes an act is a guard that lies.",
  "source": "coordinator 11:26 CST Nov 13; reviewer finding 9 on #3148",
- "note": "Rewrite the entry to say what the command does now. Queue behind #3148, which changes the behaviour. It changes a guard's allow list, so it goes to a lane and a reviewer.",
- "updatedAt": "2026-11-13T11:27:44-06:00"
+ "note": "Rewrite the entry to say what the command does now. Queue behind #3148, which changes the behaviour. It changes a guard's allow list, so it goes to a lane and a reviewer. Owner 11:45 CST Nov 13, item 709 a: accepted. Lane mail from `merge --reviewed` sends only in a batch-runner session; an owner-machine run prints \"lane mail not sent\". The allow text must say so.",
+ "updatedAt": "2026-11-13T11:47:13-06:00"
 }
