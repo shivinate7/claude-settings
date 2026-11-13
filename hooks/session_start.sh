@@ -302,7 +302,7 @@ EOF
             # comment, case or quote sits inside the substitution below: bash 3.2 (macOS sh) mis-parses those there.
             ff_raw=$(cd "$toplevel" 2>/dev/null && { git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" -- 2>/dev/null; printf 'rc=%s\n' "$?"; } | tr '\0' '\n')
             ff_rc=$(printf '%s\n' "$ff_raw" | tail -n 1)
-            ff_hit=$(printf '%s\n' "$ff_raw" | sed '$d' | while IFS= read -r ff_p; do
+            ff_hit=$(cd "$toplevel" 2>/dev/null && printf '%s\n' "$ff_raw" | sed '$d' | while IFS= read -r ff_p; do
                   ff_in=""
                   if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then ff_in="$ff_p"; fi
                   ff_d="$ff_p"
