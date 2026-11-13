@@ -19,7 +19,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
-  It plans, briefs, verifies and reports, and builds nothing (rule `roles-orchestrator-never-builds`). A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
+  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -77,8 +77,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
-  The runner keeps only the merge itself, which the merge lock serializes. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds nothing (rule `roles-orchestrator-never-builds`):
-  - Each PR close comes from the PR ledger's replaced and held lines (decision `pr-ledger`, read by `merge --reviewed`; the act is in decision `session-tiers`, archiving lanes), with its comment: one agent per close. A step close stays with triage.
+  The runner keeps only the merge itself and the CI wait for it. The merge lock serializes the merge. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds only as rule `roles-orchestrator-never-builds` allows:
+  - Each PR close comes from the PR ledger's replaced lines (decision `pr-ledger`, read by `merge --reviewed`; the act is in decision `session-tiers`, archiving lanes), with its comment: one agent per close. A step close stays with triage.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
   - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
   - Before each merge, and before each batch build where a repo still batches, one pre-flight agent per lane reads four things. The base is main. The draft `lane-touched-tests` run at the head is not failed or cancelled (`merge --lane-lint` reads it). The step row is done at the live head. No open PR is stacked on the lane's branch. The runner learns each refusal in one pass, never one build at a time.
