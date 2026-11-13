@@ -40,7 +40,7 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`), `held` (true when the batch runner's hand-in or hold list names the pull) and `reviewRecord` (true when
+   `created_at`), `held` (true when the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when
    the pull has a posted review log), both JSON bools, omitted when false or unknown. Its item rows carry `lane` when the page item has one; its `landedPulls` rows are the pull requests
    closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`. Exit 1 with `todo step with an open PR`
    lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1

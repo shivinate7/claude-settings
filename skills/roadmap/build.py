@@ -49,7 +49,7 @@ that far before the live file's readAt, when no live session step equals the pul
 usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when its branch equals the step id or
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch, bare or as lane/<id>, equals a live session step. A draft row whose optional `held` or
-`reviewRecord` is true is skipped: triage sets `held` from the batch runner's hand-in or hold list and `reviewRecord`
+`reviewLog` is true is skipped: triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
@@ -656,7 +656,7 @@ def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewRecord"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
+    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
@@ -682,9 +682,9 @@ def live_work(path, steps, slug=None):
     the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
     branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
-    A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewRecord` (the
+    A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
-    stale_drafts skips a draft pull whose `held` or `reviewRecord` is true.
+    stale_drafts skips a draft pull whose `held` or `reviewLog` is true.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -722,8 +722,8 @@ def live_work(path, steps, slug=None):
     pulls = keep("pull", raw.get("pulls", []),
                  lambda r: type(r.get("number")) is int and text(r, "title")
                  and (r.get("branch") is None or isinstance(r["branch"], str))
-                 # `held` and `reviewRecord` are JSON bools; text such as "true" is a wrong shape, not a guess.
-                 and all(isinstance(r.get(k), bool) for k in ("held", "reviewRecord") if k in r))
+                 # `held` and `reviewLog` are JSON bools; text such as "true" is a wrong shape, not a guess.
+                 and all(isinstance(r.get(k), bool) for k in ("held", "reviewLog") if k in r))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     if not has_threads:
@@ -1208,7 +1208,7 @@ def stale_drafts(work):
         if p.get("draft") is not True or (branch and any(branch in lane_head_refs(s) for s in work["liveSteps"])):
             continue
         # A pull the batch runner holds or whose review log is posted waits on a named owner, not forgotten.
-        if p.get("held") is True or p.get("reviewRecord") is True:
+        if p.get("held") is True or p.get("reviewLog") is True:
             continue
         at = created_at(p)
         if at is None:

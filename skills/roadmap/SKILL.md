@@ -74,7 +74,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     {"readAt": "<ISO time of the reads>",
      "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewRecord"?, "head"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
      "items": [{"n", "status", "home", "lane"?}]}
@@ -84,9 +84,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
-  release a lane whose draft pull is already in the default branch. `held` and `reviewRecord` are optional JSON
+  release a lane whose draft pull is already in the default branch. `held` and `reviewLog` are optional JSON
   bools (absent means false) that triage fills: `held` is true when the batch runner's hand-in or hold list names
-  the pull, `reviewRecord` when the pull has a posted review log. The stale-draft row skips a draft with either
+  the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
   true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
   stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
 - `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
@@ -244,7 +244,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
   live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
-  session holds no draft. A draft whose `held` or `reviewRecord` is true is skipped. Each entry is `#N (<branch or
+  session holds no draft. A draft whose `held` or `reviewLog` is true is skipped. Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
