@@ -1140,3 +1140,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - handin-cannot-drop 10:47 CST 11-13: Item 690 replaced by item 691; owner picked a at 10:45 CST Nov 13 (ruling backlog-drain-plan, step backlog-drain).
 - handin-cannot-drop 10:55 CST 11-13: Express (owner 10:54 CST Nov 13, ruling drain-first-hold part 4): goes ahead of the drain.
 - ruling-challenge-passes 10:55 CST 11-13: R39 incident 10:53 CST Nov 13: the retrospective read R55's express list as closed, so the owner had to restate that his rulings are read too strictly (10:54 CST).
+- ruling-challenge-passes 10:57 CST 11-13: Express (owner 10:56 CST Nov 13, ruling drain-first-hold part 4 widened): #2963 and #3143 go ahead of the drain.
