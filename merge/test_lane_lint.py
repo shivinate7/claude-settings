@@ -2824,7 +2824,7 @@ class DraftRun(LaneFixture):
         self.assertIn(link, out, "the refusal does not name the failed run's link:\n" + out)
 
     def test_a_real_host_passes_the_same_rows_when_the_windows_run_passed(self):  # control: green on the old code
-        head = self.head("feat")
+        self.head("feat")
         rows = [("touched", "pass", "")] + [("lint-%d" % k, "pass", "") for k in range(100)] + [("run (windows-latest)", "pass", tm.job_link(tm.DRAFT_RUN, 2))]
         self.use_ci_job(PASSING, 0)
         rc, out = self.real_host_run(rows, "--lane-lint", "7")
