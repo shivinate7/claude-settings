@@ -91,7 +91,7 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 - Round 2 runs first when it is missing. Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
 - Free text goes only below `---`. A record is never edited or deleted.
 - A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
-- A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
+- A lane merges origin/main once, after the pending batch lands (until the cutover; after it, no batch is pending). It uses an ordinary merge commit. It never replays, rebases or force-pushes.
 - A merge with both test and product conflicts waits for the mixed-merge route, which is on main (decision `builders-cannot-edit-tests`, Builders cannot edit tests, its merge route; owner, 2026-11-08 10:05 CST, waiting-page item 420 pick a; cases in `hooks/test_guard.py`).
 
 ## The cost
@@ -120,7 +120,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
 - In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
 - Kind, Guard or check, and docs-only are the lane's own claims. The path check above tests only the cases it lists. The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
-- Open: an integration PR has no record of its own.
+- Open: until the cutover (decision `all-repos-switch-together`), an integration PR has no record of its own. After it, each lane PR carries its own record and no integration PR exists.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix verifier per record. A second fix on a fixed head gets the fresh full review in The review a changed head owes, not a fix verifier. The one exception is a conflicted merge of main after a PASS fix verifier, which takes one more fix verifier. A clean merge takes none. `--fix-check` checks in this order:

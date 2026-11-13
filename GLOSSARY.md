@@ -23,6 +23,12 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | Term | Meaning | Home | Not |
 |---|---|---|---|
 | lane | The unit of work, and the session role that runs it. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. A lane runs it, local and cloud alike, under a coordinator or on its own. An agent is never a lane. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md`, `docs/decisions/session-tiers.md` | `workstream`, `lane session`, `solo session`, `one-lane session` |
+| batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
+| integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
+| integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge`, `skills/ci-hygiene/SKILL.md` | — |
+| stable branch | The branch that sessions and installers run from: `origin/stable`. It moves only to a main commit whose push run of checks is green, and only fast-forward. Target, not live: no `stable` branch is on origin yet. | `docs/decisions/stable-branch.md` | `release branch` |
+| breaking merge | A merge after which main's newest finished run is red. Its revert PR, a target route, undoes it. | `docs/decisions/no-merge-onto-red-main.md` | — |
+| revert PR | The lane PR that undoes a breaking merge's commit. Target, not live: it merges as an ordinary lane PR with `--base-red-ok`, once act 3 of R42 part 2 (pull request 2889) lands. There is no `merge --revert` flag, and none is to be added. The reason flag is live now. | `docs/decisions/no-merge-onto-red-main.md` | — |
 | worktree | A linked git working tree under `.claude/worktrees/`, for one agent. The Agent tool's isolation or the EnterWorktree tool makes it. | `docs/decisions/lanes-start-in-tool-worktrees.md` | — |
 | handoff | Notes one holder writes so the next reader can continue. Two cases: a session's notes file, outside git, at `~/.claude/handoffs/<session_id>.md`, rewritten whole at each checkpoint and read by the session itself after a compaction; and a project-ops role's note to its successor. | `docs/decisions/precompact-handoff.md`, `skills/project-ops/SKILL.md` | `handover` |
 | ruling | The owner's answer to a question, or an arbiter's inside its own repo. | `rule:output-answer-has-a-home` | — |
