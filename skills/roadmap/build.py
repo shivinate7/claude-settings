@@ -1573,8 +1573,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     A session named in the live file's keepSessions prints no line (no lane line, no hold line); a keepSessions that
     could not be read makes the whole list unknown. A kept id is read stripped.
 
-    A session that is not archived and carries an int `unarchived_epoch` above 0 was unarchived by someone, so an idle one reads
-    `hold (unarchived; ...)`, never a lane line. An absent or 0 value holds nothing. A value that is a bool, not an int, or
+    A session that is not archived and carries an int `unarchived_epoch` above 0 was unarchived by someone, so an idle one that
+    would otherwise be listed reads `hold (unarchived; ...)`, never a lane line. A lane that waits still prints no line. An absent or 0 value holds nothing. A value that is a bool, not an int, or
     negative makes the whole list unknown: a time that could not be read must not read as "never unarchived".
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
@@ -1625,10 +1625,6 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if row["id"] in kept or row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
         sid = row["id"]
-        if row.get("unarchived_epoch", 0) > 0:
-            # Someone unarchived this session, so archiving it again undoes their act.
-            out.append("hold (unarchived; leave it unless its owner archives it again; lane %s)" % sid)
-            continue
         mine = sorted(step_tag_ids(tags))
         if not mine:
             # The archive guard (hooks/guard_merge.py) refuses a lane with no cs-step tag, so archiving is not the act.
@@ -1658,6 +1654,10 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if doing:
             out.append("hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
                        % (" ".join(doing), sid))
+            continue
+        if row.get("unarchived_epoch", 0) > 0:
+            # Last, so only a lane that would otherwise be listed reads this hold: a waiting lane prints no line, and a lane someone unarchived is not archived again.
+            out.append("hold (unarchived; leave it unless its owner archives it again; lane %s)" % sid)
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
