@@ -555,7 +555,34 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                           "runner and never merges."))
 
 
-class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
+class LivePinFixtureMixin:
+    """Fixture helpers for a claude-settings live pin: the install script the clone holds, the pin install.sh makes beside
+    it, and the <clone>-live link to that pin. The live pin notice and the fast-forward cases share them."""
+
+    def link_to(self, target, link):
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest("this account cannot create a symlink: %s" % error)
+        return link
+
+    def make_live_pin(self):
+        """A clone that holds merge/install_from_main.sh, committed, and the pin install.sh makes beside it: a linked
+        worktree <clone>-live-<12 hex>, detached at the clone's HEAD. Sets self.pin and self.link, and returns the pin."""
+        os.makedirs(os.path.join(self.primary, "merge"))
+        with open(os.path.join(self.primary, "merge", "install_from_main.sh"), "w", encoding="utf-8") as handle:
+            handle.write("# stub: the install script that makes the live pin\n")
+        vcs(self.primary, "add", "-A")
+        vcs(self.primary, "commit", "-q", "-m", "install script")
+        # The pin's name is <clone>-live-<12 hex>, the short sha install_from_main.sh makes it with.
+        short = vcs(self.primary, "rev-parse", "--short=12", "HEAD").stdout.strip()
+        self.pin = self.primary + "-live-" + short
+        self.link = self.primary + "-live"
+        vcs(self.primary, "worktree", "add", "-q", "--detach", self.pin, "HEAD")
+        return self.pin
+
+
+class SessionStartLivePinNoticeTests(LivePinFixtureMixin, SessionStartAgentWorktreeNoticeTests):
     """A cwd inside a claude-settings live pin prints one line that names the pin, the words "live pin", and the
     clone to cd to. The pin is the linked worktree <clone>-live-<12 hex>, or the <clone>-live link to it. A pin
     counts only when the clone beside it holds merge/install_from_main.sh, the install script that makes the pin
@@ -567,16 +594,7 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     def setUp(self):
         super().setUp()
         # The clone holds the install script before the pin is made, so the pin carries it too.
-        os.makedirs(os.path.join(self.primary, "merge"))
-        with open(os.path.join(self.primary, "merge", "install_from_main.sh"), "w", encoding="utf-8") as handle:
-            handle.write("# stub: the install script that makes the live pin\n")
-        vcs(self.primary, "add", "-A")
-        vcs(self.primary, "commit", "-q", "-m", "install script")
-        # The pin's name is <clone>-live-<12 hex>, the short sha install_from_main.sh makes it with.
-        short = vcs(self.primary, "rev-parse", "--short=12", "HEAD").stdout.strip()
-        self.pin = self.primary + "-live-" + short
-        self.link = self.primary + "-live"
-        vcs(self.primary, "worktree", "add", "-q", "--detach", self.pin, "HEAD")
+        self.make_live_pin()
 
     @staticmethod
     def phys(path):
@@ -586,13 +604,6 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     def names(line, path):
         """True when the line holds PATH as a whole path, not as the front of a longer one such as <clone>-live."""
         return re.search(re.escape(path) + r"(?![\w-]|\.\w)", line) is not None
-
-    def link_to(self, target, link):
-        try:
-            os.symlink(target, link)
-        except (OSError, NotImplementedError) as error:
-            self.skipTest("this account cannot create a symlink: %s" % error)
-        return link
 
     def make_link(self):
         return self.link_to(self.pin, self.link)
@@ -905,17 +916,24 @@ class GitFixtureMixin:
         vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
         vcs(self.primary, "remote", "add", "origin", self.origin_repo)
 
-    def advance_origin_main(self, commits=1, grants=True):
-        """Another clone pushes `commits` commits to origin's main. With `grants`, the first carries fresh grants and the
-        rest are empty; without, every commit is empty. The primary checkout does not fetch them. Returns the new tip's sha."""
+    def advance_origin_main(self, commits=1, grants=True, files=None):
+        """Another clone pushes `commits` commits to origin's main. With `grants`, the first carries fresh grants; with
+        `files` (path to text), the first carries those files too; the rest are empty. The primary checkout does not
+        fetch them. Returns the new tip's sha."""
         other = os.path.join(self.root, "other")
         vcs(self.root, "clone", "-q", self.origin_repo, other)
-        first = 1
+        names = []
         if grants:
             self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
             self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
-            vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
-            vcs(other, "commit", "-q", "-m", "fresh grants at origin")
+            names += ["CLAUDE.md", ".claude/CLAUDE.md"]
+        for rel, text in (files or {}).items():
+            self.put(os.path.join(other, *rel.split("/")), text)
+            names.append(rel)
+        first = 1
+        if names:
+            vcs(other, "add", "-f", "--", *names)
+            vcs(other, "commit", "-q", "-m", "fresh grants at origin" if grants else "files at origin")
             first = 2
         for number in range(first, commits + 1):
             vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
@@ -2142,7 +2160,7 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
 
 
 FF_LINE = re.compile(r"^checkout (?P<top>.+): fast-forwarded (?P<branch>\S+) (?P<old>[0-9a-f]{7,40}) -> "
-                     r"(?P<new>[0-9a-f]{7,40}), (?P<count>\d+) commits$")
+                     r"(?P<new>[0-9a-f]{7,40}), (?P<count>\d+) commits(?P<note>; the grant lines above are now current)?$")
 NOT_FF_LINE = re.compile(r"^checkout (?P<top>.+): not fast-forwarded, (?P<reason>.+)$")
 
 
@@ -2151,7 +2169,7 @@ def same_checkout(printed, path):
     return os.path.normcase(os.path.realpath(printed)) == os.path.normcase(os.path.realpath(path))
 
 
-class SessionStartFastForwardTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, SessionStartAgentWorktreeNoticeTests):
     """Startup fast-forward of a clean checkout. At a startup start, after the origin refresh succeeded, a clean checkout on
     the default branch that is behind origin/<default> fast-forwards to it and prints one line. A checkout that cannot move
     prints one not-fast-forwarded line with its reason and changes nothing. A resume, a compact or a failed refresh moves
@@ -2366,6 +2384,99 @@ class SessionStartFastForwardTests(GitFixtureMixin, SessionStartAgentWorktreeNot
                 lines = self.run_checked(source=source)
                 self.assertEqual(self.ff_lines(lines), [], "a %s start printed a fast-forward line: %r" % (source, lines))
                 self.assert_no_move(before, "%s start" % source)
+
+    def test_an_ignored_local_file_that_origin_now_tracks_is_not_fast_forwarded_and_keeps_its_content(self):
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\nlocal.cfg\n")
+        vcs(self.primary, "add", "--", ".gitignore")
+        self.commit("ignore local.cfg")
+        vcs(self.primary, "push", "-q", "origin", "main")
+        local = os.path.join(self.primary, "local.cfg")
+        self.put(local, "local secret\n")
+        self.assertIn("local.cfg", vcs(self.primary, "ls-files", "--others", "--ignored", "--exclude-standard").stdout,
+                      "scope: local.cfg is not an ignored file")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the tree is not clean")
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"local.cfg": "tracked upstream\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "an ignored file in the way was moved or changed")
+        with open(local, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "local secret\n", "the ignored local file was overwritten")
+
+    def test_a_fast_forward_past_a_stale_claude_md_says_the_grant_lines_above_are_now_current(self):
+        self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
+        self.commit("stale grants")
+        vcs(self.primary, "push", "-q", "origin", "main")
+        fresh = self.advance_origin_main(commits=2, grants=True)
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        differs = [line for line in lines if differ_line("CLAUDE.md", "origin/main").match(line)]
+        self.assertEqual(len(differs), 1, "scope: no CLAUDE.md differs line printed above the fast-forward: %r" % lines)
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line, got %r" % lines)
+        self.assertEqual(found[0].group("note"), "; the grant lines above are now current",
+                         "the fast-forward line does not say the grant lines above are current: %r" % found[0].group(0))
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+
+    def test_a_fast_forward_with_no_differs_line_above_it_has_no_current_note(self):
+        self.origin_moves_ahead(commits=2)
+        lines = self.run_startup()
+        self.assertEqual([line for line in lines if "differs from" in line], [],
+                         "scope: a differs line printed, so this is not the no-differs case: %r" % lines)
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line, got %r" % lines)
+        self.assertIsNone(found[0].group("note"),
+                          "the line says the grant lines are current with no differs line above it: %r" % found[0].group(0))
+
+    def assert_live_pin_moves_nothing(self, through_link):
+        self.make_live_pin()
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.origin_moves_ahead(commits=2)
+        where = self.pin
+        if through_link:
+            where = self.link
+            self.link_to(self.pin, self.link)
+        before = self.checkout_state(self.pin)
+        lines = self.run_startup(session_cwd=where)
+        self.assertEqual(len([line for line in lines if "live pin" in line]), 1,
+                         "scope: the hook did not name the live pin: %r" % lines)
+        self.assertEqual(self.ff_lines(lines) + self.not_ff_lines(lines), [],
+                         "a live pin printed a fast-forward line: %r" % lines)
+        self.assertEqual(self.checkout_state(self.pin), before, "a live pin was moved")
+
+    def test_a_live_pin_beside_its_install_script_moves_nothing_and_prints_no_fast_forward_line(self):
+        self.assert_live_pin_moves_nothing(through_link=False)
+
+    def test_a_live_pin_reached_through_its_live_link_moves_nothing_and_prints_no_fast_forward_line(self):
+        self.assert_live_pin_moves_nothing(through_link=True)
+
+    def test_a_merge_blocked_by_an_index_lock_prints_the_merge_failed_line_and_writes_nothing(self):
+        self.origin_moves_ahead(commits=2)
+        lock = os.path.join(self.primary, ".git", "index.lock")
+        self.put(lock, "")
+        try:
+            index_path = os.path.join(self.primary, ".git", "index")
+            with open(index_path, "rb") as handle:
+                index_before = handle.read()
+            before = self.checkout_state(self.primary)
+            lines = self.run_startup()
+            self.assert_one_not_ff(lines, "the merge failed")
+            self.assertEqual(self.checkout_state(self.primary), before, "a blocked merge changed the checkout")
+            with open(index_path, "rb") as handle:
+                self.assertEqual(handle.read(), index_before, "a blocked merge wrote the index")
+            self.assertTrue(os.path.exists(lock), "the hook removed the index lock")
+        finally:
+            os.remove(lock)
+
+    def test_a_stub_git_whose_merge_fails_prints_the_merge_failed_line_and_moves_nothing(self):
+        self.origin_moves_ahead(commits=2)
+        folder = self.make_git_stub("merge-fails-shim", 'if [ "$1" = merge ]; then exit 1; fi')
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "merge")
+        self.assert_one_not_ff(lines, "the merge failed")
+        self.assertEqual(self.checkout_state(self.primary), before, "a failed merge changed the checkout")
 
 
 if __name__ == "__main__":
