@@ -4268,7 +4268,8 @@ class GhHalf(Env):
         self.set(runs_fail="HTTP 500: Internal Server Error (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        # GREEN_CITE says "not green" on every refusal, so the unknown read is told apart by the red head's own phrase
+        self.assertNotIn("the head's own checks are not green", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
         self.assertIn("network", out.lower())
@@ -4296,7 +4297,8 @@ class GhHalf(Env):
         self.set(runs_fail=msg)
         before = self.head()
         rc, out = self.go()
-        self.assertNotIn("not green", out)
+        # GREEN_CITE says "not green" on every refusal, so the unknown read is told apart by the red head's own phrase
+        self.assertNotIn("the head's own checks are not green", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
         if rate:
