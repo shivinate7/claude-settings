@@ -50,8 +50,8 @@ EXPLORE_AUDIT_MARKER = "Audit:"
 # reads the `1 guard` round row of the model record for it. It is the review record's field line for such a change, which
 # merge/merge.py review_body writes, so the record and the brief carry one text.
 REVIEW_GUARD_MARKER = "Guard or check: yes"
-# A lane's kind is read from the line after its Grant line (rules lane-effort-pin and lane-start-settings): REVIEW_GUARD_MARKER makes it
-# a guard-or-check lane, this marker a docs lane, and any other line a product-code-or-design lane.
+# A lane's kind is read from the block of non-blank lines after its Grant line (rules lane-effort-pin and lane-start-settings): a line
+# of REVIEW_GUARD_MARKER makes it a guard-or-check lane, a line of this marker a docs lane, and no marker line a product-code-or-design lane.
 DOCS_LANE_MARKER = "Docs only: yes"
 # A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
 FIX_CHECK_MARKER = "Fix check"

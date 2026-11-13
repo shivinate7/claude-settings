@@ -349,7 +349,7 @@ Other tools, in `judge` order:
                        role. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
                        exactly the effort of its lane kind's row in the decision record (lane_kind_row; the kind
-                       is read from the line after the Grant line, lane_kind), or whose prompt's first non-blank line does not
+                       is read from the block of lines after the Grant line, lane_kind), or whose prompt's first non-blank line does not
                        start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
                        (shared_names.grant_line_holds_words). The prompt is
                        the whole brief, the Grant line first. A lane tag is
@@ -2931,7 +2931,7 @@ AGENT_NO_REMOTE_REASON = (
 from shared_names import DOCS_LANE_MARKER, LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, REVIEW_GUARD_MARKER, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to the effort of its kind's row in decision agent-model-cap and the whole brief as "
-    "its prompt. The kind is read from the line after the Grant line: `%s` for a guard or check lane, `%s` for a docs "
+    "its prompt. The kind is read from the block of lines after the Grant line, up to the first blank line: `%s` on one of them for a guard or check lane, `%s` for a docs "
     "lane, and no marker for a product code or design lane. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
     "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % (REVIEW_GUARD_MARKER, DOCS_LANE_MARKER)
@@ -3096,13 +3096,21 @@ def marker_line(line: str, marker: str) -> bool:
 
 
 def lane_kind(prompt) -> str:
-    """The kind of a lane from its start prompt: the line after the Grant line (the second non-blank line) is REVIEW_GUARD_MARKER for
-    "guard", DOCS_LANE_MARKER for "docs", and any other line, or none, is LANE_KIND_DEFAULT. A prompt that is not text has the default."""
-    lines = [ln for ln in prompt.splitlines() if ln.strip()] if isinstance(prompt, str) else []
-    second = lines[1] if len(lines) > 1 else ""
-    if marker_line(second, REVIEW_GUARD_MARKER):
+    """The kind of a lane from its start prompt: the block of consecutive non-blank lines right after the Grant line (the first
+    non-blank line), up to the first blank line. A line of the block that is REVIEW_GUARD_MARKER makes "guard", DOCS_LANE_MARKER
+    "docs" (the guard marker wins when both are there); no marker line, or a blank line right after the Grant line, is
+    LANE_KIND_DEFAULT. A prompt that is not text has the default."""
+    lines = prompt.splitlines() if isinstance(prompt, str) else []
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    block = []
+    for line in lines[1:]:
+        if not line.strip():
+            break
+        block.append(line)
+    if any(marker_line(line, REVIEW_GUARD_MARKER) for line in block):
         return "guard"
-    return "docs" if marker_line(second, DOCS_LANE_MARKER) else LANE_KIND_DEFAULT
+    return "docs" if any(marker_line(line, DOCS_LANE_MARKER) for line in block) else LANE_KIND_DEFAULT
 
 
 def lane_kind_row(kind: str):
