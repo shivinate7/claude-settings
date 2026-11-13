@@ -1687,7 +1687,7 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
 def _read_git_segments(cmd: str, shell_cwd: str):
     """Read the cd walk of a command once, for `_run_dir`, `bare_segment_dirs` and `own_c_segment_dirs`.
 
-    Returns `(last_c, env_moved, bare, owned, moved, final)`. `last_c` is the folder of the last git
+    Returns `(last_c, env_moved, bare, owned, moved, final, wrapped)`. `last_c` is the folder of the last git
     segment when that segment carries a `git -C`, else None. `env_moved` is the env folder of the last git
     segment that carries one. `bare` lists, per git segment with no env folder and no `-C`,
     `(segment text, folder)`: the folder the shell stands in when THAT segment runs, with the last `cd`
@@ -1695,7 +1695,10 @@ def _read_git_segments(cmd: str, shell_cwd: str):
     variable). `owned` lists, per git segment with a `-C`, `(segment text, folder)`: that `-C` (after its
     env folder) read against the folder the shell stands in when that segment runs. `moved` is the folder
     the last `cd` left and `final` the folder the shell ends in. Heredoc bodies are dropped first,
-    unconditionally, so the segment texts are the shell's own lines.
+    unconditionally, so the segment texts are the shell's own lines. `wrapped` lists, per segment whose
+    command word is a shell wrapper (`sh -c`, `bash -lc`, `eval`), `(segment text, folder)`: the folder the
+    walk gives that segment, for the script it hands on. It is empty when the command has no `cd`, since the
+    walk is skipped then and the caller's whole-call folder answers.
 
     A command with no `cd` keeps the shell where it started, so the walk is skipped: `_run_dir` runs once
     per segment for some callers, and a walk each time would grow as the square of the segments."""
@@ -1712,10 +1715,13 @@ def _read_git_segments(cmd: str, shell_cwd: str):
     env_moved = None
     bare = []
     owned = []
+    wrapped = []
     for segment, tokens in zip(segments, read):
         folder = next(walk) if walk else start
         if tokens is None:
             continue
+        if walk and folder and inner_commands(tokens):
+            wrapped.append((segment, _absolute(folder, shell_cwd)))
         parts = _segment_git_c_parts(tokens)
         if parts is not None:
             env_dir, git_c = parts
@@ -1734,7 +1740,7 @@ def _read_git_segments(cmd: str, shell_cwd: str):
         cd = _segment_cd_target(tokens)
         if cd is not None:
             moved = cd
-    return last_c, env_moved, bare, owned, moved, (next(walk) if walk else start)
+    return last_c, env_moved, bare, owned, moved, (next(walk) if walk else start), wrapped
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
@@ -1768,7 +1774,7 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    last_c, env_moved, bare, _, moved, final = _read_git_segments(cmd, shell_cwd)
+    last_c, env_moved, bare, _, moved, final, _ = _read_git_segments(cmd, shell_cwd)
     where = last_c
     if where is None:
         if env_moved and not bare:
@@ -1786,7 +1792,7 @@ def bare_segment_dirs(cmd: str, shell_cwd: str):
     """Return `(segment text, folder)` for each git segment that carries no `env -C` and no `git -C`
     of its own, in command order: the folder THAT segment runs in, so a discard is judged where it runs
     and not where another segment stands or names."""
-    _, _, bare, _, _, _ = _read_git_segments(cmd, shell_cwd)
+    _, _, bare, _, _, _, _ = _read_git_segments(cmd, shell_cwd)
     return [(segment, _absolute(folder or shell_cwd or "", shell_cwd)) for segment, folder in bare]
 
 
@@ -1795,6 +1801,13 @@ def own_c_segment_dirs(cmd: str, shell_cwd: str):
     that `-C` (after its env folder) read against the folder the shell stands in when THAT segment runs.
     A `-C` names its own segment's folder and no other's."""
     return _read_git_segments(cmd, shell_cwd)[3]
+
+
+def wrapped_segment_dirs(cmd: str, shell_cwd: str):
+    """Return `(segment text, folder)` for each segment that hands a script to a shell wrapper (`sh -c`,
+    `bash -lc`, `eval`), in command order: the folder the cd walk gives THAT segment, which the script it
+    runs starts in. Empty for a command with no `cd`."""
+    return _read_git_segments(cmd, shell_cwd)[6]
 
 
 def command_root(cmd: str, shell_cwd: str) -> str:

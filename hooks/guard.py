@@ -536,7 +536,7 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, basename, own_c_segment_dirs, cap_safe,
+            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, wrapped_segment_dirs, basename, own_c_segment_dirs, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
@@ -4297,6 +4297,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     own_dirs = {}   # a segment's own `git -C`, read against the folder the shell stands in when it runs
     for text_segment, folder in own_c_segment_dirs(stripped, cwd):
         own_dirs.setdefault(text_segment, []).append(folder)
+    wrap_dirs = {}   # a shell wrapper's own folder from the same walk, which the script it hands on starts in
+    for text_segment, folder in wrapped_segment_dirs(stripped, cwd):
+        wrap_dirs.setdefault(text_segment, []).append(folder)
     pointer_dirs = {text_segment: list(folders) for dirs in (bare_dirs, own_dirs) for text_segment, folders in dirs.items()}
     # A script a shell wrapper runs (`sh -c`, `bash -lc`, `eval`) is judged as the bare command is. Each inner
     # segment keeps the text number of the text it came from and the folder of the outer segment it was unwrapped
@@ -4304,8 +4307,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # segment does.
     own_segments = [(number, part) for number, text in enumerate(texts) for part in split_segments(text)]
     segment_runs = [(number, part, False, None) for number, part in own_segments]
-    segment_runs += [(number, inner, True, (bare_dirs.get(part) or own_dirs.get(part) or [None])[0])
-                     for number, part in own_segments for inner in wrapped_script_segments(part)]
+    for number, part in own_segments:
+        # the same text twice (`cd A; sh -c X; cd B; sh -c X`) runs in two folders: each takes its own, in order
+        known = wrap_dirs.get(part) or bare_dirs.get(part) or own_dirs.get(part) or [None]
+        outer = known.pop(0) if number == 0 and len(known) > 1 and known is wrap_dirs.get(part) else known[0]
+        segment_runs += [(number, inner, True, outer) for inner in wrapped_script_segments(part)]
     for text_number, segment, wrapped, outer_dir in segment_runs:
         if not segment.strip():
             continue
