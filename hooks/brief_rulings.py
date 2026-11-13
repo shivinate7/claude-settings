@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The check that a finished lane brief keeps every owner ruling that governs its step. Standard library only.
+"""The check that a finished lane brief keeps every recorded ruling that governs its step, so no lane is briefed against settled work. Standard library only.
 
     python3 hooks/brief_rulings.py BRIEF_FILE [--repo DIR]    prints "<verdict>: <why>"; exit 0 ok or skipped, 1 flag,
                                                               2 unvetted
