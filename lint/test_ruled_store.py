@@ -693,9 +693,9 @@ def tree_digest(root):
 
 
 class StaleEntriesTests(RepoCase):
-    """`stale REPO` prints one line per open entry whose step is done, or whose step file has no lane, while main
-    still lacks the ruling. The cases run the CLI in a child process, so a subcommand that is missing shows as an
-    exit code and no lines, never as an exception in this run."""
+    """`stale REPO` prints one line per open entry whose step is done, dropped, or doing with no lane, while main
+    still lacks the ruling. Most cases run the CLI in a child process, so a subcommand that is missing shows as an
+    exit code and no lines, never as an exception in this run. The read-failure case calls main in this process."""
 
     def stale_run(self, repo):
         """(the child process, its non-empty output lines) of `stale REPO`."""
@@ -739,7 +739,8 @@ class StaleEntriesTests(RepoCase):
                          "stale listed an entry whose step is doing and has a lane: %r" % lines)
 
     def test_an_open_entry_on_a_step_that_is_doing_with_no_lane_is_listed(self):
-        cases = (("lane is null", {"lane": None}), ("lane is missing", {}), ("lane is empty", {"lane": ""}))
+        cases = (("lane is null", {"lane": None}), ("lane is missing", {}), ("lane is empty", {"lane": ""}),
+                 ("lane is not a string", {"lane": 5}))
         for index, (label, over) in enumerate(cases):
             with self.subTest(case=label):
                 repo = self.store_with("nolane-%d" % index, {"stale": fixture.entry("stale", step="step-doing")},
@@ -749,6 +750,65 @@ class StaleEntriesTests(RepoCase):
                               "stale did not list an open entry whose step is doing and %s: %r" % (label, lines))
                 self.assertIn("lane", stale_line(lines, "stale"),
                               "the line for the no-lane entry does not name the lane: %r" % lines)
+
+    def test_an_open_entry_on_a_ready_or_todo_step_with_no_lane_is_not_listed(self):
+        repo = self.store_with("queued", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "ready": fixture.entry("ready", step="step-ready"),
+            "todo": fixture.entry("todo", step="step-todo"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-ready", "ready"),
+                  **step_file("step-todo", "todo")})
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "control: stale did not list the open entry on a done step: %r"
+                      % lines)
+        self.assertNotIn("ready", stale_ids_of(lines),
+                         "stale listed an entry whose step is ready and has no lane: %r" % lines)
+        self.assertNotIn("todo", stale_ids_of(lines),
+                         "stale listed an entry whose step is todo and has no lane: %r" % lines)
+
+    def test_an_open_entry_on_a_dropped_step_is_listed_and_its_line_says_dropped(self):
+        repo = self.store_with("dropped", {
+            "stale": fixture.entry("stale", step="step-done"),
+            "shelved": fixture.entry("shelved", step="step-dropped"),
+        }, steps={**step_file("step-done", "done"), **step_file("step-dropped", "dropped", lane="lane-a")})
+        proc, lines = self.stale_run(repo)
+        self.assertIn("stale", stale_ids_of(lines), "control: stale did not list the open entry on a done step: %r"
+                      % lines)
+        self.assertIn("shelved", stale_ids_of(lines),
+                      "stale did not list the open entry whose step is dropped: %r" % lines)
+        self.assertIn("step step-dropped is dropped", stale_line(lines, "shelved"),
+                      "the line for the dropped-step entry does not say its step is dropped: %r" % lines)
+
+    def test_a_multi_step_entry_is_listed_only_when_every_step_file_exists_and_qualifies(self):
+        steps = {}
+        for slug, status, over in (("step-done", "done", {}), ("step-dropped", "dropped", {"lane": "lane-a"}),
+                                   ("step-doing-no-lane", "doing", {}),
+                                   ("step-doing-lane", "doing", {"lane": "lane-a"}),
+                                   ("step-ready", "ready", {}), ("step-todo", "todo", {})):
+            steps.update(step_file(slug, status, **over))
+        multi = {  # entry id: (its steps, listed?). step-missing has no step file.
+            "done-dropped": (["step-done", "step-dropped"], True),
+            "done-doing-no-lane": (["step-done", "step-doing-no-lane"], True),
+            "done-doing-lane": (["step-done", "step-doing-lane"], False),
+            "done-ready": (["step-done", "step-ready"], False),
+            "done-todo": (["step-done", "step-todo"], False),
+            "done-missing": (["step-done", "step-missing"], False),
+        }
+        entries = {"control": fixture.entry("control", step="step-done")}
+        for rid, (slugs, _listed) in multi.items():
+            entries[rid] = fixture.entry(rid, steps=slugs)
+        repo = self.store_with("multi", entries, steps=steps)
+        proc, lines = self.stale_run(repo)
+        listed = stale_ids_of(lines)
+        self.assertIn("control", listed, "control: stale did not list the single done-step entry: %r" % lines)
+        for rid, (slugs, want) in multi.items():
+            with self.subTest(entry=rid):
+                if want:
+                    self.assertIn(rid, listed, "stale did not list %s, whose steps %s all qualify: %r"
+                                  % (rid, ", ".join(slugs), lines))
+                else:
+                    self.assertNotIn(rid, listed, "stale listed %s, whose steps %s do not all qualify: %r"
+                                     % (rid, ", ".join(slugs), lines))
 
     def test_a_closed_entry_is_not_listed_even_when_its_step_is_done(self):
         repo = self.store_with("shut", {
@@ -860,6 +920,18 @@ class StaleEntriesTests(RepoCase):
         self.assertEqual(others, [], "stale started a process other than git: %r" % others)
         changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
         self.assertEqual(changed, [], "stale wrote or changed files under the test tree: %r" % changed)
+
+    def test_a_stale_read_that_raises_exits_two_and_writes_one_stderr_line(self):
+        failure = RuntimeError("the store read failed\nno ref at origin/roadmap")
+        with mock.patch.object(ruled_store, "stale_entries", side_effect=failure) as read:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                code = ruled_store.main(["stale", self.root])
+        self.assertTrue(read.called, "control: stale did not call the read that was patched to raise")
+        self.assertEqual(code, 2, "stale returned %r when its read raised, want 2" % code)
+        lines = err.getvalue().splitlines()
+        self.assertEqual(len(lines), 1, "stale wrote %d stderr lines for one failure, want 1: %r" % (len(lines), lines))
+        self.assertIn("the store read failed no ref at origin/roadmap", lines[0],
+                      "the stderr line does not carry the error message: %r" % lines[0])
 
 
 class CostAndCliTests(RepoCase):
