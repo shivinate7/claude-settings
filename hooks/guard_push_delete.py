@@ -1884,11 +1884,11 @@ def _transcript_events(path: str):
                 continue
             try:
                 record = json.loads(line)
-                content = record["message"].get("content") if isinstance(record.get("message"), dict) else None
             except (ValueError, TypeError):
                 continue
             if not isinstance(record, dict):
                 continue
+            content = record["message"].get("content") if isinstance(record.get("message"), dict) else None
             reports = []
             for block in content if isinstance(content, list) else ():
                 if not isinstance(block, dict):
