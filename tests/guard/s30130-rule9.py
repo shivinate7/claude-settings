@@ -366,11 +366,14 @@ def merge_tool_missing_case():
     if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
     # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    # git is on PATH for this probe: a commit whose git cannot start asks, and that is not this case's subject.
+    git_env = dict(env)
+    git_env["PATH"] = GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
     result = subprocess.run(
         [sys.executable, copy],
         input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
             "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
-        capture_output=True, text=True, env=env, timeout=60)
+        capture_output=True, text=True, env=git_env, timeout=60)
     if "permissionDecision" in result.stdout:
         return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
     try:
