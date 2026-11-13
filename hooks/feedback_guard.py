@@ -1108,7 +1108,7 @@ def backlog_candidates(root):
     """[(ref, label, text)] from the layout's backlog files in the working tree: one per debt file
     (its title and opening text), one per non-blank line of the todo and notes files. A missing or
     unreadable file is skipped. Under a bad "rolled-out" mark each kind reads at either place
-    (layout.folders_any_mark); a ref already taken by the first place is not added again, so each ref names one item."""
+    (layout.folders_any_mark); an item that reads the same at both places goes in once."""
     import layout  # lint/layout.py, the one home of where each kind lives
     out = []
     where = {key: [os.path.join(root, *f.split("/")) for f in layout.folders_any_mark(root, key)]
@@ -1128,8 +1128,7 @@ def backlog_candidates(root):
                     out += line_candidates(place, prefix)
             except OSError:
                 continue
-    seen = set()
-    return [c for c in out if not (c[0] in seen or seen.add(c[0]))]
+    return list(dict.fromkeys(out))
 
 
 def inbox_candidates(blocks, sid, skip=()):
