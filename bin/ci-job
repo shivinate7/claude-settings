@@ -77,7 +77,7 @@
 # be fetched or resolved, or a failed `npm ci`, makes each step that needs that tree one `unknown` line; the other steps run. With no
 # pin, a step runs as before. Each tree is removed on every exit, a SIGTERM included.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
-# temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
+# temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0 (but see a stale ste-lint pin, below).
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
 # runs `git fetch --unshallow` once (--plan only says so); a failed fetch is one unknown line. Cost: one git fetch,
 # only when shallow.
@@ -88,8 +88,12 @@
 # zizmor action never fails a passing lint, and its PASS line ends `; <the whole drift line>`, which starts with the marker
 # `ste-changed: pin note: ` (hooks/pin_note.py). A --step run (merge's ready checks) never gets the variable: a drifted pin
 # exits 3 and the step reads FAIL. No other step gets it either, even when the caller exports it. A failing lint is FAIL.
-# Under a pin the ste-lint step runs the pinned tree's bin/ste-changed (see the pin paragraph), which has no .git to
-# read drift from, so a note shows only for a ste-lint step that runs the local copy (a local uses:).
+# Under a sha pin the ste-lint step runs the pinned tree's bin/ste-changed (see the pin paragraph) and gets no pin note: that
+# tree has no .git, so ci-job fetches the stable branch's head (STABLE_BRANCH, "stable", R42 part 2) from the clone's origin and
+# passes it with the clone (STE_CHANGED_COMPARE_TO, STE_CHANGED_CLONE), and ste-changed judges the pin's ste-lint files against it.
+# A stale pin exits 3, which reads FAIL: the run exits 1 under --step, and 3 under --lint when stale pins are its only FAILs (any
+# other FAIL makes it 1). A stable head that cannot be read makes the step unknown, never a pass. Only a ste-lint step that runs
+# the local copy (a local uses:) passes with a note. Cost: one `git fetch origin stable` per run, when a ste-lint step holds a sha pin.
 # Under --lint, lint CI steps run at once, up to N workers: CI_JOB_LINT_WORKERS when it is a positive integer, else min(CPU count, 4),
 # at least 1 (a lane runs only the checks its change needs, decision lanes-run-no-full-ci-job; one CI step at a time, the lint run outlasted
 # merge's 1200 s bound). N=1 is the serial run. An install CI step is
@@ -375,8 +379,11 @@ def plan(step, pr, values, top, lint=False, pinned=None):
             ste, looked = action_file(top, step, os.path.join("bin", "ste-changed"), pinned)
             if not ste:
                 return "unknown", "no bin/ste-changed in the pinned tree: looked for %s" % looked, None, None, None
-        # A --lint run passes with a stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
-        return "run", '"%s" "%s"' % (slashed(ste), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
+        # A pinned tree's bin/ste-changed reads a stale pin itself (the caller sets STE_CHANGED_CLONE and STE_CHANGED_COMPARE_TO) and
+        # exits 3: run_step reads that as a FAIL, and the run exits 1 under --step and 3 under --lint (decision action-pins-follow-sessions).
+        # Only the local copy, which has no pin to judge, passes with a stale pin under --lint and says so.
+        note = lint and not (pinned and not LOCAL_ACTION.fullmatch(uses(step)))
+        return "run", '"%s" "%s"' % (slashed(ste), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if note else {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % uses(step), None, None, None
     cond = condition(step_key(step, "if"), pr)
@@ -452,6 +459,10 @@ def own_pin(step):
     return (m.group(2), None) if m else (None, None)
 
 
+STABLE_BRANCH = "stable"  # the branch CI's child repos pin and sessions install from (R42 part 2, the stable-mover action); none exists on main yet
+STABLE_HEADS = {}  # {clone: (sha or None, why none)}: the stable branch's head, fetched once per run
+DRIFT_EXIT = 3  # ste-changed's exit for a stale pin; a --lint run whose only FAILs are stale pins exits with it
+DRIFTED = []  # each ste-lint step that exited DRIFT_EXIT: a stale pin
 PIN_TREES = {}  # {ref: (tree or None, why none)}: one fetch and one archive per ref per run
 PIN_MADE = []  # every folder made, so the run's end deletes it even when the archive or the install failed
 LIVE = []  # the bin/verdict processes now running: a SIGTERM ends them, not the steps they started
@@ -480,6 +491,21 @@ def fetch_ref(clone, ref):
     got = _nowindow.run(["git", "fetch", "-q", "origin", ref], cwd=clone, capture_output=True, text=True,
                         env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
     return got if got.returncode != 0 else None
+
+
+def stable_head(clone):
+    """(sha, None): the commit the stable branch of `clone`'s origin names now, fetched once per run; (None, why) when it cannot
+    be read. A pin is judged against it: a stale pin cannot read as a pass when the head is unknown."""
+    if clone not in STABLE_HEADS:
+        why = clone_problem(STABLE_BRANCH, clone, True)
+        sha = None
+        if not why:
+            got = fetch_ref(clone, STABLE_BRANCH)
+            sha = None if got else git("rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}", cwd=clone)
+            why = ("git fetch origin %s failed in %s: %s" % (STABLE_BRANCH, clone, last_line(got)) if got else
+                   None if sha else "the stable branch names no commit in %s after the fetch" % clone)
+        STABLE_HEADS[clone] = (sha, why)
+    return STABLE_HEADS[clone]
 
 
 def pin_tree(ref):
@@ -628,6 +654,8 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
             state, first = "unknown", "a line before the suite failed, so the suite did not run; " + first
         if unstarted:
             first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
+        if state == "FAIL" and rc == DRIFT_EXIT and known_action(step) == "ste-lint":
+            DRIFTED.append(name)  # ste-changed's exit for a stale pin, which a --lint run reports as its own exit
         notes = pin_notes(log, start) if state == "PASS" and known_action(step) == "ste-lint" else []
         if notes:  # a passing lint with a stale pin: the lane keeps its place and moves the pin in a lane of its own
             first = "%s; %s" % (first, "; ".join(notes))
@@ -752,7 +780,7 @@ def main(argv):
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
     # Each step that runs gets the claude-settings tree it pins, as CI does: a named step (--step), or under --lint each lint
     # step that is not skipped. --lint --plan reads the pins but needs no clone (no fetch, no tree).
-    trees, need, blocked = {}, {}, {}  # sha -> its tree; step index -> (sha, why); step index -> why it is unknown
+    trees, need, blocked, drift_env = {}, {}, {}, {}  # sha -> its tree; step index -> (sha, why); step index -> why it is unknown; step index -> env that lets its ste-changed judge the pin
     plain_sha = None  # the one sha the job pins, when it pins exactly one: a plain run step takes it
     asked = [n for n, st in enumerate(steps) if (names[n] in wanted if wanted else
                                                   lint and is_lint(st) and plan(st, bool(base), values, top, lint)[0] != "skipped")]
@@ -776,6 +804,13 @@ def main(argv):
             for n, (own, _) in need.items():
                 if own == sha and why:  # no tree to run in: a step run against other code would be a guess
                     blocked[n] = why
+        for n, (own, why) in need.items():  # a ste-lint step at a sha is judged against the stable branch's head: unread, it is unknown
+            if not why and not dry and n not in blocked and known_action(steps[n]) == "ste-lint" and COMMIT_SHA.fullmatch(own or ""):
+                head, why = stable_head(clone)
+                if why:
+                    blocked[n] = "pin %s: the stable branch head cannot be read, so drift is unknown: %s" % (pin_label(own), why)
+                else:
+                    drift_env[n] = {"STE_CHANGED_CLONE": clone, "STE_CHANGED_COMPARE_TO": head}
         for n, (_, why) in need.items():
             if why:
                 blocked[n] = why
@@ -785,9 +820,11 @@ def main(argv):
             return 2
     own_tree = {n: trees.get(sha) for n, (sha, _) in need.items()}  # this step's own tree: its own sha, else the job's one
 
-    def with_settings_dir(step, env):
-        """The step's env with CLAUDE_SETTINGS_DIR at the job's one pinned tree; the step's own env: wins, a local uses: gets none."""
-        return {**({"CLAUDE_SETTINGS_DIR": trees[plain_sha]} if plain_sha in trees and not LOCAL_ACTION.fullmatch(uses(step)) else {}), **env}
+    def step_env_for(i, step, env):
+        """The step's env with CLAUDE_SETTINGS_DIR at the job's one pinned tree (a local uses: gets none) and, for a pinned
+        ste-lint step, the clone and commit its pin is judged against; the step's own env: wins."""
+        return {**({"CLAUDE_SETTINGS_DIR": trees[plain_sha]} if plain_sha in trees and not LOCAL_ACTION.fullmatch(uses(step)) else {}),
+                **drift_env.get(i, {}), **env}
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
@@ -885,7 +922,7 @@ def main(argv):
                         if runs[i]:
                             logs[i] = os.path.join(logdir, "%d.log" % i)
                             futures[i] = pool.submit(run_step, names[i], steps[i], False, planned[i][1], planned[i][2],
-                                                     with_settings_dir(steps[i], planned[i][3]), planned[i][4], ctx, logs[i],
+                                                     step_env_for(i, steps[i], planned[i][3]), planned[i][4], ctx, logs[i],
                                                      pinned=own_tree.get(i))
                 state, first = futures.pop(n - 1).result()
                 own = logs.pop(n - 1)
@@ -893,7 +930,7 @@ def main(argv):
                     kept_logs = True
                 first = first.replace(own, log)  # the verdict line names the log that stays
             else:
-                state, first = run_step(name, step, install, detail, shell, with_settings_dir(step, env), cwd, ctx, log,
+                state, first = run_step(name, step, install, detail, shell, step_env_for(n - 1, step, env), cwd, ctx, log,
                                         kind[n - 1] == "suite", pinned)
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
@@ -916,7 +953,10 @@ def main(argv):
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
     if not dry:
         print("log=%s" % log)
-    return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
+    stale = len(DRIFTED) if lint else 0  # under --lint a stale pin is exit 3 when it is the only FAIL; under --step it is a FAIL like any other
+    if tally["FAIL"] > stale:
+        return 1
+    return DRIFT_EXIT if tally["FAIL"] else 2 if tally["unknown"] else 0
 
 
 if __name__ == "__main__":
