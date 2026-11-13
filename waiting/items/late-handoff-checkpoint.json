@@ -4,6 +4,11 @@
   "home": "step cloud-precompact-handoff-stale",
   "id": "late-handoff-checkpoint",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "none",
+    "note": "is our setup script bad? i thought nudges to rewrite handoff trigger multiple times before compaction snd then theres snother trigger after compsction?"
+  },
   "n": 676,
   "options": [
     {
@@ -26,6 +31,7 @@
   "owner": "lane cloud-precompact-handoff-stale (session_013NEJL34URk7P9AdEH62S3i), via coordinator",
   "pick": "a",
   "ref": "coordinator 21:22 CST Nov 12",
+  "reply": "00:51 CST Nov 13, triage: your read matches the setup. hooks/precompact_handoff.py already nudges at Stop as context passes 200k, then every 150k, and once just under the compaction line; PreCompact writes a digest; SessionStart after compaction asks for a rewrite. Triage asked lane cloud-precompact-handoff-stale why that is not enough in the cloud, and what a late checkpoint would add. The item stays open for its answer.",
   "repo": "shivinate7/claude-settings",
   "short": "Late handoff checkpoint before compaction",
   "status": "open",

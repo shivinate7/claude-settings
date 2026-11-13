@@ -4,6 +4,11 @@
   "home": "docs/plans/outbox-aggregate-plan.md; step outbox-aggregate-plan",
   "id": "outbox-scope",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "b",
+    "note": "children need to and will learn to pur those gripes in their outbox"
+  },
   "n": 658,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "lane outbox-aggregate-plan (session_013NEJL21kw7F4TNpNyj1j1o)",
   "pick": "a",
   "ref": "plan PR #2974 (gather other repos' outbox findings), refuter finding P1; your ask on item 493 a",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you picked b (only the outbox folder; children learn to put findings there). Sent to lane outbox-aggregate-plan.",
   "repo": "shivinate7/claude-settings",
   "short": "What the outbox gather reads",
-  "status": "open",
+  "status": "closed",
   "title": "Does \"outbox\" mean only the outbox folder, or every place a child repo keeps a claude-settings finding?",
   "why": "You asked for the gather on Nov 10; the plan cannot settle its scope without your word."
 }

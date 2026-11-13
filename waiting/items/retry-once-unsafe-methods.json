@@ -4,6 +4,11 @@
   "home": "decision standing-merge-grant (its sentence on the 3 retries)",
   "id": "retry-once-unsafe-methods",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "c",
+    "note": ""
+  },
   "n": 650,
   "options": [
     {
@@ -40,9 +45,10 @@
   "owner": "lane retry-net-method-safe (session_013NEJL1ubMb2G2VdQNW823R)",
   "pick": "c",
   "ref": "lane retry-net-method-safe 15:19 CST Nov 12, PR #2964; option c added after your 15:28 CST note",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you picked c (check, then retry). Sent to lane retry-net-method-safe.",
   "repo": "shivinate7/claude-settings",
   "short": "Writes sent once on a server error",
-  "status": "open",
+  "status": "closed",
   "title": "May the merge tool send a write to GitHub only once on a server error?",
   "why": "The fix changes your Oct 16 ruling of 3 retries for every call."
 }

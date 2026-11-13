@@ -4,6 +4,11 @@
   "home": "docs/plans/outbox-aggregate-plan.md act 4; step outbox-aggregate-plan",
   "id": "outbox-clearing-route",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "none",
+    "note": "either works -as claude settings u shudnt need an override for B, u can just add the repo to ur session environment snd thrn act"
+  },
   "n": 659,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "lane outbox-aggregate-plan (session_013NEJL21kw7F4TNpNyj1j1o)",
   "pick": "a",
   "ref": "plan PR #2974, owner act b; item 490 route",
+  "reply": "Closed 00:51 CST Nov 13 by triage: either works. For b, a claude-settings session adds the child repo to its own session and pushes there, with no override. Sent to lane outbox-aggregate-plan.",
   "repo": "shivinate7/claude-settings",
   "short": "Clearing a child's filed findings",
-  "status": "open",
+  "status": "closed",
   "title": "Who removes a child repo's finding once claude-settings has filed it?",
   "why": "Option b writes into other repos, which needs your override each time."
 }

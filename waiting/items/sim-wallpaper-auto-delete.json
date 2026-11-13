@@ -4,6 +4,11 @@
   "home": "step sim-wallpaper-store-drop",
   "id": "sim-wallpaper-auto-delete",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 674,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "lane sim-noise-and-wallpaper (session_013NEJL1RLjiPPk24Jqci2wc)",
   "pick": "a",
   "ref": "lane message 21:09 CST Nov 12; Degen report row D12",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you picked a (delete before every boot). Sent to lane sim-noise-and-wallpaper.",
   "repo": "shivinate7/claude-settings",
   "short": "Simulator snapshot store delete on each boot",
-  "status": "open",
+  "status": "closed",
   "title": "Let the simulator test script delete the PosterBoard snapshot store before every boot?",
   "why": "It widens a delete you approved for one device and changes a duty in the shared iOS skill."
 }

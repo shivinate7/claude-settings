@@ -4,6 +4,11 @@
   "home": "R27 point 1; decision prose-tending-contract",
   "id": "feedback-close-reads-content",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "a",
+    "note": "ask retrospective im not confident in a"
+  },
   "n": 653,
   "options": [
     {
@@ -26,6 +31,7 @@
   "owner": "lane prose-tending-contract (session_013NEJL3ebkkPacdNS1qZVrk)",
   "pick": "a",
   "ref": "lane prose-tending-contract 15:48 CST Nov 12; PR #2915, PR #2996; debt feedback-close-reads-file-only",
+  "reply": "00:51 CST Nov 13, triage: your a is held while the retrospective gives a second read, as you asked. The lane waits; the item stays open until that read comes back.",
   "repo": "shivinate7/claude-settings",
   "short": "Close on file, not on its text",
   "stands": true,

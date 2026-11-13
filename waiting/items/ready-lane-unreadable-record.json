@@ -4,6 +4,11 @@
   "home": "step auto-merge-refused",
   "id": "ready-lane-unreadable-record",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
   "n": 667,
   "options": [
     {
@@ -26,10 +31,11 @@
   "owner": "lane auto-merge-refused (session_013NEJL3sJVXCG9wJYPEN1Az)",
   "pick": "a",
   "ref": "draft PR #3018 (ready-lane rule); lane question 17:04 CST",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you accepted a (let it through). Sent to lane auto-merge-refused.",
   "repo": "shivinate7/claude-settings",
   "short": "Ready check: unreadable session record",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "When the new ready check cannot read who a session is, does it let the session mark a PR ready?",
   "why": "The lane took this pick; it stands unless you choose b."
 }

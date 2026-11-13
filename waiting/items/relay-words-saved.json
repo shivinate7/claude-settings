@@ -4,6 +4,11 @@
   "home": "R27 point 4; PR #2996 (feedback log)",
   "id": "relay-words-saved",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 652,
   "options": [
     {
@@ -26,10 +31,11 @@
   "owner": "lane prose-tending-contract (session_013NEJL3ebkkPacdNS1qZVrk)",
   "pick": "a",
   "ref": "lane prose-tending-contract 15:48 CST Nov 12; PR #2996",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you picked b (log relays that carry a marker). Sent to lane prose-tending-contract.",
   "repo": "shivinate7/claude-settings",
   "short": "Relayed words stay unlogged",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Your words relayed by another session stay out of the feedback log for now",
   "why": "The lane took this pick; it stands unless you choose b."
 }

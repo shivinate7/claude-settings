@@ -4,6 +4,11 @@
   "home": "rule roles-brief-contents",
   "id": "brief-rule-push-line",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T06:50:40Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 673,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "lane brief-names-push-target (session_013NEJL371TsKz9QxefdQQgz), PR #3044",
   "pick": "a",
   "ref": "lane message 19:53 CST Nov 12; draft PR #3044",
+  "reply": "Closed 00:51 CST Nov 13 by triage: you picked a (add the Push to: line to rule roles-brief-contents). Sent to lane brief-names-push-target for PR #3044.",
   "repo": "shivinate7/claude-settings",
   "short": "Brief rule names the push line",
-  "status": "open",
+  "status": "closed",
   "title": "Add the \"Push to:\" line to your rule on what a brief carries?",
   "why": "It changes the text of your rule in the root CLAUDE.md, which only you can change."
 }
