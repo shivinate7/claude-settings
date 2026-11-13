@@ -110,9 +110,24 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 | CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:204. Pins: da8d8073 (checks.yml:108, :173, :204; doc-links.yml:17) 272 behind, mutation-report a48189d0 (:195) 262 behind, ci-alarm 59bff081 (:213) 272 behind. Sparse pin of `bin/verdict` and `hooks/_nowindow.py` at da8d8073. Not wired: claude-md-cites, ste-lint, silent-undo, ruling-kind, ci-done-comment. | Pins, and five unused shared actions. |
 | Once per batch | PR only for the batch | checks.yml:4-6 runs on PR and push to main, nightly at :9. | R64: when runners are free. |
 
+## Scope of the lanes (coordinator, 21:14 CST Nov 12, relaying the owner at 21:12 CST)
+
+The owner is already working in degen and home. The coordinator starts fix lanes for the other five repos (joyous,
+ios-adblock, mailaudit, banchi, q_max). For degen and home, the lists below are what each needs to get on board, and the
+coordinator passes them to the owner. No lane starts in either repo.
+
+## What feeds the shared R44 builds
+
+- **Stable branch for child CI (R44 pins):** every repo. Pin lines to move are named per repo above. Every repo has
+  commit pins, so this build reaches all seven at once.
+- **Contradiction check in child CI (R44 contradiction check):** the cases it must catch, found by reading: q_max D-705 and
+  D-499/D-833 (no parent rule named), banchi's "never --admin" and `enforce_admins` wording, degen line 7 (wrong parent
+  rule named), ios-adblock CLAUDE.md line 6, mailaudit's mislabeled rule id. The case it must not flag: joyous and home, where
+  none was found.
+
 ## Fix lanes, smallest first
 
-One lane per repo. The coordinator starts them. Each lane lands in its own repo through that repo's batch runner.
+One lane per repo. The coordinator starts the five outside degen and home. Each lane lands in its own repo through that repo's batch runner.
 
 1. **joyous.** Move the claude-settings pins to a stable branch. Add a record naming the shared pieces joyous uses. Add project-ops (roster, roadmap branch). R64: when runners are free: drop the push-to-main re-run.
 2. **ios-adblock.** Move the pins. Rewrite CLAUDE.md line 6 to cite `main-branch-protection`. Add `claude-md-cites`, `ste-lint` and `silent-undo` under `all-jobs-passed`. Add project-ops. Collapse AGENTS.md to a pointer. R64: when runners are free: once-per-batch trim.
