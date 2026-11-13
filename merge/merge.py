@@ -5321,7 +5321,7 @@ def idle_lanes_after_merge(root, commit):
     path = None
     try:
         try:
-            fetch_branch(root, "roadmap")
+            fetch_branch(root, "roadmap", IDLE_CITE)
         except Stop:
             # A fetch of a missing branch and a failed fetch both exit non-zero; only a listing that works and is empty proves the branch is absent.
             lc, listed = git(root, "ls-remote", "--heads", "origin", "refs/heads/roadmap")
