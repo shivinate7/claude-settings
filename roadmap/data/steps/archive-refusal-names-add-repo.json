@@ -1,0 +1,14 @@
+{
+ "id": "archive-refusal-names-add-repo",
+ "title": "The lane-archive refusal names the add_repo act when it cannot read a lane's repo",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "lane-closes-after-records refused three times tonight on lane session-mailbox-followups because this session could not read the lane's second repo; add_repo fixed it at 09:08 CST. The owner asked (09:12 CST) that the fix be mechanical.",
+ "source": "retrospective 09:13 CST Nov 13, owner ask 09:12 CST",
+ "note": "Fix: when the archive guard cannot read a lane repo, its refusal names the act 'add_repo <owner>/<repo> (read), then retry', with the repo from the lane's cs-repo tag. Red first: a fixture lane whose repo read fails gets that remedy. The gap itself (archive-guard-child-repo-read) is a debt for the lane to file on main.",
+ "updatedAt": "2026-11-13T09:14:28-06:00"
+}

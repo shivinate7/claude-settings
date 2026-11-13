@@ -1,0 +1,11 @@
+{
+ "id": "portable-own-features",
+ "at": "2026-11-13T09:12:00-06:00",
+ "title": "Build portable features of our own rather than depend on upstream fixes",
+ "ruling": "Owner 09:12 CST Nov 13, closing item 687 (report the Remote Control start refusal to Anthropic): drop the upstream report. Build features in our own tools so they carry over if Claude Code is ever left. D19's queue workaround stays on step refused-start-queues-turn.",
+ "quote": "re d19 bug -- no, drop it. i dont wanna be beholden to anthropic i'd rather build on my own should i ever wanna leave claude code one day i want all the features etc that i've built to be translatable across systems yanno? hence why i built my own messaging system, triage page/status, hooks etc",
+ "source": "owner chat 09:12 CST Nov 13, relayed by the retrospective 09:13 CST; page item 687",
+ "status": "open",
+ "supersedes": [],
+ "step": "upstream-session-raises"
+}

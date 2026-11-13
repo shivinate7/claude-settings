@@ -1,7 +1,7 @@
 {
  "id": "upstream-session-raises",
  "title": "Raise two session-platform gaps upstream",
- "status": "ready",
+ "status": "dropped",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "D19: a Remote Control session refuses to start a session on a turn that another session started. Step refused-start-queues-turn covers only the queue rule, not the refusal itself. D20: send_message has no read receipt. Neither had a home (Degen ledger audit).",
  "source": "retrospective Degen ledger audit 06:30 CST Nov 13",
- "note": "Owner of the raise: the retrospective (mail-bound acts go through it). Done: each gap raised upstream with its repro, and the raise linked here. 06:34 CST Nov 13, retrospective: a raise to Anthropic is a message outside the org, which cannot be undone, so the owner sends it. The retrospective drafts the two texts (D19, D20) and brings them to the owner as one yes or no. Owner act: the owner; drafting: the retrospective. 09:07 CST Nov 13: Cockpit item 687 posted from the retrospective's drafts (D19, D20): a send both (recommended), b D19 only, c hold. The owner sends each with /bug. 09:08 CST Nov 13: owner 09:06 CST moved D20 (read receipts) to our own mailbox, step mail-read-receipt. Item 687 now covers D19 only: a send, b hold.",
- "updatedAt": "2026-11-13T09:08:36-06:00"
+ "note": "Owner of the raise: the retrospective (mail-bound acts go through it). Done: each gap raised upstream with its repro, and the raise linked here. 06:34 CST Nov 13, retrospective: a raise to Anthropic is a message outside the org, which cannot be undone, so the owner sends it. The retrospective drafts the two texts (D19, D20) and brings them to the owner as one yes or no. Owner act: the owner; drafting: the retrospective. 09:07 CST Nov 13: Cockpit item 687 posted from the retrospective's drafts (D19, D20): a send both (recommended), b D19 only, c hold. The owner sends each with /bug. 09:08 CST Nov 13: owner 09:06 CST moved D20 (read receipts) to our own mailbox, step mail-read-receipt. Item 687 now covers D19 only: a send, b hold. 09:15 CST Nov 13: dropped. Owner 09:12 CST (via the retrospective) dropped the D19 report: build portable features of our own (ruling portable-own-features). Item 687 closed. D19's queue workaround stays on step refused-start-queues-turn.",
+ "updatedAt": "2026-11-13T09:14:28-06:00"
 }
