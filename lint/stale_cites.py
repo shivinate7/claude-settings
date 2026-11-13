@@ -950,7 +950,8 @@ def cited_excerpt(cite, text, limit=40):
     rows = text.split("\n")
     first, last = 1, limit
     anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", rest) if kind == "read" else None
-    symbol = READ_SYMBOL.search(rest) if kind == "read" and not anchor else None
+    word = next((w.rstrip(".") for w in re.split(r"[\s,;]+", rest) if SOURCE.match(w.rstrip("."))), "")
+    symbol = READ_SYMBOL.search(word) if kind == "read" and not anchor else None
     if anchor:
         first = int(anchor.group(1))
         last = int(anchor.group(2) or first)
@@ -959,6 +960,7 @@ def cited_excerpt(cite, text, limit=40):
         first = symbol_line(text, name)
         if not first:
             return "unknown: `%s` is not found in the cited file" % name
+        last = first + limit - 1
     elif kind == "test" and TEST_CITE.match(rest):
         first = symbol_line(text, rest.rsplit("::", 1)[-1]) or 1
     first = max(first, 1)
