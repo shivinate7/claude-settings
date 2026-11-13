@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "A local republish of the waiting page has no pictures.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D2 rest",
- "note": "The rest of D2, after step artifact-guard-matcher-names. Ledger row D2. Started by coordinator 21:07 CST Nov 12.",
- "updatedAt": "2026-11-12T21:07:27-06:00"
+ "note": "The rest of D2, after step artifact-guard-matcher-names. Ledger row D2. Started by coordinator 21:07 CST Nov 12. Retrospective 23:27 CST Nov 12, Degen D2 narrowed: local sessions have the publish tools (triage-confirmed 22:14 CST). The step becomes: skill waiting-page names the tool a local session republishes the page with; main names none.",
+ "updatedAt": "2026-11-12T23:29:06-06:00"
 }
