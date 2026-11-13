@@ -4,11 +4,11 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL1YBVqsXRPBac7nRcz",
+ "lane": "session_013NEJL3qkyfjjgJa3YS4Dsz",
  "owner": "triage",
  "blockedBy": [],
  "why": "Coordinator 13:43 CST Nov 13, from lane mail-guards-read-send-message.",
  "source": "coordinator 13:43 CST Nov 13",
- "note": "Todo. Cause not read yet; a cloud session has no login the mailbox tool accepts. The cutover trial (20 messages) waits on this. A lane reads the mail tool's auth path and says what a cloud session needs (a token, a different route, or a Mac-only send). Past rulings not checked; mailbox rulings (mailbox-default, mailbox-store-place) may govern where the store lives. Coordinator 13:45 CST: no new lane. Lane session_013NEJL1YBVqsXRPBac7nRcz owns step session-mailbox-followups (doing), which covers mail auth and the trial; it has the finding.",
- "updatedAt": "2026-11-13T13:44:33-06:00"
+ "note": "Todo. Cause not read yet; a cloud session has no login the mailbox tool accepts. The cutover trial (20 messages) waits on this. A lane reads the mail tool's auth path and says what a cloud session needs (a token, a different route, or a Mac-only send). Past rulings not checked; mailbox rulings (mailbox-default, mailbox-store-place) may govern where the store lives. Coordinator 13:45 CST: no new lane. Lane session_013NEJL1YBVqsXRPBac7nRcz owns step session-mailbox-followups (doing), which covers mail auth and the trial; it has the finding. Coordinator 13:47 CST correction: lane session_013NEJL3qkyfjjgJa3YS4Dsz (started 13:47 CST, Sonnet, medium, tag cs-step:mail-send-cloud-auth). The earlier lane id was archived.",
+ "updatedAt": "2026-11-13T13:46:19-06:00"
 }

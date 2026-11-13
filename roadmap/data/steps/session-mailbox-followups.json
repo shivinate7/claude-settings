@@ -1,11 +1,11 @@
 {
  "title": "Session mailbox: Mac and Windows auth, settings default, and the trial",
  "phase": "now",
- "status": "doing",
+ "status": "ready",
  "order": -296,
  "why": "The git mailbox (#1371) works from the cloud. The owner's Mac and PC still need auth before every session can use it.",
  "note": "Rewritten 11:56 CST Nov 12 (coordinator 11:55 CST). Act 1 done: on main via #2615 (mail-send-no-file fix, batch 88), no new code. Windows round trip PASS 11:52 CST Nov 12: request 8933ab505319 Windows to cloud, reply 7292c549f4ee cloud to Windows, read and taken (1 sent, 1 stored, 1 replied); owner commands call the installed ~/.claude/bin/mail.cmd, not a checkout's bin. Mac: one Mac-to-cloud message (08c14103ba2b, 18:41 CST Nov 10) was taken; the Mac round trip is open (command sent to the owner for his Mac helper). The MAILBOX_REPO settings default stays an owner question: page item 556 mailbox-default (decision session-messages: the default needs the owner's typed words). A cloud lane needs add_repo (push) on shivinate7/session-mailbox for mailbox login, else \"mail unknown: auth\" (notes file). Earlier history: git log of this file. Owner page save 11:59 CST Nov 12: item 556 pick a, note \"windows as well now that windows works -- we're just waiting on mac\": the mailbox default goes on for cloud and Windows now; Mac follows its check. Decision session-messages gets these typed words. PR #2849 (coordinator pick 13:01 CST Nov 12, stands item 609) holds `mail` on darwin, with opt-out MAILBOX_HOLD_OFF=1. Once it merges, the owner's Mac round-trip commands must run `MAILBOX_HOLD_OFF=1 python3 \"$HOME/.claude/bin/mail\" send ...` and the same for `read`, or they exit 2. There is no Mac card on the page (the 11:56 CST command went out another way); triage asked the coordinator for the command text so it can post a card. Owner page save 13:12 CST Nov 12: item 609 a (accepted pick).",
  "owner": "coordinator",
- "updatedAt": "2026-11-13T07:39:03-06:00",
- "lane": "session_013NEJL1YBVqsXRPBac7nRcz"
+ "updatedAt": "2026-11-13T13:46:19-06:00",
+ "lane": ""
 }
