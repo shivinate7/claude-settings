@@ -16,6 +16,6 @@ Residual risk: a clean merge can still break a suite. Main's run after the merge
 Kind: process
 Home: merge/merge.py
 
-Cost: per merge, one green read of the head and two `git merge-tree --write-tree` starts. Unmeasured.
+Cost: per merge, one green read of the head and two `git merge-tree --write-tree` starts (unmeasured).
 
 Risk: likely. Lanes merge while main moves, so main often moves under a green head.
