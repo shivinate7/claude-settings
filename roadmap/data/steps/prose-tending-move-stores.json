@@ -6,10 +6,10 @@
  "phase": "next",
  "lane": "session_013NEJL3ebkkPacdNS1qZVrk",
  "why": "Once the shared contract exists, the other stores still tend themselves their own way until each one moves over.",
- "note": "Ruling R28 (plan a96d4a3 under item 3.14 (moved from 3.6 by plan 7e04144, 10:52 CST), after R27). Owner 10:19 CST: \"everything that marks prose should share the same \\\"tending\\\" mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices\". Order (box answer before 10:22 CST): a read-only skim audit (the retrospective session, running now), then this shared contract, then a deeper audit and moves. Home: a new decision for the shared contract. A deeper audit first; then each store moves when a lane next touches it. Third in lane prose-tending-contract (coordinator 13:10 CST Nov 12).",
+ "note": "Ruling R28 (plan a96d4a3 under item 3.14 (moved from 3.6 by plan 7e04144, 10:52 CST), after R27). Owner 10:19 CST: \"everything that marks prose should share the same \\\"tending\\\" mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices\". Order (box answer before 10:22 CST): a read-only skim audit (the retrospective session, running now), then this shared contract, then a deeper audit and moves. Home: a new decision for the shared contract. A deeper audit first; then each store moves when a lane next touches it. Third in lane prose-tending-contract (coordinator 13:10 CST Nov 12). Lane old-drafts-to-handin 21:15 CST Nov 12: the first debts Until date lapses 2026-11-19. Flipping debts live then makes the merge check fail every PR until a close runs. The flip runs the close pass first (or flips on a date with no lapsed Until), so no PR goes red for an old debt.",
  "source": "owner 2026-11-11 10:19-10:22 CST, relayed by the retrospective session 10:23 CST",
  "owner": "triage",
- "updatedAt": "2026-11-12T13:11:09-06:00",
+ "updatedAt": "2026-11-12T21:16:27-06:00",
  "blockedBy": [
   "feedback-log-tends-itself"
  ]
