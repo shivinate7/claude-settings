@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "GUARD_PATHS leaves out agents/, though the hold-unsafe-after-round-3 list names the agents/*.md tools lines as guard changes, so a change there is not held as one.",
  "source": "coordinator 17:57 CST Nov 12, from lane model-table-one-home",
- "note": "Add agents/*.md (or the tools lines) to GUARD_PATHS in the merge tool, pointing at the one constant (building-allow-list-is-the-constant); a test goes red on main.",
- "updatedAt": "2026-11-12T17:59:33-06:00"
+ "note": "Add agents/*.md (or the tools lines) to GUARD_PATHS in the merge tool, pointing at the one constant (building-allow-list-is-the-constant); a test goes red on main. Coordinator 18:06 CST Nov 12 (process-only pick): #3024 puts the whole agents/ folder in GUARD_PATHS, so a prompt-only agents/*.md edit also counts as a guard change (round 3, net value); follow-up step guard-paths-agents-narrow. Note: the lane amended and force-pushed its own PR branch after round 1; told to add commits instead.",
+ "updatedAt": "2026-11-12T18:07:34-06:00"
 }

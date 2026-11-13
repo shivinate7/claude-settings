@@ -1,0 +1,16 @@
+{
+ "id": "guard-paths-agents-narrow",
+ "title": "GUARD_PATHS counts only the tools and model lines of agents/*.md",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "guard-paths-agents"
+ ],
+ "why": "Coordinator 18:06 CST Nov 12: #3024 counts every agents/*.md edit as a guard change, so a prompt-only edit owes round 3 and the net-value test.",
+ "source": "coordinator 18:06 CST Nov 12, from lane guard-paths-agents",
+ "note": "Narrow the agents/ entry by a content check: a diff counts as a guard change only when it touches the tools or model lines (the lines the hold-unsafe-after-round-3 list names). Tests first, red on #3024's behaviour.",
+ "updatedAt": "2026-11-12T18:07:34-06:00"
+}
