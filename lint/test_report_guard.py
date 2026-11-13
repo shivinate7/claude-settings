@@ -2538,6 +2538,54 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(["Close q_max #969?"]))])
                 self.assertIsNone(out)
 
+    def test_qm_green_cse_writer_passes_a_send_to_its_cse_id(self):
+        # Catches: a send to a cse_ writer's own cse_ id blocked. The writer maps to its session_ id, and the send's
+        # raw cse_ string matches none of the mapped ids.
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_green_cse_writer_ack_of_a_cse_id_send_keeps_the_turn(self):
+        # Catches: the ack of a send to a cse_ writer's cse_ id starting a new turn. The ack's sender is the raw cse_
+        # id, and the ack map holds only the session_ ids the writer maps to.
+        ack = peer_msg("got it", from_session="cse_5b9e")
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_green_labelled_cse_writer_passes_a_send_to_its_cse_id(self):
+        # Catches: a send to the cse_ id that a "Triage (cse_X)" label names blocked. The label's id maps to session_X,
+        # and the send's raw cse_X string matches none of the mapped ids.
+        labelled = "Triage (cse_5b9e)"
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_the_whole_cse_label_does_not_count(self):
+        # Catches: a send to the whole "Triage (cse_X)" label counted as a send to the writer. Only the id it names
+        # counts.
+        labelled = "Triage (cse_5b9e)"
+        for label, send in (("session_id", self.send(session_id=labelled)), ("to", self.send(to=labelled))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_to_another_id_than_the_cse_writer_does_not_count(self):
+        # Catches: a send to cse_X2 or session_X2 counted as a send to the writer cse_X. Only the id itself counts.
+        for target in ("cse_5b9e2", "session_5b9e2"):
+            for label, send in (("session_id", self.send(session_id=target)), ("to", self.send(to=target))):
+                with self.subTest(target=target, field=label):
+                    out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send,
+                                     assistant_text(self.reply(self.PICK))])
+                    self.assert_blocked(out, "Pick guard")
+
     def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
         # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
         # so the reply that follows it has no send and blocks.
@@ -2864,6 +2912,18 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             for label, send in forms:
                 with self.subTest(shape=shape, field=label):
                     out = self.lane(*self.writer_read(self.WRITER), *incoming, *send,
+                                    assistant_text(self.reply(self.PICK)))
+                    self.assertIsNone(out)
+
+    def test_ln_green_send_to_a_cse_writer_passes(self):
+        # Catches: a lane's send to its page writer's cse_ id refused. The lane's wanted set holds the session_ id the
+        # writer maps to, and the raw cse_ target matches none of them.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e")))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, field=label):
+                    out = self.lane(*self.writer_read("cse_5b9e"), *incoming, *send,
                                     assistant_text(self.reply(self.PICK)))
                     self.assertIsNone(out)
 
