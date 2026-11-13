@@ -278,6 +278,19 @@ class QuotaMark(unittest.TestCase):
                 else:
                     self.assertIsNone(got, f"{label}: read as low, want not low or unknown: {got!r}")
 
+    def test_a_wait_to_a_reset_past_the_cap_is_the_cap(self):  # control: green on 9640fa9a6, its mutant without the cap is the red
+        now = 1000.0
+        got = gh_quota.read(quota_headers(0, 3600, now), now, 30)
+        self.assertIsNotNone(got, "Remaining 0 with the reset 3600 s on read as not low")
+        self.assertEqual(got[2], gh_quota.WAIT_CAP, f"the wait is {got[2]} s, want the cap of {gh_quota.WAIT_CAP} s, not the 3600 s to the reset")
+
+    def test_a_fractional_wait_rounds_up_to_whole_seconds(self):  # control: green on 9640fa9a6, its mutant that truncates is the red
+        now = 1000.5   # the reset is a whole epoch, so a fractional wait comes from a fractional now
+        headers = {"x-ratelimit-limit": "15000", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1601"}
+        got = gh_quota.read(headers, now, 30)
+        self.assertIsNotNone(got, "Remaining 0 with the reset 600.5 s on read as not low")
+        self.assertEqual(got[2], 601, f"the wait is {got[2]} s, want 601: 600.5 s to the reset rounds up")
+
     def test_the_merge_read_paces_by_its_own_settle_pause(self):  # control: green on main
         g = QuotaGh(self, quota=low_until_reset)
         host = g.host()
