@@ -41,7 +41,8 @@ SIM_RT17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-0"
 SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0): the copy OS=17.0 names
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
+SIM_UG = "1A2B3C4D-0000-4000-8000-0000000000D7"  # Gamma Pad, booted in the lease section's three-booted case
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005, SIM_UG: 4006}
 LSTART = "Sat Oct 10 07:00:00 2026"
 # The machine readings a simulator case runs under (see decide, and add's `load`). SIM_BUSY is over the memory bar of
 # the load brake (85%), SIM_UNREAD leaves every reading unread, which counts as normal.
@@ -259,6 +260,14 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
+    # The boot cap follows the machine, not the count (owner ruling 2026-11-12 21:59 CST). Two booted on a quiet machine:
+    # the cap lets the boot through, so the route rule (xcodebuild) and the lease rule (MCP) judge it instead.
+    sh("boot a third simulator with two booted, a quiet machine: xcodebuild destination is judged by the route rule",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-route", env_path=cap_path, config=cap_cfg)
+    add("boot a third simulator with two booted, a quiet machine: MCP launch is judged by the lease rule",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=LEASE_CARRIES)
     # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
     # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
     # device would be refused by it before the cap or twin rule is read. Every MCP launch of a shut-down device
@@ -932,6 +941,24 @@ def register_simulator_lease_cases():
     lease_launch("lease: this session's live slot 1 lease, cap full and busy: simulator-boot-cap still refuses first",
                  "deny", lease_fixture("cap_full", cap_rows, live, slot1), device=duo1,
                  rule="simulator-boot-cap", load=SIM_BUSY, carries=(SIM_UA, SIM_UB))
+    # The boot cap follows the machine, not the count (owner ruling 2026-11-12 21:59 CST). This session's live slot 1 lease
+    # for the Duo launch: a quiet, unread or cloud machine lets the boot through whatever the count, and a busy one refuses it.
+    sim_type_pad = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch"  # no other row has this type
+    cap3_rows = cap_rows + [(SIM_UG, "Gamma Pad", "Booted", sim_type_pad, SIM_RT)]
+    shut_rows = [row for row in cap_rows if row[2] != "Booted"]
+    lease_launch("lease: this session's live slot 1 lease, three booted, a quiet machine: allowed, no count cap",
+                 "allow", lease_fixture("three_quiet", cap3_rows, live, slot1), device=duo1)
+    lease_launch("lease: this session's live slot 1 lease, two booted, a quiet machine: allowed, no count cap",
+                 "allow", lease_fixture("two_quiet", cap_rows, live, slot1), device=duo1)
+    lease_launch("lease: this session's live slot 1 lease, two booted, an unread machine: allowed",
+                 "allow", lease_fixture("two_unread", cap_rows, live, slot1), device=duo1, load=SIM_UNREAD)
+    cloud_path, cloud_cfg = lease_fixture("two_cloud", cap_rows, live, slot1)
+    add("lease: this session's live slot 1 lease, two booted, a cloud session on a busy machine: allowed, not braked",
+        "allow", tool=SIM_MCP, action="launch", device=duo1, env_path=cloud_path, config=cloud_cfg,
+        session=LEASE_OWN, env=dict(LEASE_ENV, CLAUDE_CODE_REMOTE="true"), load=SIM_BUSY)
+    lease_launch("lease: this session's live slot 1 lease, none booted, a busy machine: the busy bar refuses it",
+                 "deny", lease_fixture("none_busy", shut_rows, live, slot1), device=duo1,
+                 rule="simulator-boot-cap", carries=("memory",), load=SIM_BUSY)
     lease_launch("lease: this session's live slot 1 lease, an idle twin: simulator-boot-twin still refuses first",
                  "deny", lease_fixture("twin", twin_rows, live, slot1,
                                        records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
