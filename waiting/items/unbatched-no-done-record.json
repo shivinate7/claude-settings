@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-13T16:08:00Z",
+  "context": "Goal: accurate work landed at the fastest speed.\nProblem (goal): 177 open lane PRs hold built work with no done review record, and if nothing decides their path they sit until the stale-draft pass closes them and the work is lost.\nBased on (measured): the retrospective's lost-lanes audit at 09:55 CST Nov 13 found 356 of 410 open lane PRs unbatched: 179 with a done record, 59 with a record open, bad or stale, and 118 with no record; 155 of their lanes are archived.\nBased on (ruling): your 09:26 CST Nov 13 call on step handin-cannot-drop makes every PR with a done record join a batch mechanically, so the 179 are already decided and this question covers only the 177.\nBased on (read): stale-draft closes on all 356 are held until you pick.\nDeparts from: main, where the stale-draft pass closes old drafts \u2014 adds a sort of these 177 before any close, with their steps following the outcome.",
+  "home": "step handin-cannot-drop",
+  "id": "unbatched-no-done-record",
+  "kind": "decision",
+  "n": 690,
+  "options": [
+    {
+      "gain": "Fresh work lands soon, and old work is rebuilt on current rules instead of fixed through conflicts.",
+      "how": "PRs under 48 h old get lane-lint and one fresh Sonnet review each, then join batches newest first. PRs 48 h or older are closed with a note, and their steps go back to ready to rebuild under today's rules.",
+      "id": "split-by-age",
+      "key": "a",
+      "label": "Split by age (recommended)",
+      "lose": "Some good old work is built twice."
+    },
+    {
+      "gain": "No built work is lost.",
+      "how": "Every one of the 177 gets lane-lint and one fresh Sonnet review, then joins batches, whatever its age.",
+      "id": "rescue-all",
+      "key": "b",
+      "label": "Review and batch all 177",
+      "lose": "Many reviews and batches; old PRs need conflict fixes, and some carry rules you have since changed."
+    },
+    {
+      "gain": "A clean queue on current rules.",
+      "how": "Each of the 177 is closed with a note, and its step goes back to ready.",
+      "id": "reset-all",
+      "key": "c",
+      "label": "Close all 177 and rebuild",
+      "lose": "About 177 builds are redone, including recent work that only needed a review."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 10:07 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Built lane PRs with no done review",
+  "shown": [
+    {
+      "id": "split-by-age",
+      "key": "a",
+      "label": "Split by age (recommended)"
+    },
+    {
+      "id": "rescue-all",
+      "key": "b",
+      "label": "Review and batch all 177"
+    },
+    {
+      "id": "reset-all",
+      "key": "c",
+      "label": "Close all 177 and rebuild"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "What happens to 177 built lane PRs whose review record is missing, open or stale?",
+  "why": "Your 09:26 CST call covers PRs with a done review: they join batches mechanically. These 177 have no done review, and no ruling of yours says whether to review them or rebuild them."
+}
