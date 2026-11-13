@@ -12,11 +12,12 @@ What a reply carries: `gh api` prints its header block only with -i, as gh does.
 GitHub's names (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset as an epoch). The mark is never a fixed number: each case
 uses an empty quota (Remaining 0) or a full one (Remaining equal to Limit), so any sane mark sorts them the same way.
 """
-import contextlib, io, json, os, re, sys, unittest, unittest.mock
+import contextlib, inspect, io, json, os, re, sys, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_merge as tm  # noqa: E402  the fixtures (gh_i, Clock, workflow_folder, RATE_API_403); importing it runs none of its cases
+gh_quota = tm.merge.gh_quota  # the one home of the quota read (hooks/gh_quota.py)
 
 NOW = 1000.0       # fake time of the first read
 LIMIT = "5000"     # the REST quota of a user token
@@ -218,12 +219,75 @@ class QuotaInsideDeadline(unittest.TestCase):
             host.api("pulls/7")
         self.assertRegex(buf.getvalue(), r"(?i)quota|rate limit", "the low quota was not reported inside shared_deadline")
 
+    def test_inside_shared_deadline_the_low_line_goes_to_stderr_not_stdout(self):
+        """The guard's stdout is its JSON decision, so the low line goes to stderr only."""
+        g = QuotaGh(self, quota=low_until_reset)
+        host, out, err = g.host(), io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), tm.merge.shared_deadline(60):
+            host.api("pulls/7")
+        self.assertRegex(out.getvalue() + err.getvalue(), r"(?i)quota", "no low line was printed at all, on either stream")
+        self.assertEqual(out.getvalue(), "", f"the low line is on the guard's stdout, which holds its JSON decision: {out.getvalue()!r}")
+        self.assertRegex(err.getvalue(), r"(?i)quota", "the low line is not on stderr")
+
     def test_inside_shared_deadline_a_low_quota_never_sleeps(self):  # control: green on main
         g = QuotaGh(self, quota=low_until_reset)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), tm.merge.shared_deadline(60):
             code, _ = g.host().api("pulls/7")
         self.assertEqual(code, 0)
         self.assertEqual(g.clock.pauses, [], f"a pause of {g.clock.pauses} inside shared_deadline, which has no room for one")
+
+
+def quota_headers(left, to_reset, now, limit=15000):
+    """The header block of gh_quota.read, lower-case as split_headers gives it: Remaining `left` of `limit`, the reset `to_reset` s on."""
+    return {"x-ratelimit-limit": str(limit), "x-ratelimit-remaining": str(left), "x-ratelimit-reset": str(int(now + to_reset))}
+
+
+class QuotaMark(unittest.TestCase):
+    """The low mark of gh_quota.read, derived from the caller's pace: a quota is low when what is left cannot cover the reads the caller
+    makes before the reset, one every `pace` seconds. The pace is each caller's own, passed in, and has no default a caller could copy.
+    Every case here passes its pace. The exact edges of the mark are pinned, so a mutant of `>=` or of the bounds fails a row."""
+
+    def test_the_pace_has_no_default(self):  # red on 878cc8433: pace defaults to POLL_PACE
+        pace = inspect.signature(gh_quota.read).parameters["pace"]
+        self.assertIs(pace.default, inspect.Parameter.empty,
+                      f"gh_quota.read's pace defaults to {pace.default!r}: a caller that leaves it out copies that constant")
+
+    def test_the_same_quota_is_low_at_a_30_s_pace_and_not_at_a_120_s_pace(self):  # control: green on main
+        now = 1000.0
+        headers = quota_headers(100, 3600, now)
+        self.assertIsNotNone(gh_quota.read(headers, now, 30), "a 30 s caller reads 100 left against 3600 s to the reset as low (100 x 30 < 3600)")
+        self.assertIsNone(gh_quota.read(headers, now, 120), "a 120 s caller reads 100 left against 3600 s to the reset as not low (100 x 120 >= 3600)")
+
+    def test_the_mark_edges_are_exact(self):  # control: green on main
+        now = 1000.0
+        rows = [
+            ("at the mark: 100 reads at 30 s cover 3000 s exactly", 100, 3000, False),
+            ("one second past the mark", 100, 3001, True),
+            ("Remaining 0, reset 1 s on", 0, 1, True),
+            ("Remaining 0, reset now", 0, 0, False),
+            ("Remaining 0, reset 1 s past", 0, -1, False),
+            ("Remaining -1, outside 0..Limit, reset 600 s on", -1, 600, False),
+            ("Remaining equal to Limit", 15000, 3600, False),
+            ("Remaining above Limit", 15001, 3600, False),
+        ]
+        for label, left, to_reset, low_wanted in rows:
+            with self.subTest(label):
+                got = gh_quota.read(quota_headers(left, to_reset, now), now, 30)
+                if low_wanted:
+                    self.assertIsNotNone(got, f"{label}: read as not low, want low")
+                else:
+                    self.assertIsNone(got, f"{label}: read as low, want not low or unknown: {got!r}")
+
+    def test_the_merge_read_paces_by_its_own_settle_pause(self):  # control: green on main
+        g = QuotaGh(self, quota=low_until_reset)
+        host = g.host()
+        with unittest.mock.patch.object(tm.merge.gh_quota, "read", wraps=gh_quota.read) as spy, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            host.api("pulls/7")
+        self.assertTrue(spy.called, "the merge read never reached gh_quota.read")
+        args, kwargs = spy.call_args
+        pace = kwargs["pace"] if "pace" in kwargs else args[2]
+        self.assertEqual(pace, tm.merge.SETTLE_SECONDS, f"the merge read paced the quota check at {pace!r} s, not its settle pause")
 
 
 if __name__ == "__main__":
