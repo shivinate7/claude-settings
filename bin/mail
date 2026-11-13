@@ -2,10 +2,11 @@
 # mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->
 # mail read [--addr <addr>] [<id>]   list the open messages, or show one with its body
 # mail take [--addr <addr>] <id>     move one open message to done/; act on it only after this exits 0
+# mail status <id>                 print open, taken <time> by <taker>, or unknown (exit 1); looks under every address, writes nothing
 # mail wait [--interval <s>] [--max-seconds <s>]   block until new mail for the session's address, then print one line per new message
 # --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
-# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use, MAILBOX_REPO not set, or the platform held. Windows: bin/mail.cmd.
+# Exit 0 ok; 1 not sent, not taken, id unknown (status), or mail unknown; 2 bad use, MAILBOX_REPO not set, or the platform held. Windows: bin/mail.cmd.
 # wait exits 0 on new mail; 2 not started (MAILBOX_REPO unset, no address, a waiter already runs, the lock cannot be taken,
 # the mailbox unreadable at start for about 5 minutes, or a bad --interval or --max-seconds); 3 ended with no mail.
 import argparse
@@ -83,6 +84,18 @@ def take(env, addrs, mid):
     return 1
 
 
+def status(env, mid):
+    state, taker = mail.message_status(env, mid)
+    if state == "unknown":
+        print("unknown")
+        return 1
+    if state == "open":
+        print("open")
+    else:
+        print("taken %s by %s" % (taker[1], taker[0]) if taker else "taken (taker unknown)")
+    return 0
+
+
 def main(argv):
     # The tool reads and prints UTF-8 whatever the locale: a Windows pipe defaults to cp1252 and fails on "→".
     # Own copy: guard_core's helper is private and covers stdout and stderr only; verdict is a standalone script.
@@ -101,6 +114,8 @@ def main(argv):
     one.add_argument("id", nargs="?")
     one = sub.add_parser("take")
     one.add_argument("--addr")
+    one.add_argument("id")
+    one = sub.add_parser("status")
     one.add_argument("id")
     one = sub.add_parser("wait")
     one.add_argument("--interval", type=int, default=mail.WAIT_INTERVAL)
@@ -121,8 +136,11 @@ def main(argv):
     if mail.held(env):
         print("mail is held on this platform until its round trip passes (step mail-mac-unhold)", file=sys.stderr)
         return 2
-    addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
-    if not addrs:
+    # status looks under every folder, so it needs no address of the session's own.
+    own = args.command != "status"
+    addrs = [args.addr] if getattr(args, "addr", None) else (
+        mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env) if own else [])
+    if own and not addrs:
         print("no address: set CLAUDE_CODE_REMOTE_SESSION_ID or run inside a git repo with an origin", file=sys.stderr)
         return 2
     named = [value for value in (getattr(args, "to", None), getattr(args, "re", None), getattr(args, "id", None),
@@ -133,6 +151,8 @@ def main(argv):
     try:
         if args.command == "send":
             return send(env, args, addrs)
+        if args.command == "status":
+            return status(env, args.id)
         return show(env, addrs, args.id) if args.command == "read" else take(env, addrs, args.id)
     except mail.MailError as error:
         print(("not sent: %s" if args.command == "send" else "mail unknown: %s") % error, file=sys.stderr)

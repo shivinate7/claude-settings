@@ -203,9 +203,16 @@ Design:
   gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A take whose read-back fails (the open file stays in the new tree, or the done file is missing) prints "mail unknown: message file missing from the commit" and exits 1. A
   request gets a reply file: `mail send --kind reply --re <id>`, sent to its Reply-to. An inform closes by
   the take alone.
+- Status. `mail status <id>` prints where one message stands, under every folder, with no `--addr`. It prints `open` for
+  `mail/<addr>/<id>.md`, and `taken <time> by <taker>` for `done/<addr>/<id>.md`, read from its `Taken-by:` line
+  (`taken (taker unknown)` when the line is missing or garbled). Both exit 0. An id in no folder, or an empty store, prints
+  `unknown` and exits 1, never `open`. An unsafe id prints `bad address or id` and exits 2. A git fault prints
+  `mail unknown: <reason>` on stderr and exits 1. Cost per call: at most four git processes, ls-remote, fetch, `ls-tree -r`
+  and, for a taken message only, one show (`hooks/test_mail.py` pins the counts). No file is written beyond what the fetch
+  puts in the cache, and no log is written.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
-  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
+  for all `mail` commands: 0 ok; 1 not sent, not taken, a `mail status` id that is unknown, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
   not set, or the platform held.
 - Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
   each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;

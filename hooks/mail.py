@@ -8,6 +8,10 @@ Cost of a turn start: one git process (ls-remote) when the ref has not moved, an
 (ls-remote, fetch, grep, log), and files written only in the cache. The four bounds sum to 10 s, so a hung remote costs the
 prompt at most 10 s. A failure prints "mail unknown: <reason>", never "no mail".
 
+Cost of `mail status <id>`: at most three git processes for an open or unknown id (ls-remote, fetch, ls-tree) and four for a taken one
+(plus one show). No file is written beyond what the fetch puts in the cache, and no log. Pinned by the StatusCommand cases in
+test_mail.py.
+
 Cost of `mail wait`: one process, one lock file, and one ls-remote per interval (30 s) while the ref has not moved. A moved
 ref adds one fetch and one grep. A wake adds one show (the subject) and the grep's age lookup, one log. Nothing else is
 written during a poll.
@@ -185,6 +189,27 @@ def sync(env):
     if tip:
         fetch(env)
     return tip
+
+
+TAKEN_BY = re.compile(r"^Taken-by: (\S+) (\S+) (\S+)$")
+
+
+def message_status(env, mid):
+    """('open', None), ('taken', (taker, time) or None) or ('unknown', None) for one id under any folder. No write.
+    The id is matched by exact basename, so a folder of any depth (pc/host/repo/session) is found."""
+    tip = sync(env)
+    if not tip:
+        return "unknown", None
+    cache = cache_path(env)
+    name = "/%s.md" % mid
+    paths = must(["ls-tree", "-r", "-z", "--name-only", "--full-tree", tip], env, cache).split("\0")
+    hits = {kind: [p for p in paths if p.startswith(kind + "/") and p.endswith(name) and len(p) > len(kind) + len(name) + 1]
+            for kind in ("done", "mail")}
+    if hits["done"]:
+        text = must(["show", "%s:%s" % (tip, hits["done"][0])], env, cache)
+        stamped = [m for m in map(TAKEN_BY.match, text.splitlines()) if m]
+        return "taken", ((stamped[-1].group(1), stamped[-1].group(2)) if stamped else None)
+    return ("open", None) if hits["mail"] else ("unknown", None)
 
 
 def commit_tree(env, tip, adds, removes, message):
