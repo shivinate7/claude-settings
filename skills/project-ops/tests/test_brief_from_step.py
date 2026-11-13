@@ -459,7 +459,7 @@ class FixedLayout(BriefCase):
         files = section(out, "Files")
         self.assertIsNotNone(files, "the brief has no ## Files section")
         self.assertIn(PATH_IN_NOTE, files, "the path the note names is not in Files")
-        self.assertNotIn("```", out, "a code fence from the step note reaches the output")
+        self.assertNotIn("```python", out, "the step note's code fence reaches the output")
         leaked = [n for n in range(PASTED_LINES) if "value_%02d" % n in out]
         self.assertEqual(leaked, [], "%d of %d lines of the pasted block reach the output"
                          % (len(leaked), PASTED_LINES))
@@ -626,11 +626,16 @@ class SpawnBriefHead(BriefCase):
         self.assertIsNotNone(block, "the output has no Agent spawn brief head block")
         return block
 
-    def test_block_lists_each_marker_form_at_a_line_start_outside_a_fence(self):
-        pairs = fenced_pairs(self.block())
+    def test_block_lists_each_marker_form_inside_a_fence_and_none_at_a_line_start_outside_one(self):
+        block = self.block()
+        self.assertTrue(any(line.strip().startswith("```") for line in block),
+                        "the block has no code fence to hold the marker listing")
+        pairs = fenced_pairs(block)
         for form in MARKER_FORMS:
-            self.assertTrue(any(line.startswith(form) and not fenced for line, fenced in pairs),
-                            "the block does not list the marker form %r at a line start outside a fence" % form)
+            self.assertTrue(any(line.startswith(form) and fenced for line, fenced in pairs),
+                            "the block does not list the marker form %r inside a code fence" % form)
+            self.assertFalse(any(line.startswith(form) and not fenced for line, fenced in pairs),
+                             "the block lists the marker form %r at a line start outside a fence" % form)
         self.assertTrue(any("first line" in line for line, _fenced in pairs),
                         "the block does not say the marker goes on the spawn brief's first line")
 
@@ -645,6 +650,13 @@ class SpawnBriefHead(BriefCase):
         reason = guard_reason(self.config, spawn_brief(self.block()))
         self.assertTrue(reason.startswith("agent-role-model:"),
                         "the spawn with no marker was not refused by agent-role-model: %r" % reason[:200])
+
+    def test_block_pasted_whole_into_a_builder_spawn_on_opus_is_refused_with_no_first_line_marker(self):
+        pasted = "\n".join(self.block())  # the block verbatim, its marker listing included, and no marker of its own
+        reason = guard_reason(self.config, pasted, model="opus", role="builder")
+        self.assertTrue(reason.startswith("agent-model-cap:"),
+                        "the marker listing in the pasted block lifted a builder spawn with no first-line marker: %r"
+                        % reason[:200])
 
 
 class DoneCheckFields(BriefCase):
