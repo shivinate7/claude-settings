@@ -19231,7 +19231,7 @@ class BatchFreeze(CloudSession):
         too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown", or a ci_job_run answer as a tuple), the run is a
         --batch-build --ready: lane_lint runs for real under a spy that counts its calls, ci-job's answer is scripted to that state, and the
         temp tree lives in this run's folder. With `checks_state` too (the same answer forms), run_ready_checks runs for real, and its ci-job
-        run ("--pinned") answers `checks_state` while the lint keeps `ready_state`. Yields {name: mock}: read after the run."""
+        run ("--step") answers `checks_state` while the lint keeps `ready_state`. Yields {name: mock}: read after the run."""
         if checks_state is not None and ready_state is None:
             raise ValueError("checks_state goes with ready_state: the ready checks run in a --ready run, which lints first")
         with contextlib.ExitStack() as stack:
@@ -19247,7 +19247,7 @@ class BatchFreeze(CloudSession):
                 checks = LINT_STATES[checks_state] if isinstance(checks_state, str) else checks_state
                 mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(merge, "lane_lint", wraps=merge.lane_lint))
                 mocks["ci_job_run"] = stack.enter_context(unittest.mock.patch.object(
-                    merge, "ci_job_run", side_effect=lambda wt, *args, **kw: checks if checks is not None and "--pinned" in args else answer))
+                    merge, "ci_job_run", side_effect=lambda wt, *args, **kw: checks if checks is not None and "--step" in args else answer))
                 stack.enter_context(unittest.mock.patch.object(tempfile, "tempdir", self.run_dir))
             yield mocks
 
@@ -19559,7 +19559,7 @@ class BatchFreeze(CloudSession):
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
         with self.no_lint_or_ready_check(ready_state="pass", checks_state="fail") as mocks:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        ran = [c for c in mocks["ci_job_run"].call_args_list if "--pinned" in c.args]
+        ran = [c for c in mocks["ci_job_run"].call_args_list if "--step" in c.args]
         self.assertTrue(ran, "--ready ran no ready check, though merge.readyChecks names one: %s" % out)
         self.assertEqual(self.host.readies, [], "a failing ready check did not refuse the ready mark: %s" % out)
         self.assertTrue(self.host.batch_pulls[pr]["draft"], "a failing ready check marked the batch PR ready: %s" % out)

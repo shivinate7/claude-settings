@@ -254,7 +254,7 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
         run = runs[0]
-        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
+        self.assertEqual([a for a in run["argv"] if a != "--pinned"], ["checks", "--lint", "--base", "origin/" + base])  # --pinned: its own case
         self.assertEqual(run["head"], head)
         self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
         self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
