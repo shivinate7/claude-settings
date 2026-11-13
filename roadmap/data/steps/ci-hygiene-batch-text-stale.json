@@ -1,0 +1,14 @@
+{
+ "id": "ci-hygiene-batch-text-stale",
+ "title": "skills/ci-hygiene says the batch rules stay live until the cutover, while the merge tool has no batch path",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A session reads a skill that says batching is live, while the tool it runs has no batch build or drop, so lanes and steps chase a flow that is gone.",
+ "source": "Lane release-check-vs-batch-head 15:25 CST Nov 13 (measured on main 59da758a3: merge.py:4152; SKILL.md lines 59 and 86).",
+ "note": "Filed 15:26 CST Nov 13. The skill and the tool disagree on whether batching is live. Whether the child repos still batch until the cutover (decision all-repos-switch-together) is unchecked. Fix: the skill says what the tool does, with the cutover wording kept only if a child repo still batches. Docs lane after the coordinator confirms the cutover state. Overlaps the coordinator pick on drain-batch-measure and the ledger sweep of batch-only rows (backlog-drain). Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:26:15-06:00"
+}
