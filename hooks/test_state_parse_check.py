@@ -55,6 +55,12 @@ SHELL_ONLY = unittest.skipIf(os.name == "nt", "the cases run Bash in sh, which t
 GNU_SED_ONLY = unittest.skipIf(os.name == "nt" or sys.platform == "darwin",
                                "sed -i takes a suffix argument on BSD sed, so these cases run on Linux")
 
+def run_spelling(command, darwin_spelling):
+    """The command a platform's tools run. BSD sed takes -i with an empty suffix argument, so a case runs
+    `darwin_spelling` on darwin and `command` elsewhere. The hook still judges `command`, the form under test."""
+    return darwin_spelling if sys.platform == "darwin" else command
+
+
 HEAD_1 = "### 2026-11-06 11:38 CST (UTC-06:00)"
 HEAD_2 = "### 2026-11-06 11:40 CST (UTC-06:00)"
 GOAL = "# Handoff\n\n## Goal\n\nShip the state check.\n\n"
@@ -813,8 +819,11 @@ class CdAndHeredoc(unittest.TestCase):
     def test_sed_after_cd_into_the_handoff_folder_that_deletes_the_closer_is_named(self):
         home = Home()
         write(home.inbox, HEAD_1 + "\n````\nowner: keep the closing fence\n````\n")
-        command = "cd %s && sed -i '$d' %s" % (shlex.quote(home.handoffs), shlex.quote(os.path.basename(home.inbox)))
-        self.assertEqual(home.sh(command), 0, "scope: the cd and the sed must run")
+        cd = "cd %s && " % shlex.quote(home.handoffs)
+        name = shlex.quote(os.path.basename(home.inbox))
+        command = cd + "sed -i '$d' " + name
+        self.assertEqual(home.sh(run_spelling(command, cd + "sed -i '' '$d' " + name)), 0,
+                         "scope: the cd and the sed must run")
         self.assertNotEqual(read_text(home.inbox).splitlines()[-1], "````", "scope: the sed must delete the closer")
         codes, ctx = home.dispatch("Bash", {"command": command})
         assert_named(self, codes, ctx, "a sed -i after a cd into the handoff folder", home.sid + ".inbox.md", home,
@@ -875,14 +884,15 @@ class WriteForms(unittest.TestCase):
         assert_named(self, codes, ctx, why, home.sid + ".inbox.md", home, line=2)
 
     @SHELL_ONLY
-    def test_head_to_a_temp_file_then_mv_that_drops_the_closer_is_named(self):
+    def test_sed_dollar_d_into_a_temp_file_then_mv_that_drops_the_closer_is_named(self):
+        # sed '$d' is the one spelling BSD and GNU both run: BSD head has no -n -1.
         home = Home()
         q = shlex.quote
         write(home.inbox, self.INTACT)
         tmp = home.inbox + ".tmp"
-        command = "head -n -1 %s > %s && mv %s %s" % (q(home.inbox), q(tmp), q(tmp), q(home.inbox))
-        self.assertEqual(home.sh(command), 0, "scope: the head and mv must run")
-        self.named_when_lost(home, "Bash", command, "head -n -1 into a temp file, then mv over the inbox")
+        command = "sed '$d' %s > %s && mv %s %s" % (q(home.inbox), q(tmp), q(tmp), q(home.inbox))
+        self.assertEqual(home.sh(command), 0, "scope: the sed and mv must run")
+        self.named_when_lost(home, "Bash", command, "sed '$d' into a temp file, then mv over the inbox")
 
     @SHELL_ONLY
     def test_mv_of_a_copy_that_drops_the_closer_is_named(self):
@@ -1068,7 +1078,7 @@ class InPlaceForms(unittest.TestCase):
         path = os.path.join(home.work, "bad.json")
         write(path, self.BROKEN)
         command = "sed -i s/a/b/ bad.json"
-        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(home.sh(run_spelling(command, "sed -i '' s/a/b/ bad.json")), 0, "scope: the sed must run")
         self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite bad.json")
         self.assert_named_after(home, path, command, "sed -i, the form that already names the file")
 
@@ -1078,7 +1088,8 @@ class InPlaceForms(unittest.TestCase):
         path = os.path.join(home.work, "bad.json")
         write(path, self.BROKEN)
         command = "sed -ni 's/a/b/p' bad.json"
-        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(home.sh(run_spelling(command, "sed -ni '' 's/a/b/p' bad.json")), 0,
+                         "scope: the sed must run")
         self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite bad.json")
         self.assert_named_after(home, path, command, "sed -ni, the combined flags, that leaves a json broken")
 
