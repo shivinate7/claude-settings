@@ -72,6 +72,47 @@ def point_ref(repo, ref, files, scratch):
     return commit
 
 
+def fetch_head(repo):
+    """The path of the repo's FETCH_HEAD, as git names it. The age of origin/roadmap is this file's mtime."""
+    return os.path.join(repo, git(repo, "rev-parse", "--git-path", "FETCH_HEAD"))
+
+
+def set_fetch_head(repo, when=None):
+    """Makes the repo's FETCH_HEAD with its mtime at `when` (an epoch second), or now when `when` is None."""
+    path = fetch_head(repo)
+    with open(path, "a", encoding="utf-8"):
+        pass
+    os.utime(path, None if when is None else (when, when))
+
+
+def without_fetch_head(repo):
+    """Removes the repo's FETCH_HEAD, so origin/roadmap reads as never fetched."""
+    path = fetch_head(repo)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def ref_sha(repo, ref=STORE_REF):
+    return git(repo, "rev-parse", ref)
+
+
+def bare_origin(scratch, name, files):
+    """A bare repo at scratch/<name>.git whose refs/heads/roadmap holds `files`. Returns its path."""
+    path = os.path.join(scratch, name + ".git")
+    git(scratch, "init", "--bare", "-q", path)
+    point_ref(path, "refs/heads/roadmap", files, scratch)
+    return path
+
+
+def clone_with_origin(root, name, origin, files):
+    """A repo whose origin/roadmap holds `files`, with `origin` as its origin remote when it is not None."""
+    repo = init_repo(os.path.join(root, name))
+    point_ref(repo, STORE_REF, files, root)
+    if origin is not None:
+        git(repo, "remote", "add", "origin", origin)
+    return repo
+
+
 def ruling_files(entries):
     """{path: text} for a store: each id maps to roadmap/rulings/<id>.json. A dict is written as JSON; a str is
     written as it is, which is how a case makes a malformed file."""
@@ -695,6 +736,100 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(failed.returncode, 1, "check on a store with a migrated entry exited %d, want 1"
                          % failed.returncode)
         self.assertIn("migrated", failed.stdout + failed.stderr, "check did not name the entry it refused")
+
+
+NOTE_LINE = re.compile(r"read as of \d{2}:\d{2} (CST|CDT)")  # the note lint/roadmap_ref.py adds to a stale read
+
+
+class StaleRefReadTests(RepoCase):
+    """The store read fetches a stale origin/roadmap first, and says the read is as of a time when it cannot
+    (lint/roadmap_ref.py). The helper's own cases are in lint/test_roadmap_ref.py."""
+
+    def stale_pair(self):
+        """(older, newer) store trees: the newer one adds the ruling `new`."""
+        older = ruling_files({"old": entry("old")})
+        return older, ruling_files({"old": entry("old"), "new": entry("new")})
+
+    def test_a_stale_ref_is_fetched_before_the_store_is_read(self):
+        older, newer = self.stale_pair()
+        origin = bare_origin(self.root, "fetch-origin", older)
+        repo = self.make_repo("fetch", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        without_fetch_head(repo)
+        self.assertIn("new", ids(ruled_store.ruled_entries(repo)),
+                      "the stale origin/roadmap was read without a fetch: the newer ruling is missing")
+
+    def test_a_stale_ref_with_no_network_says_read_as_of_in_the_session_block(self):
+        repo = self.make_repo("offline", store=ruling_files({"r-1": entry("r-1")}))
+        git(repo, "remote", "add", "origin", os.path.join(self.root, "gone.git"))
+        without_fetch_head(repo)
+        lines = ruled_store.session_lines(repo)
+        self.assertTrue(any(NOTE_LINE.search(line) for line in lines),
+                        "the session block did not say the ref was read as of a time: %r" % lines)
+
+    def test_a_fetch_cut_at_the_timeout_is_bounded_at_two_seconds_and_says_read_as_of(self):
+        older, _newer = self.stale_pair()
+        origin = bare_origin(self.root, "cut-origin", older)
+        repo = self.make_repo("cut", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        without_fetch_head(repo)
+        real_run = subprocess.run
+        started = []
+
+        def cut(args, *rest, **kwargs):
+            if isinstance(args, (list, tuple)) and "fetch" in args:
+                started.append(kwargs.get("timeout"))
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_run(args, *rest, **kwargs)
+
+        with mock.patch("subprocess.run", side_effect=cut):
+            lines = ruled_store.session_lines(repo)
+        self.assertEqual(started, [2.0], "the fetch was not started through subprocess with a 2.0 s timeout: %r"
+                         % started)
+        self.assertTrue(any(NOTE_LINE.search(line) for line in lines),
+                        "a cut fetch did not leave the session block saying read as of: %r" % lines)
+
+    def test_a_fresh_ref_is_read_without_a_fetch(self):
+        older, newer = self.stale_pair()
+        origin = bare_origin(self.root, "fresh-origin", older)
+        repo = self.make_repo("fresh", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        set_fetch_head(repo)
+        before = ref_sha(repo)
+        entries = ruled_store.ruled_entries(repo)
+        self.assertNotIn("new", ids(entries), "a fresh ref was fetched: the newer ruling was read")
+        self.assertEqual(ref_sha(repo), before, "a fresh ref moved")
+
+    def test_the_session_block_carries_the_note_the_helper_returns(self):
+        repo = self.make_repo("carry", store=ruling_files({"r-1": entry("r-1")}))
+        helper = mock.Mock()
+        helper.fresh_ref.return_value = "read as of 11:05 CST"
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of 11:05 CST" in line for line in lines),
+                        "the session block dropped the note the helper returned: %r" % lines)
+
+    def test_each_store_read_calls_the_helper_once(self):
+        repo = self.make_repo("once", store=ruling_files({"r-1": entry("r-1")}))
+        helper = mock.Mock()
+        helper.fresh_ref.return_value = ""
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            module = load_module()
+            module.ruled_entries(repo)
+            once = helper.fresh_ref.call_count
+            module.read_store(repo)
+            twice = helper.fresh_ref.call_count
+        self.assertEqual(once, 1, "ruled_entries called the helper %d times, want 1" % once)
+        self.assertEqual(twice, 2, "read_store did not add one call to the helper: %d in all, want 2" % twice)
+
+    def test_an_offline_stale_ref_is_not_a_store_problem(self):
+        clean = self.make_repo("offline-clean", store=ruling_files({"ok": entry("ok")}))
+        git(clean, "remote", "add", "origin", os.path.join(self.root, "gone-clean.git"))
+        without_fetch_head(clean)
+        self.assertEqual(ruled_store.check_store(clean), [],
+                         "a stale ref with no network counted as a store problem")
 
 
 def tearDownModule():

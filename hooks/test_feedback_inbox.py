@@ -4288,6 +4288,36 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+def case_repeat_stale_roadmap_read_carries_the_read_as_of_note():
+    """The REPEAT read judges from the roadmap ref. This repo has no origin to fetch, so the read is stale and the
+    fetch fails. The block reason names the item and says the read is as of a time (lint/roadmap_ref.py)."""
+    root = repeat_repo("repeat-stale-note", step=True)
+    cfg, sid = new_cfg(), "repeat-stale-note"
+    check("stale note: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    reason = block_reason(p) or ""
+    check("stale note: the block reason names the item and says read as of a time",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason
+          and re.search(r"read as of \d{2}:\d{2} (CST|CDT)", reason) is not None, p.desc())
+
+
+def case_repeat_roadmap_read_calls_the_helper_once():
+    """The REPEAT read of the roadmap ref calls the one helper once, and still reads the step from that ref."""
+    from unittest import mock
+    root = repeat_repo("repeat-helper-once", step=True)
+    helper = mock.Mock()
+    helper.fresh_ref.return_value = ""
+    with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+        sys.modules.pop("feedback_guard", None)
+        feedback_guard = importlib.import_module("feedback_guard")
+        found = feedback_guard.roadmap_candidates(root)
+    check("helper once: the roadmap read still finds the step",
+          any(STEP_TEXTS[0] in text for _ref, _label, text in found), found[:1])
+    check("helper once: the roadmap read calls fresh_ref once", helper.fresh_ref.call_count == 1,
+          "%d calls" % helper.fresh_ref.call_count)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4456,6 +4486,8 @@ CASES = (
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_repeat_stale_roadmap_read_carries_the_read_as_of_note,
+    case_repeat_roadmap_read_calls_the_helper_once,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
