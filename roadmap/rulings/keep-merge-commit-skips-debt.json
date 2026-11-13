@@ -2,7 +2,7 @@
  "id": "keep-merge-commit-skips-debt",
  "at": "2026-11-13T11:51:00-06:00",
  "title": "Keep debt merge-commit-skips-review as true; rewrite its Retire line",
- "ruling": "Coordinator pick 2026-11-13 11:51 CST (stood, for owner veto): keep the debt merge-commit-skips-review true and rewrite its Retire line to name the real gap, that batch intake reads no record. The reviewer of #2796/#3161 found the claimed closure false. Built in #3184 (coordinator 12:10 CST).",
+ "ruling": "Coordinator pick 2026-11-13 11:51 CST (stood, for owner veto): keep the debt merge-commit-skips-review true and rewrite its Retire line to name the real gap, that batch intake reads no record. The reviewer of #2796/#3161 found the claimed closure false. Built in #3184 (coordinator 12:10 CST). Owner 12:11 CST Nov 13, page item 731 (pick-keep-merge-skips-debt), a, \"accepted pick\": accepted.",
  "quote": "keep the debt",
  "source": "Coordinator 11:50 CST and 12:10 CST Nov 13, messages to triage. A coordinator pick, not an owner word. Filed by triage.",
  "status": "open",

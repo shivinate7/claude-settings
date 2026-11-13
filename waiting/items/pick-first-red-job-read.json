@@ -1,47 +1,47 @@
 {
   "added": "2026-11-13T18:02:00Z",
-  "context": "Goal: a red CI job wakes its session at once, on any OS.\nProblem (goal): no GitHub event fires a workflow on one failed Actions job (the lane read the docs). Two routes: B reads the run state at check-ins with no CI change; A adds `wake-<job>` jobs in checks.yml.\nBased on (ruling): decision ci-wait-reads-run-status; your CI-speed words 11:34 and 11:36 CST Nov 13.\nDeparts from: main \u2014 main has no first-red-job read; a adds the read now and the wake jobs after #2980.",
+  "context": "Goal: a session waiting on CI hears about a red job quickly.\nIn plain words: today a waiting session checks CI on a timer. GitHub cannot start anything when one job of a run fails (the lane read the docs), so there are two routes.\nRoute 1 (build now): at each check-in the session asks GitHub for the run's state (`merge --run-state <pr>`) and sees the first red job at once. It still learns only at the check-in, not the second the job fails. No CI file changes.\nRoute 2 (later): add a small extra job per CI job in checks.yml that runs when its job fails and wakes the session. Faster, but it edits checks.yml, which three other lanes edit (conflict risk), costs extra runner minutes (unmeasured), and needs #2980 first.\nProblem (goal): which to build first.\nBased on (ruling): decision ci-wait-reads-run-status; your CI-speed words 11:34 and 11:36 CST Nov 13.\nDeparts from: main \u2014 main has no first-red-job read; a adds route 1 now and route 2 after #2980.",
   "home": "step lane-lint-once-fail-fast",
   "id": "pick-first-red-job-read",
   "kind": "decision",
   "n": 728,
   "options": [
     {
-      "gain": "A first-red-job read now, with no edit to checks.yml that three lanes touch.",
-      "how": "`merge --run-state <pr>` is read at check-ins, no CI change; the `wake-<job>` jobs wait for #2980.",
+      "gain": "A first-red-job read now, without touching the busy checks.yml.",
+      "how": "Build the run-state read now; add the wake-up jobs after #2980.",
       "id": "b-then-a",
       "key": "a",
-      "label": "Build B now, A after #2980 (coordinator's pick)",
-      "lose": "Wake-on-red waits until #2980 lands."
+      "label": "Route 1 now, route 2 after #2980 (coordinator's pick)",
+      "lose": "A session still waits for its next check-in; instant wake waits for #2980."
     },
     {
-      "gain": "One route, built once.",
-      "how": "No read until the wake jobs exist.",
+      "gain": "One route, built once; fastest wake when it lands.",
+      "how": "No read until the wake-up jobs exist.",
       "id": "a-only",
       "key": "b",
-      "label": "Wait and build only A after #2980",
-      "lose": "No first-red-job read for now."
+      "label": "Wait and build only route 2 after #2980",
+      "lose": "No first-red-job read for now, and extra runner minutes later."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "coordinator 12:02 CST Nov 13, lane read of the Actions docs 11:59 CST",
   "repo": "shivinate7/claude-settings",
-  "short": "First red job: build the run-state read first",
+  "short": "Learn of a red CI job: two routes",
   "shown": [
     {
       "id": "b-then-a",
       "key": "a",
-      "label": "Build B now, A after #2980 (coordinator's pick)"
+      "label": "Route 1 now, route 2 after #2980 (coordinator's pick)"
     },
     {
       "id": "a-only",
       "key": "b",
-      "label": "Wait and build only A after #2980"
+      "label": "Wait and build only route 2 after #2980"
     }
   ],
   "stands": true,
   "status": "open",
-  "title": "To wake a session on the first failed CI job, build the `merge --run-state` read now and the `wake-<job>` jobs after #2980?",
+  "title": "How should a waiting session learn that one CI job failed: ask GitHub at each check-in now, or add wake-up jobs to CI later?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

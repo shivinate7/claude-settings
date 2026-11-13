@@ -14,8 +14,8 @@ After a compaction: re-read this note, the roadmap, then act.
 - Oct 27 23:48 CDT (waiting page): c108 (a), c40 (c), c121 (b), c82 done pending guard.log lines.
 
 ## Pages
-- Roadmap: https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h
-- Waiting page: https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx
+- Roadmap: artifact:roadmap-page
+- Waiting page: artifact:queue
 - d4 picks: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU
 
 ## Running sessions

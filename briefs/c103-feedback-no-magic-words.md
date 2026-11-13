@@ -7,7 +7,7 @@ build advisor; never merge.
 ## Goal
 
 Every owner message is captured with no "fb" or "fb done". Ruling: Oct 26 20:57 CDT decision card,
-option A now (C later is c104). Brief source: https://claude.ai/artifact/NGf6aaaVp2bF1i3kyhF5HD.
+option A now (C later is c104). Brief source: artifact:c103-brief.
 
 ## Inputs
 

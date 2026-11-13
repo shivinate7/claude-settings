@@ -1,0 +1,10 @@
+{
+ "id": "degen-skips-push-suite",
+ "at": "2026-11-13T12:11:00-06:00",
+ "title": "degen skips the push-to-main suite when its batch PR run proved the tree",
+ "ruling": "Owner 2026-11-13 12:11 CST, page item 723 (pick-degen-skip-push-suite), pick a: degen skips the push suite on a tree its batch PR run proved, like home, after degen's red-main check is confirmed. About 55 runner-min saved per merge (runner 11 audit).",
+ "quote": "A: Skip it, like home (recommended)",
+ "source": "Page copy answers/pick-degen-skip-push-suite.json (12:11 CST Nov 13, choice a). Filed by triage.",
+ "status": "open",
+ "step": "child-ci-once-per-batch"
+}

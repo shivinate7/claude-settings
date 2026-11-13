@@ -1,7 +1,7 @@
 {
  "id": "page-one-store-fixes",
  "title": "Follow-up to #2829: three fixes from the retrospective audit",
- "status": "doing",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1agou8xGXea9pQSAJ",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retro audit of #2829 (12:01 CST Nov 13); coordinator 12:05 CST: a follow-up step, not part of #2829, no owner question.",
  "source": "retrospective 12:01 CST Nov 13; coordinator 12:04 and 12:05 CST",
- "note": "Todo. (1) Widen route B's triggers to name cross-account reference. (2) Add a read-only cross-account copy read to step 2's allow list. (3) Add a copy-age reader beside waiting-lag-read. Gap found: cross-account reads of the git copy (owner 11:34 CST Nov 11). Waits on the owner's answer to page item 730 if he picks git as the truth. Retro 12:08 CST Nov 13: add the three fixes to the #2829 rewrite (git home, database the live view). Coordinator 12:08 CST: #2829 rejoins the next prose batch after the rewrite. Placement of this step is the coordinator's call. Folded into the #2829 rewrite by lane page-one-store-git-home, session_013NEJL1agou8xGXea9pQSAJ (coordinator 12:10 CST Nov 13).",
- "updatedAt": "2026-11-13T12:09:27-06:00"
+ "note": "Todo. (1) Widen route B's triggers to name cross-account reference. (2) Add a read-only cross-account copy read to step 2's allow list. (3) Add a copy-age reader beside waiting-lag-read. Gap found: cross-account reads of the git copy (owner 11:34 CST Nov 11). Waits on the owner's answer to page item 730 if he picks git as the truth. Retro 12:08 CST Nov 13: add the three fixes to the #2829 rewrite (git home, database the live view). Coordinator 12:08 CST: #2829 rejoins the next prose batch after the rewrite. Placement of this step is the coordinator's call. Folded into the #2829 rewrite by lane page-one-store-git-home, session_013NEJL1agou8xGXea9pQSAJ (coordinator 12:10 CST Nov 13). Folded into page-data-one-store (coordinator 12:10 CST Nov 13): the three cross-account fixes go inside the #2829 rewrite by lane page-one-store-git-home.",
+ "updatedAt": "2026-11-13T12:11:53-06:00"
 }

@@ -5,6 +5,6 @@
   "order": 523,
   "why": "Feedback fb-1456-1, fb-1458-1, fb-1458-2, fb-1512-1, fb-1509-1, fb-1510-1. The degen copy move is a follow-up. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
   "note": "Lane [ended:lane:-artifact-lane], started by the coordinator Nov 3 17:26 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane [ended:artifact-lane] at 03:46-03:49 CST Nov 10. PR #2520, released to batch 72 (coordinator 05:39 CST Nov 10). Leftovers: step degen-scan-false-alarm-strings (a degen or Mac session); the degen copy move goes to the Degen coordinator; designer-gap cause 4 (unpushed worktree loss) is note designer-gap-worktree-loss. Coordinator pick, process only: the cite rule does not cover waiting/items, because page options carry links by rule style-press-has-link. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:artifact-lane]). Lane prose-handoffs started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Moved to lane fan-prose-handoffs (coordinator 07:31 CST Nov 12).",
-  "updatedAt": "2026-11-12T07:34:00-06:00",
+  "updatedAt": "2026-11-13T12:11:53-06:00",
   "lane": "session_013NEJL2x8vsS7agCiTdu1LU"
 }

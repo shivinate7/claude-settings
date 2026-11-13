@@ -1,0 +1,10 @@
+{
+ "id": "qmax-skips-push-suite",
+ "at": "2026-11-13T12:11:00-06:00",
+ "title": "q_max skips the push-to-main suite when its batch PR run proved the tree",
+ "ruling": "Owner 2026-11-13 12:11 CST, page item 722 (pick-qmax-skip-push-suite), pick a: q_max skips the full suite on a push to main when the batch PR run already proved the same tree, like home (ci-once-per-batch, owner 21:16 CST Nov 12). About 94 runner-min and 15 min saved per merge (runner 11 audit). This overrides q_max D-695 and D-537 (full CI on main) for that case.",
+ "quote": "A: Skip it, like home (recommended)",
+ "source": "Page copy answers/pick-qmax-skip-push-suite.json (12:11 CST Nov 13, choice a). Filed by triage.",
+ "status": "open",
+ "step": "child-ci-once-per-batch"
+}

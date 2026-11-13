@@ -1,0 +1,14 @@
+{
+ "id": "glossary-step-statuses",
+ "title": "GLOSSARY.md names the step statuses: blocked, folded, and no second name for todo",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:11 CST Nov 13, item 583 a: \"ensure this is above board how we operate our glossary\". GLOSSARY.md on main has no row for step statuses; the roadmap build knows blocked, queued and folded (PR #2825), and queued is listed like todo, which is two names for one thing.",
+ "source": "page item 583 (pick-roadmap-status-names), owner note 12:11 CST Nov 13",
+ "note": "Todo. A record-writer lane adds glossary rows for blocked and folded, and drops queued as an alias of todo (one name per thing, decision glossary-meets-owner-halfway). lint/check_glossary.py must pass.",
+ "updatedAt": "2026-11-13T12:14:14-06:00"
+}

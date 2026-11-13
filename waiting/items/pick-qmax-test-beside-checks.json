@@ -1,6 +1,6 @@
 {
   "added": "2026-11-13T17:52:00Z",
-  "context": "Goal: q_max batch runs finish sooner.\nProblem (rule): D-718 ci-spend-gate says cheap checks first, so `test` waits for `checks`. Side by side, the wall time goes from about 15 min to about 10 min (a projection, unmeasured). A red `checks` then wastes the `test` minutes.\nBased on (ruling): q_max D-718 ci-spend-gate, which this goes against.\nDeparts from: q_max main, where `test` starts after `checks` \u2014 a starts both at once.",
+  "context": "Goal: q_max batch runs finish sooner without wasting runner minutes.\nIn plain words: q_max CI has a cheap `checks` job (lint and similar) and a bigger `test` job. Today `test` starts only after `checks` passes (decision D-718, the spend gate: do not spend test minutes on a change the cheap checks already reject). You asked three things. Can one failing fail the other? No: they are separate jobs; one failing does not fail or cancel the other, but the run is red if either is red. Should both run together depending on batch or merge? That is option c below. Is it just a testing fault? Nothing on record says `test` is flaky; the 15 to 10 min gain is a projection, unmeasured, and I have not read q_max's CI file myself (runner 11 did).\nProblem (rule): starting both together finishes sooner, but a red `checks` would still spend the `test` minutes, which D-718 exists to avoid.\nBased on (ruling): q_max D-718 ci-spend-gate; claude-settings ci-once-per-batch (your 21:16 CST Nov 12).\nDeparts from: q_max main, where `test` always starts after `checks` \u2014 a starts both together on every run; c only on the batch run.",
   "home": "q_max decision D-718 (ci-spend-gate)",
   "id": "pick-qmax-test-beside-checks",
   "kind": "decision",
@@ -8,38 +8,52 @@
   "options": [
     {
       "gain": "Wall time about 15 to 10 min (projection).",
-      "how": "q_max starts `test` beside `checks`.",
-      "id": "yes",
+      "how": "q_max starts `test` beside `checks` on every run.",
+      "id": "side-by-side",
       "key": "a",
-      "label": "Run side by side (recommended)",
-      "lose": "A red `checks` still spends the `test` minutes."
+      "label": "Start both together on every run",
+      "lose": "A red `checks` still spends the `test` minutes on every run."
     },
     {
-      "gain": "A red `checks` spends no `test` minutes.",
+      "gain": "A red `checks` never spends `test` minutes.",
       "how": "q_max keeps D-718 as it is.",
-      "id": "no",
+      "id": "cheap-first",
       "key": "b",
-      "label": "Keep cheap first",
+      "label": "Keep cheap first everywhere",
       "lose": "Wall time stays about 15 min."
+    },
+    {
+      "gain": "The proof run gets faster, and lane runs still save `test` minutes on cheap failures.",
+      "how": "The one batch run that proves a merge starts both jobs together; lane runs keep cheap first. Runner 11 confirms q_max has both kinds of run.",
+      "id": "batch-only",
+      "key": "c",
+      "label": "Together only on the batch run; cheap first on lane runs (recommended)",
+      "lose": "Two rules to keep in q_max's CI file instead of one."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 11:48 CST Nov 13, runner 11 child-repo CI audit",
+  "reply": "You asked if one fail can fail the other and whether both should run together depending on batch or merge. Answered in the item: no, they are independent; and option c is your batch/merge idea. Please answer again.",
   "repo": "shivinate7/claude-settings",
-  "short": "q_max: start test beside checks",
+  "short": "q_max: when does `test` start?",
   "shown": [
     {
-      "id": "yes",
+      "id": "side-by-side",
       "key": "a",
-      "label": "Run side by side (recommended)"
+      "label": "Start both together on every run"
     },
     {
-      "id": "no",
+      "id": "cheap-first",
       "key": "b",
-      "label": "Keep cheap first"
+      "label": "Keep cheap first everywhere"
+    },
+    {
+      "id": "batch-only",
+      "key": "c",
+      "label": "Together only on the batch run; cheap first on lane runs (recommended)"
     }
   ],
   "status": "open",
-  "title": "In q_max, start `test` at the same time as `checks`, not after it?",
+  "title": "In q_max, when should the `test` job start: after `checks` always, together with `checks` always, or together only on the batch run?",
   "why": "Goes against q_max D-718, which needs your word."
 }

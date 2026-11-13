@@ -9,34 +9,35 @@
     {
       "gain": "The guard keeps working; chat shows what you pick between.",
       "how": "Keep `Page item: <id>` and the `a) <label>` lines; #3006 is rebuilt to match.",
-      "id": "lines",
+      "id": "page-and-lines",
       "key": "a",
       "label": "Page item plus option lines (triage's pick; main today)",
-      "lose": "Chat is longer than one line."
+      "lose": "Chat is longer: about one line per option in every reply that holds options (15 to 30 words each, unmeasured), so more tokens."
     },
     {
-      "gain": "Shortest chat.",
+      "gain": "Shortest chat; the tokens a saves.",
       "how": "Chat carries one line; the guard option-labels-match-chat changes with #3006.",
       "id": "one-line",
       "key": "b",
-      "label": "One line, \"on the page, item N\" (R18)",
-      "lose": "No options in chat to compare against the page."
+      "label": "One line, 'on the page, item N' (R18)",
+      "lose": "No options in chat to compare against the page; a mismatch would go unnoticed."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154",
+  "reply": "Yes, a costs tokens. A reply that holds options repeats one line per option in chat, about 15 to 30 words each (unmeasured per reply), every time. b saves those words but removes the chat copy that the guard option-labels-match-chat compares with the page, so a page and a chat that disagree would go unnoticed. a costs words; b costs a quiet mismatch.",
   "repo": "shivinate7/claude-settings",
   "short": "#3006: which reply form?",
   "shown": [
     {
-      "id": "lines",
+      "id": "page-and-lines",
       "key": "a",
       "label": "Page item plus option lines (triage's pick; main today)"
     },
     {
       "id": "one-line",
       "key": "b",
-      "label": "One line, \"on the page, item N\" (R18)"
+      "label": "One line, 'on the page, item N' (R18)"
     }
   ],
   "status": "open",

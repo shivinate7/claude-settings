@@ -5,7 +5,7 @@ Written by triage 5 (session_013NEJL1qEunLpTi68de3Jrv), Nov 2 2026 12:40 CST, at
 ## Role
 
 - Triage is the only writer of the Queue page and of this branch (roadmap). It routes owner answers to the owning session, files each ruling and task in its home, and answers the coordinator's check-ins ("none" or item ids with picks).
-- Queue page: https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx. Database collections: items/<id>, answers/<id> (owner writes), receipts/<id>. Route an answer in one batch: update the item (status, pick, lastAnswer, reply), delete the answer pinned to its version, set receipts/<id> {n, read, filed}; then tell the owning session.
+- Queue page: artifact:queue. Database collections: items/<id>, answers/<id> (owner writes), receipts/<id>. Route an answer in one batch: update the item (status, pick, lastAnswer, reply), delete the answer pinned to its version, set receipts/<id> {n, read, filed}; then tell the owning session.
 - Page HTML republished as v88 at 13:12 CST, with the roadmap block at 190bab8b spliced in; the items database is current. Republish the page as "claude-settings Cockpit" once step page-title-cockpit (PR #1100) merges (owner ruling 11:12 CST).
 - Roadmap head at writing: 190bab8b (before this update's commit). Steps: roadmap/data/steps/<slug>.json, json indent 1, ensure_ascii False, trailing newline. Pull before each write.
 

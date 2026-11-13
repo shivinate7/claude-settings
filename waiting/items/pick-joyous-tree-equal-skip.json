@@ -34,6 +34,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 12:05 CST Nov 13 (corrected)",
+  "reply": "Your answer a was recorded at 12:11 CST against the OLD wording: the item then said 'Allow the tree-equal skip in joyous'. I rewrote it at 12:06 CST: a is now 'put the skip in claude-settings' shared CI form for every repo', and the joyous-only skip is option c, which goes against your rule that a repo changes to fit a shared tool. The page you answered from showed the old text. I have NOT acted on it. Please confirm: a (shared form, every repo), b (keep all push suites), or c (joyous-only).",
   "repo": "shivinate7/claude-settings",
   "short": "Shared tree-equal push skip",
   "shown": [

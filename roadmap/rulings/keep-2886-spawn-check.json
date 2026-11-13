@@ -1,0 +1,10 @@
+{
+ "id": "keep-2886-spawn-check",
+ "at": "2026-11-13T12:11:00-06:00",
+ "title": "Keep PR #2886 (spawn-time check on a brief that orders a file write)",
+ "ruling": "Owner 2026-11-13 12:11 CST, page item 712 (drain-2886-keep-or-close), pick a: keep #2886 and #2693. The five debts of rule brief-write-needs-writer stay. Main's guard readonly-shell-write judges only redirect, tee, touch and mktemp; a brief ordering a write by cp, sed -i or python -c still passes, and #2886 catches it.",
+ "quote": "A: Keep #2886 (triage's pick)",
+ "source": "Page copy answers/drain-2886-keep-or-close.json (12:11 CST Nov 13, choice a, no note). Filed by triage.",
+ "status": "open",
+ "step": "brief-write-needs-writer"
+}

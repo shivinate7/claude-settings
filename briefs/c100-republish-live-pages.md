@@ -7,7 +7,7 @@ Template: `skills/waiting-page/page.html` on claude-settings main b031394f (batc
 For each page, in this order:
 1. home-app (and home, which shares it): https://claude.ai/artifact/7vEdEW2MXHdKYRxXMtrwe4
 2. degen: https://claude.ai/artifact/33ADqiuuKMBAf3PTwTZFrx
-3. mailaudit: https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13
+3. mailaudit: artifact:mailaudit-page
 
 Per page:
 - `ArtifactData list items` and `list answers`; note the counts.

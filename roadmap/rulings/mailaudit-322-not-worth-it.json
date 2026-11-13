@@ -1,0 +1,10 @@
+{
+ "id": "mailaudit-322-not-worth-it",
+ "at": "2026-11-13T12:10:00-06:00",
+ "title": "Mailaudit #322 is closed as not worth it",
+ "ruling": "Coordinator pick 2026-11-13 12:10 CST (stood, page item 732, for owner veto): mailaudit PR #322 (test shards and a doc-path push trim) is closed as not worth it. Its review failed it on owner ruling 176 b; the saving is about 15 to 20 s of a 236 s run on 3 runners. The push trim waits on page item 729.",
+ "quote": "not worth it",
+ "source": "Coordinator message to triage, 12:10 CST Nov 13. A coordinator pick, not an owner word. Filed by triage.",
+ "status": "open",
+ "step": "child-ci-once-per-batch"
+}

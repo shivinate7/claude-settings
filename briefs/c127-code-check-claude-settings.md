@@ -1,6 +1,6 @@
 # Brief: c127 part 1, one shared code-check action, adopted by claude-settings first
 
-Repo: shivinate7/claude-settings, from main 43d9af20 (batch #698). One lane: builder (sonnet), then reviewer (sonnet). Plan: roadmap step c127 note and https://claude.ai/artifact/K4ixuAMi4ycpBvgm2x4k3H (survey and pick).
+Repo: shivinate7/claude-settings, from main 43d9af20 (batch #698). One lane: builder (sonnet), then reviewer (sonnet). Plan: roadmap step c127 note and artifact:c127-survey (survey and pick).
 
 ## Task
 1. A composite action `actions/code-check` with pinned tool versions, CI only. Per language, three layers (type check, bug lint, formatter), or a one-line reason in the standard's table for each skipped layer. The action fails on a repo language with no row.

@@ -1,6 +1,6 @@
 {
   "added": "2026-11-12T18:18:00Z",
-  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:17 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator message, 12:17 CST Nov 12.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nIn plain words: when your account runs in 'overage' (over its normal use), Claude remembers a session's earlier conversation for only 5 minutes instead of an hour. A session that waits on CI longer than 5 minutes then pays to re-read its whole conversation when it wakes. The CI wait cap is how long a session waits before it checks in.\nProblem (goal): the coordinator left the wait cap alone for overage, because no hook can tell when overage is on, so a second, shorter cap has nothing to switch it. The cost of that gap is unmeasured on the Mac and the PC.\nBased on (notes): coordinator message, 12:17 CST Nov 12; the retrospective's audit 13:19 CST found the pick sound.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
   "home": "step ci-wait-cap-55",
   "id": "pick-overage-cache-gap",
   "kind": "decision",
@@ -24,7 +24,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:17 CST",
-  "reply": "Closed 13:19 CST: the retrospective's audit found this pick sound. The Mac and the PC are not measured yet; the gap stays on record. Say so in the thread to overrule it.",
+  "reply": "You said the tradeoff was not well written; the item now says in plain words what overage does and what the cap is. In short: a leaves the wait cap alone and records the gap (no way to detect overage yet, cost unmeasured); b adds a second 300 s cap that is used only while overage shows, which needs a reader for overage first. Say b in the thread or on the page to overrule.",
   "repo": "shivinate7/claude-settings",
   "short": "CI wait cap: leave the 5-minute overage cache as a known gap",
   "stands": true,

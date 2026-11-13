@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T18:10:00Z",
+  "context": "Goal: CI changes pay for themselves.\nProblem (cost): the review of mailaudit #322 failed it on your ruling 176 b (keep non-macOS push suites until claude-settings changes the red-main check). The change would save about 15 to 20 s of a 236 s run on 3 runners.\nBased on (ruling): 176 b (21:45 CST Nov 12).\nBased on (measured): the reviewer's numbers, 15 to 20 s of 236 s, 3 runners.\nDeparts from: mailaudit main, which runs all push suites \u2014 a leaves it that way and drops #322; the push trim waits on item 729.",
+  "home": "ruling mailaudit-322-not-worth-it",
+  "id": "pick-mailaudit-322-close",
+  "kind": "decision",
+  "n": 732,
+  "options": [
+    {
+      "gain": "No review-failed change on your ruling 176 b; no code to keep.",
+      "how": "The PR (test shards and a doc-path trim on push) closes. The push trim waits on your answer to item 729.",
+      "id": "close",
+      "key": "a",
+      "label": "Close mailaudit #322 as not worth it (coordinator's pick)",
+      "lose": "About 15 to 20 s of a 236 s run (3 runners) is not saved."
+    },
+    {
+      "gain": "The 15 to 20 s saving.",
+      "how": "A lane reworks the shards and the trim so the review passes.",
+      "id": "keep",
+      "key": "b",
+      "label": "Keep #322 open and rework it",
+      "lose": "More work on a change its reviewer failed against 176 b."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "coordinator 12:10 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Close mailaudit #322?",
+  "shown": [
+    {
+      "id": "close",
+      "key": "a",
+      "label": "Close mailaudit #322 as not worth it (coordinator's pick)"
+    },
+    {
+      "id": "keep",
+      "key": "b",
+      "label": "Keep #322 open and rework it"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Close mailaudit PR #322 (test shards and a doc-path push trim) as not worth it?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

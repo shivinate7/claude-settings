@@ -1,32 +1,46 @@
 {
   "added": "2026-11-12T18:10:00Z",
-  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:01 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of today's picks.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nIn plain words: the PR ledger lists pull requests waiting on a review. The coordinator's pick gave a stalled review a flag after 72 hours. That is a fixed time limit, which you said you do not approve (your 11:36 CST Nov 13 words, R37), and the 72 was a guess. That is why it does not make sense.\nProblem (goal): the pick also says a record marked done whose lane check never passed belongs to its lane, not to the batch runner. That part is not about time.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of picks; R37 and your 11:36 CST Nov 13 words.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
   "home": "PR ledger",
   "id": "pick-pr-ledger-72h",
   "kind": "decision",
   "n": 572,
   "options": [
     {
-      "gain": "A stalled review shows up after three days instead of never.",
-      "how": "The PR ledger gives a fix check, a fresh full review and a lane's round 2 or later a 72 h limit (unmeasured). A record marked done whose lane check never passed belongs to its lane, not to the batch runner.",
+      "gain": "No guessed time limit; the ownership fix stays.",
+      "how": "The ledger flags a stalled review by a measured age, once step pr-ledger-round-ages has measured how old rounds get. A record marked done whose lane check never passed belongs to its lane.",
+      "id": "keep-no-number",
       "key": "a",
-      "label": "Keep the pick (Recommended)",
-      "lose": "The other route is not taken unless you choose b."
+      "label": "Drop the 72 h number; keep the ownership part (triage's proposal)",
+      "lose": "A stalled review is not flagged by age until the measure exists."
     },
     {
       "gain": "The other route, if you prefer it.",
-      "how": "No time limit in the ledger.",
+      "how": "No age flag and no ownership change in the ledger.",
+      "id": "overrule",
       "key": "b",
-      "label": "Overrule it",
-      "lose": "The governed work is redone or waits for the change."
+      "label": "Overrule the whole pick",
+      "lose": "A record marked done with no passing lane check still has no owner."
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:01 CST",
-  "reply": "Closed 13:19 CST: the retrospective's audit found the pick sound for now, but the 72 hours were a guess. Step pr-ledger-round-ages measures how old review rounds really get and replaces the 72 hours with that measure.",
+  "reply": "You said this does not make sense. It did not: the pick used a fixed 72 h limit, which you have said you do not approve. I rewrote it: a drops the number and keeps the ownership part; b overrules everything. Please answer again.",
   "repo": "shivinate7/claude-settings",
   "short": "PR ledger: a 72 h limit for fix checks and later rounds",
+  "shown": [
+    {
+      "id": "keep-no-number",
+      "key": "a",
+      "label": "Drop the 72 h number; keep the ownership part (triage's proposal)"
+    },
+    {
+      "id": "overrule",
+      "key": "b",
+      "label": "Overrule the whole pick"
+    }
+  ],
   "stands": true,
   "status": "open",
   "title": "PR ledger: a 72 h limit for fix checks and later rounds",
