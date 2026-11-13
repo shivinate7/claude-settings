@@ -1540,12 +1540,13 @@ def cmd_exe_delete_hit(segment: str) -> str:
 # push's own exit status gates it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
 # ends come from `split_segments`; each push is read by `_push_parse`. A push and a delete pair when they
 # name the same branch by text: `${b}` folds to `$b`, and `$b` pairs with `$b` by equality, with no expansion
-# read. A source `origin/<name>` is `<name>`, and a taken archive name `archive/<name>-N` is `<name>`. One push
-# that carries both the archive refspec and the delete never pairs. `bash -c` bodies, heredocs, script files
-# and PowerShell are not read (`guard-guards-mistakes-only`).
+# read. An explicit source `origin/<name>` is `<name>` alone. A `HEAD` or `@` source takes its names from the
+# archive name, with and without `-N`. One push that carries both the archive refspec and the delete never
+# pairs. `bash -c` bodies, heredocs, script files and PowerShell are not read (`guard-guards-mistakes-only`).
 ARCHIVE_GATE = "&&"   # the join that gates, and the one word the remedy names
 ARCHIVE_PREFIX = "archive/"
 ARCHIVE_COPY_SUFFIX = r"(-[0-9]+)?"   # a taken archive name: `archive/<branch>` or `archive/<branch>-<digits>`
+ARCHIVE_CURRENT_BRANCH = ("HEAD", "@")   # a source that names no branch
 _BRACED_VARIABLE = re.compile(r"\$\{(\w+)\}")
 
 
@@ -1556,11 +1557,12 @@ def _branch_name(text: str) -> str:
 
 
 def _archive_names(source: str, dest: str):
-    """The branch names an archive push of `source` to `archive/<dest>` stands for: the source without an
-    `origin/` prefix, and the destination with and without its `-N` suffix."""
-    names = {source.removeprefix("origin/"), dest}
-    names.add(re.fullmatch(r"(.+?)" + ARCHIVE_COPY_SUFFIX, dest).group(1))
-    return names
+    """The branch names an archive push of `source` to `archive/<dest>` stands for. An explicit branch source
+    is that branch alone, without `origin/`. A `HEAD` or `@` source names no branch, so the destination
+    stands for it, with and without its `-N` suffix."""
+    if source not in ARCHIVE_CURRENT_BRANCH:
+        return {source.removeprefix("origin/")}
+    return {dest, re.fullmatch(r"(.+?)" + ARCHIVE_COPY_SUFFIX, dest).group(1)}
 
 
 def _push_events(segment: str):
@@ -1579,8 +1581,9 @@ def _push_events(segment: str):
         for spec in plain:
             source, colon, dest = spec.lstrip("+").partition(":")
             source, dest = _branch_name(source), _branch_name(dest if colon else source)
-            if dest.startswith(ARCHIVE_PREFIX) and source:
-                events.append(("archive", _archive_names(source, dest[len(ARCHIVE_PREFIX):])))
+            name = dest.removeprefix(ARCHIVE_PREFIX)
+            if dest.startswith(ARCHIVE_PREFIX) and source and name:
+                events.append(("archive", _archive_names(source, name)))
     return events
 
 
