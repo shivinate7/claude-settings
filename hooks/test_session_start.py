@@ -952,6 +952,9 @@ class GitFixtureMixin:
         try:
             proc.stdin.write(payload)
             proc.stdin.close()
+            # Python 3.11 and 3.12 flush stdin inside communicate() without guarding a closed file, so the drain
+            # below must not see it. None skips that flush; the drain reads only stdout and stderr.
+            proc.stdin = None
             if select.select([marker], [], [], HOOK_WAIT)[0]:
                 reached = marker.readline() == "reached\n"
         finally:
