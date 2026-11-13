@@ -1,0 +1,10 @@
+{
+ "id": "own-agent-owned-processes",
+ "at": "2026-11-13T14:37:00-06:00",
+ "title": "One record of the processes each agent started; end only those at SubagentStop; kill-only-yours reads it",
+ "ruling": "Owner 14:37 CST Nov 13, relayed by the retrospective, on its 14:36 reframe: \"i agree ensure that triage marks that\". Before that, 14:36: \"if the excel lesson is specific to excel it can run for just areas that use excel? ... tho i imagine the takeaway from the excel session if reviewed from outcomes based is more broad than just what we're describing right?\". Meaning: step office-pids-per-agent becomes agent-owned-processes. One record of what each agent started; end only those at SubagentStop (start time checked; a visible window or an unclear owner is reported, never ended); the kill-only-yours guard reads that record; Office is one Windows adapter with an early exit elsewhere; sim-lease joins the same record, not a second home. The step text and design are the retrospective's, unread by triage.",
+ "quote": "i agree ensure that triage marks that (14:37 CST) | if the excel lesson is specific to excel ... the takeaway ... is more broad (14:36 CST)",
+ "source": "Owner words 14:36 and 14:37 CST Nov 13 via the retrospective 14:36 and 14:37; filed by triage 14:38 CST Nov 13.",
+ "status": "open",
+ "step": "agent-owned-processes"
+}

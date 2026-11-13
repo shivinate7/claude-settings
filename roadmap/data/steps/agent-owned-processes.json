@@ -1,7 +1,7 @@
 {
  "id": "agent-owned-processes",
  "title": "Every process an agent starts is recorded against that agent; only those are ended at SubagentStop, and cleanup refuses any other",
- "status": "todo",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Processes an agent starts can outlive it with no owner record (dev servers, Playwright browsers, simulators, Office, background jobs), and a cleanup can end what it did not start.",
  "source": "Owner 14:36 CST Nov 13 via the retrospective: \"if the excel lesson is specific to excel it can run for just areas that use excel? ... tho i imagine the takeaway from the excel session if reviewed from outcomes based is more broad than just what we're describing right?\"; first case: excel-ui-kit, 8 hidden EXCEL.EXE for 1-2 h and a Quit sent to an Excel the cleanup did not start (pid 66412).",
- "note": "Filed 14:37 CST Nov 13; replaces office-pids-per-agent (folded). Retro's design (unread by triage): one home records every process an agent starts against that agent and ends only those at SubagentStop, with the start time checked; a visible window or an unclear owner is reported, never ended; the kill-only-yours guard reads that record. Likely home to extend from session to agent: the session tag in stall_watch / guard_kill.pid_is_session_job (unread: whether it tags per agent). Office is one adapter: COM-started Office has the DcomLaunch service as parent, so it needs the before/after diff of EXCEL.EXE, POWERPNT.EXE and WINWORD.EXE; it does nothing off Windows or when no Office process exists (one early exit). A PID two agents' diffs both saw is reported, never ended. sim-lease is the simulator case of the same idea: check it is not a second home (one home per capability). Cost stated with a test (process starts per tool call), per outcomes-mechanize-rules; red proof on a scratch agent leaving a hidden process. Past rulings not checked.",
- "updatedAt": "2026-11-13T14:37:37-06:00"
+ "note": "Filed 14:37 CST Nov 13; replaces office-pids-per-agent (folded). Retro's design (unread by triage): one home records every process an agent starts against that agent and ends only those at SubagentStop, with the start time checked; a visible window or an unclear owner is reported, never ended; the kill-only-yours guard reads that record. Likely home to extend from session to agent: the session tag in stall_watch / guard_kill.pid_is_session_job (unread: whether it tags per agent). Office is one adapter: COM-started Office has the DcomLaunch service as parent, so it needs the before/after diff of EXCEL.EXE, POWERPNT.EXE and WINWORD.EXE; it does nothing off Windows or when no Office process exists (one early exit). A PID two agents' diffs both saw is reported, never ended. sim-lease is the simulator case of the same idea: check it is not a second home (one home per capability). Cost stated with a test (process starts per tool call), per outcomes-mechanize-rules; red proof on a scratch agent leaving a hidden process. Past rulings not checked. Ruled 14:38 CST Nov 13 (ruling own-agent-owned-processes, owner \"i agree ensure that triage marks that\", relayed by retro 14:37): this is the step; office-pids-per-agent is folded into it. sim-lease joins the same record, not a second home. Ready.",
+ "updatedAt": "2026-11-13T14:38:17-06:00"
 }
