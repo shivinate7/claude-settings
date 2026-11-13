@@ -1,8 +1,8 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
-# With TMPDIR unset it also appends a conditional TMPDIR export to CLAUDE_ENV_FILE, except on Windows.
-# In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
-# Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one fetch per checkout. The grant lines print first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Warns on: core.worktree set in the shared config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the caution level, or unknown.
+# It adds TMPDIR to CLAUDE_ENV_FILE when unset, except on Windows.
+# In a git tree it patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch, and says so if it cannot.
+# Outside a git tree or without git, prints only the tier line. Exits 0, silent on stderr.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
