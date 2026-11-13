@@ -58,6 +58,7 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
   PowerShell, `bin/merge <N>` or `merge <N>` (the merge tool), or a GitHub MCP merge_pull_request with that
   pullNumber. A bare `gh pr merge` or `gh pr close` (no number, so gh aims at the current branch's PR) also
   closes it. A merge that names another PR closes nothing, and an MCP merge with no pullNumber closes nothing.
+  A merge that names a branch (`gh pr merge feature-x`) names no PR, so it closes no numbered wait.
 - A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. A check-in whose
   tool_result is an error does not count; one with no result yet, or a good result, does. An open wait with no
   check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
@@ -2547,6 +2548,25 @@ def CI75_full_size_bare_wait_closed_by_a_merge_of_any_pr():
     items = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
     items.append(ready(command="gh pr ready"))
     return silent_with_control(items + [shell("gh pr merge 5 --squash")], items, pr=None)
+
+
+@case
+def CI76_branch_name_merge_closes_no_numbered_wait():
+    """CI76. gh pr merge <branch>, and bin/merge <branch> --confirm, name a branch and no PR, so each closes no
+    numbered wait: it blocks on PR 5, and the reason names only PR 5. Control: gh pr merge 5 of the same wait passes"""
+    wait = [ready("5")]
+    return (["gh pr merge feature-x: " + p
+             for p in expect_block(wait + [shell("gh pr merge feature-x")], pr="5", not_named=["feature-x"])]
+            + ["bin/merge feature-x: " + p
+               for p in expect_block(wait + [merge_bin("feature-x")], pr="5", not_named=["feature-x"])]
+            + ["control, gh pr merge 5: " + p for p in expect_silent(wait + [shell("gh pr merge 5")])])
+
+
+@case
+def CI77_bare_ready_closed_by_a_branch_merge_of_any_pr():
+    """CI77. a bare gh pr ready opens a wait with no PR number, and gh pr merge <branch> closes it, as a merge of any
+    PR does: passes. Control: the bare wait alone blocks, and its reason names no PR number"""
+    return bare_wait_closed_by(shell("gh pr merge feature-x"), "gh pr merge of a branch")
 
 
 if __name__ == "__main__":
