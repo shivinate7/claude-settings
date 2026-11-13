@@ -1,10 +1,10 @@
 {
   "title": "Parse each state file a Bash or Edit call names",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.3545,
   "why": "A broken inbox, handoff or roadmap JSON is caught at the edit, not later.",
-  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1329.\nCoordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): After a Bash or Edit call, parse any JSON or fenced state file it names. Widens step inbox-fence-check, which is not on origin/roadmap. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1329. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1329).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
-  "lane": ""
+  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1329.\nCoordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): After a Bash or Edit call, parse any JSON or fenced state file it names. Widens step inbox-fence-check, which is not on origin/roadmap. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1329. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1329). Lane owner-asks-promised started 12:49 CST Nov 13 (coordinator 12:48 CST): session_013NEJL1vJ1tAeBHJaJ4ixt4.",
+  "updatedAt": "2026-11-13T12:49:49-06:00",
+  "lane": "session_013NEJL1vJ1tAeBHJaJ4ixt4"
 }

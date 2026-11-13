@@ -1,10 +1,10 @@
 {
   "title": "The MCP merge tool skips the merge checks",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 103.3535,
   "why": "settings.json's guard.py matcher has had no mcp__github__* entry since commit 97ffeb3f (Oct 2), so a merge through the GitHub MCP tool is never checked.",
-  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Measured by the coordinator. Lane [ended:lane:-mcp-merge-unguarded]. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1314. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1314).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Measured by the coordinator. Lane [ended:lane:-mcp-merge-unguarded]. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1314. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1314). Done 12:49 CST Nov 13 (coordinator 12:48 CST): 625a87260 on main.",
+  "updatedAt": "2026-11-13T12:49:49-06:00",
   "lane": ""
 }

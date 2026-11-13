@@ -1,11 +1,11 @@
 {
   "title": "A remote branch delete runs only when the archive push before it succeeded",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 266.95,
   "owner": "coordinator",
   "why": "Degen incident, 2026-11-07: zsh read `$b:r` as a filename modifier, so the archive pushes failed; `| tail` hid the failure, and six branches were deleted on GitHub with no archive copy. They were restored from the local clone, so nothing was lost.",
-  "note": "Refuse a command that runs `git push --delete <branch>` (or `push origin :<branch>`) after its archive push unless that push's own exit status gates the delete: no `| tail` or `;` between them. Rule shared-trees-archive-then-delete. From the owner's ask ask-mw79tt4bwr (relayed from a Degen session), 21:26 CST Nov 7. Filed 21:30 CST Nov 7. Lane [ended:archive-push-gates-delete] started (coordinator, received 21:39 CST Nov 7). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:archive-push-gates-delete]).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
-  "lane": ""
+  "note": "Refuse a command that runs `git push --delete <branch>` (or `push origin :<branch>`) after its archive push unless that push's own exit status gates the delete: no `| tail` or `;` between them. Rule shared-trees-archive-then-delete. From the owner's ask ask-mw79tt4bwr (relayed from a Degen session), 21:26 CST Nov 7. Filed 21:30 CST Nov 7. Lane [ended:archive-push-gates-delete] started (coordinator, received 21:39 CST Nov 7). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:archive-push-gates-delete]). Lane owner-asks-promised started 12:49 CST Nov 13 (coordinator 12:48 CST): session_013NEJL1vJ1tAeBHJaJ4ixt4.",
+  "updatedAt": "2026-11-13T12:49:49-06:00",
+  "lane": "session_013NEJL1vJ1tAeBHJaJ4ixt4"
 }
