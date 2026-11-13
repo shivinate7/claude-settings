@@ -10,7 +10,7 @@ These cases read this repo's real .claude/layout-extras.json, at the root the gu
 repo_root). No fixture stands in for it. The run folder, the send and transcript helpers come from
 lint/test_report_guard.py, the one home. Run with:
 
-    python3 lint/test_report_guard_repo_writer.py -v
+    python3 lint/test_report_guard_page_writer.py -v
 """
 import os
 import re
@@ -40,7 +40,7 @@ def tearDownModule():
     trg.tearDownModule()
 
 
-class RepoWriterTests(trg.SameTurnWriter, unittest.TestCase):
+class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
     """This repo's extras file names a page writer that the pick check can match a same-turn send against. The send
     is SameTurnWriter.send, and the check is question_problem, the function the Stop hook calls."""
 
