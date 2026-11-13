@@ -315,10 +315,10 @@ class NoteCapHook(unittest.TestCase):
         self.assert_refused(self.commit(), ".json (300 words)")
 
     def ruling(self, name, text):
-        """Write roadmap/rulings/<name> as raw text, so a broken ruling stays broken."""
+        """Write roadmap/rulings/<name> as raw text or bytes, so a broken ruling stays broken."""
         path = self.repo / "roadmap" / "rulings" / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
 
     def assert_ruling_refused(self, r, name):
         self.assertEqual(r.returncode, 1, "a staged ruling that does not parse was not refused: " + r.stdout + r.stderr)
@@ -390,6 +390,108 @@ class NoteCapHook(unittest.TestCase):
         self.ruling("r111.json", BROKEN_RULING)
         self.git("add", "-A")
         self.assert_ruling_refused(self.commit(), "r111.json")
+
+    def seed_ruling(self, name, text):
+        """Commit a ruling with the hook off, as an older writer did."""
+        self.ruling(name, text)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+
+    def unborn(self):
+        """Switch to an unborn branch and keep the index, so the next commit is the repo's first."""
+        self.git("checkout", "-q", "--orphan", "first")
+        self.assertNotEqual(self.git("rev-parse", "-q", "--verify", "HEAD^{commit}", check=False).returncode, 0,
+                            "HEAD is not unborn")
+
+    def test_ruling_in_cp1252_is_refused(self):
+        raw = '{"id": "r1", "ruling": "“quoted”"}\n'.encode("cp1252")
+        with self.assertRaises(UnicodeDecodeError):  # precondition: the bytes are not UTF-8
+            raw.decode("utf-8")
+        self.ruling("cp1252.json", raw)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "cp1252.json")
+
+    def test_ruling_with_nan_is_refused(self):
+        text = '{"id": "r1", "weight": NaN}\n'
+        json.loads(text)  # precondition: plain json accepts NaN, so only the refusal of NaN can stop it
+        self.ruling("nan.json", text)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "nan.json")
+
+    def test_ruling_that_is_a_json_array_is_refused(self):
+        json.loads("[]\n")  # precondition: valid JSON, not an object
+        self.ruling("array.json", "[]\n")
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "array.json")
+
+    def test_ruling_that_is_json_null_is_refused(self):
+        json.loads("null\n")  # precondition: valid JSON, not an object
+        self.ruling("null.json", "null\n")
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "null.json")
+
+    def test_symlinked_ruling_is_refused(self):
+        target = self.repo / "notes" / "ok.json"
+        target.parent.mkdir()
+        target.write_text(VALID_RULING, encoding="utf-8")
+        link = self.repo / "roadmap" / "rulings" / "linked.json"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to("../../notes/ok.json")
+        self.git("add", "-A")
+        self.assertTrue(self.git("ls-files", "-s", "roadmap/rulings/linked.json").stdout.startswith("120000"))
+        self.assert_ruling_refused(self.commit(), "linked.json")
+
+    def test_first_commit_with_valid_ruling_passes(self):
+        self.unborn()
+        self.ruling("r1.json", VALID_RULING)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_first_commit_with_broken_ruling_is_refused(self):
+        self.unborn()
+        self.ruling("quote-ruling.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "quote-ruling.json")
+
+    def test_mode_only_change_of_broken_ruling_is_refused(self):
+        self.seed_ruling("quote-ruling.json", BROKEN_RULING)
+        (self.repo / "roadmap" / "rulings" / "quote-ruling.json").chmod(0o755)
+        self.git("add", "-A")
+        self.assertIn("100755", self.git("diff", "--cached", "--raw", "--", "roadmap/rulings").stdout)
+        self.assert_ruling_refused(self.commit(), "quote-ruling.json")
+
+    def test_renamed_broken_ruling_is_refused(self):
+        self.seed_ruling("old-name.json", BROKEN_RULING)
+        self.git("mv", "roadmap/rulings/old-name.json", "roadmap/rulings/new-name.json")
+        self.assertEqual(self.git("ls-files", "roadmap/rulings").stdout.split(), ["roadmap/rulings/new-name.json"])
+        self.assert_ruling_refused(self.commit(), "new-name.json")
+
+    def test_merge_brings_broken_ruling_unchanged_passes(self):
+        self.git("checkout", "-q", "-b", "other")
+        self.seed_ruling("theirs.json", BROKEN_RULING)
+        self.git("checkout", "-q", "roadmap")
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit("ours"))
+        self.git("merge", "-q", "--no-commit", "--no-ff", "other")
+        self.assertEqual(self.git("ls-files", "roadmap/rulings").stdout.split(), ["roadmap/rulings/theirs.json"])
+        self.assert_passed(self.commit("merge"))
+
+    def test_merge_that_edits_a_ruling_into_brokenness_is_refused(self):
+        self.seed_ruling("r1.json", VALID_RULING)
+        self.git("checkout", "-q", "-b", "other")
+        self.ruling("r1.json", VALID_RULING.replace('"x"', '"y"'))
+        self.git("add", "-A")
+        self.assert_passed(self.commit("theirs"))
+        self.git("checkout", "-q", "roadmap")
+        self.ruling("r1.json", VALID_RULING.replace('"x"', '"z"'))
+        self.git("add", "-A")
+        self.assert_passed(self.commit("ours"))
+        self.git("merge", "-q", "--no-commit", "--no-ff", "other", check=False)  # conflicts on r1.json
+        self.assertIn("roadmap/rulings/r1.json", self.git("ls-files", "-u", "roadmap/rulings").stdout)
+        self.ruling("r1.json", BROKEN_RULING)  # the resolution the merge itself writes
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit("merge"), "r1.json")
 
     def path_with(self, *tools):
         bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
