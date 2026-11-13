@@ -140,6 +140,9 @@ class LostWorkFixture(unittest.TestCase):
         self.live = pathlib.Path(self.tmp.name) / "live.json"
         self.heads, self.pulls, self.comments, self.checks, self.sessions, self.threads = {}, [], [], {}, [], []
         self.branches = []  # the live file's branches list: each pushed branch, the publisher's read of origin
+        role = mock.patch.object(merge, "read_merge_role", lambda: "batch-runner")  # the lane mail gate: a session with no batch-runner role sends nothing
+        role.start()
+        self.addCleanup(role.stop)
         self.publish()
 
     def tearDown(self):
@@ -413,7 +416,7 @@ class LostWorkRows(LostWorkFixture):
         self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
         self.assertEqual(branch_rows(lines, "claude/merged-last-week"), [], "a state-f row for a branch at main, which is not ahead: %r" % lines)
 
-    def test_f_main_and_batch_branches_are_never_listed(self):
+    def test_f_main_and_integration_branches_are_never_listed(self):
         self.branches.append({"name": "main"})
         self.push_branch("batch-132", self.commit_on(self.main, {"docs/batch-note.md": "batch\n"}))
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
