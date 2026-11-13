@@ -78,6 +78,7 @@ SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of the FETCH_HEAD fixtures (lint/test_ruled_store.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -242,6 +243,9 @@ class _CountingPopen(_real_popen):
         if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
             with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
                 f.write("git\n")
+            if "fetch" in argv:  # a roadmap or main refresh, one line each: the fetches a case counts
+                with open(os.path.join(os.environ["CJ_LOADED_DIR"], "fetch.log"), "a", encoding="utf-8") as f:
+                    f.write("fetch\n")
         _real_popen.__init__(self, args, *rest, **kwargs)
 
 
@@ -289,6 +293,8 @@ class Run:
                 self.calls = [json.loads(line) for line in f if line.strip()]
         gitlog = os.path.join(base, "git.log")
         self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
+        fetchlog = os.path.join(base, "fetch.log")
+        self.fetches = len(open(fetchlog, encoding="utf-8").read().split()) if os.path.exists(fetchlog) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
 
@@ -1570,16 +1576,27 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
-    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
+    # Each judged run starts with a fresh roadmap FETCH_HEAD line, so the roadmap read starts no fetch. The git starts
+    # left are its cat-file and the store's ls-tree (one start when the store is absent).
+    fixture.write_fetch_head(CI_REPO)
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
           len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    fixture.write_fetch_head(CI_REPO)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
+    fixture.write_fetch_head(BARE_REPO)
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
     check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
           len(q.calls) == 1 and q.git <= 2, detail(q))
+    # A stale roadmap ref (no roadmap line in FETCH_HEAD): the judged question fetches it at most once.
+    fixture.without_fetch_head(CI_REPO)
+    s = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a stale roadmap ref is fetched at most once per judged question",
+          len(s.calls) == 1 and s.fetches <= 1, "fetches=%d; %s" % (s.fetches, detail(s)))
+    fixture.without_fetch_head(CI_REPO)
+    fixture.without_fetch_head(BARE_REPO)
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
