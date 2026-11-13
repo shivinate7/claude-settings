@@ -576,8 +576,9 @@ def report_shape_ok(text):
 # A ref is `#12`, `PR 12`, a /pull/N or /commit/<sha> URL, or a hex sha of 6 to 40 digits that
 # holds at least one digit (so a plain word like "added" is not a sha).
 DONE_KIND_RE = re.compile(r"\b(?:BUILT|RECORDED|OTHER)\b")
+DONE_HEX = r"\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b"
 DONE_REF_RE = re.compile(
-    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b)")
+    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|" + DONE_HEX + r")")
 BULLET_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
@@ -733,24 +734,30 @@ def answered_problem(text):
 
 # claim-vs-main-needs-read: a reply line that says how the work compares with main cites a read of main on that line.
 # It extends answered-needs-source: the same line reader (_prose_lines), code-span strip (CODE_SPAN) and hash pattern
-# (DONE_REF_RE). A claim form is a phrase of whole words; a hyphen joins words into a name, so "not-worse-than-main" is
-# no form. "regression test(s)" and "regression suite(s)" are nouns for a test count, not a claim. A hedge word on the
-# line exempts it. A cite is one of a closed list, found on the line with code spans unwrapped.
+# (DONE_HEX, the hex part of DONE_REF_RE). A claim form is a phrase of whole words; a hyphen joins words into a name,
+# so "not-worse-than-main" is no form. Emphasis marks (`*`) are removed and a code span that holds only `main` is read
+# as the word, so neither hides a form. `main` before `.<letter>` or `(` is a file or call name (main.py, main()), and
+# "main's own" is a claim only after a copula or before a clause mark or the line end ("main's own CI" is no claim).
+# "regression test(s)", "regression suite(s)" and "regression testing" are nouns for a test count, not a claim. A hedge
+# word on the line exempts it. A cite is one of a closed list, found anywhere on the line with code spans unwrapped.
 _W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
 _MAIN = r"main(?![\w-])"
+_MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()"
+_OWN = r"main['\u2019]s\s+own(?![\w-])"
 MAIN_CLAIM_RE = re.compile(
-    _W + r"(?:not\s+a\s+regression|no\s+regression)(?![\w-])(?!\s+(?:tests?|suites?)\b)"
-    r"|" + _W + r"(?:worse\s+than|same\s+as|already\s+on|pre-?existing\s+on|matches|regression\s+from)\s+" + _MAIN +
-    r"|" + _W + r"main['\u2019]s\s+own(?![\w-])", re.I)
+    _W + r"(?:not\s+a\s+regression|no\s+regressions?)(?![\w-])(?!\s+(?:testing|tests?|suites?)\b)"
+    r"|" + _W + r"(?:worse\s+than|same\s+as|already\s+on|pre-?existing\s+on|matches|regressions?\s+from)\s+" + _MAIN_REF +
+    r"|" + _W + r"(?:is|are|was|were|be)\s+" + _OWN +
+    r"|" + _W + _OWN + r"(?=\s*(?:[.,;:]|$))", re.I)
 MAIN_HEDGE_RE = re.compile(_W + r"(?:unmeasured|unknown|not\s+read)(?![\w-])", re.I)
-_SHA_HEAD = r"(?=[0-9a-f]*\d)[0-9a-f]{6,40}"
-_SHA = _SHA_HEAD + r"(?![\w-])"
+_SHA_LETTER = r"(?=\d*[a-f])"  # a cited hash holds a letter, so a date such as 20261112 is no hash
+_CITE_SHA = _SHA_LETTER + DONE_HEX
 MAIN_CITE_RE = re.compile(
     r"\b[\w/-]+\.[A-Za-z]\w{0,7}:\d+\b"
     r"|(?<![\w/-])origin/main(?![\w-])"
     r"|\bgit\s+show\s+(?:origin/)?main:"
-    r"|" + _W + r"main(?:['\u2019]s)?\s*(?:@|at\s+|commit\s+)?\s*" + _SHA +
-    r"|\b" + _SHA_HEAD + r"\s+(?:on|of|from|in)\s+" + _MAIN, re.I)
+    r"|" + _W + r"main(?:['\u2019]s)?\s*(?:@|at\s+|commit\s+)?\s*" + _CITE_SHA +
+    r"|" + _CITE_SHA + r"\s+(?:on|of|from|in)\s+" + _MAIN, re.I)
 MAIN_SHOT_RE = re.compile(_W + r"main(?:['\u2019]s)?\s+screenshot(?![\w-])", re.I)
 MAIN_SHOT_SOURCE_RE = re.compile(r"https?://\S+|[\w.-]+/[\w./-]*\.\w+")
 MAIN_CLAIM_REASON = owner_line(
@@ -772,7 +779,7 @@ def main_claim_problem(text):
         return ""
     bad = []
     for body in _prose_lines(text):
-        plain = CODE_SPAN.sub(" ", body)
+        plain = CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else " ", body).replace("*", "")
         if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
             continue
         if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
