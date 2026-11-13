@@ -1,14 +1,14 @@
 {
  "id": "claim-vs-main-needs-read",
  "title": "A regression or no-regression claim cites a read of main",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1D4J39Z3Xqh1gfQag",
  "owner": "triage",
  "blockedBy": [],
  "why": "A \"not worse than main\" claim went out with no read of main behind it.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D5",
- "note": "A regression or no-regression claim must cite a read of main. Extends #2765. Ledger row D5.",
- "updatedAt": "2026-11-12T21:05:22-06:00"
+ "note": "A regression or no-regression claim must cite a read of main. Extends #2765. Ledger row D5. Started by coordinator 21:07 CST Nov 12.",
+ "updatedAt": "2026-11-12T21:07:27-06:00"
 }

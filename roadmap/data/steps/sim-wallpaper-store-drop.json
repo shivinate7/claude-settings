@@ -1,14 +1,14 @@
 {
  "id": "sim-wallpaper-store-drop",
  "title": "Simulator wallpaper store stops growing without limit",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1RLjiPPk24Jqci2wc",
  "owner": "triage",
  "blockedBy": [],
  "why": "The simulator wallpaper store grows without limit.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D12",
- "note": "One lane with sim-boot-noise-off, both in bin/sim-test. Ledger row D12.",
- "updatedAt": "2026-11-12T21:05:22-06:00"
+ "note": "One lane with sim-boot-noise-off, both in bin/sim-test. Ledger row D12. Started by coordinator 21:07 CST Nov 12. Shared lane, two PRs.",
+ "updatedAt": "2026-11-12T21:07:27-06:00"
 }

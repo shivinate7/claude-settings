@@ -1,14 +1,14 @@
 {
  "id": "readonly-agent-shell-write",
  "title": "Refuse a shell write from an agent whose brief says read-only",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3mC8wqJYhEhcmCJnG",
  "owner": "triage",
  "blockedBy": [],
  "why": "An agent briefed read-only for an audit wrote files over ssh (>, tee, mktemp, touch). No guard stops it.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D4",
- "note": "Refuse a write (>, tee, mktemp, touch) over ssh or in the shell from an agent whose brief says read-only. Ledger row D4.",
- "updatedAt": "2026-11-12T21:05:22-06:00"
+ "note": "Refuse a write (>, tee, mktemp, touch) over ssh or in the shell from an agent whose brief says read-only. Ledger row D4. Started by coordinator 21:07 CST Nov 12.",
+ "updatedAt": "2026-11-12T21:07:27-06:00"
 }

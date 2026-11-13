@@ -1,14 +1,14 @@
 {
  "id": "guards-read-origin-main-config",
  "title": "Guards read repo config from the origin/main blob",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3e5VxTvDHtfBupKfs",
  "owner": "triage",
  "blockedBy": [],
  "why": "Session checkouts go stale, and guards read repo config from the stale checkout.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D14 b",
- "note": "Guards read repo config (git_reads.py:305, question_form.py:1062-1077) from the origin/main blob. Part (a) is an owner choice that reverses step grants-read-from-main; the retrospective brings it. Ledger row D14.",
- "updatedAt": "2026-11-12T21:05:22-06:00"
+ "note": "Guards read repo config (git_reads.py:305, question_form.py:1062-1077) from the origin/main blob. Part (a) is an owner choice that reverses step grants-read-from-main; the retrospective brings it. Ledger row D14. Started by coordinator 21:07 CST Nov 12.",
+ "updatedAt": "2026-11-12T21:07:27-06:00"
 }
