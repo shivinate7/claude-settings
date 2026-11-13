@@ -117,7 +117,7 @@ parent, or miss a message while busy.
      the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
-  4. The coordinator archives the old session, then starts the successor from the hand-off file
+  4. The coordinator archives the old session, then the coordinator starts the successor from the hand-off file
      and sends triage the new id in the same turn. Triage rewrites the roster line on the record
      branch (ruling R22). The coordinator sends no broadcast. Sessions read the roster.
   5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
