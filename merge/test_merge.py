@@ -15964,8 +15964,9 @@ class ReviewFixNotesGap(ReviewEnv):
     review at the Head still covers the code the gap leaves alone. Any other gap commit refuses (exit 2): one with a code file, a docs file that is no
     record, no files, or a merge. A walk that never reaches the Head refuses too, and so does a read that fails, which says unknown. The fix commit after
     the reviewed head is never judged: the fix verifier checks it. Each case scripts the chain Head, gap, reviewed head, then the --head commit, a code
-    commit that a walk from --head would refuse. Each verdict comes after its scope check, the read of the gap commit it depends on. Cases 7 and 8 are
-    green controls on the base: a fix line refuses, and no gap is the old behaviour."""
+    commit that a walk from --head would refuse. Each verdict comes after its scope check, the read of the gap commit it depends on. The controls are green
+    on the base: test_a_fix_line_on_the_newest_record_refuses_a_notes_only_gap (a fix line refuses) and
+    test_no_gap_keeps_the_old_behaviour (no gap is the old behaviour)."""
 
     CODE = "merge/merge.py"  # the --head commit's file: a walk that reached --head would refuse on it
     GAP = ["91" * 20, "92" * 20, "93" * 20]  # the gap commit shas, in the order the cases use them
@@ -16136,6 +16137,16 @@ class ReviewFixNotesGap(ReviewEnv):
         self.assertIn(self.GAP[0], host.commit_reads, "scope: the walk did not read the renamed commit, so the refusal below tests nothing")
         self.assert_refused(rc, out, err, "a fix check whose gap commit renames a code path into a record folder was accepted")
 
+    def test_a_rename_between_two_record_markdown_files_still_records(self):
+        # the allow side: both paths are record markdown files, so the rename changes no code and the gap still records
+        self.assertTrue(hasattr(merge.Host, "commit_files"), "Host has no commit_files: the read of a commit's paths is not built")
+        old, new = f"{self.RECORD_DIRS[0]}/moved-from.md", f"{self.RECORD_DIRS[0]}/moved-to.md"
+        renamed = {"filename": new, "status": "renamed", "previous_filename": old}
+        host, fix = self.gap_host([(self.GAP[0], [])], files_json={self.GAP[0]: [renamed]})
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.commit_reads, "scope: the walk did not read the renamed commit, so the verdict below tests nothing")
+        self.assert_recorded(rc, out, err, "a rename between two record markdown files was refused: no code path is in it")
+
 
 class CommitFilesHost(merge.Host):
     """Host whose one gh call, the REST read of commits/<sha>, returns `answer`, a (code, output) pair. The gh seam is faked as ProtectionHost
@@ -16198,12 +16209,12 @@ class HostCommitFiles(unittest.TestCase):
                 with self.assertRaises(merge.Stop):
                     host.commit_files(self.SHA)
 
-    def test_a_files_list_of_300_stops_as_possibly_truncated_and_299_is_read(self):
-        # GitHub caps a commit's files list at 300, so a list of 300 may be cut short: it stops. A list of 299 is short of the cap, so it is complete.
+    def test_a_files_list_of_30_stops_as_possibly_cut_off_and_29_is_read(self):
+        # GitHub answers only 30 files on its default page, so a list of 30 may be cut short: it stops. A list of 29 is under that page, so it is complete.
         self.assert_has_method()
-        paths = [f"many/path-{i}.txt" for i in range(300)]
-        host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths[:299]]))
-        self.assertEqual(host.commit_files(self.SHA), paths[:299], "a files list of 299 was not read as its paths")
+        paths = [f"many/path-{i}.txt" for i in range(30)]
+        host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths[:29]]))
+        self.assertEqual(host.commit_files(self.SHA), paths[:29], "a files list of 29 was not read as its paths")
         host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths]))
         with self.assertRaises(merge.Stop):
             host.commit_files(self.SHA)
