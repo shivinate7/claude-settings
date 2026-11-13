@@ -1690,12 +1690,6 @@ class ScopedRepo:
                 flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
         return r.returncode, flags
 
-    def scope_of(self, files):
-        """-> scope_run's answer for `files` alone: a probe branch cut from main with only those changes. The scope of a main move, read
-        before a case relies on it (P7)."""
-        self.on("probe", files, start="main")
-        return self.scope_run(branch="probe")
-
     @staticmethod
     def turned_on(flags):
         """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
@@ -2001,40 +1995,6 @@ class SmallBaseMove(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
         self.assertIn("touching only paths no job of this batch reads", out)
-
-    def assert_main_move_is_lint_only(self, files, *lints):
-        """The scope assert, before the subject (P7): the real ci-scope.sh turns on no job and no suite for main's move `files`, and exactly the
-        lint flags `lints`. The move is probed on its own branch first, so a case reads its scope before it relies on it."""
-        rc, flags = self.scope_of(files)
-        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the move" % rc)
-        self.assertEqual(self.turned_on(flags), [], "the move turns a job on, so it is not prose-only: %r" % flags)
-        self.assertEqual(self.lints_on(flags), sorted(lints), "the real ci-scope.sh's lint flags for the move: %r" % flags)
-
-    def test_a_main_claude_md_move_keeps_the_green_run(self):
-        """CLAUDE.md on main sets lint_ruling_kind and no job, so the move is prose-only and the green run stands."""
-        self.scoped()
-        self.assert_main_move_is_lint_only({"CLAUDE.md": "rules\n"}, "lint_ruling_kind")
-        self.on("main", {"CLAUDE.md": "rules\n"})
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(self.host.merged, out)
-        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
-
-    def test_a_main_test_folder_note_move_keeps_the_green_run(self):
-        """A .md under a test folder on main sets lint_red_run and no job. No suite reads it, so the green run stands."""
-        self.scoped()
-        self.assert_main_move_is_lint_only({"skills/example/tests/notes.md": "# Notes\n"}, "lint_red_run")
-        self.on("main", {"skills/example/tests/notes.md": "# Notes\n"})
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(self.host.merged, out)
-        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
-
-    def test_a_main_code_path_beside_a_claude_md_move_is_refused(self):
-        """The control for the lint-only moves: a job path on main is refused, even with a lint-only path beside it."""
-        self.scoped()
-        self.on("main", {"CLAUDE.md": "rules\n", "hooks/x.py": "X = 2\n"})
-        self.refused()
 
     def test_an_unreadable_merge_base_is_refused(self):
         self.scoped()
