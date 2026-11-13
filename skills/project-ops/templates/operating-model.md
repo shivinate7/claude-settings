@@ -47,7 +47,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground, never
-  `run_in_background` (decision `merge-confirm-repo`).
+  `run_in_background` (decision `merge-confirm-repo`, cloud auto mode). A CI wait then holds that runner's turn.
   It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head
   its CI ran on. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
