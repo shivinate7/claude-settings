@@ -3175,7 +3175,8 @@ class HandedInRow(UpkeepFixture):
     `unknown (#<number> has no reviewLogAt)`, unless batched is true: batched takes the pull out before that check, as held does for
     createdAt. A non-bool batched skips the pull row. The row reads the live file's pulls, the open pull requests: a pull the file lists
     only as landed (closed or merged) is absent. A docs-only pull counts like any other, since the live file holds no record kind. The read
-    time is whole seconds, so the 6 h boundary is exact."""
+    time is whole seconds, so the 6 h boundary is exact. A pull whose newest record reads open or bad (reviewDone false) is not handed in:
+    its review log is posted, but the lane has not answered it. reviewDone is a JSON bool, like reviewLog."""
 
     HANDIN = "handed in over 6 h, in no batch"
 
@@ -3188,7 +3189,7 @@ class HandedInRow(UpkeepFixture):
 
     def handed(self, number, branch, **keys):
         """An open pull row with a posted review log (reviewLog true). `keys` add to it or replace its fields."""
-        row = {"number": number, "title": "lane " + branch, "branch": branch, "reviewLog": True}
+        row = {"number": number, "title": "lane " + branch, "branch": branch, "reviewLog": True, "reviewDone": True}
         row.update(keys)
         return row
 
@@ -3210,6 +3211,12 @@ class HandedInRow(UpkeepFixture):
 
     def test_the_threshold_is_six_hours(self):
         self.assertEqual(getattr(build, "STALE_HANDIN_HOURS", None), 6, "build.STALE_HANDIN_HOURS is not 6")
+
+    def test_the_row_label_states_the_boundary_as_six_hours_or_more(self):
+        # The row lists a pull handed in exactly 6 h before the read (6 h or more), so its label says "6 h or more", not "over 6 h".
+        label = getattr(build, "HANDIN_LINE", None)
+        self.assertIsNotNone(label, "build has no HANDIN_LINE constant naming the row")
+        self.assertIn("6 h or more", label, "HANDIN_LINE %r does not state the boundary the row applies: a pull at exactly 6 h is listed" % label)
 
     def test_a_pull_handed_in_exactly_six_hours_before_the_read_is_listed(self):
         read = self.read_when()
@@ -3279,6 +3286,37 @@ class HandedInRow(UpkeepFixture):
         read = self.read_when()
         self.publish_at(read, [self.handed(1001, "docs-note", title="Docs: note", reviewLogAt=self.hours_before(read, 7))])
         self.assertEqual(self.listed(), (1, ["#1001 (7h)"]), "a docs-only pull's posted review log does not count as handed in")
+
+    def test_a_pull_whose_newest_record_reads_done_is_listed(self):
+        # control: reviewDone true is the mark a handed-in pull carries
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "done-lane", reviewLogAt=self.hours_before(read, 7), reviewDone=True),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1001 (7h)", "#1002 (7h)"]), "a pull whose newest record reads done is not listed as handed in")
+
+    def test_a_pull_whose_newest_record_is_open_or_bad_is_not_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "open-lane", reviewLogAt=self.hours_before(read, 7), reviewDone=False),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a pull whose newest record is open or bad is listed as handed in")
+
+    def test_a_non_bool_review_done_skips_the_pull_row(self):
+        read = self.read_when()
+        for value in ("yes", 1):
+            with self.subTest(value=value):
+                self.publish_at(read, [self.handed(1001, "odd", reviewLogAt=self.hours_before(read, 7), reviewDone=value),
+                                       self.handed(1002, "other", reviewLogAt=self.hours_before(read, 7))])
+                count, detail = self.row(self.out_with_live(), self.HANDIN)
+                self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
+                                 "a reviewDone that is not a JSON bool does not skip its pull row")
+
+    def test_a_review_log_with_no_review_done_reads_its_entry_unknown(self):
+        read = self.read_when()
+        row = self.handed(998, "no-done", reviewLogAt=self.hours_before(read, 7))
+        del row["reviewDone"]  # absent, not false: the newest record's verdict is not known
+        self.publish_at(read, [row, self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1002 (7h)", "unknown (#998 has no reviewDone)"]),
+                         "a pull with a posted review log and no reviewDone does not read unknown")
 
 
 class DoneWithoutCheck(UpkeepFixture):
