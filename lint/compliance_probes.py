@@ -40,8 +40,10 @@ ios: drift from the iOS standard of skills/ios-apps, one item per line: the make
   iOS app is n/a. Comments do not count.
 words: each retired word in a checked repo, one item per line: `  <word>: <file>:<line> <detail>`, with `-` for
   the line of a path hit. The word list is read live from lint/check_glossary.py and the GLOSSARY.md beside
-  it: its path, identifier, rule anchor, record slug and hook message reads, run on the child's tracked
-  files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
+  it: its path, identifier, rule anchor, record slug and hook message reads, run on what the child's change
+  adds against the merge base with its origin/main (the paths and lines its commits, work tree and untracked
+  files add, as lint/check_glossary.py reads them); the whole tracked tree when it has no origin/main or no
+  merge base. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
   parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
   the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
   term that repeats a claude-settings term, or is the retired word itself, does not. It is an item at its
@@ -1145,37 +1147,71 @@ def probe_words(root):
         if time.monotonic() > deadline:
             raise DeadlineHit()
 
+    class NoBase(Exception):
+        pass
+
+    def no_base(why):  # check_glossary.unknown_exit would end this process
+        raise NoBase(why)
+
+    real_root, real_exit = check_glossary.ROOT, check_glossary.unknown_exit
+    check_glossary.ROOT, check_glossary.unknown_exit = root, no_base  # the check's git and reads now run in the child
+    check_glossary._RUN.clear()
     check_glossary.tick = tick  # the check calls it inside its name loop, so one giant file cannot outrun the deadline
     current, done = None, 0
     try:
-        for done, rel in enumerate(files):
+        # (path, read its path, read it now, its text, its added lines): a child with a merge base is read on what
+        # its change adds, as check_glossary.main reads it; one with none is read whole.
+        try:
+            check_glossary.tips()
+            diff = True
+        except NoBase:
+            diff = False
+        try:
+            if diff:
+                scope, unknown = check_glossary.added_lines()
+                committed, more = check_glossary.committed_lines()
+                if unknown + more:
+                    raise CannotRun(unknown[0] if unknown else more[0])
+                units = [(rel, True, False, None, None) for rel in check_glossary.added()]
+                units += [(rel, False, True, None, lines) for rel, lines in sorted(scope.items())]
+                units += [(rel, False, False, text, lines) for rel, text, lines in committed
+                          if not (scope.get(rel) == lines and read(root, rel) == text)]
+            else:
+                units = [(rel, True, True, None, None) for rel in files]
+        except NoBase as err:
+            raise CannotRun(str(err))
+        for done, (rel, by_path, read_now, body, lines) in enumerate(units):
             current = rel
             tick()
-            for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
-                add(rel, "-", problem, problem[len(rel):].strip())
-            body = read(root, rel)
-            if body is None:
-                unread.append(rel)
-                continue
-            if rel.startswith(check_glossary.SKIP_CODE):
+            if by_path:
+                for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
+                    add(rel, "-", problem, problem[len(rel):].strip())
+            if read_now:
+                body = read(root, rel)
+                if body is None:
+                    unread.append(rel)
+                    continue
+            if body is None or rel.startswith(check_glossary.SKIP_CODE):
                 continue
             if body.startswith("\ufeff"):  # the check's own read uses utf-8-sig; a BOM would fail the Python parse
                 body = body[1:]
             try:
-                problems = check_glossary.code_problems(rel, body, table, None, spans)
+                problems = check_glossary.code_problems(rel, body, table, lines, spans)
             except SyntaxError as err:
                 raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
             for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
                 line, _, detail = problem[len(rel) + 1:].partition(": ")
                 add(rel, line, problem, detail)
     except DeadlineHit:
-        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(files)))
+        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(units)))
     finally:
         check_glossary.tick = None
+        check_glossary.ROOT, check_glossary.unknown_exit = real_root, real_exit
+        check_glossary._RUN.clear()
     note = "unread: %d files, %s" % (len(unread), ", ".join(unread[:3]) + (", ..." if len(unread) > 3 else ""))
     if not files:
         raise CannotRun("no tracked files")
-    if len(unread) == len(files):
+    if not diff and len(unread) == len(files):
         raise CannotRun("no tracked file could be read (%s)" % note)
     sha = glossary_commit(check_glossary.ROOT)
     stale = glossary_uncommitted(check_glossary.ROOT, check_glossary.GLOSSARY)
