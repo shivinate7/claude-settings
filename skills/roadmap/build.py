@@ -751,7 +751,7 @@ def live_work(path, steps, slug=None):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
-    why, session_steps, live_steps, live_rows, lane_sessions = [], [], [], {}, None  # the first reason wins
+    why, session_steps, live_steps, live_rows, lane_rows = [], [], [], {}, None  # the first reason wins
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -786,7 +786,7 @@ def live_work(path, steps, slug=None):
                      if r.get("status_bucket") not in ENDED_BUCKETS}
         live_steps = sorted({k for ids in live_rows.values() for k in ids})
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
-        lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
+        lane_rows = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
                           "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None,
                           **{k: r[k] for k in JOINT_SESSION_KEYS if k in r}}
                          for r in sessions]
@@ -818,7 +818,7 @@ def live_work(path, steps, slug=None):
             "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "liveRows": live_rows, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
+            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_rows,  # glossary-ok: the returned key stays laneSessions, the name its readers use
             "landedPulls": landed_pulls}
 
 
