@@ -879,16 +879,13 @@ class GhLock(Lock):
 PUSHED_HEAD_WAIT = "GitHub to show the pushed head"
 PUSHED_HEAD_WAIT_MINUTES = 5  # --lane-lint's bound on that wait; a push shows on GitHub in seconds, so a head still missing after this is not lag
 
-def wait_pushed_head(host, n, info, end, progress=None, want=None):
+def wait_pushed_head(host, n, info, end, want=None):
     """The one wait for GitHub to show a pushed head: read pull request `n` again until its head is no longer the one in `info` (the head
     before the push), or `end` (a `host.now()` time) passes. With `want`, it ends only on that head, so a third head GitHub shows on the way
-    does not end it. -> the fresh info, or None at `end`. wait_checks and fetch_pr_head call it.
-    With no `progress`, it prints one wait line."""
+    does not end it. -> the fresh info, or None at `end`. fetch_pr_head calls it. It prints one wait line."""
     stale, said = info["head"], False
     while (info["head"] != want) if want else (info["head"] == stale):
-        if progress:
-            progress(PUSHED_HEAD_WAIT)
-        elif not said:
+        if not said:
             say("merge: waiting on " + PUSHED_HEAD_WAIT)
             said = True
         if host.now() >= end:
@@ -899,7 +896,7 @@ def wait_pushed_head(host, n, info, end, progress=None, want=None):
 
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
-    Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
+    Tests pass a fake with the same pr and merge, or a `gh` shim on PATH."""
 
     def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None, cwd=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
@@ -1365,82 +1362,8 @@ class Host:
             got.setdefault(d["name"], []).append((bucket, d.get("link") or ""))
         return got
 
-    def wait_checks(self, n, sha, deadline_minutes, prior=None):
-        """Wait until every required check on `sha` has finished and none failed. -> (ok, why). `ok` is None when the deadline passed with a required
-        check still pending, or with GitHub still showing the head before the push: no answer, not a red one. `prior` is the head before this run's push.
-        Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
-        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check or run, required or not,
-        ends the wait. Only a pending check named in the required list holds the wait, or a pending workflow run that
-        `required_only` cannot show to belong to a workflow without a required job; any other pending check or run is dropped from the wait,
-        and the success line names it. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
-        listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
-        say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
-        names = self.required_names()
-        base = self.base  # the base read under the lock: the last pr() before the wait
-        end = self.now() + deadline_minutes * 60
-        settled, absent_seen = False, None
-        if not listed:
-            say("merge: required: " + ", ".join(names))
-        said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
-
-        def progress(what):
-            nonlocal said, said_at
-            if what and (what != said or self.now() - said_at >= 120):
-                say("merge: waiting on " + what)
-                said, said_at = what, self.now()
-
-        while True:
-            info = self.pr(n)
-            if info["head"] == prior and prior != sha:
-                info = wait_pushed_head(self, n, info, end, progress)
-                if info is None:
-                    return None, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {GREEN_CITE}"
-                # the fresh read goes through the checks below like any other
-            if info["base"] != base:
-                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
-            if info["head"] != sha:
-                return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again. {GREEN_CITE}"
-            if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
-                return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
-            got = self.checks(n, sha=info["head"])
-            red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
-            r_red, r_pending = self.run_state(sha)
-            pending, held, unwaited = pending + r_pending, *self.required_only(pending + r_pending, names)  # only what the wait waits on may clear a "no check ran" red
-            red = self.settle(red, held, r_red, [])[0]
-            if red:
-                return False, "a check is red: " + "; ".join(red) + " " + GREEN_CITE
-            absent = sorted(k for k in names if not got.get(k))
-            if absent and got and pending == absent:  # every reported check and run has ended; only a required name nobody reports is left
-                if absent_seen != absent:  # ponytail: a job that waits on another, or a status from outside Actions, can appear after the last check ends. One minute covers that; one later still stops the run, which is rerun.
-                    absent_seen = absent
-                    self.pause(self.minute)  # a status from outside Actions can post a minute after the last job ends
-                    continue
-                return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
-                               f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names. {GREEN_CITE}")
-            absent_seen = None
-            pending = held  # after the absent block, which compares the full list; before the settle pass, so its re-read still runs
-            if not pending and not settled:
-                # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
-                if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm
-                    say("merge: waiting on a last read of the checks")
-                    said_at = self.now()
-                self.pause(SETTLE_SECONDS)
-                settled = True
-                continue
-            if not pending:
-                if ignored:
-                    say("merge: ignored by merge.ignoreChecks: " + "; ".join(ignored))
-                if unwaited:
-                    say("merge: not waited for (not required): " + "; ".join(unwaited))
-                return True, ""
-            if self.now() >= end:
-                return None, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending) + " " + GREEN_CITE
-            settled = False
-            progress(", ".join(pending))
-            self.block(pending, got)
-
     def required_only(self, pending, names):
-        """-> (held, dropped) from the pending list of `wait_checks`. Held: a pending check named in `names`, and every `workflow <name>` run
+        """-> (held, dropped) from the pending list of the checks read. Held: a pending check named in `names`, and every `workflow <name>` run
         not shown to be a workflow without a required job. A run is dropped only when its name is the top-level `name:` of a local workflow
         file that was read, whose line scan found jobs, and that defines none of `names`. An unknown run name, an empty or unreadable folder
         and a file whose scan finds no job all hold: a failed read never loosens the wait. Dropped: every other pending check or run."""
@@ -1657,7 +1580,7 @@ class Host:
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
+        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
         Another ready PR's running CI holds no merge (per-lane merge). A settled head still makes the read of those pull requests (batch_running,
         which takes `batch_ignore` as its ignore list), because that read takes the branch protection's required names: a read of them that
         fails is unknown, and the guard denies a merge it could not read.
