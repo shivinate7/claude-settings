@@ -12333,6 +12333,15 @@ class PullsHost(merge.Host):
 class BatchRunningReads(unittest.TestCase):
     """merge.Host.batch_running over scripted reads. Only `pages` is faked: the filters and the check judging are the real code."""
 
+    def test_head_read_on_a_settled_head_makes_no_batch_read(self):
+        # head_read's verdict is the head's own, and a batch read of the other ready pull requests cannot change it. Each open pull request costs
+        # gh calls the guard then discards, inside its one budget, so a settled head's read makes none of them.
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)],
+                         {OWN_SHA: [batch_run("checks", "completed", "success")], OTHER_SHA: [batch_run("checks")]})
+        verdict, detail = host.head_read(1)
+        self.assertEqual((verdict, detail), ("green", ""), "precondition: the own head reads green, so the batch read is the only one in question")
+        self.assertNotIn("pulls", host.reads, "head_read read the open pull requests for the batch read, and discarded the answer")
+
     def test_a_pending_required_check_on_another_ready_pr_blocks(self):
         host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks")]})
         blockers = host.batch_running(1, "main")
