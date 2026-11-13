@@ -704,7 +704,34 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                          "a solo session subject is accepted")
 
 
-class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
+class LivePinFixtureMixin:
+    """Fixture helpers for a claude-settings live pin: the install script the clone holds, the pin install.sh makes beside
+    it, and the <clone>-live link to that pin. The live pin notice and the fast-forward cases share them."""
+
+    def link_to(self, target, link):
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest("this account cannot create a symlink: %s" % error)
+        return link
+
+    def make_live_pin(self):
+        """A clone that holds merge/install_from_main.sh, committed, and the pin install.sh makes beside it: a linked
+        worktree <clone>-live-<12 hex>, detached at the clone's HEAD. Sets self.pin and self.link, and returns the pin."""
+        os.makedirs(os.path.join(self.primary, "merge"))
+        with open(os.path.join(self.primary, "merge", "install_from_main.sh"), "w", encoding="utf-8") as handle:
+            handle.write("# stub: the install script that makes the live pin\n")
+        vcs(self.primary, "add", "-A")
+        vcs(self.primary, "commit", "-q", "-m", "install script")
+        # The pin's name is <clone>-live-<12 hex>, the short sha install_from_main.sh makes it with.
+        short = vcs(self.primary, "rev-parse", "--short=12", "HEAD").stdout.strip()
+        self.pin = self.primary + "-live-" + short
+        self.link = self.primary + "-live"
+        vcs(self.primary, "worktree", "add", "-q", "--detach", self.pin, "HEAD")
+        return self.pin
+
+
+class SessionStartLivePinNoticeTests(LivePinFixtureMixin, SessionStartAgentWorktreeNoticeTests):
     """A cwd inside a claude-settings live pin prints one line that names the pin, the words "live pin", and the
     clone to cd to. The pin is the linked worktree <clone>-live-<12 hex>, or the <clone>-live link to it. A pin
     counts only when the clone beside it holds merge/install_from_main.sh, the install script that makes the pin
@@ -716,16 +743,7 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     def setUp(self):
         super().setUp()
         # The clone holds the install script before the pin is made, so the pin carries it too.
-        os.makedirs(os.path.join(self.primary, "merge"))
-        with open(os.path.join(self.primary, "merge", "install_from_main.sh"), "w", encoding="utf-8") as handle:
-            handle.write("# stub: the install script that makes the live pin\n")
-        vcs(self.primary, "add", "-A")
-        vcs(self.primary, "commit", "-q", "-m", "install script")
-        # The pin's name is <clone>-live-<12 hex>, the short sha install_from_main.sh makes it with.
-        short = vcs(self.primary, "rev-parse", "--short=12", "HEAD").stdout.strip()
-        self.pin = self.primary + "-live-" + short
-        self.link = self.primary + "-live"
-        vcs(self.primary, "worktree", "add", "-q", "--detach", self.pin, "HEAD")
+        self.make_live_pin()
 
     @staticmethod
     def phys(path):
@@ -735,13 +753,6 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     def names(line, path):
         """True when the line holds PATH as a whole path, not as the front of a longer one such as <clone>-live."""
         return re.search(re.escape(path) + r"(?![\w-]|\.\w)", line) is not None
-
-    def link_to(self, target, link):
-        try:
-            os.symlink(target, link)
-        except (OSError, NotImplementedError) as error:
-            self.skipTest("this account cannot create a symlink: %s" % error)
-        return link
 
     def make_link(self):
         return self.link_to(self.pin, self.link)
@@ -1048,10 +1059,52 @@ class GitFixtureMixin:
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None):
+    def make_origin(self):
+        """A bare origin at self.origin_repo, added as the primary checkout's remote. The caller pushes what it needs."""
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+
+    def advance_origin_main(self, commits=1, grants=True, files=None, remove=(), branch="main"):
+        """Another clone pushes `commits` commits to origin's `branch` (main by default). The clone starts on origin's HEAD,
+        so a caller that advances another branch points origin's HEAD at it first. With `grants`, the first carries fresh
+        grants; with `files` (path to text) and `remove` (paths), the first carries those changes too; the rest are empty.
+        The primary checkout does not fetch them. Returns the new tip's sha."""
+        other = os.path.join(self.root, "other")
+        vcs(self.root, "clone", "-q", self.origin_repo, other)
+        if remove:
+            vcs(other, "rm", "-q", "--", *remove)
+            for rel in remove:
+                try:
+                    os.removedirs(os.path.dirname(os.path.join(other, *rel.split("/"))))
+                except OSError:
+                    pass
+        names = []
+        if grants:
+            self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
+            self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
+            names += ["CLAUDE.md", ".claude/CLAUDE.md"]
+        for rel, text in (files or {}).items():
+            self.put(os.path.join(other, *rel.split("/")), text)
+            names.append(rel)
+        first = 1
+        if names or remove:
+            if names:
+                vcs(other, "add", "-f", "--", *names)
+            vcs(other, "commit", "-q", "-m", "fresh grants at origin" if grants else "files at origin")
+            first = 2
+        for number in range(first, commits + 1):
+            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
+        vcs(other, "push", "-q", "origin", "HEAD:%s" % branch)
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def checkout_lane(self):
+        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
+
+    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None, source=None):
         """The hook's lines, after a control: the hook ran and printed its checkout line."""
         lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout,
-                              trace_file=trace_file)
+                              trace_file=trace_file, source=source)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         return lines
@@ -1434,29 +1487,10 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
 
     def setUp(self):
         super().setUp()
-        self.origin_repo = os.path.join(self.root, "origin.git")
-        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
-        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        self.make_origin()
         self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
         self.commit("stale grants")
         vcs(self.primary, "push", "-q", "origin", "main")
-
-    def advance_origin_main(self, commits=1):
-        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
-        does not fetch them. Returns the new tip's sha."""
-        other = os.path.join(self.root, "other")
-        vcs(self.root, "clone", "-q", self.origin_repo, other)
-        self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
-        self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
-        vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
-        vcs(other, "commit", "-q", "-m", "fresh grants at origin")
-        for number in range(2, commits + 1):
-            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
-        vcs(other, "push", "-q", "origin", "HEAD:main")
-        return vcs(other, "rev-parse", "HEAD").stdout.strip()
-
-    def checkout_lane(self):
-        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
 
     @staticmethod
     def fetch_starts(starts):
@@ -2281,6 +2315,556 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
         self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+
+FF_LINE = re.compile(r"^checkout (?P<top>.+): fast-forwarded (?P<branch>\S+) (?P<old>[0-9a-f]{7,40}) -> "
+                     r"(?P<new>[0-9a-f]{7,40}), (?P<count>\d+) commits(?P<note>; the grant lines above are now current)?$")
+NOT_FF_LINE = re.compile(r"^checkout (?P<top>.+): not fast-forwarded, (?P<reason>.+)$")
+
+
+def same_checkout(printed, path):
+    """True when the path a hook line prints names the checkout at `path`, whatever its slashes or links."""
+    return os.path.normcase(os.path.realpath(printed)) == os.path.normcase(os.path.realpath(path))
+
+
+class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """Startup fast-forward of a clean checkout. At a startup start, after the origin refresh succeeded, a clean checkout on
+    the default branch that is behind origin/<default> fast-forwards to it and prints one line. A checkout that cannot move
+    prints one not-fast-forwarded line with its reason and changes nothing. A resume, a compact or a failed refresh moves
+    nothing. Each case runs the hook on a real origin and a real checkout."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_origin()
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def origin_tip(self):
+        return vcs(self.origin_repo, "rev-parse", "refs/heads/main").stdout.strip()
+
+    def origin_moves_ahead(self, commits=3):
+        """Another clone pushes `commits` empty commits to origin's main. The checkout learns of them only at the hook's refresh.
+        Returns the new tip."""
+        fresh = self.advance_origin_main(commits=commits, grants=False)
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        return fresh
+
+    def run_startup(self, session_cwd=None, path_dir=None, fetch_timeout="30"):
+        return self.run_checked(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout, source="startup")
+
+    @staticmethod
+    def ff_lines(lines):
+        return [found for found in map(FF_LINE.match, lines) if found]
+
+    @staticmethod
+    def not_ff_lines(lines):
+        return [found for found in map(NOT_FF_LINE.match, lines) if found]
+
+    def assert_one_not_ff(self, lines, reason):
+        """Exactly one not-fast-forwarded line, and its reason is `reason`."""
+        found = self.not_ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one not-fast-forwarded line with reason %r, got %r" % (reason, lines))
+        self.assertEqual(found[0].group("reason"), reason,
+                         "the not-fast-forwarded line gives another reason: %r" % found[0].group(0))
+
+    def assert_no_move(self, before, label):
+        self.assertEqual(self.head_sha(), before, "the hook moved the checkout (%s)" % label)
+
+    def checkout_state(self, where):
+        """HEAD, the index entries and the status of the checkout at `where`. A no-op leaves all three as they were."""
+        return (vcs(where, "rev-parse", "HEAD").stdout.strip(),
+                vcs(where, "ls-files", "--stage").stdout,
+                vcs(where, "status", "--porcelain=v1", "--untracked-files=all").stdout)
+
+    def test_a_clean_default_branch_behind_origin_fast_forwards_and_prints_one_line(self):
+        # origin/HEAD names origin/main, so the existing behind line is in play and must not print after the move.
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        before = self.head_sha()
+        fresh = self.origin_moves_ahead(commits=3)
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line for a clean checkout behind origin/main, got %r" % lines)
+        self.assertEqual(found[0].group("branch"), "main", "the line names another branch: %r" % found[0].group(0))
+        self.assertTrue(before.startswith(found[0].group("old")),
+                        "the line's old sha is not the checkout's old tip: %r" % found[0].group(0))
+        self.assertTrue(fresh.startswith(found[0].group("new")),
+                        "the line's new sha is not origin/main's tip: %r" % found[0].group(0))
+        self.assertEqual(found[0].group("count"), "3", "the line counts another number of commits: %r" % found[0].group(0))
+        self.assertTrue(same_checkout(found[0].group("top"), self.primary),
+                        "the line names another checkout: %r" % found[0].group(0))
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "the fast-forward left the working tree dirty")
+        behind = [line for line in lines if "behind origin/" in line]
+        self.assertEqual(behind, [], "the existing behind line printed after a fast-forward: %r" % behind)
+
+    def test_two_startup_runs_in_a_row_move_once(self):
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        fresh = self.origin_moves_ahead(commits=3)
+        first = self.run_startup()
+        self.assertEqual(len(self.ff_lines(first)), 1,
+                         "want one fast-forward line on the first startup run, got %r" % first)
+        second = self.run_startup()
+        self.assertEqual(self.ff_lines(second), [], "the second startup run moved the checkout again: %r" % second)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not end at origin/main after two runs")
+
+    def test_a_clean_checkout_already_at_origin_main_prints_no_fast_forward_line(self):
+        before = self.head_sha()
+        self.assertEqual(self.origin_tip(), before, "scope: origin's main is not at the checkout's HEAD")
+        lines = self.run_startup()
+        self.assertEqual(self.ff_lines(lines), [], "a checkout already at origin/main printed a fast-forward line: %r" % lines)
+        self.assert_no_move(before, "already up to date")
+
+    def test_a_dirty_tracked_file_is_not_fast_forwarded_and_says_uncommitted_changes(self):
+        self.origin_moves_ahead(commits=3)
+        self.put(os.path.join(self.primary, "f.txt"), "edited in place\n")
+        self.assertNotEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the checkout is clean")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "uncommitted changes")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout that was not fast-forwarded changed")
+
+    def test_an_untracked_file_is_not_fast_forwarded_and_says_uncommitted_changes(self):
+        self.origin_moves_ahead(commits=3)
+        self.put(os.path.join(self.primary, "scratch.txt"), "untracked draft\n")
+        self.assertIn("?? scratch.txt", vcs(self.primary, "status", "--porcelain").stdout, "scope: no untracked file")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "uncommitted changes")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout that was not fast-forwarded changed")
+
+    def test_commits_ahead_of_origin_main_move_nothing_and_print_no_fast_forward_line(self):
+        # Ahead only leaves nothing to move. The existing commits-ahead line already reports that state.
+        self.commit("local work not pushed")
+        self.assertEqual(self.origin_tip(), self.resolve("HEAD^"), "scope: origin's main is not the checkout's parent")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assertEqual(self.ff_lines(lines), [], "a checkout with commits ahead printed a fast-forward line: %r" % lines)
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with commits ahead changed")
+
+    def test_a_diverged_checkout_is_not_fast_forwarded_and_says_diverged(self):
+        self.commit("local work not pushed")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "diverged")
+        self.assertEqual(self.checkout_state(self.primary), before, "a diverged checkout changed")
+
+    def test_a_merge_cherry_pick_or_revert_in_progress_is_not_fast_forwarded_and_says_merge_or_rebase(self):
+        self.origin_moves_ahead(commits=3)
+        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            with self.subTest(marker=marker):
+                path = os.path.join(self.primary, ".git", marker)
+                self.put(path, self.head_sha() + "\n")
+                try:
+                    self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "",
+                                     "scope: the checkout is dirty with %s set" % marker)
+                    before = self.checkout_state(self.primary)
+                    lines = self.run_startup()
+                    self.assert_one_not_ff(lines, "merge or rebase in progress")
+                    self.assertEqual(self.checkout_state(self.primary), before, "a checkout with %s set changed" % marker)
+                finally:
+                    os.remove(path)
+
+    def test_a_rebase_in_progress_is_not_fast_forwarded_and_says_merge_or_rebase(self):
+        self.origin_moves_ahead(commits=3)
+        for folder in ("rebase-merge", "rebase-apply"):
+            with self.subTest(folder=folder):
+                path = os.path.join(self.primary, ".git", folder)
+                os.makedirs(path)
+                try:
+                    before = self.checkout_state(self.primary)
+                    lines = self.run_startup()
+                    self.assert_one_not_ff(lines, "merge or rebase in progress")
+                    self.assertEqual(self.checkout_state(self.primary), before, "a checkout with %s present changed" % folder)
+                finally:
+                    os.rmdir(path)
+
+    def test_a_detached_head_is_not_fast_forwarded_and_says_detached_head(self):
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "HEAD",
+                         "scope: the checkout is still on a branch")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "detached HEAD")
+        self.assertEqual(self.checkout_state(self.primary), before, "a detached checkout changed")
+
+    def test_a_checkout_on_another_branch_is_not_fast_forwarded_and_says_not_on_main(self):
+        self.checkout_lane()
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "lane-x",
+                         "scope: the checkout is not on lane-x")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "not on main")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout on another branch changed")
+
+    def test_an_agent_worktree_is_not_fast_forwarded_and_says_another_agents_worktree(self):
+        # The primary checkout leaves main, so an agent worktree can hold main. Main is the reason the agent check must win.
+        self.checkout_lane()
+        agent = os.path.join(self.primary, ".claude", "worktrees", "agent-ff1")
+        vcs(self.primary, "worktree", "add", "-q", agent, "main")
+        self.assertEqual(vcs(agent, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
+                         "scope: the agent worktree is not on main")
+        self.origin_moves_ahead(commits=3)
+        before = self.checkout_state(agent)
+        lines = self.run_startup(session_cwd=agent)
+        self.assert_one_not_ff(lines, "another agent's worktree")
+        self.assertEqual(self.checkout_state(agent), before, "an agent worktree changed")
+
+    def assert_failed_refresh_moves_nothing(self, folder, label):
+        fresh = self.origin_tip()
+        stale = self.resolve("origin/main")
+        self.assertNotEqual(stale, fresh, "scope: origin/main is already fresh")
+        before = self.head_sha()
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "fetch")
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line (%s), got %r" % (label, lines))
+        self.assertEqual(self.ff_lines(lines) + self.not_ff_lines(lines), [],
+                         "a failed refresh printed a fast-forward line (%s): %r" % (label, lines))
+        self.assert_no_move(before, "failed refresh, %s" % label)
+        self.assertEqual(self.resolve("origin/main"), stale, "a failed refresh moved origin/main (%s)" % label)
+
+    def test_a_failed_refresh_moves_nothing_and_prints_only_the_did_not_run_line(self):
+        self.origin_moves_ahead(commits=3)
+        with self.subTest(fetch="refused"):
+            folder = self.make_git_stub("refused-fetch-shim", 'if [ "$1" = fetch ]; then exit 1; fi')
+            self.assert_failed_refresh_moves_nothing(folder, "refused")
+        with self.subTest(fetch="killed"):
+            self.assert_failed_refresh_moves_nothing(self.make_fetch_killed_shim(), "killed")
+
+    def test_a_resume_or_compact_start_moves_nothing_even_when_clean_and_behind(self):
+        self.origin_moves_ahead(commits=3)
+        self.assertNotEqual(self.origin_tip(), self.head_sha(), "scope: origin's main is not ahead of the checkout")
+        before = self.head_sha()
+        for source in ("resume", "compact"):
+            with self.subTest(source=source):
+                lines = self.run_checked(source=source)
+                self.assertEqual(self.ff_lines(lines), [], "a %s start printed a fast-forward line: %r" % (source, lines))
+                self.assert_no_move(before, "%s start" % source)
+
+    def test_an_ignored_local_file_that_origin_now_tracks_is_not_fast_forwarded_and_keeps_its_content(self):
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\nlocal.cfg\n")
+        vcs(self.primary, "add", "--", ".gitignore")
+        self.commit("ignore local.cfg")
+        vcs(self.primary, "push", "-q", "origin", "main")
+        local = os.path.join(self.primary, "local.cfg")
+        self.put(local, "local secret\n")
+        self.assertIn("local.cfg", vcs(self.primary, "ls-files", "--others", "--ignored", "--exclude-standard").stdout,
+                      "scope: local.cfg is not an ignored file")
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the tree is not clean")
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"local.cfg": "tracked upstream\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "an ignored file in the way was moved or changed")
+        with open(local, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "local secret\n", "the ignored local file was overwritten")
+
+    def test_a_fast_forward_past_a_stale_claude_md_says_the_grant_lines_above_are_now_current(self):
+        self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
+        self.commit("stale grants")
+        vcs(self.primary, "push", "-q", "origin", "main")
+        fresh = self.advance_origin_main(commits=2, grants=True)
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        differs = [line for line in lines if differ_line("CLAUDE.md", "origin/main").match(line)]
+        self.assertEqual(len(differs), 1, "scope: no CLAUDE.md differs line printed above the fast-forward: %r" % lines)
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line, got %r" % lines)
+        self.assertEqual(found[0].group("note"), "; the grant lines above are now current",
+                         "the fast-forward line does not say the grant lines above are current: %r" % found[0].group(0))
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+
+    def test_a_fast_forward_with_no_differs_line_above_it_has_no_current_note(self):
+        self.origin_moves_ahead(commits=2)
+        lines = self.run_startup()
+        self.assertEqual([line for line in lines if "differs from" in line], [],
+                         "scope: a differs line printed, so this is not the no-differs case: %r" % lines)
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line, got %r" % lines)
+        self.assertIsNone(found[0].group("note"),
+                          "the line says the grant lines are current with no differs line above it: %r" % found[0].group(0))
+
+    def test_a_fast_forward_of_a_develop_default_does_not_say_the_grant_lines_above_are_current(self):
+        # origin's default is develop. The grant lines above compare the checkout with origin/main, which holds fresh grants.
+        # The move changes develop only, so the checkout still differs from origin/main, and the note would be false.
+        self.set_grants(GRANT_FRESH, GRANT_FRESH_DOT)
+        self.commit("fresh grants on main")
+        vcs(self.primary, "push", "-q", "origin", "main")
+        vcs(self.primary, "checkout", "-q", "-b", "develop")
+        self.set_grants(GRANT_STALE, GRANT_FRESH_DOT)
+        self.commit("stale grants on develop")
+        vcs(self.primary, "push", "-q", "origin", "develop")
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/develop")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+        fresh = self.advance_origin_main(commits=2, grants=False, branch="develop")
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's develop did not move past the checkout")
+        main_tip = vcs(self.origin_repo, "rev-parse", "refs/heads/main").stdout.strip()
+        lines = self.run_startup()
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", main_tip)
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "scope: want one fast-forward line for develop, got %r" % lines)
+        self.assertEqual(found[0].group("branch"), "develop", "scope: the line names another branch: %r" % found[0].group(0))
+        self.assertEqual(self.head_sha(), fresh, "scope: the checkout did not move to origin/develop")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                            "scope: the checkout's CLAUDE.md matches origin/main after the move")
+        self.assertIsNone(found[0].group("note"),
+                          "the line says the grant lines above are current, but they compare with origin/main: %r"
+                          % found[0].group(0))
+
+    def assert_live_pin_moves_nothing(self, through_link):
+        self.make_live_pin()
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.origin_moves_ahead(commits=2)
+        where = self.pin
+        if through_link:
+            where = self.link
+            self.link_to(self.pin, self.link)
+        before = self.checkout_state(self.pin)
+        lines = self.run_startup(session_cwd=where)
+        self.assertEqual(len([line for line in lines if "live pin" in line]), 1,
+                         "scope: the hook did not name the live pin: %r" % lines)
+        self.assertEqual(self.ff_lines(lines) + self.not_ff_lines(lines), [],
+                         "a live pin printed a fast-forward line: %r" % lines)
+        self.assertEqual(self.checkout_state(self.pin), before, "a live pin was moved")
+
+    def test_a_live_pin_beside_its_install_script_moves_nothing_and_prints_no_fast_forward_line(self):
+        self.assert_live_pin_moves_nothing(through_link=False)
+
+    def test_a_live_pin_reached_through_its_live_link_moves_nothing_and_prints_no_fast_forward_line(self):
+        self.assert_live_pin_moves_nothing(through_link=True)
+
+    def test_a_merge_blocked_by_an_index_lock_prints_the_merge_failed_line_and_writes_nothing(self):
+        self.origin_moves_ahead(commits=2)
+        lock = os.path.join(self.primary, ".git", "index.lock")
+        self.put(lock, "")
+        try:
+            index_path = os.path.join(self.primary, ".git", "index")
+            with open(index_path, "rb") as handle:
+                index_before = handle.read()
+            before = self.checkout_state(self.primary)
+            lines = self.run_startup()
+            self.assert_one_not_ff(lines, "the merge failed")
+            self.assertEqual(self.checkout_state(self.primary), before, "a blocked merge changed the checkout")
+            with open(index_path, "rb") as handle:
+                self.assertEqual(handle.read(), index_before, "a blocked merge wrote the index")
+            self.assertTrue(os.path.exists(lock), "the hook removed the index lock")
+        finally:
+            os.remove(lock)
+
+    def test_a_stub_git_whose_merge_fails_prints_the_merge_failed_line_and_moves_nothing(self):
+        self.origin_moves_ahead(commits=2)
+        folder = self.make_git_stub("merge-fails-shim", 'if [ "$1" = merge ]; then exit 1; fi')
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "merge")
+        self.assert_one_not_ff(lines, "the merge failed")
+        self.assertEqual(self.checkout_state(self.primary), before, "a failed merge changed the checkout")
+
+    def test_a_stub_git_whose_added_paths_diff_fails_prints_the_could_not_be_read_line_and_moves_nothing(self):
+        # A failed read of the added paths is not an empty list. The move is held, and the one line says why.
+        self.origin_moves_ahead(commits=2)
+        folder = self.make_git_stub("diff-fails-shim", 'if [ "$1" = diff ]; then exit 128; fi')
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "diff")
+        self.assert_one_not_ff(lines, "the added paths could not be read")
+        found = self.not_ff_lines(lines)[0]
+        self.assertTrue(same_checkout(found.group("top"), self.primary),
+                        "the line names another checkout: %r" % found.group(0))
+        self.assertEqual(self.checkout_state(self.primary), before,
+                         "a checkout whose added paths could not be read changed")
+
+    def publish_checkout(self, files, patterns):
+        """Commits `files` (path to text) on the checkout's main, with a .gitignore that ignores `patterns`, and pushes
+        main, so origin and the checkout agree before origin moves on."""
+        for rel, text in files.items():
+            self.put(os.path.join(self.primary, *rel.split("/")), text)
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\n" + "".join("%s\n" % p for p in patterns))
+        vcs(self.primary, "add", "-f", "--", ".gitignore", *files)
+        self.commit("publish the checkout's files")
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def write_ignored(self, rel, text):
+        """A local file the checkout ignores. It is written after publish_checkout and never committed."""
+        path = os.path.join(self.primary, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.put(path, text)
+        return path
+
+    def assert_ignored_listed(self, rel):
+        listed = vcs(self.primary, "ls-files", "--others", "--ignored", "--exclude-standard").stdout.splitlines()
+        self.assertIn(rel, listed, "scope: %s is not an ignored local file" % rel)
+
+    def assert_tree_clean(self):
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the tree is not clean")
+
+    @staticmethod
+    def read_text(path):
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_an_ignored_file_that_origin_renames_a_tracked_file_onto_is_not_overwritten(self):
+        self.publish_checkout({"old.txt": "tracked text\n"}, ["ign-moved.txt"])
+        local = self.write_ignored("ign-moved.txt", "local secret\n")
+        self.assert_ignored_listed("ign-moved.txt")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-moved.txt": "tracked text\n"},
+                                         remove=["old.txt"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file in the way changed")
+        self.assertEqual(self.read_text(local), "local secret\n", "the ignored file was overwritten by the rename")
+
+    def test_an_ignored_file_where_origin_adds_a_file_under_it_is_not_overwritten(self):
+        self.publish_checkout({}, ["ign-pf"])
+        local = self.write_ignored("ign-pf", "local file\n")
+        self.assert_ignored_listed("ign-pf")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-pf/child": "upstream child\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file in the way changed")
+        self.assertTrue(os.path.isfile(local), "the ignored file was replaced by a directory")
+        self.assertEqual(self.read_text(local), "local file\n", "the ignored file was overwritten")
+
+    def test_an_ignored_symlink_where_origin_adds_a_file_under_it_is_not_followed_or_replaced(self):
+        self.publish_checkout({}, ["ign-ps"])
+        scratch = os.path.join(self.root, "scratch")
+        os.makedirs(scratch)
+        self.put(os.path.join(scratch, "marker.txt"), "scratch marker\n")
+        link = os.path.join(self.primary, "ign-ps")
+        self.link_to(scratch, link)
+        self.assert_ignored_listed("ign-ps")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-ps/child": "upstream child\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored symlink in the way changed")
+        self.assertTrue(os.path.islink(link), "the ignored symlink was replaced")
+        self.assertFalse(os.path.exists(os.path.join(scratch, "child")), "the move wrote into the symlink's target")
+
+    def test_a_tracked_directory_that_origin_replaces_with_a_file_still_fast_forwards(self):
+        self.publish_checkout({"tracked/f": "tracked f\n"}, [])
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "tracked")), "scope: tracked is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=2, grants=False, files={"tracked": "now a file\n"},
+                                         remove=["tracked/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line: a file that replaces a tracked directory is a move, "
+                                        "got %r" % lines)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertTrue(os.path.isfile(os.path.join(self.primary, "tracked")), "tracked is not the file origin added")
+
+    def test_an_ignored_directory_that_origin_adds_a_new_file_into_still_fast_forwards_and_keeps_its_files(self):
+        # Control: green on the current hook. The move adds a file that is absent, so nothing in the way.
+        self.publish_checkout({}, ["build/"])
+        kept = self.write_ignored("build/other.txt", "local other\n")
+        self.assert_ignored_listed("build/other.txt")
+        self.assertFalse(os.path.exists(os.path.join(self.primary, "build", "new.txt")), "scope: build/new.txt is present")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=2, grants=False, files={"build/new.txt": "upstream new\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line for a file origin adds into an ignored directory, "
+                                        "got %r" % lines)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertEqual(self.read_text(kept), "local other\n", "the ignored directory's own file changed")
+
+    def test_a_directory_holding_an_ignored_file_that_origin_replaces_with_a_file_is_not_moved_over(self):
+        self.publish_checkout({"t/f": "tracked f\n"}, ["*.log"])
+        local = self.write_ignored("t/ign.log", "local log\n")
+        self.assert_ignored_listed("t/ign.log")
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "t")), "scope: t is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"t": "now a file\n"}, remove=["t/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file under t changed")
+        self.assertTrue(os.path.isfile(local), "the ignored file under t was removed")
+        self.assertEqual(self.read_text(local), "local log\n", "the ignored file under t was overwritten")
+
+    def test_a_directory_holding_an_ignored_symlink_that_origin_replaces_with_a_file_is_not_moved_over(self):
+        self.publish_checkout({"t/f": "tracked f\n"}, ["*.log"])
+        scratch = os.path.join(self.root, "scratch")
+        os.makedirs(scratch)
+        marker = os.path.join(scratch, "marker.txt")
+        self.put(marker, "scratch marker\n")
+        link = os.path.join(self.primary, "t", "ign.log")
+        self.link_to(marker, link)
+        self.assert_ignored_listed("t/ign.log")
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "t")), "scope: t is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"t": "now a file\n"}, remove=["t/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored symlink under t changed")
+        self.assertTrue(os.path.islink(link), "the ignored symlink under t was replaced")
+        self.assertEqual(os.path.realpath(link), os.path.realpath(marker), "the ignored symlink now points elsewhere")
+
+    def test_an_ignored_file_named_head_does_not_hide_the_ignored_file_origin_force_adds(self):
+        # HEAD is also a revision name, so a worktree file named HEAD makes the hook's revision arguments ambiguous. The
+        # ignored x.log that origin force-adds must still stop the move, and keep its local content.
+        self.publish_checkout({}, ["*.log"])
+        local = self.write_ignored("x.log", "local log\n")
+        self.assert_ignored_listed("x.log")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"x.log": "upstream log\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        exclude = os.path.join(self.primary, ".git", "info", "exclude")
+        os.makedirs(os.path.dirname(exclude), exist_ok=True)
+        with open(exclude, "a", encoding="utf-8") as handle:
+            handle.write("\nHEAD\n")
+        try:
+            self.put(os.path.join(self.primary, "HEAD"), "local HEAD file\n")
+        except OSError as error:
+            self.skipTest("this file system refuses a file named HEAD: %s" % error)
+        self.assert_ignored_listed("HEAD")
+        self.assert_tree_clean()
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file named HEAD changed")
+        self.assertEqual(self.read_text(local), "local log\n", "the ignored x.log was overwritten by origin's force-added file")
+
+    def test_an_ignored_file_origin_force_adds_is_held_when_the_session_starts_in_a_subfolder(self):
+        # The ignored-file check reads each added path from the process cwd, not from the toplevel. From src/ the toplevel's
+        # build/out.txt is not there to see, so the move runs over it. The toplevel run is the control on the same layout.
+        self.publish_checkout({"src/app.txt": "app\n"}, ["build/"])
+        local = self.write_ignored("build/out.txt", "local content\n")
+        self.assert_ignored_listed("build/out.txt")
+        self.assert_tree_clean()
+        self.assertIn("src/app.txt", vcs(self.primary, "ls-files").stdout.splitlines(), "scope: src/app.txt is not tracked")
+        subfolder = os.path.join(self.primary, "src")
+        self.assertTrue(os.path.isdir(subfolder), "scope: src is not a directory")
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"build/out.txt": "upstream content\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        for label, where in (("toplevel", self.primary), ("subfolder", subfolder)):
+            with self.subTest(cwd=label):
+                before = self.checkout_state(self.primary)
+                lines = self.run_startup(session_cwd=where)
+                self.assert_one_not_ff(lines, "an ignored file is in the way")
+                self.assertTrue(same_checkout(self.not_ff_lines(lines)[0].group("top"), self.primary),
+                                "the not-fast-forwarded line names another checkout: %r" % lines)
+                self.assertEqual(self.checkout_state(self.primary), before,
+                                 "a session started in the %s moved the checkout over an ignored file" % label)
+                self.assertEqual(self.read_text(local), "local content\n",
+                                 "a session started in the %s overwrote the ignored build/out.txt" % label)
 
 
 if __name__ == "__main__":

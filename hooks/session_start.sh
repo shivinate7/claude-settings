@@ -1,5 +1,6 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; a default branch or local main behind or off origin; more than 50 agent worktrees; a check that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the caution level.
+# At a startup start, once the origin refresh ran, it fast-forwards a clean checkout on the default branch that is behind origin and says so; a checkout that is behind but cannot move says why and changes nothing.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -182,6 +183,7 @@ default_branch="${default_branch#origin/}"
 # exits. It is bounded by git's own run (an ls-remote, or a fetch of one or two refs) and is never a daemon. No other
 # timer. The hook itself keeps no file; that late git writes only its own refs, objects and FETCH_HEAD.
 gm_unref=""
+gm_differs=""
 gm_remote_read=""
 gm_default="$default_branch"
 if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
@@ -230,10 +232,12 @@ if [ -n "$gm_out" ]; then
     gm_note=""
     [ -n "$gm_unref" ] && gm_note="; $gm_ref is unrefreshed"
     if [ "$gm_head1" != "$gm_ref1" ]; then
+      [ "$gm_ref" = "origin/$gm_default" ] && gm_differs=1
       printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
     if [ "$gm_head2" != "$gm_ref2" ]; then
+      [ "$gm_ref" = "origin/$gm_default" ] && gm_differs=1
       printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
@@ -242,6 +246,103 @@ if [ -n "$gm_out" ]; then
   fi
 fi
 
+# Step fast-forward-clean-start: a session that starts on a stale checkout once read old files as current. At a
+# startup start only (a resume or compact start keeps what the session already read), when the refresh above ran,
+# a checkout that is behind origin/<default> and clean moves to it with `git merge --ff-only`, which can only move
+# forward and never rewrites a commit. Clean: no uncommitted or untracked file (the dirty count read at the top), no
+# merge, cherry-pick, revert or rebase in progress, no commit ahead of origin, HEAD on the default branch. A checkout
+# that is behind but not clean is left as it is and says why, one line, so the session knows its files are stale. An
+# agent worktree is another session's, so it is never moved. The live pin is skipped: merge-reinstalls-from-main owns it.
+# Up to date, or ahead only: no line (the later ahead check covers that). The default is $gm_default, the branch the
+# refresh fetched, so no second fetch runs. A merge that fails says so and leaves git's own state.
+# Cost: one git rev-list per startup start, plus one git rev-parse for the in-progress files and one git diff for the
+# added paths when the checkout is behind, plus one git ls-files per added path with something on disk in its way, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
+# hook; the merge writes the working tree, index and HEAD of this checkout only.
+ff_done=""
+if [ "$source" = startup ] && [ "${gm_fetch_rc:-1}" -eq 0 ] 2>/dev/null && [ -n "$gm_default" ]; then
+  ff_base=""
+  case "$toplevel" in
+    *-live-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ff_base="${toplevel%-live-*}" ;;
+    *-live) ff_base="${toplevel%-live}" ;;
+  esac
+  if [ -z "$ff_base" ] || [ ! -f "$ff_base/merge/install_from_main.sh" ]; then
+    ff_counts=$(cd "$toplevel" 2>/dev/null && git rev-list --left-right --count "HEAD...origin/$gm_default" 2>/dev/null)
+    ff_ahead=""
+    ff_behind=""
+    read -r ff_ahead ff_behind <<EOF
+$ff_counts
+EOF
+    if [ -n "$ff_behind" ] && [ "$ff_behind" -gt 0 ] 2>/dev/null; then
+      ff_reason=""
+      case "$toplevel" in
+        */.claude/worktrees/agent-*) ff_reason="another agent's worktree" ;;
+      esac
+      if [ -z "$ff_reason" ]; then
+        if [ "$branch" = "detached" ]; then
+          ff_reason="detached HEAD"
+        elif [ "$branch" != "$gm_default" ]; then
+          ff_reason="not on $gm_default"
+        else
+          ff_prog=$(cd "$toplevel" 2>/dev/null && git rev-parse --git-path MERGE_HEAD --git-path CHERRY_PICK_HEAD \
+            --git-path REVERT_HEAD --git-path rebase-merge --git-path rebase-apply 2>/dev/null \
+            | while read -r ff_p; do [ -e "$ff_p" ] && { echo 1; break; }; done)
+          if [ -n "$ff_prog" ]; then
+            ff_reason="merge or rebase in progress"
+          elif [ "$n" -gt 0 ] 2>/dev/null; then
+            ff_reason="uncommitted changes"
+          elif [ "$ff_ahead" -gt 0 ] 2>/dev/null; then
+            ff_reason="diverged"
+          else
+            # Something untracked on disk at a path the move adds, or a file or symlink at one of its parents, is an
+            # ignored one (a non-ignored one made the tree dirty above): git would overwrite it or write through it, so
+            # the move does not run. A tracked one is git's own to replace, and a parent directory holds the new file
+            # without harm. --no-renames lists a rename's target as added, so it is checked too.
+            # A tracked directory that origin replaces with a file goes with whatever ignored files it holds, so that
+            # case holds too. Literal pathspecs, so a name holding * or ? cannot match some other tracked path. No
+            # comment, case or quote sits inside the substitution below: bash 3.2 (macOS sh) mis-parses those there.
+            ff_raw=$(cd "$toplevel" 2>/dev/null && { git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" -- 2>/dev/null; printf 'rc=%s\n' "$?"; } | tr '\0' '\n')
+            ff_rc=$(printf '%s\n' "$ff_raw" | tail -n 1)
+            ff_hit=$(cd "$toplevel" 2>/dev/null && printf '%s\n' "$ff_raw" | sed '$d' | while IFS= read -r ff_p; do
+                  ff_in=""
+                  if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then ff_in="$ff_p"; fi
+                  ff_d="$ff_p"
+                  while [ -z "$ff_in" ]; do
+                    [ "${ff_d%/*}" != "$ff_d" ] || break
+                    ff_d="${ff_d%/*}"
+                    if [ -L "$ff_d" ] || { [ -e "$ff_d" ] && [ ! -d "$ff_d" ]; }; then ff_in="$ff_d"; fi
+                  done
+                  if [ -n "$ff_in" ]; then
+                    if [ -z "$(git --literal-pathspecs ls-files -- "$ff_in" 2>/dev/null)" ]; then echo 1; break; fi
+                    if [ -d "$ff_in" ] && [ ! -L "$ff_in" ] \
+                      && [ -n "$(git --literal-pathspecs ls-files -z -o -i --exclude-standard -- "$ff_in" 2>/dev/null | tr '\0' '\n')" ]; then echo 1; break; fi
+                  fi
+                done)
+            if [ "$ff_rc" != "rc=0" ]; then
+              ff_reason="the added paths could not be read"
+            elif [ -n "$ff_hit" ]; then
+              ff_reason="an ignored file is in the way"
+            fi
+          fi
+        fi
+      fi
+      if [ -n "$ff_reason" ]; then
+        printf 'checkout %s: not fast-forwarded, %s\n' "$toplevel" "$ff_reason"
+      else
+        ff_old=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 HEAD 2>/dev/null)
+        ff_new=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 "origin/$gm_default" 2>/dev/null)
+        if (cd "$toplevel" 2>/dev/null && git merge --ff-only --quiet "origin/$gm_default" >/dev/null 2>&1); then
+          ff_note=""
+          # The grant lines printed above compared the old files; after the move they match origin's.
+          [ -n "$gm_differs" ] && ff_note="; the grant lines above are now current"
+          printf 'checkout %s: fast-forwarded %s %s -> %s, %s commits%s\n' "$toplevel" "$branch" "$ff_old" "$ff_new" "$ff_behind" "$ff_note"
+          ff_done=1
+        else
+          printf 'checkout %s: not fast-forwarded, the merge failed\n' "$toplevel"
+        fi
+      fi
+    fi
+  fi
+fi
 
 # Decision merge-reinstalls-from-main, ruling 1: no work runs in the live pin. A cwd whose toplevel is the
 # pin says so, and names the clone to cd to. Same test as live_pin_clone in install.sh, repeated here
@@ -437,7 +538,7 @@ fi
 # the fetch never moves a local branch (it may write FETCH_HEAD and remote-tracking refs). An unknown default branch means no line.
 # When the refresh read the remote and its HEAD names another branch, the local default is stale and was not fetched,
 # so a count against it could read 0 behind on a stale ref: no line then.
-if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
+if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] && [ -z "$ff_done" ] \
    && { [ -z "$gm_remote_read" ] || [ "$gm_default" = "$default_branch" ]; } \
    && { [ -z "$d" ] || [ "$(cd "$toplevel" 2>/dev/null && pwd -P)" != "$(cd "$d" 2>/dev/null && pwd -P)" ]; }; then
   if bounded_fetch "$toplevel"; then
