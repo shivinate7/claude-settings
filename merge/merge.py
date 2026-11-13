@@ -4886,7 +4886,7 @@ def lane_list(numbers):
 
 def return_to_draft(h, n, info):
     """Before a push to the integration branch of pull request `n`: send a ready one back to draft, so the push's CI run is a draft run and `--ready`
-    lints the new head. A refused return never stops the push; it restarts CI whatever the flag says. A draft is left as it is.
+    checks the new head. A refused return never stops the push; it restarts CI whatever the flag says. A draft is left as it is.
     -> True when the pull request is a draft now; the caller says `needs_ready` after the push."""
     if info["draft"]:
         return True
@@ -5270,7 +5270,7 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
         refuse_draft_runs(h, heads, unknown_ok, ready=True)
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
-        cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the lint: a config that cannot be read stops the run before the 14 minutes
+        cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the ready checks: a config that cannot be read stops the run early
         try:
             batch_ready_checks(root, cfg, pr, name, branch, base)  # a FAIL here blames by the same path as a lint FAIL
         except LintFail as e:
