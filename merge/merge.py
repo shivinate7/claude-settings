@@ -158,7 +158,7 @@
                           check, pushes nothing, takes no lock. A cloud run needs the batch-runner role.
   merge --batch-drop NAME PR
                           take PR, and each frozen lane whose head contains PR's head, off batch-NAME. PR must have a stored blame
-                          (Blamed:, from --ready or --blame); any other lane is refused. Rebuild the branch from the batch's
+                          (Blamed:, from --ready, --blame, or a debt refusal of the integration PR that names it alone); any other lane is refused. Rebuild the branch from the batch's
                           base with the lanes left, force-with-lease, and rewrite the block with a Dropped line per PR. Rebuilds each open
                           batch that says `On: batch-NAME` on the new head. Before the push it asks the host to return a ready pull
                           request to draft; Host.to_draft sends nothing, so it says so and the push restarts CI. The batch then needs
@@ -553,7 +553,24 @@ def debt_check(wt, base_ref, host, info):
         text = "the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}"
         if all(f.kind == "unknown" for f in found):  # each is a check that could not run: no finding is proven
             raise Unread(text)
+        blame_debt_lane(wt, base_ref, host, info, debt, found)
         raise Dropped(text)
+
+def blame_debt_lane(wt, base_ref, host, info, debt, found):
+    """A debt refusal of a batch integration PR stores the one frozen lane that closes the debts as Blamed, so --batch-drop may take it off.
+    A lane PR, or a refusal with no single lane, stores nothing. The store is best effort: a failed write never hides the refusal."""
+    if not is_integration_pr(info):
+        return
+    block = parse_freeze(info["body"])
+    try:
+        lane = debt_blamed_lane(wt, base_ref, [f.slug for f in found], block["lanes"], debt)
+        if lane is None:
+            return
+        record_in_block(host, info["branch"], blamed=sorted({*block["blamed"], lane}))
+    except (Stop, debt.Unknown) as e:
+        say(f"merge: no blame was stored for the debt refusal: {e}")
+        return
+    say(f"merge: blame stored: #{lane} is the one lane that closes each debt refused below. To take it off the batch, run: merge --batch-drop {block['name']} {lane}")
 
 def say(*lines):
     text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
@@ -5084,6 +5101,19 @@ def blamed_lanes(root, fail, lanes, base):
         if hit:
             blamed[n] = hit
     return blamed
+
+def debt_blamed_lane(wt, base_ref, slugs, lanes, debt):
+    """-> the one frozen lane (PR) whose diff against `base_ref` closes each debt of `slugs`, or None when a slug has no such lane, has two, or the lanes
+    differ. A close is read by check_debt_retire.closes, the home of what closes a debt (delete or rename out of the debts folder). Raises debt.Unknown."""
+    closing = collections.defaultdict(set)
+    for n, head in sorted(lanes.items()):
+        got = debt.closes(wt, base_ref, head)
+        for old, _new in got[1] if got else ():
+            closing[os.path.basename(old)[:-3]].add(n)
+    hit = [closing[s] for s in slugs]
+    if any(len(x) != 1 for x in hit) or len(set.union(*hit)) != 1:
+        return None
+    return next(iter(hit[0]))
 
 def blame_lines(name, blamed, base, stored=True):
     """The lines a FAILing lint of batch-NAME's head adds: each blamed lane with its drop command when its blame is `stored`, else with the --blame route, since a
