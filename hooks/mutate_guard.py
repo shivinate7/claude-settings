@@ -80,6 +80,10 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+# The merge tool's review-record rules (owner ruling own-r3-reviewer-sonnet-high). Its suite is unittest, which prints
+# each failure as `FAIL: <case>` on stderr; run_suite reads those lines too.
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
+MERGE_SUITE = os.path.join(HERE, "..", "merge", "test_merge_grant.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +96,7 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    "merge": (MERGE_TOOL, MERGE_SUITE, "MERGE_UNDER_TEST", "merge"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1361,34 +1366,17 @@ MUTATIONS = [
     ("step-up: the line-start rows read the first line only, so a round line after the first line walks past",
      '            found = list(rx.finditer(brief))',
      '            found = list(rx.finditer(first))', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
-    ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
+    ("step-up: the first-line round row is dropped, so a Round 2 reviewer behind a role word on line one walks past",
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
-     'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
+     'first-line marker: reviewer with no model and a role word before Round 2 of 3 on line one is denied'),
     ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
      'ROLE_ROUND_EXACT = ("2",)',
-     'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
-    ("step-up: a builder round 3 on a non-opus model is no longer refused",
-     '        want = role_round_model(rounds, role, "3")\n        if want and (',
-     '        want = role_round_model(rounds, role, "3")\n        if False and want and (',
-     "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
-    ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on sonnet walks past",
-     'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("try",)', "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
-    ("step-up: the builder marker drops Try before its sunset, so a Try 3 of 3 builder on sonnet walks past",
-     'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("round",)', "guard", 'floor step-up: builder Try 3 of 3 on sonnet is denied'),
-    ("step-up: any builder round steps up, so a Round 2 of 3 builder on sonnet is refused",
-     'kind.lower() in BUILDER_MARKERS and n == "3"',
-     'kind.lower() in BUILDER_MARKERS and n in "23"', "guard",
-     'floor step-up: builder Round 2 of 3 on sonnet is allowed'),
+     'ROLE_ROUND_EXACT = ("2", "3")', "guard",
+     "floor step-up: reviewer's last round on opus is denied by the Opus ceiling, with no record to read"),
     ("ceiling: the Opus spawn denial never fires, so an Opus spawn passes unrefused",
      'if "opus" not in str(tool_input.get("model") or "").lower():\n        return False',
      'if True:\n        return False', "guard", 'ceiling: Agent with model opus and no role is denied'),
-    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unrefused",
-     'if role == "builder" and builder_third_round(brief):',
-     'if builder_third_round(brief):', "guard",
-     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
     ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
      'if unseen & {"model", "agentType"} or not keys.get("model"):',
      'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
@@ -1403,7 +1391,31 @@ MUTATIONS = [
     ("ceiling: the Workflow scan judges a shorthand agentType as general-purpose, so a designer loop on opus is refused",
      'if "..." in unseen and "agentType" not in keys:',
      'if False:', "guard",
-     'role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed'),
+     'role-model: Workflow designer and Plan on opus, a shorthand agentType in a loop, are allowed'),
+    # The round-row refusal of a reviewer's last round (owner ruling own-r3-reviewer-sonnet-high): no row above it, no override.
+    ("round row: a reviewer's last round past its row skips the no-opus check and reaches the Opus ceiling",
+     '    for kind, n in brief_markers(prompt):\n        if kind.lower() == "round" and n in ROLE_ROUND_NO_OPUS:',
+     '    for kind, n in brief_markers(prompt):\n        if False and kind.lower() == "round" and n in ROLE_ROUND_NO_OPUS:', "guard",
+     "agent-role-model: a reviewer spawn on opus in round 3 is refused with the remedy use sonnet, and names no override"),
+    ("never-lifted: the no-opus refusal of a reviewer's last round is liftable, so an owner override reaches it",
+     "            or role_model_check(tool, tool_input)[1].startswith(ROLE_ROUND_NO_OPUS_MATCH)\n",
+     "", "guard", "override: the model and role guards stay refused under a one-act override"),
+    ("veto: the no-opus refusal keeps the override line, so it names an override that cannot lift it",
+     "    if bare and vetoed:\n        reason = bare_reason",
+     "    if False:\n        reason = bare_reason", "guard",
+     "role-model: reviewer on opus with Round 3 of 3 is denied under agent-role-model, with no override line"),
+    ("lane kind: a guard-or-check lane is read as a product lane, so it takes the product effort",
+     '    if marker_line(second, REVIEW_GUARD_MARKER):\n        return "guard"',
+     '    if False:\n        return "guard"', "guard",
+     "lane-effort-pin: a guard-or-check lane at effort high is allowed under the kind table"),
+    ("role row labels: no lane or batch runner label is read whole, so the table splits a lane label",
+     'ROLE_ROW_LABELS = tuple(LANE_KIND_LABELS.values()) + ("batch runner",)',
+     "ROLE_ROW_LABELS = ()", "guard",
+     "role-model: the role table reads the lane rows and the batch runner row whole, and splits no lane label"),
+    ("merge: a reviewer's round 3 on opus is accepted again, the clause the round-3 Sonnet rule removed",
+     '                if want not in model.lower() and not (n >= 4 and "opus" in model.lower()):',
+     '                if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):', "merge",
+     "test_round_three_on_opus_is_refused_and_round_three_on_sonnet_passes"),
     ("role row: a Workflow agent() call loses its agentType, so an Explore on sonnet runs as general-purpose",
      'yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",',
      'yield {"subagent_type": None, "model": keys["model"], "prompt": prompt or "",', "guard",
@@ -4455,6 +4467,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env.pop("DECISION_WATCH_UNDER_TEST", None)
     env.pop("RULING_HOME_UNDER_TEST", None)
     env.pop("CALL_JUDGE_UNDER_TEST", None)
+    env.pop("MERGE_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
@@ -4474,6 +4487,8 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
     red = [line for line in lines if line.startswith("FAIL")]
+    # unittest prints its failures to stderr, as `FAIL: <case> (<class>)`; the guard suite prints to stdout.
+    red += [line for line in error_text.splitlines() if line.startswith("FAIL:")]
     # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
     ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
     return result.returncode, red, ran, mutate_shared.diagnostic_lines(result.stdout + "\n" + error_text)
@@ -4530,6 +4545,25 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
+    if target == "merge":
+        # merge.py puts hooks/ and lint/ on its path beside its own folder, and reads actions/ci-alarm/events.json. The copy
+        # goes at <root>/merge/merge.py, so each of those paths resolves as it does in a checkout.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
+        mutate_shared.guard_tree(os.path.join(root, "hooks"))
+        lay_out_guard_reads(root)
+        # The suite reads the records (docs/decisions, through lint/test_rule_audit.py) at import, so the copy holds docs/ too.
+        # Its cite_homes reads the rule anchors of <root>/CLAUDE.md and output-styles/ at import as well.
+        tracked_tree.copy_tracked(root, "lint", "docs", "output-styles", root=os.path.dirname(HERE))
+        shutil.copy(os.path.join(os.path.dirname(HERE), "CLAUDE.md"), os.path.join(root, "CLAUDE.md"))
+        text = sources[target]
+        if old != new:  # old == new is the clean-layout control: no anchor to find
+            if text.count(old) != 1:
+                raise mutate_shared.StaleMutant("STALE: the merge anchor is in %d places in merge.py" % text.count(old))
+            text = text.replace(old, new, 1)
+        copy_path = os.path.join(root, "merge", "merge.py")
+        with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        return copy_path
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
