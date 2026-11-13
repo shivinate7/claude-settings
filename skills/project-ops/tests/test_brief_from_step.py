@@ -83,6 +83,14 @@ SRC_UNNAMED = "page item 12"
 SRC_PARA = "page item 13"
 SRC_LONG = "page item 14"
 SRC_DASH = "page item 15"
+Q_RELAYED = "Owner words relayed by the coordinator: keep the drain small."
+AT_RELAYED = "2026-11-12T17:17:00-06:00"
+RELAYED = "relayed by lane bg-tail-loses-verdict, 11:51 CST Nov 13; not a direct owner quote"
+UNREADABLE = "roadmap/rulings/unreadable-one.json"  # a ruling file that is not JSON
+MODEL_NAME = re.compile(r"sonnet|haiku|opus", re.I)
+# The R9 ruling's own words and time, copied from roadmap/rulings/r9.json on origin/roadmap,
+# so no test reads that branch.
+R9_WORDS = ("passes round 1 is done", "fixed under a fix verifier waits for round 3", "15:44")
 
 
 def setUpModule():
@@ -142,6 +150,13 @@ def note_with_block():
     """A step note that names one path and pastes a 40-line file body in a code fence."""
     body = "\n".join("    value_%02d = compute(%d)" % (n, n) for n in range(PASTED_LINES))
     return "Coordinator note: edit %s only.\n\n```python\n%s\n```\n" % (PATH_IN_NOTE, body)
+
+
+def unreadable_count(repo):
+    """The ruling files in the store's folder that read_store does not return: the folder's list less the entries."""
+    listed = fixture.git(repo, "ls-tree", "--name-only", "refs/heads/" + REF, "roadmap/rulings/")
+    files = [name for name in listed.split("\n") if name.endswith(".json")]
+    return len(files) - len(fixture.ruled_store.read_store(repo, REF)[0])
 
 
 def template_tail():
@@ -391,6 +406,77 @@ class TemplateTail(unittest.TestCase):
     def test_report_cap_in_lines_is_named(self):
         # Already in the template on the base commit: a guard that the rewritten template keeps the cap.
         self.assertTrue(tail_has(r"\bcap\b", r"\blines\b"), "the template does not cap the report in lines")
+
+
+class TemplateRules(unittest.TestCase):
+    """The template's own lines: the cs-topic tag, no ruling words, the Fences line, the practice decisions, models."""
+
+    def test_template_keeps_the_cs_topic_tag_line(self):
+        self.assertTrue(any("cs-topic:" in line for line in read_template().splitlines()),
+                        "the template has no line naming the cs-topic tag")
+
+    def test_template_points_at_r9_by_id_and_restates_nothing(self):
+        text = read_template()
+        self.assertTrue(re.search(r"\br9\b", text, re.I), "the template does not point at ruling r9 by id")
+        for phrase in R9_WORDS:
+            self.assertNotIn(phrase, text, "the template restates ruling r9: %r" % phrase)
+
+    def test_task_part_holds_a_fences_line(self):
+        task = section(read_template(), "Task")
+        self.assertIsNotNone(task, "the template has no ## Task section")
+        self.assertTrue(re.search(r"^Fences\b", task, re.M), "the Task part has no Fences line")
+
+    def test_template_names_test_practices_and_merge_practices_on_one_line(self):
+        self.assertTrue(any("test-practices" in line and "merge-practices" in line
+                            for line in read_template().splitlines()),
+                        "no line names the decisions test-practices and merge-practices")
+
+    def test_template_names_no_model_but_the_roadmap_fetch_line(self):
+        offenders = [line for line in read_template().splitlines()
+                     if MODEL_NAME.search(line) and "refs/heads/roadmap" not in line]
+        self.assertEqual(offenders, [], "the template names a model outside the roadmap fetch line")
+
+    def test_template_says_each_agent_runs_its_role_row_in_agent_model_cap(self):
+        self.assertTrue(any("agent-model-cap" in line and re.search(r"\brole\b", line, re.I)
+                            for line in read_template().splitlines()),
+                        "no line says each agent runs its role row in agent-model-cap")
+
+
+class RulingsAndSource(BriefCase):
+
+    def test_unparseable_ruling_file_is_counted_and_not_read_as_none(self):
+        repo = self.make_repo(step=step_doc(), extra={UNREADABLE: "{ not json"})
+        self.assertEqual(unreadable_count(repo), 1, "control: the store does not hold one unreadable ruling file")
+        out = self.build(repo)
+        lines = [line.strip() for line in out.splitlines()]
+        self.assertIn("Rulings: unknown (1 unreadable ruling file)", lines,
+                      "the unreadable ruling file is not counted in the Rulings line")
+        self.assertNotIn("None names this step", out, "an unreadable ruling file reads as no ruling")
+
+    def test_unparseable_ruling_file_beside_a_ruling_still_says_unknown(self):
+        repo = self.make_repo(step=step_doc(), extra={UNREADABLE: "{ not json"}, rulings={
+            "open-one": fixture.entry("open-one", step=SLUG, quote=Q_OPEN, at=AT_OPEN, source=SRC_OPEN)})
+        self.assertEqual(unreadable_count(repo), 1, "control: the store does not hold one unreadable ruling file")
+        out = self.build(repo)
+        self.assertIn(Q_OPEN, out, "the readable ruling for the step is missing")
+        self.assertIn("Rulings: unknown (1 unreadable ruling file)", [line.strip() for line in out.splitlines()],
+                      "the unreadable ruling file beside a ruling is not counted in the Rulings line")
+
+    def test_step_without_a_source_says_source_unknown(self):
+        step = step_doc()
+        del step["source"]
+        lines = [line.strip() for line in self.build(self.make_repo(step=step)).splitlines()]
+        self.assertNotIn("Source:", lines, "the Source line is blank for a step with no source")
+        self.assertIn("Source: unknown", lines, "a step with no source does not print Source: unknown")
+
+    def test_relayed_source_prints_on_the_ruling_line_next_to_the_quote(self):
+        repo = self.make_repo(step=step_doc(), rulings={
+            "relayed-one": fixture.entry("relayed-one", step=SLUG, quote=Q_RELAYED, at=AT_RELAYED, source=RELAYED)})
+        out = self.build(repo)
+        self.assertIn(Q_RELAYED, out, "the relayed ruling's quote is missing")
+        quote_lines = [line for line in out.splitlines() if Q_RELAYED in line]
+        self.assertTrue(any(RELAYED in line for line in quote_lines),
+                        "the relayed source is not printed on the quote's line")
 
 
 if __name__ == "__main__":
