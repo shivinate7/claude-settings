@@ -2271,3 +2271,6 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- brief-step-only-matching: the brief check (`brief_rulings`) matches rulings by step slug, id and alias only, so a ruling filed under another step (example: pr-close-by-batch-runner) is missed. Decision: lane-brief-from-step (how a lane brief is built and checked). Fix: none — rare and harmless. Until: 2026-12-13
+- brief-skipped-exit-zero: the brief check reads a mistyped step slug as "skipped" and exits 0. Decision: lane-brief-from-step (how a lane brief is built and checked). Fix: none — rare and harmless. Until: 2026-12-13
+- spawn-guard-marker-any-line: the spawn guard counts a marker on any line of a brief, not only the first, so the brief head's own listing can lift a spawn refusal (found by test case 22). Decision: lane-brief-from-step (how a lane brief is built and checked). Fix: none — rare and harmless. Until: 2026-12-13
