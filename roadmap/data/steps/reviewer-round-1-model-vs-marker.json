@@ -1,0 +1,14 @@
+{
+ "id": "reviewer-round-1-model-vs-marker",
+ "title": "A round 1 reviewer with the guard marker at line 1 of its brief still reported Haiku, not the Sonnet row of agent-model-cap",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A guard change gets a cheaper reviewer than the table says, and the record can only state the model the reviewer reported.",
+ "source": "Coordinator 16:36 CST Nov 13, from lane gh-quota-budget (PR #3288, record at head 878cc8433): the lane's report only, unchecked by the coordinator and by triage.",
+ "note": "Filed 16:36 CST Nov 13. The lane says its round 1 brief carried `Guard or check: yes` at line 1 and the reviewer still reported claude-haiku-5-5. The coordinator first told the lane the marker was missing; that is withdrawn. A lane reads first: does the agent-role-model guard or the harness read the marker, and what picks the model: the brief text, the reviewer.md default, or the spawn call? Also the record shows the reported model, so it can state the true one. Relations: round-one-model-prose-matches-table, decision agent-model-cap. A guard or check change: test-author red case first, builder, reviewer. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T16:36:40-06:00"
+}
