@@ -8,6 +8,7 @@ each one select_runs picks. It fails safe: a PR that is not closed, a read it ca
 nothing, and an unreadable input exits non-zero so the run shows red. Stdlib only.
 """
 import json
+import os
 import subprocess
 import sys
 
@@ -51,11 +52,15 @@ def _is_cancellable(run, pr_number, repo, default_branch):
     return _is_candidate(run, repo, default_branch) and _lists_only_pr(run, pr_number)
 
 
-def select_runs(runs, pr_number, repo, default_branch):
-    """The ids of the runs to cancel: an unfinished pull_request run of this PR, from this repo, off the default branch."""
+def select_runs(runs, pr_number, repo, default_branch, own_run_id=None):
+    """The ids of the runs to cancel: an unfinished pull_request run of this PR, from this repo, off the default branch.
+
+    The cancel job is itself an unfinished run of the closed PR, so own_run_id is never selected: it would cancel itself
+    before the older runs."""
     if not isinstance(runs, list):
         return []
-    return [run["id"] for run in runs if _is_cancellable(run, pr_number, repo, default_branch)]
+    return [run["id"] for run in runs
+            if _is_cancellable(run, pr_number, repo, default_branch) and run["id"] != own_run_id]
 
 
 def count_no_pr_list(runs, repo, default_branch):
@@ -103,6 +108,12 @@ def main(argv):
         print("usage: cancel_closed_pr_runs.py PR_NUMBER OWNER/REPO", file=sys.stderr)
         return 2
     pr_number, repo = int(argv[1]), argv[2]
+    # Read before any gh call: an unreadable id cannot be left out of the cancel, so nothing may be cancelled.
+    raw_run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if raw_run_id and not (raw_run_id.isascii() and raw_run_id.isdigit()):
+        print(f"nothing cancelled: GITHUB_RUN_ID is not a number: {raw_run_id!r}", file=sys.stderr)
+        return 1
+    own_run_id = int(raw_run_id) if raw_run_id else None
     try:
         state = read_text([f"repos/{repo}/pulls/{pr_number}", "--jq", ".state"]).strip()
         if not state:
@@ -114,7 +125,7 @@ def main(argv):
         if not default_branch:
             raise ReadError("the default branch came back empty")
         runs = list_active_runs(repo)
-        ids = select_runs(runs, pr_number, repo, default_branch)
+        ids = select_runs(runs, pr_number, repo, default_branch, own_run_id)
         skipped = count_no_pr_list(runs, repo, default_branch)
         if skipped:
             print(f"{skipped} run(s) skipped: no PR list", file=sys.stderr)
