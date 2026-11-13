@@ -1,0 +1,14 @@
+{
+ "id": "page-one-store-fixes",
+ "title": "Follow-up to #2829: three fixes from the retrospective audit",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro audit of #2829 (12:01 CST Nov 13); coordinator 12:05 CST: a follow-up step, not part of #2829, no owner question.",
+ "source": "retrospective 12:01 CST Nov 13; coordinator 12:04 and 12:05 CST",
+ "note": "Todo. (1) Widen route B's triggers to name cross-account reference. (2) Add a read-only cross-account copy read to step 2's allow list. (3) Add a copy-age reader beside waiting-lag-read. Gap found: cross-account reads of the git copy (owner 11:34 CST Nov 11). Waits on the owner's answer to page item 730 if he picks git as the truth.",
+ "updatedAt": "2026-11-13T12:06:35-06:00"
+}

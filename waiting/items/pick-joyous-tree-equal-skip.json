@@ -1,45 +1,59 @@
 {
   "added": "2026-11-13T18:03:00Z",
-  "context": "Goal: child-repo CI is fast without a test-red main going unseen.\nProblem (risk): joyous #87 drops Test, Build and Install on push to main. Your ruling 176 b (21:45 CST Nov 12) keeps non-macOS push suites until claude-settings changes the red-main check, so #87 is held. A narrower skip exists and needs your word.\nBased on (measured): 12 of 12 recent joyous merges pushed a tree equal to the PR's tested tree (runner 11 read).\nBased on (ruling): 176 b; claude-settings ci-once-per-batch (your 21:16 CST Nov 12).\nDeparts from: joyous main, which runs the push suites on every push \u2014 a skips them when the pushed tree equals the second parent's tree.",
+  "context": "Goal: every repo's CI is fast without a test-red main going unseen.\nProblem (risk): joyous #87 drops Test, Build and Install on push to main. Your ruling 176 b (21:45 CST Nov 12) keeps non-macOS push suites until claude-settings changes the red-main check, so #87 is held. A skip that applies to every repo needs your word.\nBased on (measured): 12 of 12 recent joyous merges pushed a tree equal to the PR's tested tree (runner 11 read).\nBased on (ruling): 176 b; your rule that a repo changes to fit a shared tool, never the tool to fit a repo; ci-once-per-batch (your 21:16 CST Nov 12).\nDeparts from: every repo runs its push suites on each push to main \u2014 a skips them when the pushed tree equals the tested tree.",
   "home": "joyous PR #87; your ruling 176 b",
   "id": "pick-joyous-tree-equal-skip",
   "kind": "decision",
   "n": 729,
   "options": [
     {
-      "gain": "Push runs stop replaying trees the PR run already tested.",
-      "how": "joyous skips its push suites on a push to main when the pushed tree equals the second parent's tree (the PR's tested tree). A direct push still runs them.",
-      "id": "allow",
+      "gain": "Push runs stop replaying tested trees in every repo.",
+      "how": "A claude-settings lane adds the skip to the shared CI form: a push to main skips its suites when the pushed tree equals the tree the PR tested. Direct pushes still run them. joyous #87 then follows the shared form.",
+      "id": "shared",
       "key": "a",
-      "label": "Allow the tree-equal skip in joyous (recommended)",
-      "lose": "A merge that changes the tree after the PR run still runs the suites; nothing is lost."
+      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it (recommended)",
+      "lose": "One claude-settings lane comes first; joyous waits for it."
     },
     {
       "gain": "No change.",
-      "how": "joyous #87 stays held.",
+      "how": "Ruling 176 b stays as it is; joyous #87 stays held.",
       "id": "keep",
       "key": "b",
       "label": "Keep all push suites until the red-main check changes",
-      "lose": "joyous push minutes stay as they are."
+      "lose": "Push minutes stay as they are in every repo."
+    },
+    {
+      "gain": "joyous gets the saving at once.",
+      "how": "joyous skips on an equal tree by its own setting, outside the shared form.",
+      "id": "joyous-only",
+      "key": "c",
+      "label": "Joyous-only skip (not recommended)",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
-  "ref": "coordinator 12:05 CST Nov 13, runner 11 read",
+  "ref": "coordinator 12:05 CST Nov 13 (corrected)",
   "repo": "shivinate7/claude-settings",
-  "short": "joyous: skip push suites on an equal tree",
+  "short": "Shared tree-equal push skip",
   "shown": [
     {
-      "id": "allow",
+      "id": "shared",
       "key": "a",
-      "label": "Allow the tree-equal skip in joyous (recommended)"
+      "label": "Put the tree-equal push skip in claude-settings' shared CI form, so every repo gets it (recommended)"
     },
     {
       "id": "keep",
       "key": "b",
       "label": "Keep all push suites until the red-main check changes"
+    },
+    {
+      "id": "joyous-only",
+      "key": "c",
+      "label": "Joyous-only skip (not recommended)"
     }
   ],
   "status": "open",
-  "title": "In joyous, skip the push-to-main suites when the pushed tree equals the tree the PR already tested?",
+  "title": "Put the tree-equal push skip in the shared CI form for every repo, or keep all push suites?",
   "why": "A narrowing of your ruling 176 b needs your word; runner 11 waits on joyous only."
 }

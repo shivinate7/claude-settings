@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T18:05:00Z",
+  "context": "Goal: each repo's page is usable live and rebuildable anywhere, with git as the dataset.\nProblem (rule): as built on main, the page writes answers only to its claude.ai database, and the writer copies it to git at each wake, so git lags; page.html reads only the database and shows \"This view cannot reach the page's store\" without it. #2829 (from your item 593 a, 12:40 CST Nov 12) makes the database the truth and git a timely backup. Your 12:03 CST words today (\"nothing points to a specific link of the artifact as the real dataset, only git data in a sense\") and R28 (11:50 CST Nov 11) point the other way.\nBased on (ruling): R28; item 593 a; your 12:03 CST Nov 13 words.\nDeparts from: main \u2014 the database is the store and git is copied at each wake; a makes git the truth.\nMeanwhile: the coordinator gave batch 136, which holds #2829, a go at 12:05 CST; the retrospective asks that #2829 stay a draft until you answer.",
+  "home": "PR #2829; rulings R28 and item 593 a",
+  "id": "pick-page-git-truth",
+  "kind": "decision",
+  "n": 730,
+  "options": [
+    {
+      "gain": "Rebuildable anywhere, cross-account reads need nothing special, no stale copy.",
+      "how": "Each answer is written to git at once or within the turn; the page builds from git and the database is the live cache.",
+      "id": "git-truth",
+      "key": "a",
+      "label": "Git is the truth; every page write also lands in git (recommended)",
+      "lose": "Every answer costs a git write."
+    },
+    {
+      "gain": "Simplest, already half-built.",
+      "how": "The page keeps writing only to its database; git is copied at each wake.",
+      "id": "db-first",
+      "key": "b",
+      "label": "Keep #2829: the database first, git a timely backup",
+      "lose": "Git lags, and the Questions tab cannot render from git."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 12:05 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Page truth: git or database?",
+  "shown": [
+    {
+      "id": "git-truth",
+      "key": "a",
+      "label": "Git is the truth; every page write also lands in git (recommended)"
+    },
+    {
+      "id": "db-first",
+      "key": "b",
+      "label": "Keep #2829: the database first, git a timely backup"
+    }
+  ],
+  "status": "open",
+  "title": "Should git be the truth for each page, with the database a live cache, instead of #2829's database-first model?",
+  "why": "Your 593 a and your 12:03 CST words point different ways; the retrospective asks you to pick."
+}
