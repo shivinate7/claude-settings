@@ -1,0 +1,14 @@
+{
+ "id": "review-record-parses-at-handin",
+ "title": "Lane-lint fails when merge --reviewed cannot parse the review record at the head",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Two lanes tonight (#3052, #3050) reported review records posted, but runner 10's `merge --reviewed` parsed none at any head. Lanes hand in without checking that the record parses, and the batch runner finds out at merge.",
+ "source": "coordinator 21:04 CST Nov 12 (2 of the last ~8 hand-ins)",
+ "note": "Fix: lane-lint runs the same parser as `merge --reviewed` at the head and fails, naming the record, when it parses none. One home: call the merge tool's parser, never a copy. Red first on a record shaped like the #3052 or #3050 one.",
+ "updatedAt": "2026-11-12T21:05:22-06:00"
+}

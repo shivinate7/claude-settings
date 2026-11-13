@@ -1,0 +1,14 @@
+{
+ "id": "local-page-publish-route",
+ "title": "Local sessions publish the waiting page with pictures",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A local republish of the waiting page has no pictures.",
+ "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D2 rest",
+ "note": "The rest of D2, after step artifact-guard-matcher-names. Ledger row D2.",
+ "updatedAt": "2026-11-12T21:05:22-06:00"
+}

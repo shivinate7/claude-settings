@@ -1,0 +1,14 @@
+{
+ "id": "session-start-pin-skip-log",
+ "title": "SessionStart logs each skip of the live pin update",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The live pin fell 439 commits behind main and no line said why.",
+ "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D10",
+ "note": "Find why SessionStart skipped the pin; write one line on each skip. The log needs a named reader (rule outcomes-mechanize-rules): the session that starts. Ledger row D10.",
+ "updatedAt": "2026-11-12T21:05:22-06:00"
+}
