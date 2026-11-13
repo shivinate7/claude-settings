@@ -1,0 +1,14 @@
+{
+ "id": "page-grant-closed-item-leftovers",
+ "title": "Round 3 review of PR #3224 found three leftovers around closed page items and the grant check (L1 to L3)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane of PR #3224 (session_013NEJKyqQmpj2FNxeZzDV7s), at the coordinator's 14:02 CST word, 14:00 CST Nov 13: round 3 review of head 846c523f27 (page_grant rule 4, ruling own-748-b-rule-4).",
+ "source": "lane of PR #3224 via coordinator, 14:00 CST Nov 13",
+ "note": "Todo. Facts as the lane read them on the origin/roadmap waiting/ mirror; the live page was not read. L1 (debt candidate): old closes left `lane` on the item, so 44 closed items hold lane + lastAnswer + a kept answer; 30 of them now pass rule 4 (main refused them as closed); all 44 go unnamed by the kept-answer line (stale_pages.py 576-577). Examples: cs-1421-press-merge, auto-mode-allow-lines, guard-fix-check-sonnet. Fix idea: a one-time sweep that deletes the done acts' answers or drops their `lane`. L2 (note): an exact string compare of `at` (page_grant.py 270-276) false-refuses 14 of the 44, whose lastAnswer.at is cut to seconds; fails closed, the owner then types the grant in chat. L3 (note): an older open item with `lane` stays open and unanswered on the done path (SKILL.md \"Never-ending wait\" and Dead receiver bullet); two such items: drain-2071-guard-incident, qmax-d369-error-source. Nothing on #3224 changes. Triage adds: on Nov 13 triage wrote 139 receipts for closed items and left their answers in the answers collection (step answers-ledger-followups), which adds to the kept-answer count for L1. L1 is a debt only if Claude is likely to hit it in normal work: unjudged. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:00:09-06:00"
+}
