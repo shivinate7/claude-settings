@@ -921,7 +921,8 @@ def grant_problem(b, text, items):
     return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
-PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
+WAKE_HEADER = "[Artifact comment sent to Claude]"  # the banner a Send opens its turn with
+PAGE_BANNER = re.compile(re.escape(WAKE_HEADER) + r"\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
 PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
 SAVED_WAKE = "Saved on the waiting page"
 UNDONE_WAKE = "Undone on the waiting page"  # page.html builds it with a tail, so its items carry no note
@@ -1294,14 +1295,18 @@ def _exported_write(inp, collections):
 
 
 def _scan_transcript(records, collections):
-    """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
+    """(writes, exports, results, wakes) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
     ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
-    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result)."""
-    writes, exports, results = [], [], {}
+    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result); `wakes`
+    is [epoch] for each user record whose text begins with WAKE_HEADER (a Send on a page)."""
+    writes, exports, results, wakes = [], [], {}, []
     for rec in records:
         if rec.get("isSidechain"):
             continue
         when = _ts(rec)
+        text = _transcript.owner_text(rec)
+        if when is not None and text is not None and text.lstrip().startswith(WAKE_HEADER):
+            wakes.append(when)
         for use in _transcript.tool_uses(rec):
             inp, name = use.get("input"), str(use.get("name", ""))
             if not isinstance(inp, dict) or when is None:
@@ -1314,7 +1319,7 @@ def _scan_transcript(records, collections):
         for block in _transcript.tool_results(rec):
             lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
             results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines)
-    return writes, exports, results
+    return writes, exports, results, wakes
 
 
 def _cleared(exports, results, newest, page_id):
@@ -1340,21 +1345,24 @@ def export_check(cwd, transcript_path, session_id):
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
-    transcript is read and timestamps decide, so a write in an earlier turn still counts."""
+    transcript is read and timestamps decide, so a write in an earlier turn still counts. A wake (a user record
+    whose text begins with WAKE_HEADER: a Send on the page) counts as a page write at its time, so each Send's
+    wake ends with an export."""
     try:
         records = _transcript.read_transcript(transcript_path)
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None  # no transcript to read (a hook run with none is normal), or no layout
-    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
+    writes, exports, results, wakes = _scan_transcript(records, layout.WAITING_COLLECTIONS)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
-    if not writes:
-        return None, None  # nothing is read from the repo before a write is found
+    if not writes and not wakes:
+        return None, None  # nothing is read from the repo before a write or a wake is found
     writer = _transcript.page_writer_id(records)
     if writer:
         is_writer = writer in (session_id, override.remote_session_id())
     else:
-        is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
+        last = max([w[0] for w in writes] + wakes)
+        is_writer = any(e[0] < last for e in exports)
     if not is_writer:
         return None, None  # receipts and answers are not this session's to export
     try:
@@ -1362,7 +1370,9 @@ def export_check(cwd, transcript_path, session_id):
         if root is None:
             return None, None
         is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
-        wrote = [w[0] for w in writes if is_page[w[2]]]
+        # A wake's text may not name its artifact (unmeasured), so a wake counts for the repo's waiting page, which
+        # only the page writer watches.
+        wrote = [w[0] for w in writes if is_page[w[2]]] + wakes
         if not wrote:
             return None, None
         newest = max(wrote)
