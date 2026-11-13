@@ -6,9 +6,9 @@
   "phase": "next",
   "lane": "",
   "why": "Compaction too early wastes context; the cloud may override our value.",
-  "note": "R40 (owner 13:21 CST Nov 11, \"compaction: A\", relayed by the retrospective; plan 8349e6a). After the fresh start, a lane sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=92 in the settings env and reads one new cloud session's autocompact_state with get_session. If our value wins, it holds everywhere; if not, the record says so. Home: decision precompact-handoff. Held, coordinator 20:58 CST Nov 12: a settings env edit that needs the owner's computer; relayed via the retrospective. Retro 21:02 CST Nov 12: draft PR #3055 (head 8b6fa23d1), made on the owner's Mac at about 21:01 CST. The coordinator gets it reviewed and handed in. Hold lifted.",
+  "note": "R40 (owner 13:21 CST Nov 11, \"compaction: A\", relayed by the retrospective; plan 8349e6a). After the fresh start, a lane sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=92 in the settings env and reads one new cloud session's autocompact_state with get_session. If our value wins, it holds everywhere; if not, the record says so. Home: decision precompact-handoff. Held, coordinator 20:58 CST Nov 12: a settings env edit that needs the owner's computer; relayed via the retrospective. Retro 21:02 CST Nov 12: draft PR #3055 (head 8b6fa23d1), made on the owner's Mac at about 21:01 CST. The coordinator gets it reviewed and handed in. Hold lifted. 02:56 CST Nov 13, triage premise check for #3060 (coordinator 02:56 CST): R40's fresh start ran. The owner respawned the coordinator at 22:38 CST Nov 11 (get_session created_at 04:38Z Nov 12, origin web_claude_ai), and triage was spawned at 22:42 CST, per plan restart-plan 'What happens next' item 1. #3060 does not wait. A fact, not a ruling: no owner item. Read 02:56 CST: coordinator autocompact threshold 441,600 (92% of 480K), triage 384,000 (80%), both source 'settings'. The local 467,000 figure is unread.",
   "source": "owner 2026-11-11 13:21 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T21:03:59-06:00",
+  "updatedAt": "2026-11-13T02:56:38-06:00",
   "blockedBy": []
 }
