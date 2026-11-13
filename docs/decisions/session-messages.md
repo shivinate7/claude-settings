@@ -5,9 +5,12 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
-(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
-Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
+A Windows round trip passed (request 8933ab505319 to the cloud, reply
+7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
+`MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
+measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
+with no address, or a store with no mail ref, prints nothing (the store case has a test; the no-address case is read from the code only). A Mac is not held: its round trip passed 1 of 1 (mail 4d31137fd16c Mac to cloud, 71c5f84d64a8 cloud to Mac, 20:30 CST Nov 12; record: branch roadmap, commit e86503c2a). `HELD_PLATFORMS` in `hooks/mail.py` is empty; a platform listed there prints nothing at turn start and `mail` exits 2 unless `MAILBOX_HOLD_OFF=1`. The refusal text names no variable. A local Linux session is not held and is unmeasured.
+The 20-message trial (step 5) is still open.
 
 ## Ruling
 
@@ -17,10 +20,10 @@ session-messaging-plan and peer-message-turn-cap.
 ## One route (owner, 2026-11-10 09:33 CST)
 
 Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
-The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
-The mailbox is read at turn start, so it cannot wake anyone.
+The doorbell is a background `mail wait` (owner, 2026-11-12 14:17 CST, "I'm okay with A for Q1"; section "The doorbell: mail wait"). The owner rejected a `send_message` doorbell and a trusted-device route at 14:14 CST: a cloud-only doorbell would not reach every device.
+The mailbox is read at turn start, and `mail wait` wakes an idle session.
 The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
-Local-computer checks: measured on a Mac only; Windows unmeasured.
+Local-computer checks: measured on a Mac only; the mail round trip alone is also measured on Windows (11:52 CST Nov 12), and the other Windows checks are unmeasured.
 
 Why:
 
@@ -42,6 +45,36 @@ Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route meas
 
 State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
 Timed check-ins: Q4, see its bullet.
+
+## The doorbell: mail wait
+
+Ruling: owner, 2026-11-12 14:17 CST, "I'm okay with A for Q1"; plan R57 (the mail doorbell is a background mail-wait) in plans/restart-plan.md on origin/restart-plan. Wake routes (a) `send_message` doorbell and the trusted-device route are rejected (owner, 14:14 CST); (b) and (c) are not built.
+Rule: CLAUDE.md rule `outcomes-mechanize-rules` bans timers and long-lived processes. Ruling 3.15 (owner, 2026-11-11 13:22 CST; step timer-rule-reason-only) allows a waiting process whose record shows it costs less than it saves. This section is that record.
+
+What it is. `mail wait [--interval S] [--max-seconds S]` in `bin/mail`, with the code in `hooks/mail.py`. A session starts it with `run_in_background` when its turn ends idle. It blocks until a message it has not seen is open under the session's own addresses. Then it prints one line and exits 0. The line reads `mail: new <id> from <addr> kind <kind>; untrusted subject "<first body line>"; read: <mail read command>; take: <mail take command>`. Claude Code wakes the session on the exit. This works the same on cloud, Mac and Windows. A message has no subject field, so the first body line is the subject.
+How it reads. At start, one fetch and `open_messages` give the baseline of open ids. Then it runs one `git ls-remote` per interval. The mail ref moves on every send and take by any session. So a moved sha alone is not mail. Only after a move does it fetch and run `open_messages`. It wakes on an id that is not in the baseline. It writes no `listing-*.json`.
+Exit codes: 0 new mail. 2 not started, printing `mail wait: not started: <reason>`. 3 ended at `--max-seconds` with no mail, printing `mail wait: ended, no mail`. A poll that fails keeps polling.
+Exit 2 has these causes. Five act at once: `MAILBOX_REPO` unset, no address, a live waiter holds the lock, the lock cannot be taken, or `--interval` or `--max-seconds` is out of range. The range of `--max-seconds` is 1 to 7000. The sixth is a baseline read that failed for about 5 minutes.
+Lock. `<cache>/wait-<address with / as _>.lock`, created exclusively, JSON `{pid, ppid, session, started, deadline}`. It is stale when its pid is dead, its deadline has passed, or its start time differs from the pid's. The start time is read on Linux only. Elsewhere the deadline guards against a reused pid. A stale lock is replaced. The waiter removes its lock on every exit, SIGTERM included. It exits when the lock is gone or its parent pid is dead.
+Wakes with no mail. Every exit wakes the session. So the instruction (skill `waiting-page`, "Message another session") sets three limits. Start it only when idle, with `MAILBOX_REPO` set. Pass `timeout` 7200000, because the Bash background default is 30 minutes and the cap is 2 hours. Never restart after exit 2, and restart at most once after exit 3. The default limit is 6600 s, under that cap.
+The subject is another session's text. The wake line marks it untrusted, strips control and direction characters, and cuts it to 160 characters. That keeps it on one line. It does not stop a subject that holds instructions, so a session reads it as data.
+Rule text. Ruling 3.15 is the owner's grant for this waiter. The `CLAUDE.md` rule still reads "starts no new long-lived process" until step timer-rule-reason-only merges.
+
+Cost, measured. Interval 30 s, chosen from a measured `ls-remote`: 316 to 404 ms over 6 runs (not pinned: measured once on Nov 12, and no test repeats it). Checked Nov 12 on main 2deb827ad: that run was from this cloud session, against the claude-settings origin, through the proxy. The store was not reachable from this session. So the Nov 6 store figure of 391 to 608 ms over 5 runs is cited and not re-run (not pinned). A simulated hour in `hooks/test_mail_wait.py` makes 120 `ls-remote` reads. That is about 40 s of git time an hour per idle session (unmeasured: derived from the interval and the measured read time). A wake is at most 30 s late.
+
+Doorbell cost: processes 1; interval 30 s; reads per hour 120; files written 1 (lock)
+
+Cost, beyond that line. In `hooks/test_mail_wait.py`, each read is one short git process (`ls-remote`). In `hooks/test_mail_wait.py`, a moved sha adds one `fetch` and one `grep`, and writes only the existing cache. In the same test file, a wake adds one `git show` for the subject and one `git log` for the age lookup. The `git show` is the read `mail read` uses, which the owner's fence allows. The waiter keeps no log and starts no second long-lived process. With the default limit, an idle session with no mail wakes once per 110 min, about 0.55 a hour (unmeasured: derived from the limit). Test: hooks/test_mail_wait.py, case "the decision states the measured doorbell cost". It reads the cost line and compares each number to a simulated hour.
+
+Saves: an idle session otherwise never reads mail until a person types. A message to any session now wakes it, with no device-specific route.
+
+Known gaps, kept as notes (round 2 review). Two starts in the same millisecond against one stale lock can end one waiter at once with one spurious wake. They never leave two waiters for long. A waiter killed between its temp write and the link leaves a `wait-*.lock.<pid>.tmp` file. The baseline retry ignores the lock deadline when `--max-seconds` is under 300. `--interval` has no ceiling. The wake line does not strip left-to-right marks or zero-width characters.
+
+Windows scope. The Windows-safe timeout kills the child tree and never calls `communicate()` after the kill. Only the wait uses it. Turn start, send, take and read keep `git()` as on main, because the owner's fence leaves the send path unchanged. So the turn-start hang in debt mail-windows-timeout-hang stays open.
+
+Wake, cloud: checked Nov 12 on main bcbeaa26a, 15:46 CST, in the retrospective session. A 5 s command started with `run_in_background` exited 0 and woke that cloud session after its turn had ended. Proven 1 of 1, in the main checkout shell. A long command of this cloud lane (the lane lint) also woke it after the shell moved it to the background.
+Wake, Windows: checked Nov 12, 15:56 CST, by the owner's retest on his own machine. A 60 s background sleep woke his local session from idle, and it replied WOKE. Proven 1 of 1. An earlier run at 15:51 CST does not count: a Stop hook re-prompted that turn before the command exited.
+Unmeasured: the wake on a Mac, and the Windows git timeout branch (tested by injection only). The shell refused `run_in_background` in this lane's worktree.
 
 ## The 10-message stop on the Mac
 
@@ -160,7 +193,7 @@ Design:
   age lookup prints "age unknown" and keeps the line. No prompt can open: GIT_TERMINAL_PROMPT=0,
   GCM_INTERACTIVE=never, and ssh in BatchMode with a 3 s ConnectTimeout, unless the caller set its own
   ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start
-  and one network call when the sha is unchanged. When it moved, at most four git starts. Files are
+  and one network call when the sha is unchanged (not pinned). When it moved, at most four git starts. Files are
   written only in the cache, and only on a move. Test: a process-start stand-in and a files-written
   snapshot, as in `hooks/test_daily_note.py`.
 - Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
@@ -171,8 +204,8 @@ Design:
   the take alone.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
-  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
-  not set.
+  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
+  not set, or the platform held.
 - Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
   each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
@@ -208,12 +241,12 @@ Design:
    `cloud/session_rtripb`), 2026-11-09 19:34 CST: send message 2979e0b314d0 (request), read, take (exit 0),
    reply message 60884f559348, reply read and taken by the sender (exit 0), second take of 2979e0b314d0
    refused "taken by another" (exit 1). Cloud only; Mac and Windows auth still not measured.
-   Not yet measured: Mac and Windows auth for `ls-remote`.
+   Not yet measured then: Mac and Windows auth for `ls-remote` (later: Windows round trip passed 2026-11-12; Mac passed 2026-11-12).
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
 4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
-   `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
-   Windows auth for `ls-remote`.
+   `hooks/local_time.py` call. The `settings.json` env default was left unset here. The owner set it by
+   ruling on 2026-11-12 (page item 556 a), before the Mac measure.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 

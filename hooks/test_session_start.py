@@ -24,6 +24,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies the repo's lint folder into the pointer clone (testing/tracked_tree.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 SESSION = "session-start-cases"  # the session id every run_hook payload names
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=session-start-cases@example.invalid", "-c", "user.name=session-start-cases"]
@@ -769,13 +772,37 @@ def differ_line(rel, ref):
                       r"%s:%s$" % (re.escape(rel), re.escape(ref), re.escape(ref), re.escape(rel)))
 
 
+# The ruled store's reads (lint/ruled_store.py) start `git -C <repo> ls-tree ... roadmap/rulings` and `git -C <repo>
+# cat-file --batch`. The grant check's starts never carry -C, so a -C ls-tree or cat-file is the store's, not the check's.
+STORE_READ = re.compile(r"^-C .* (ls-tree|cat-file)\b")
+
+
 def names_the_grant_check(argv):
     """True when a git start is one the grant check makes: it names a grant file, an origin ref, or a stdin read.
     The hook's own default-branch read (symbolic-ref, which names origin/HEAD) runs before the check, so it is not
-    counted."""
-    if argv.split()[0] == "symbolic-ref":
+    counted. Neither is a ruled-store read (STORE_READ)."""
+    if argv.split()[0] == "symbolic-ref" or STORE_READ.match(argv):
         return False
     return any(part in argv for part in ("CLAUDE.md", "origin", "--batch", "--stdin"))
+
+
+class GrantFilterTests(unittest.TestCase):
+    """names_the_grant_check counts the grant check's git starts only. The ruled store's reads (lint/ruled_store.py, run
+    as git -C <repo>) are not the grant check's, so they are not counted."""
+
+    def test_a_ruled_store_read_is_not_a_grant_check_start(self):
+        for start in ("-C /tmp/repo ls-tree -z --name-only origin/roadmap roadmap/rulings/",
+                      "-C /tmp/repo cat-file --batch"):
+            with self.subTest(start=start):
+                self.assertFalse(names_the_grant_check(start),
+                                 "a ruled-store read is counted as a grant-check start: %r" % start)
+
+    def test_a_grant_read_is_still_a_grant_check_start(self):
+        for start in ("show origin/main:CLAUDE.md",
+                      "rev-list --left-right --count refs/heads/main...refs/remotes/origin/main"):
+            with self.subTest(start=start):
+                self.assertTrue(names_the_grant_check(start),
+                                "a grant-check read is not counted: %r" % start)
 
 
 class GitFixtureMixin:
@@ -1806,6 +1833,73 @@ def full_size_text():
     filler = "".join("# filler line %03d: the platform script carries its own comment block here\n" % number
                      for number in range(150))
     return PLATFORM_TEXT.replace("#!/bin/bash\n", "#!/bin/bash\n" + filler, 1)
+
+
+class SessionStartRulingLinesTests(SessionStartAgentWorktreeNoticeTests):
+    """The owner's open rulings print once at session start: the hook runs lint/ruled_store.py --session-line on the
+    claude-settings clone that the config's pointer names. That clone is a second checkout, with no origin remote (so the
+    hook's fetch never runs in it) and with lint/ copied from this repo. The session's own checkout holds no store, so a
+    hook that reads the session checkout instead of the clone prints nothing."""
+
+    def make_clone(self, store, main=None):
+        """The pointer clone, with origin/roadmap at `store` and, when given, origin/main at `main`. The config's CLAUDE.md
+        names it. lint/ is copied from this repo, as tracked_tree lists it."""
+        clone = os.path.join(self.root, "clone")
+        os.makedirs(clone)
+        vcs(clone, "init", "-q", "-b", "main", ".")
+        tracked_tree.copy_tracked(clone, "lint")
+        vcs(clone, "add", "-A")
+        vcs(clone, "commit", "-q", "-m", "claude-settings clone")
+        fixture.point_ref(clone, fixture.STORE_REF, store, self.root)
+        if main is not None:
+            fixture.point_ref(clone, fixture.MAIN_REF, main, self.root)
+        with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % clone.replace("\\", "/"))
+
+    def open_store_lines(self):
+        """The hook's lines for a store with two open entries and one entry that main's text closes."""
+        self.make_clone(
+            fixture.ruling_files({
+                "ruled-apps-keep": fixture.entry("ruled-apps-keep"),
+                "ruled-pending": fixture.entry("ruled-pending", lands_in={"path": "docs/rules.md",
+                                                                          "contains": "Rule two: keep the apps."}),
+                "ruled-landed": fixture.entry("ruled-landed", lands_in={"path": "docs/rules.md",
+                                                                        "contains": "Rule one: keep the apps."}),
+            }),
+            main={"docs/rules.md": "Rule one: keep the apps.\n"},
+        )
+        return self.run_hook(source="startup")
+
+    def test_open_entries_print_the_header_at_start(self):
+        lines = self.open_store_lines()
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "control: the hook printed no checkout line: %r" % lines)
+        heads = [line for line in lines if line.startswith("rulings not on main: ")]
+        self.assertEqual(heads, ["rulings not on main: 2 open (0 with no supersedes read yet), newest first"],
+                         "the ruled header line is not the one for two open entries: %r" % heads)
+
+    def test_each_open_entry_prints_one_line_and_the_entry_main_closes_does_not(self):
+        lines = self.open_store_lines()
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "control: the hook printed no checkout line: %r" % lines)
+        listed = sorted(line.split()[0] for line in lines if line.startswith("  ruled-"))
+        self.assertEqual(listed, ["ruled-apps-keep", "ruled-pending"],
+                         "the entry lines name %r, want the two open entries and not the one closed on main" % listed)
+
+    def test_nothing_prints_when_no_entry_is_open(self):
+        self.make_clone(
+            fixture.ruling_files({
+                "ruled-shut": fixture.entry("ruled-shut", status="closed"),
+                "ruled-landed": fixture.entry("ruled-landed", lands_in={"path": "docs/rules.md",
+                                                                        "contains": "Rule one: keep the apps."}),
+            }),
+            main={"docs/rules.md": "Rule one: keep the apps.\n"},
+        )
+        lines = self.run_hook(source="startup")
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "control: the hook printed no checkout line: %r" % lines)
+        noise = [line for line in lines if line.startswith("rulings not on main") or line.startswith("  ruled-")]
+        self.assertEqual(noise, [], "the hook printed a ruled line with no open entry: %r" % noise)
 
 
 class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):

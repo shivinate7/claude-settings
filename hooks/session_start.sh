@@ -495,6 +495,23 @@ if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && c
   fi
 fi
 
+# The owner's rulings that main has not yet taken in (the ruled store, decision ruled-store-one-home): lint/ruled_store.py
+# --session-line prints one header, up to five entry lines and a command line, or nothing. It reads origin/roadmap and
+# origin/main of the claude-settings clone ($d), else of this checkout, as the fetches above left them: no fetch of its
+# own. Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python start and two
+# read-only git processes (ls-tree, cat-file --batch), plus a third cat-file when an open entry names the text it lands
+# in; no file written, no timer, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  rs_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/ruled_store.py"
+  [ -f "$rs_script" ] || rs_script="$config_dir/lint/ruled_store.py"
+  if [ -f "$rs_script" ]; then
+    rs_repo="$toplevel"
+    [ -n "$d" ] && [ -e "$d/.git" ] && rs_repo="$d"
+    rs_lines=$(python3 "$rs_script" --session-line "$rs_repo" 2>/dev/null)
+    [ -n "$rs_lines" ] && printf '%s\n' "$rs_lines"
+  fi
+fi
+
 # Local main against origin/main: `main...origin/main` counts local-only commits (ahead) on the left and
 # origin-only commits (behind) on the right. Silent when either ref is absent or the two are equal. Also silent
 # when a behind line for this repo's main already printed (the default-branch check, or the pointer check when
