@@ -127,6 +127,18 @@ class ChecksYmlTriggers(unittest.TestCase):
         if hits:
             self.fail(f"checks.yml on: block has a cron line at line {hits[0]}")
 
+    def test_on_block_keeps_workflow_dispatch(self):
+        self.assertIsNotNone(self.on, "checks.yml has no top-level on: block")
+        names = [name for name, _ in self.on[0]]
+        self.assertIn("workflow_dispatch", names, "checks.yml on: block lost the workflow_dispatch trigger")
+
+    def test_on_block_keeps_push_and_pull_request(self):
+        self.assertIsNotNone(self.on, "checks.yml has no top-level on: block")
+        names = [name for name, _ in self.on[0]]
+        for trigger in ("push", "pull_request"):
+            with self.subTest(trigger=trigger):
+                self.assertIn(trigger, names, f"checks.yml on: block lost the {trigger} trigger")
+
 
 class ReadsTheOnBlock(OnBlockCase):
     SCHEDULE = workflow('on:\n  push:\n  schedule:\n    - cron: "0 6 * * *"\n')
