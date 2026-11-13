@@ -1,0 +1,14 @@
+{
+ "id": "express-combined-pr",
+ "title": "One hand-built combined PR merges the express heads in order, built by a lane off main",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Many express lanes each cost a PR run and a main run; the owner allows a combined PR that saves CI, and nothing builds one yet.",
+ "source": "Coordinator 15:44 CST Nov 13; ruling own-767-a-combined-pr; text rules in step claude-md-merge-alone-or-combined.",
+ "note": "Filed 15:45 CST Nov 13. One hand-built PR merges the express heads in order, built by a lane off main, under the recipe of step combined-pr-recipe (lane lint, ready, its own record; the runner merges it alone on its own green run; a red one drops a lane). The coordinator starts its lane once main reads green or the owner force-merges. Not started. Past rulings other than own-767-a not checked.",
+ "updatedAt": "2026-11-13T15:45:33-06:00"
+}
