@@ -3362,10 +3362,10 @@ def case_typed_opus_off_with_no_grant_prints_nothing():
           not any("opus-off" in line for line in ov_log(cfg)), "log %r" % (ov_log(cfg),))
 
 
-def case_harness_opus_off_keeps_the_turn_file():
-    # A harness `opus off` is no typed turn, so it never ends the owner's turn grant. A notice, a wakeup, a peer or a task
-    # notification can carry the words, and a builder's end-notice must not cancel a plain ask before its spawn (ruling
-    # own-761-d, 14:21 CST Nov 13). Each such `opus off` leaves the turn file, prints no receipt and logs no line.
+def case_harness_opus_off_removes_the_turn_file_with_its_receipt():
+    # The off form only narrows a grant, so it is ungated (decision owner-override, owner Q1, 09:11 CST Nov 11). A harness
+    # `opus off` removes the turn file as it removes the timed file, and prints the receipt and logs the removal, as a typed
+    # one does. The sources and origins are the ones the typed-turn gate refuses.
     cases = [("source %s" % source, {"source": source}, None) for source in SOURCE_REFUSED]
     for origin_name, origin in QUEUED_NOT_OWNER:
         cases.append(("a prompt record, %s" % origin_name, None,
@@ -3378,11 +3378,13 @@ def case_harness_opus_off_keeps_the_turn_file():
               opus_grant_file(cfg, OPUS_TURN_FOLDER) is not None and opus_grant_file(cfg, OPUS_FOLDER) is None,
               "files %r" % (ov_files(cfg),))
         _, _, out, _ = opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1), extra=extra, transcript=path)
-        check("opus off harness: %s: the turn file is kept" % name,
-              opus_grant_file(cfg, OPUS_TURN_FOLDER) is not None, "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
-        check("opus off harness: %s: no receipt is printed" % name, out == "", "stdout %r" % (out[-200:],))
-        check("opus off harness: %s: no opus-off guard.log line is written" % name,
-              not any("opus-off" in line for line in ov_log(cfg)), "log %r" % (ov_log(cfg),))
+        check("opus off harness: %s: the turn file is removed" % name,
+              opus_grant_file(cfg, OPUS_TURN_FOLDER) is None,
+              "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+        check("opus off harness: %s: the receipt line is printed" % name,
+              out.splitlines() == ["Opus override: ended."], "stdout %r" % (out[-200:],))
+        check("opus off harness: %s: one opus-off guard.log line is written" % name,
+              sum("opus-off" in line for line in ov_log(cfg)) == 1, "log %r" % (ov_log(cfg),))
 
 
 def case_once_override_ends_at_the_owners_next_typed_prompt():
@@ -3661,7 +3663,7 @@ def main():
         case_opus_off_ends_a_no_length_opus_override()
         case_typed_opus_off_after_a_turn_grant_says_ended_and_logs_it()
         case_typed_opus_off_with_no_grant_prints_nothing()
-        case_harness_opus_off_keeps_the_turn_file()
+        case_harness_opus_off_removes_the_turn_file_with_its_receipt()
         case_once_override_ends_at_the_owners_next_typed_prompt()
         case_once_override_survives_a_harness_prompt()
         case_once_override_survives_a_harness_queued_command()
