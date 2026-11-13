@@ -2155,7 +2155,7 @@ def role_bare(subagent_type) -> str:
     return role_key(subagent_type).rsplit(":", 1)[-1]
 
 
-# A spawn of one of these is a review round (guard_merge review_log_hit) and is never resumed once finished (resume_finished_hit).
+# The reviewer roles: guard_merge's review log reads a spawn of one as a round, and resume_finished_hit refuses a resume of a finished one.
 RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")
 # The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
 RESUME_ISOLATIONS = ("worktree", "remote")
