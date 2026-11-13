@@ -1,0 +1,14 @@
+{
+ "id": "record-claim-cites-code-notes",
+ "title": "Notes from lane record-claim-cites-code (#3182): four small defects to home",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane record-claim-cites-code, handed in at a03e9005d, 12:46 CST Nov 13: four small findings for the notes store.",
+ "source": "coordinator 12:46 CST Nov 13, lane record-claim-cites-code (#3182)",
+ "note": "Todo, notes (one line each, no lane yet). (1) SKILL.md: a blank line before `## Proof` was dropped. (2) A one-span cite like `lint/x.py nope` matches neither form of the cite check. (3) STALE010: an ste-disable mark inside a code span still hides the line. (4) notes.md entry stale005-report-share-one-try cites lint/stale_cites.py:1020-1023, which is wrong on main. A debt only after a real incident (roadmap rule roles-findings-are-debts-or-notes). Also: the lane's first lane-lint run failed on the mutation fixture suite and the rerun passed, which is step mutate-shard-test-order-flake again.",
+ "updatedAt": "2026-11-13T12:46:19-06:00"
+}
