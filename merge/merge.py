@@ -78,7 +78,9 @@
                           live head, is a FAIL; a PASS on UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`); `git merge-tree` of its head into the base tip
                           must be clean; so must `git merge-tree` of its head into the head of each open batch (an open integration PR, draft or
                           ready) on the same base, and a FAIL names that batch, its PR number and its head sha; an unread open list or batch
-                          head is `unknown`, never a pass; a batch stacked on another batch is not checked; and a PR on a base other than the
+                          head is `unknown`, never a pass, and so is a `batch-*` PR whose frozen block this tool cannot read; a batch built with
+                          `--base <lower batch>` has that batch as its base, so it is read only for a PR on that base (a stacked batch built with `--on` and no `--base`
+                          has base main and is read); and a PR on a base other than the
                           default branch needs the open PR whose head is that base in the same call, and that PR must pass. Takes no lock and no merge role, merges and pushes nothing; any session may run it.
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one read of the open
                           pull list (every page), one fetch per distinct base, one merge-tree per PR and open batch (tree objects, no ref),
@@ -1138,7 +1140,7 @@ class Host:
 
     def open_prs(self):
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
-        return [(d["number"], self.info(d)) for d in self.pages("pulls", fields={"state": "open"})]
+        return [(d["number"], self.info({"state": "open", **d})) for d in self.pages("pulls", fields={"state": "open"})]  # the read asks for open, so a row without a state is open
 
     def batch_pr(self, branch):
         """-> (number, pr() fields) of the open pull request whose head is `branch`, or None. Two of them is a Stop: the batch is not told apart."""
@@ -4625,9 +4627,20 @@ def batch_merge_reason(root, n, head, bn, batch):
             or merge_reason(root, n, batch["base"], head, {}, into=batch["head"], target=f"open batch {batch['name']} (#{bn}, head {batch['head'][:9]})"))
 
 def open_batches(h):
-    """-> [(number, {name, head, base})] of the open integration pull requests, drafts too, from one read of the open list. A failed read is a Stop."""
-    rows = [(d["number"], {"branch": d["head"]["ref"], "body": d.get("body") or "", "head": d["head"]["sha"], "base": d["base"]["ref"]}) for d in h.open_pulls()]
-    return [(bn, {"name": parse_freeze(info["body"])["name"], "head": info["head"], "base": info["base"]}) for bn, info in rows if is_integration_pr(info)]
+    """-> [(number, {name, head, base, why})] of the open integration pull requests, drafts too, from one read of the open list (Host.open_prs). A failed read is a Stop.
+    A pull request on a `batch-*` branch whose frozen block parse_freeze cannot read is a batch whose head cannot be checked: its entry has name None
+    and `why`, the unknown reason, and the base from the list row. It is never dropped, so the release check cannot pass past it."""
+    out = []
+    for bn, info in h.open_prs():
+        entry = {"head": info["head"], "base": info["base"], "why": None}
+        try:
+            block = batch_block(info)
+        except Stop as e:
+            out.append((bn, {**entry, "name": None, "why": unknown_reason(f"the frozen block of batch pull request #{bn} cannot be read: {e}")}))
+            continue
+        if block:
+            out.append((bn, {**entry, "name": block["name"]}))
+    return out
 
 def release_check(root, h, numbers, lints, root_why=None):
     """-> (lines, ok) of `merge --release-check`: one line per number in `numbers`, in order: `#N PASS`, or `#N FAIL: ` and the reasons joined by
@@ -4635,7 +4648,7 @@ def release_check(root, h, numbers, lints, root_why=None):
     number gets a line, so a missing line cannot read as a pass. `lints` maps a number to the (sha, verdict) of the lint the caller reports. The checks:
     the pull request is open; its newest review record is done at the live head
     (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
-    the merge with the base tip is clean; the merge into the head of each open batch on the same base is clean (the open integration pull requests, drafts too, from one read of the open list; an unread list or head is an unknown, a batch stacked on another batch is not read); and a base that is not the default branch is the head of a pull request in the call that passes.
+    the merge with the base tip is clean; the merge into the head of each open batch on the same base is clean (the open integration pull requests, drafts too, from one read of the open list; an unread list or head, or a `batch-*` pull request whose frozen block cannot be read, is an unknown; a batch built with `--base <lower batch>` is read only for a pull request on that base); and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
     Cost: one `pulls/N` read per number, one list read of the repo's comments since the oldest of them (every page), one read of the open pull list (every page),
     one fetch per distinct base, one merge-tree per open number and open batch (it writes tree objects, never a ref), and a fetch of a pull request or batch head the clone lacks; no new
@@ -4703,6 +4716,9 @@ def release_check(root, h, numbers, lints, root_why=None):
         for bn, batch in batches:
             if batch["base"] != i["base"]:
                 continue  # a batch on another base is not where this pull request lands
+            if batch["why"]:
+                out.append(batch["why"])
+                continue
             try:
                 clash = batch_merge_reason(root, n, i["head"], bn, batch)
             except (OSError, subprocess.TimeoutExpired) as e:
@@ -4784,14 +4800,24 @@ def integration_branch(name):
     """The one home of the integration branch form: batch NAME is on `batch-NAME`."""
     return f"{BATCH_PREFIX}{name}"
 
-def is_integration_pr(info):
-    """True when PR `info` (its "branch" and "body") is a batch integration PR: its body holds a freeze block and its branch is the integration branch
-    of that block's batch name. A body parse_freeze cannot read is not one: the PR is read as a lane PR."""
+def batch_block(info):
+    """-> the freeze block of PR `info` (its "branch" and "body") when it is a batch integration PR, else None: its body holds a freeze block and its branch is
+    the integration branch of that block's batch name. A body parse_freeze cannot read is a Stop when the branch starts with BATCH_PREFIX, since the PR may be a
+    batch; any other branch is a lane PR."""
     try:
         block = parse_freeze(info["body"])
     except Stop:
+        if info["branch"].startswith(BATCH_PREFIX):
+            raise
+        return None
+    return block if block and info["branch"] == integration_branch(block["name"]) else None
+
+def is_integration_pr(info):
+    """True when PR `info` is a batch integration PR (batch_block). A body parse_freeze cannot read is not one: the PR is read as a lane PR."""
+    try:
+        return batch_block(info) is not None
+    except Stop:
         return False
-    return bool(block) and info["branch"] == integration_branch(block["name"])
 
 FROZEN_ONLY_DROP = "a frozen set never changes except by --batch-drop"
 
