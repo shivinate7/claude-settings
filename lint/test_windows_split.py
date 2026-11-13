@@ -207,10 +207,10 @@ MACOS_SPLIT = ("checks-macos", "checks-macos-b")
 MACOS_GUARD = "python3 hooks/test_guard.py"
 MACOS_SLICE_JOB = "checks-macos"
 MACOS_SLICE_ENV = {"GUARD_TESTS": "macos-slice"}
-# The runner pick (PR #2970): a macOS job's runs-on is an expression that reads the scope job's mac_runner output, a list of
-# macOS labels from mac-runner.py. is_macos counts that job as macOS, so the macOS checks still see it.
-# MAC_PICK_RUNS_ON copies PR #2970's RUNS_ON, which is not on this base; point it at RUNS_ON once #2970 lands.
-MAC_PICK ="needs.scope.outputs.mac_runner"
+# A macOS job whose runs-on is an expression that reads the scope job's mac_runner output, a list of macOS labels from
+# mac-runner.py. is_macos counts that job as macOS, so the macOS checks still see it.
+# MAC_PICK_RUNS_ON is that runs-on text. The constant that holds it is not on this base, so the fixture keeps its own copy.
+MAC_PICK = "needs.scope.outputs.mac_runner"
 MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) "
                     f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
 # R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
@@ -1380,7 +1380,7 @@ class SplitJobs(unittest.TestCase):
                 return split_doc({"checks-macos": (runs_on, a), "checks-macos-b": (runs_on, b), **(extra or {})})
             return doc
 
-        # Each case runs on a literal macos-* runs-on and on the runner pick (PR 2970): the checker must see both as macOS.
+        # Each case runs on a literal macos-* runs-on and on the runner pick: the checker must see both as macOS.
         for runs_on in ("macos-latest", MAC_PICK_RUNS_ON):
             with self.subTest(runs_on=runs_on):
                 doc = doc_on(runs_on)
