@@ -734,6 +734,29 @@ class RealChecks(unittest.TestCase):
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
 
 
+class DebtRetireInLint(unittest.TestCase):
+    """The debt Retire step reads the PR body from the event file, which only CI has. A lint run of checks (merge's small-base
+    and lane lint) cannot read that body, so it does not plan the step. A plain plan of checks still plans it."""
+
+    STEP = "Debt retire check"
+
+    def planned(self, *args):
+        done = plan_job("checks", *args, "--base", "HEAD", cwd=os.path.join(HERE, ".."))
+        return done, by_step(done.stdout.splitlines())
+
+    def test_f1a_a_lint_run_of_checks_does_not_plan_the_debt_retire_step(self):
+        done, states = self.planned("--lint", "--plan")
+        self.assertIn(self.STEP, states, "scope: the lint plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertIn(states[self.STEP], ("skipped", "not run"),
+                      "a lint run plans the debt Retire step as %r, which needs the PR body that only CI reads" % states[self.STEP])
+
+    def test_f1b_a_plain_plan_of_checks_still_plans_the_debt_retire_step(self):
+        done, states = self.planned("--plan")
+        self.assertIn(self.STEP, states, "scope: the plain plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertEqual(states[self.STEP], "would run",
+                         "a plain plan of checks no longer plans the debt Retire step")
+
+
 def launcher(patch):
     """A `python3 -c` launcher: the code in `patch` runs first, then ci-job runs in this process with the argv it was given."""
     return patch + "\nimport runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')\n"
