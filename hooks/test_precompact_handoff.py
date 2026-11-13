@@ -2300,7 +2300,27 @@ def case_nudge_sections_flags_an_empty_handoff():
 # --------------------------------------------------------------------------- the run
 
 
+def case_prompt_names_audit_agent():
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        prompt = " ".join(f.read().split())
+    for name, needle in (
+            ("the compaction trigger, not a Stop checkpoint",
+             "After a compaction, also send one Explore agent"),
+            ("one Explore agent on Sonnet", "one Explore agent on Sonnet"),
+            ("no earlier marker reads from the start", "with no earlier marker, from the start"),
+            ("the transcript's path", "<session_id>.jsonl"),
+            ("a marker is a compact_boundary record, never quoted text",
+             "A marker is a `compact_boundary` system record"),
+            ("the Audit: marker on the brief's first line", "first line is `Audit:`"),
+            ("reads from the previous continuation marker", "This session is being continued"),
+            ("the missing list", "MISSING"), ("the stale list", "STALE"), ("the done list", "DONE"),
+            ("the 40-line cap", "40 lines or fewer"),
+            ("the handoff is rewritten whole from the report", "rewrite the handoff whole")):
+        check("audit step: the prompt names " + name, needle in prompt, "missing %r" % needle)
+
+
 def main() -> int:
+    case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
     case_precompact_error_is_ok_false()
     case_reorient_ok_names_prompt_and_digest()
