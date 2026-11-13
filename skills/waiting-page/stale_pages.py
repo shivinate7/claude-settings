@@ -104,7 +104,7 @@ or a compared receipt with no readable `read` prints an `unknown:` line and exit
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
 own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
 A listed answer on an item with a non-empty `lane` ends its parentheses with `, lane <slug>`, so the wake can message that lane.
-An answer already routed is never listed: its item has a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at` (the busy-lane path). No receipt is needed.
+An answer already routed is not listed: its item has a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at` (the busy-lane path), and a receipt with a `read` at or after the answer's `at` exists (the routing session writes it at routing time). A routed answer with no such receipt is listed as usual.
 Two more lines, after the answer lines and before any unknown line:
 `answer-needs-reply <id> (item <n>, owner <owner>, answered <at>)` for an item answer of `choice` `none` whose `note` is not blank, when
 the item has no `reply` with text and a `replied` later than the answer's `at` (read or unread, whatever the wake). A `replied` that is
@@ -123,7 +123,7 @@ a `set` of receipts/<id> with `read` and `filed` at --now (default: the clock, I
 answers/<id>, with `"pinned"` true or false beside `writes`. A write carries `if_version` from --item-version, --answer-version or --receipt-version, else from
 the fetched wrapper's `version`, else none (--receipt names the receipt already stored). With the item or answer (or a named receipt) unpinned, the first line
 on stderr is `unpinned: <docs>` and `pinned` is false; the payload still prints. Exit 0.
-Exit 2 with one `unknown:` line and no payload when the item is open and routed, awaiting a done report, and --done is not passed (`item waits for a done report`): it has `waits`, or a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at`. An open item with `lane` and a plain pick (no matching `lastAnswer`) closes without --done. Also when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
+Exit 2 with one `unknown:` line and no payload when the item is open and routed, awaiting a done report, and --done is not passed (`item waits for a done report`): it has `waits`, or a non-empty `lane` and a `lastAnswer.at` equal to the answer's `at`. An open item with `lane` and a plain pick (no matching `lastAnswer`) closes without --done, and the helper then prints `notify-lane <slug>` on stderr and `"notify": "<slug>"` in the payload: the closer messages that lane. Also when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
 `none` that asks a question and --reply has no text. Cost: one python process, reads up to 3 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
@@ -799,8 +799,8 @@ def unread_mode(argv):
             unknown.append("unknown: the answer %s has no readable at" % key)
             continue
         item = item_data[key]
-        if routed_answer(item, at):  # sent to the lane already: listing it again would re-message the lane
-            pass
+        if routed_answer(item, at) and any(t is not None and t >= at for t in map(parse_utc, reads.get(key, []))):
+            pass  # sent to the lane already, and the routing receipt says so: listing it again would re-message the lane
         elif woke is None or at < woke:
             times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
             if any(t is not None and t >= at for t in times):
@@ -943,7 +943,12 @@ def close_batch_mode(argv):
             write["if_version"] = versions[name]
     if unpinned:  # the live get shape is unverified, so an unpinned close is printed, never refused
         print("unpinned: %s" % ", ".join(unpinned), file=sys.stderr)
-    print(json.dumps({"writes": [receipt, update, delete], "pinned": not unpinned}, indent=1))
+    payload = {"writes": [receipt, update, delete], "pinned": not unpinned}
+    # A plain pick on an item with a lane was never relayed: the closer tells that lane (SKILL.md, step 1 of "Route and close").
+    if has_text(item.get("lane")) and item.get("status") != "closed" and not routed_answer(item, parse_utc(answer.get("at"))):
+        payload["notify"] = item["lane"].strip()
+        print("notify-lane %s" % payload["notify"], file=sys.stderr)
+    print(json.dumps(payload, indent=1))
     return 0
 
 
