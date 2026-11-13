@@ -1447,13 +1447,15 @@ def agent_path(folder, aid):
     return os.path.join(folder, "session", "subagents", "agent-%s.jsonl" % aid)
 
 
-def agent_launch(aid, output, desc="review the diff"):
+def agent_launch(aid, output, desc="review the diff", subagent_type=None):
     """A background agent's launch: its Agent tool_use, then the async result. The result's toolUseResult
-    names the agent id and the outputFile."""
+    names the agent id and the outputFile. `subagent_type` is the role the Agent input names, when given."""
     cid = "toolu_" + aid
+    spawn = {"description": desc, "prompt": "review", "run_in_background": True}
+    if subagent_type is not None:
+        spawn["subagent_type"] = subagent_type
     use = {"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": cid, "name": "Agent",
-         "input": {"description": desc, "prompt": "review", "run_in_background": True}}]}}
+        {"type": "tool_use", "id": cid, "name": "Agent", "input": spawn}]}}
     result = {"type": "user", "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": cid,
          "content": "Async agent launched successfully. agentId: %s." % aid}]},
@@ -1462,11 +1464,11 @@ def agent_launch(aid, output, desc="review the diff"):
     return [use, result]
 
 
-def background_agent(folder, aid, records, idle, output=None):
+def background_agent(folder, aid, records, idle, output=None, subagent_type=None):
     """A background agent of the session in folder. Return (launch, spec): the launch records for the
     session's items, and the spec for transcript(agents=). The launch names output when given, else the
-    agent's own transcript."""
-    return agent_launch(aid, output or agent_path(folder, aid)), (aid, records, idle)
+    agent's own transcript. `subagent_type` is the role the spawn ran as."""
+    return agent_launch(aid, output or agent_path(folder, aid), subagent_type=subagent_type), (aid, records, idle)
 
 
 def agent_step(tag, text="done\n"):
@@ -1527,14 +1529,14 @@ def stop_in_process(transcript_path):
 
 @case
 def A1_quiet_agent_is_listed_once_with_its_remedy():
-    """A1. a background agent whose transcript has not changed for 600 s, after 300 earlier steps, its last
-    record a tool_result: listed once, by its id, with the remedy: resume it by name, or send a fresh
-    reviewer the prior report"""
+    """A1. a background reviewer whose transcript has not changed for 600 s, after 300 earlier steps, its last
+    record a tool_result: listed once, by its id. Its remedy sends a fresh agent the prior report and offers no
+    resume by name, since a reviewer is never resumed (roles-resume-by-name)"""
     folder = new_dir()
     many = []
     for i in range(300):
         many += agent_step("s%d" % i)
-    launch, spec = background_agent(folder, agent_id(1), many + agent_step("last"), 600)
+    launch, spec = background_agent(folder, agent_id(1), many + agent_step("last"), 600, subagent_type="reviewer")
     path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
@@ -1543,8 +1545,32 @@ def A1_quiet_agent_is_listed_once_with_its_remedy():
     if problems:  # the remedy is read from a listing: with no listing, there is no remedy to check
         return problems
     low = msg.lower()
-    for word in ("resume", "by name", "fresh reviewer", "prior report"):
-        problems += expect(word in low, f"the remedy has no {word!r}: {msg!r}")
+    problems += expect("prior report" in low, f"the remedy does not pass the prior report: {msg!r}")
+    problems += expect("fresh reviewer" in low or "fresh agent" in low,
+                       f"the remedy does not send a fresh agent: {msg!r}")
+    problems += expect("resume it by name" not in low and "resume by name" not in low,
+                       f"the remedy for a reviewer still offers a resume by name: {msg!r}")
+    return problems
+
+
+@case
+def A1c_quiet_agent_with_no_worktree_keeps_the_resume_by_name_remedy():
+    """A1c. a quiet background Explore that ran with no worktree and is no reviewer: once stopped, a resume by name
+    is still allowed, so its remedy keeps offering one. The control for A1, which the reviewer's remedy must differ from"""
+    folder = new_dir()
+    many = []
+    for i in range(300):
+        many += agent_step("s%d" % i)
+    launch, spec = background_agent(folder, agent_id(3), many + agent_step("last"), 600, subagent_type="Explore")
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(3), by_line=True)
+    if problems:
+        return problems
+    problems += expect("resume it by name" in msg.lower(),
+                       f"the remedy for an Explore with no worktree has no resume by name: {msg!r}")
     return problems
 
 
