@@ -14,7 +14,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
-  It archives each other finished session it started at its next wake, once it has read the report, (ruling R46). It also archives a lane it decides to stop (decision `session-tiers`, Archiving scope). Each lane sends the nudge below when triage flags it (ruling R56 point 3).
+  It archives each other finished session it started at its next wake, once it has read the report (ruling R46). That covers a lane it decides to stop. It sends each lane that triage flags one line: reply if you are stuck and nobody picked it up (ruling R56 point 3).
   The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
