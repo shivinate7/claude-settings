@@ -17,7 +17,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import mail  # noqa: E402  hooks/mail.py
 
-TRIES = 6  # the first push and at most 5 retries, each only after a non-fast-forward
+TRIES = mail.TRIES  # the first push and at most 5 retries, each only after a non-fast-forward
 WAIT_CEILING = 7000  # the most --max-seconds a wait may ask for, in seconds
 
 
