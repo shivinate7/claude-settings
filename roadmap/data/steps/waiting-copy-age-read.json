@@ -1,0 +1,16 @@
+{
+ "id": "waiting-copy-age-read",
+ "title": "The copy-age reader flags a page copy older than its page's last write, per account",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "waiting-lag-read"
+ ],
+ "why": "Git-home plan item 6.",
+ "source": "coordinator 12:18 CST Nov 13, lane page-one-store-git-home, decision page-one-store (#2829) Plan",
+ "note": "Todo, under page-data-one-store. `stale_pages.py --copy-age <folder>` reports, per account, each page copy older than its page's last write. Inside lane page-one-store-git-home. Blocked by waiting-lag-read.",
+ "updatedAt": "2026-11-13T12:19:23-06:00"
+}

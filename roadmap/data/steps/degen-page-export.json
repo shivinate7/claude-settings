@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": null,
   "why": "degen registers a waiting page (LT2ST4u9…), but degen's roadmap branch has no waiting/ folder, so its data was never copied, and this account gets 404 on the page. Found by lane export-after-page-write (#1784; coordinator, 23:24 CST Nov 7).",
-  "note": "The page sits on another account, so a degen page writer on the owner's Mac owns the export. Owner task page item 398 now asks a Mac session for both banchi and degen. Done check: degen's roadmap branch holds waiting/items and the page shows its roadmap block. Slug and title by triage; no source gave one.",
-  "updatedAt": "2026-11-12T11:17:26-06:00"
+  "note": "The page sits on another account, so a degen page writer on the owner's Mac owns the export. Owner task page item 398 now asks a Mac session for both banchi and degen. Done check: degen's roadmap branch holds waiting/items and the page shows its roadmap block. Slug and title by triage; no source gave one. Owner 12:12 CST Nov 13 (retro 12:16): \"i dont wanna unstale the copies until we've confirmed that's the last step you need before the universal git plan works -- otehrwise they will just go stale agian tbh\". The Home and Degen export paste prompts are held until lane page-one-store-git-home finishes its six steps.",
+  "updatedAt": "2026-11-13T12:19:23-06:00"
 }
