@@ -4090,7 +4090,7 @@ REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "n
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
-REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
+REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds. The cap no review row may pass (the guard's REVIEW_POLICY_CAP; this file does not load the guard at import). A change's own last round is its review row's.
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
@@ -4104,12 +4104,23 @@ def review_round_model(n):
     rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
     return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
 
+def review_policy(kind, guard):
+    """-> (owed, last, net) for a change of this kind and Guard or check: the model record's review row, read through the guard's reader
+    (hooks/guard.py review_policy_table), else REVIEW_POLICY_FALLBACK. owed is the round a PASS must reach, last the final round, net true when
+    a failed final round still owes its net value. Reads the record once per call, like review_round_model."""
+    import guard as hook_guard
+    return hook_guard.review_policy(hook_guard.review_policy_table(hook_guard.pointer_checkout()), kind, guard)
+
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
-    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row.
+    REVIEW_POLICY_FALLBACK, the review rows' built-in rule, is read the same way."""
     if name == "REVIEW_FIX_GUARD_MODEL":
         import guard as hook_guard
         return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
+    if name == "REVIEW_POLICY_FALLBACK":
+        import guard as hook_guard
+        return hook_guard.REVIEW_POLICY_FALLBACK
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):
@@ -4160,8 +4171,6 @@ def parse_review(text):
     n, head, kind, guard = (m.group(1) for m in fields)
     if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
         return None
-    if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
-        return None
     g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
     bound = grant_pr(g.group(1)) if g else None
     grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
@@ -4193,10 +4202,11 @@ def review_state(rec, head):
     The done rules follow roles-review-cap-three and the decision pr-review-record (owner item 741, 2026-11-13 13:29 CST): a passing round, or a
     passing sonnet fix check, ends the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix
     check PASS counts as that round passing (every fix check runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS
-    or absent; or Kind is delete-only, Guard or check is no and the first round is done; or Kind is docs-only with no round. Net value negative holds
+    or absent; or the row owes no round and none is recorded. The rounds a pass must reach, the final round and whether net value is owed
+    come from the change's review row (review_policy: the model record's second table, decision agent-model-cap). Net value negative holds
     the change. A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a delete-only done names it.
     A failed round is open. After a failed round 2 the builder's third try runs round 3 (a granted round 4 follows it): a failed final round
-    is done when Guard or check is no, or when Net value is zero or positive, and open while a guard or check change owes its net value.
+    is done when the row owes no net value, or when Net value is zero or positive, and open while a row that owes its net value has none.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
     rounds say. A PASS counts as the last recorded round passing, even when that round failed. With no round recorded it is open."""
     if rec is None:
@@ -4218,29 +4228,29 @@ def review_state(rec, head):
         return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
-    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # round 3, or a granted round 4, is the final round
+    owed, last, net_owed = review_policy(rec["kind"], rec["guard"])  # the model record's review row for this change
+    final = last + bool(rec.get("grant"))  # the row's last round, or a granted round after it, is the final round
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
-    passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
+    reached = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
+    passed = reached and top >= owed  # a pass below the rounds the row owes does not end the review
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
     lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
     if passed and not bad:  # a passing round or fix check ends the review, a guard or check change too (owner item 741)
         return "done", lead
     if top >= final:  # a passing final round is done above, so this reads a failed one
-        if rec["guard"] == "no":
-            return "done", f"round {final} is done, no guard or check changed" + note
+        if not net_owed:
+            return "done", f"round {final} is done, no net value owed" + note
         if rec["net"] in ("zero", "positive"):
             return "done", f"round {final} is done, net value {rec['net']}" + note
         if bad and (fix or all(v == "PASS" for i, role, _, v in rounds if i == top and role == REVIEW_ROLES[0])):  # the reviewer passed and the design reviewer did not
             return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
         return "open", f"round {final} is done on a guard or check change, and its net value is owed"
-    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
-        return "done", "delete-only change, round 1 is done" + note
     if passed:
         return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
-    if rec["kind"] == "delete-only" and top == 1:
-        return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
-    if rec["kind"] == "docs-only" and not rounds:
-        return "done", "docs-only change, no round owed"
+    if reached:
+        return "open", f"{lead}, but this kind of change owes {owed} rounds"
+    if not rounds and not owed:
+        return "done", "no round owed for this kind of change"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
@@ -5725,9 +5735,9 @@ def main(argv, host=None, lock=None, hosts=None):
             earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
             earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
             new_top = max((r[0] for r in a.round), default=0)
-            # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
-            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
-                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
+            # a new record may not lower the top round an earlier record holds, and below its review row's last round it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
+            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < review_policy(a.kind, a.guard)[1] and not a.fix_check)):
+                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {review_policy(a.kind, a.guard)[1]}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None

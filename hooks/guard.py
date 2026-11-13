@@ -3784,6 +3784,79 @@ def role_round_model(rounds, role, n, kind="other"):
     return ROLE_ROUND_FALLBACK.get((role, n, kind))
 
 
+# THE REVIEW ROWS (decision agent-model-cap, "The round rows", second table). A table under the header `Kind | Guard or check |
+# Rounds owed after a pass | Last round | Net value owed after a failed last round` gives each change's review policy: the key is
+# (kind, guard), the value (owed, last, net): the round a pass must reach to end the review, the final round, and whether a failed
+# final round still owes its net value. review_policy_table is the one reader; the merge tool and lint read it through the guard.
+# A row the record lacks or cannot read falls back to REVIEW_POLICY_FALLBACK, which equals the shipped rows.
+REVIEW_POLICY_HEADER = ["kind", "guard or check", "rounds owed after a pass", "last round", "net value owed after a failed last round"]
+REVIEW_POLICY_KINDS = ("normal", "delete-only", "docs-only")
+REVIEW_POLICY_CAP = 3  # rule roles-review-cap-three: no row names a last round above this
+REVIEW_POLICY_FALLBACK = {("normal", "no"): (1, 3, False), ("normal", "yes"): (1, 3, True),
+                          ("delete-only", "no"): (1, 1, False), ("delete-only", "yes"): (1, 3, True),
+                          ("docs-only", "no"): (0, 3, False), ("docs-only", "yes"): (0, 3, True)}
+
+
+def review_policy_rows(pointer_root):
+    """[(cells, row text)] for each row of the record's review rows table, the cells as written (lowercase, backticks dropped), or
+    None when the record cannot be read. Only the table under the review header is read; its separator line is left out."""
+    text = _role_record_text(pointer_root)
+    if text is None:
+        return None
+    rows, inside = [], False
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            inside = False
+            continue
+        cells = [cell.strip().replace("`", "").lower() for cell in line.strip().strip("|").split("|")]
+        if cells == REVIEW_POLICY_HEADER:
+            inside = True
+        elif inside and not all(re.fullmatch(r":?-+:?", cell) for cell in cells):
+            rows.append((cells, line.strip()))
+    return rows
+
+
+def review_policy_row(cells):
+    """((kind, guard), (owed, last, net)) of one review row's cells, or None when the row is malformed: not five cells, a kind outside
+    REVIEW_POLICY_KINDS, a guard word other than yes or no, a round cell that is not a number, a last round outside 1..REVIEW_POLICY_CAP,
+    owed above last, or a net word other than yes or no."""
+    if len(cells) != len(REVIEW_POLICY_HEADER):
+        return None
+    kind, guard, owed, last, net = cells
+    if kind not in REVIEW_POLICY_KINDS or guard not in ("yes", "no") or net not in ("yes", "no"):
+        return None
+    if not (re.fullmatch(r"\d+", owed, re.ASCII) and re.fullmatch(r"\d+", last, re.ASCII)):
+        return None
+    if not 1 <= int(last) <= REVIEW_POLICY_CAP or int(owed) > int(last):
+        return None
+    return (kind, guard), (int(owed), int(last), net == "yes")
+
+
+def review_policy_table(pointer_root):
+    """{(kind, guard): (owed, last, net)} of the record's well-formed review rows, the first row for a key winning, or None when the
+    record cannot be read or holds no well-formed row. The one reader of the review rows."""
+    table = {}
+    for cells, _ in review_policy_rows(pointer_root) or ():
+        row = review_policy_row(cells)
+        if row:
+            table.setdefault(*row)
+    return table or None
+
+
+def review_policy(rows, kind, guard):
+    """(owed, last, net) for a change of this kind and Guard or check: its row in `rows` (review_policy_table's read, or None), else
+    REVIEW_POLICY_FALLBACK."""
+    return (rows or {}).get((kind, guard)) or REVIEW_POLICY_FALLBACK[(kind, guard)]
+
+
+def review_policy_drift(pointer_root):
+    """One line per malformed review row, [] when none or when the record cannot be read (the lint check reports that as unknown).
+    Lint-time only, like role_round_drift."""
+    return ["review row is malformed (a kind of %s, a Guard or check of yes or no, whole-number round cells with a last round of 1 to %d "
+            "and no more owed than last, and a net value of yes or no): %s" % (", ".join(REVIEW_POLICY_KINDS), REVIEW_POLICY_CAP, text)
+            for cells, text in review_policy_rows(pointer_root) or () if review_policy_row(cells) is None]
+
+
 def role_round_drift(pointer_root):
     """One line per round row whose model the guard cannot rank, [] when none or when the record cannot be read (the lint check
     reports that as unknown). Lint-time only, like role_list_drift."""
