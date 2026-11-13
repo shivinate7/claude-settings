@@ -16,8 +16,6 @@ Run from any folder:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch <branch>] --block --out FILE
 
-`python3 ~/.claude/skills/roadmap/build.py --check-staged` is the pre-commit note cap (step c138). It reads the step files staged in the index and writes no page. It exits 1 and names each step whose staged note is over `NOTE_WORDS` words and is added or grown by the commit.
-
 `--record-branch` defaults to the extras key `record-branch` in `.claude/layout-extras.json`, else `roadmap`.
 With no flag, an extras file that cannot be read warns and reads `roadmap`. A `record-branch` value that is
 not a plain git branch name stops the script.
