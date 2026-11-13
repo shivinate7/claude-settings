@@ -440,24 +440,9 @@ class ReviewRecordTests(unittest.TestCase):
         # one. The fix names an earlier head, so its diff is not empty.
         self.assert_record_blocks_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
 
-    def assert_open_guard_record_blocks_with_its_why(self, body):
-        """A PASS claim on a record that merge reads open is refused. The reason carries review_state's why for the live head, and it
-        does not tell the lane to post a record, since the record is posted already."""
-        state, why = merge_mod.review_state(merge_mod.parse_review(body), LIVE)
-        self.assertEqual(state, "open", "fixture: merge/merge.py does not call this record open")
-        self.serve(comments=[body])
-        out = self.stop(self.lane_turn(report(CLAIM)))
-        self.assert_reads_of(PR)
-        self.assert_blocked(out)
-        self.assertIn(why, out["reason"], f"the refusal does not carry review_state's why {why!r}: {out['reason']}")
-        self.assertNotIn("has no review record", out["reason"], "the refusal says there is no review record, but the record is posted")
-        self.assertNotIn("--review-record", out["reason"], "the refusal tells the lane to post a record that is already posted")
-        self.assertNotIn("post the record", out["reason"], "the refusal tells the lane to post a record that is already posted")
-
-    def test_guard_yes_record_with_a_fix_pass_below_the_final_round_blocks_with_its_why(self):
-        # Catches: a PASS claim refused with the no-record remedy, which tells the lane to post a record already on the PR.
-        # owner, page item 471 a: each record reads open. A fix check PASS below the final round leaves a guard or check change open;
-        # the final round with no net value does too.
+    def test_guard_yes_record_with_a_passing_fix_check_or_round_three_is_not_refused(self):
+        # owner, page item 741: a passing fix check ends a guard or check change whatever round it follows, and a passing round 3 ends it with no
+        # net value owed, so each PASS claim here is satisfied and not refused
         fix = (OLD, "reviewer", "sonnet", "PASS")
         cases = (([(1, "reviewer", "sonnet", "FAIL")], fix),
                  ([(1, "reviewer", "sonnet", "PASS")], fix),
@@ -465,7 +450,7 @@ class ReviewRecordTests(unittest.TestCase):
                  ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")], None))
         for rounds, fix_line in cases:
             with self.subTest(rounds=rounds, fix=fix_line):
-                self.assert_open_guard_record_blocks_with_its_why(record(rounds=rounds, guard="yes", net="not owed", fix=fix_line))
+                self.assert_record_satisfies_claim(record(rounds=rounds, guard="yes", net="not owed", fix=fix_line))
 
     def test_guard_yes_record_that_passes_before_the_final_round_with_no_fix_check_is_not_refused(self):
         # control: owner, page item 471 a: merge reads a guard or check change whose round passed, with no fix check, as done before the

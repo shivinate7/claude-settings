@@ -15566,10 +15566,9 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
-class ReviewRoundStopsAtTwo(ReviewEnv):
-    """--review-record writes rounds 1 and 2 only (owner, page item 741: "round 3 no longer occurs"; coordinator, 2026-11-13). A record that ends at a
-    passing round 1, alone or with a fix check, is complete on a guard or check change, and its printed body parses. parse_review still reads a round 3
-    in a record posted before the rule."""
+class ReviewRoundOneCompletes(ReviewEnv):
+    """--review-record accepts a record that ends at a passing round 1, alone or with a fix check, on a guard or check change, and its printed body
+    parses. parse_review still reads a round 3 in a record posted before the rule."""
 
     def yes_argv(self, *rounds, fix=None):
         """The argv of --review-record for a normal change with Guard or check yes at the live head, with the --round values given in order."""
@@ -15589,16 +15588,6 @@ class ReviewRoundStopsAtTwo(ReviewEnv):
                 rc, out, err = self.run_args(*argv, host=host)
                 self.assertEqual(rc, 0, f"a guard change whose round 1 passes was refused {label}:\n" + out + err)
                 parse_text(self, posted_body(self, out))
-
-    def test_the_writer_refuses_a_third_round_on_a_guard_change(self):
-        rc, out, err = self.run_args(*self.yes_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"))
-        self.assertEqual(rc, 2, "the writer posted a record with a round 3, but its rounds stop at 2 (item 741):\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused round 3 still printed a record")
-
-    def test_a_refused_round_three_names_stop_at_two(self):
-        rc, out, err = self.run_args(*self.yes_argv("3:reviewer:opus:PASS"))
-        self.assertEqual(rc, 2, "a lone round 3 was not refused:\n" + out + err)
-        self.assertIn("stop at 2", err, f"the refusal of round 3 does not say the rounds stop at 2: {err!r}")
 
     def test_parse_review_still_accepts_a_posted_round_three_record(self):
         # back-compat control: a record posted before the rule holds round 3; it still parses and reads its state
@@ -16012,10 +16001,11 @@ class ReviewRoundModel(ReviewEnv):
         """The review flags for a record with the given --round values, in order, with --head set to the live head of the feature branch."""
         return ("--kind", "normal", "--guard", "no", "--head", self.head(), *(flag for r in rounds for flag in ("--round", r)))
 
-    def test_a_round_two_naming_a_model_other_than_sonnet_is_refused(self):
-        # owner, page item 741: rounds stop at 2, so the round-3 pair is gone; a round 3 is refused by ReviewRoundStopsAtTwo
+    def test_a_round_two_or_three_naming_a_model_other_than_sonnet_is_refused(self):
         pairs = (
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:haiku:PASS"), "round 2 on haiku"),
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
+             ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:haiku:PASS"), "round 3 on haiku"),
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"), "round 2 on opus"),
         )
         for good, bad, label in pairs:
@@ -16028,11 +16018,13 @@ class ReviewRoundModel(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_the_rounds_the_row_allows_still_print(self):
-        # controls: the first review on haiku or sonnet, and a design reviewer on opus in each of rounds 1 and 2 (rounds stop at 2, item 741)
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and the last review on opus by the owner's override
         cases = (
             ("1:reviewer:haiku:PASS",),
             ("1:reviewer:sonnet:PASS",),
-            ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:FAIL", "2:design-reviewer:opus:PASS"),
+            ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:FAIL", "2:design-reviewer:opus:PASS",
+             "3:reviewer:sonnet:PASS", "3:design-reviewer:opus:PASS"),
+            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
         )
         for rounds in cases:
             with self.subTest(rounds=rounds):
@@ -16138,13 +16130,11 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
-    def test_a_round_three_record_that_lists_the_earlier_rounds_is_refused_at_stop_at_two(self):
-        # owner, page item 741: the writer's rounds stop at 2, so a round 3 is refused even when it lists the earlier rounds
+    def test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
                                      host=self.host_with(earlier))
-        self.assertEqual(rc, 2, "a round 3 record was written, but the writer's rounds stop at 2:\n" + out + err)
-        self.assertIn("stop at 2", err, f"the refusal of round 3 does not say the rounds stop at 2: {err!r}")
+        self.assert_accepted(rc, out, err)
 
     def test_a_fix_verifier_after_the_full_earlier_rounds_is_accepted(self):
         # the earlier record has no Fix check line, so a record that repeats its three rounds and names its head as the fix base is allowed
