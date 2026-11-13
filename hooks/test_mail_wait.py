@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cases for `mail wait`: one background command that blocks until the session's own mailbox address has a new
-open message, then prints one line and exits 0 (decision session-messages, "One route" and "Design").
+open message, then prints one wake line per new message and exits 0 (decision session-messages, "One route" and "Design").
 
 Run it from the repository root:
 
@@ -1031,6 +1031,91 @@ class WakeLine(WaitCase):
         self.assertEqual(code, 0, "new repo-address mail made mail wait exit %r, expected 0" % (code,))
         self.assertIn("mail take --addr %s 0a1b2c3d4e61" % PC_BASE, text,
                       "the wake for the repo address gives no take command with its own --addr: %r" % text)
+
+
+def wake_subject(mid):
+    return "Body marker: new %s" % mid
+
+
+def expected_wake(mid):
+    """The wake line _wake_line prints for one new message of this session's address, with its wake_subject."""
+    return ('mail: new %s from %s kind request; untrusted subject "%s"; read: `mail read --addr %s %s`; '
+            'take: `mail take --addr %s %s`' % (mid, SENDER, wake_subject(mid), ADDR, mid, ADDR, mid))
+
+
+def more_line(count):
+    """The line that counts the new messages past the five named, with the read command for the address."""
+    return "mail: %d more new; read: `mail read --addr %s`" % (count, ADDR)
+
+
+class WakeEveryNew(WaitCase):
+    """A poll that finds N new open ids prints one wake line per new message, in the order open_messages returns them
+    (by id, for one address), and exits 0. At most five lines: past five, the first five are named and one more line
+    counts the rest."""
+
+    def land_at_second_poll(self, new_ids, open_at_start=()):
+        """A waiter whose address holds `open_at_start` when it starts. At its second sleep, each of `new_ids` lands
+        as one message. Returns (exit code, printed text, probe)."""
+        store, machine = self.fixture()
+        for mid in open_at_start:
+            store.seed(ADDR, mid, "request", SENDER, "Body marker: open at start %s" % mid)
+        probe = {}
+
+        def land(fake):
+            if len(fake.sleeps) == 2 and "sent" not in probe:
+                for mid in new_ids:
+                    store.seed(ADDR, mid, "request", SENDER, wake_subject(mid))
+                probe["sent"] = True
+
+        code, text = run_wait(machine.env, FakeTime(hook=land), Procs(), max_seconds=600)
+        return code, text, probe
+
+    def test_two_new_messages_each_get_one_wake_line_in_id_order_and_exit_0(self):
+        ids = ["0a1b2c3d4e50", "0a1b2c3d4e51"]
+        code, text, probe = self.land_at_second_poll(ids)
+        self.assertIn("sent", probe, "the sends never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "two new messages made mail wait exit %r, expected 0" % (code,))
+        named = [line for line in text.splitlines() if line.startswith("mail: new ")]
+        self.assertEqual(len(named), 2, "two new messages printed %d wake lines, expected 2: %r" % (len(named), text))
+        self.assertEqual(text.splitlines(), [expected_wake(mid) for mid in ids],
+                         "the wake lines are not one per new message, in id order: %r" % text)
+
+    def test_one_new_message_still_prints_exactly_one_wake_line(self):
+        ids = ["0a1b2c3d4e52"]
+        code, text, probe = self.land_at_second_poll(ids)
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "one new message made mail wait exit %r, expected 0" % (code,))
+        self.assertEqual(text.splitlines(), [expected_wake(ids[0])],
+                         "one new message did not print exactly its one wake line: %r" % text)
+
+    def test_seven_new_messages_name_the_first_five_and_count_the_other_two(self):
+        ids = ["0a1b2c3d4e%02x" % n for n in range(0x60, 0x67)]
+        code, text, probe = self.land_at_second_poll(ids)
+        self.assertIn("sent", probe, "the sends never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "seven new messages made mail wait exit %r, expected 0" % (code,))
+        named = [line for line in text.splitlines() if line.startswith("mail: new ")]
+        self.assertEqual(len(named), 5, "seven new messages named %d messages, expected 5: %r" % (len(named), text))
+        self.assertEqual(text.splitlines(), [expected_wake(mid) for mid in ids[:5]] + [more_line(2)],
+                         "seven new messages did not print the first five in id order and then 'mail: 2 more new': %r"
+                         % text)
+
+    def test_message_open_at_start_is_not_named_while_two_new_messages_wake(self):
+        new, open_id = ["0a1b2c3d4e50", "0a1b2c3d4e52"], "0a1b2c3d4e51"
+        code, text, probe = self.land_at_second_poll(new, open_at_start=[open_id])
+        self.assertIn("sent", probe, "the sends never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "two new messages with one open at the start made mail wait exit %r, expected 0"
+                         % (code,))
+        self.assertNotIn(open_id, text, "the message open at the start was named in a wake line: %r" % text)
+        self.assertEqual(text.splitlines(), [expected_wake(mid) for mid in new],
+                         "the wake lines are not one per new message: %r" % text)
+
+    def test_five_new_messages_get_five_lines_and_no_more_line(self):
+        ids = ["0a1b2c3d4e%02x" % n for n in range(0x70, 0x75)]
+        code, text, probe = self.land_at_second_poll(ids)
+        self.assertIn("sent", probe, "the sends never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "five new messages made mail wait exit %r, expected 0" % (code,))
+        self.assertEqual(text.splitlines(), [expected_wake(mid) for mid in ids],
+                         "five new messages did not print five wake lines and no 'more new' line: %r" % text)
 
 
 def lock_state(path):
