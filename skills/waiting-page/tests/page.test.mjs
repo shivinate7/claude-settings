@@ -8591,6 +8591,155 @@ test("Withdraw of a sent overturn removes the answer and the ruling card is back
   assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
 });
 
+// ---------------------------------------------------------------- wakes: the sessions an answer wakes, on the card
+// Spec: docs/design/wakes-on-card-notes.md (sections 1, 2, 4, 5 and 6). `wakes` is a list of session ids. Absent or null: the
+// owner alone, and the card draws nothing. A list is valid when it has one or more entries and each is `session_` then
+// [A-Za-z0-9_-]+. Any other list says the list is not valid and draws no disclosure. Each case reads the top row, the
+// disclosure or the card, by visible text and by where the part sits.
+const WK_IDS = ["session_01TriageWake7Vx4Lq2mZ", "session_01CoordWake3Rt8Ny5Pd"];
+const WK_MANY = Array.from({ length: 12 }, (_, i) => "session_01ManyWake" + String(i).padStart(2, "0") + "Zq");
+const WK_LONG = "session_" + "abcdefghij".repeat(5); // 58 characters: the length the notes check at 390 wide
+const wkWords = (n) => "your answer wakes " + n + (n === 1 ? " session" : " sessions");
+// The item's owner is "test thread" (the DECISION fixture), so the not-valid line names it.
+const WK_NOT_VALID = "wake list not valid: test thread is asked to fix it when you answer";
+const wkTop = (page, it) => card(page, it).locator(".top");
+// The disclosure whose summary holds the given text. A card holds at most one.
+const wkBox = (page, it, which) => card(page, it).locator("details", { has: page.locator("summary", { hasText: which }) });
+const wkIdsIn = (box) => box.locator("li").allTextContents().then((l) => l.map((s) => flat(s)));
+// Any wakes line or session list on the card: the count must be 0 where the item wakes nobody.
+const wkAny = (page, it) => card(page, it).getByText(/your answer wakes|wake list not valid|Which sessions?/).count();
+// The card's top row and its disclosure: no part runs past the card's right edge, and the page does not scroll sideways.
+const wkFit = (page, it) => page.evaluate((id) => {
+  const c = document.getElementById("item-" + id), cr = c.getBoundingClientRect();
+  const bad = [...c.querySelectorAll(".top *, .wk, .wk *")].filter((e) => e.getBoundingClientRect().right > cr.right + 0.5).map((e) => e.tagName.toLowerCase() + "." + e.className + " " + e.textContent.trim().slice(0, 40));
+  return { sw: document.documentElement.scrollWidth, iw: innerWidth, bad };
+}, it.id);
+
+test("wakes: two sessions say 'your answer wakes 2 sessions' in the top row, after the lane line, with the notes' focus ids", async (t) => {
+  const it = mk("wake-two", 1, { lane: "ci-done-comment", wakes: WK_IDS });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it), "the item is not drawn");
+  await need(wkTop(page, it).getByText(wkWords(2), { exact: true }), "the top row has no single text run 'your answer wakes 2 sessions'");
+  const top = flat(await wkTop(page, it).innerText());
+  assert.ok(top.includes("waits on lane ci-done-comment") && top.indexOf("waits on lane ci-done-comment") < top.indexOf(wkWords(2)), "the wakes line does not follow the lane line in the top row: " + top);
+  assert.doesNotMatch(top, /session_/, "a session id shows in the top row with the disclosure closed: " + top);
+  assert.equal(await card(page, it).locator("#wakes-" + it.id).count(), 1, "the words have no focus id wakes-<id>");
+  assert.equal(await card(page, it).locator("#wk-" + it.id).count(), 1, "the disclosure has no focus id wk-<id>");
+});
+
+test("wakes: one session says 'your answer wakes 1 session', and its disclosure is 'Which session' and holds that one id", async (t) => {
+  const it = mk("wake-one", 1, { wakes: [WK_IDS[0]] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it), "the item is not drawn");
+  await need(wkTop(page, it).getByText(wkWords(1), { exact: true }), "the top row has no single text run 'your answer wakes 1 session'");
+  const box = wkBox(page, it, "Which session");
+  await need(box, "no disclosure whose summary holds 'Which session'");
+  assert.equal(flat(await box.locator("summary").innerText()), "Which session", "the one-session disclosure is not titled 'Which session'");
+  await box.locator("summary").click();
+  assert.deepEqual(await wkIdsIn(box), [WK_IDS[0]], "the disclosure does not list the one id as written");
+});
+
+test("wakes: the ids sit in a closed disclosure titled 'Which sessions' that opens, and list each id as written, in stored order", async (t) => {
+  const it = mk("wake-open", 1, { wakes: [WK_IDS[1], WK_IDS[0]] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it), "the item is not drawn");
+  const box = wkBox(page, it, "Which sessions");
+  await need(box, "no disclosure titled 'Which sessions' in the card");
+  assert.equal(flat(await box.locator("summary").innerText()), "Which sessions", "the disclosure is not titled 'Which sessions'");
+  assert.equal(await box.evaluate((d) => d.open), false, "the disclosure starts open");
+  assert.equal(await box.locator("li").first().isVisible(), false, "the ids show before the disclosure is opened");
+  await box.locator("summary").click();
+  assert.equal(await box.evaluate((d) => d.open), true, "the disclosure did not open");
+  assert.deepEqual(await wkIdsIn(box), [WK_IDS[1], WK_IDS[0]], "the ids are not listed as written, in stored order");
+  assert.equal(await box.locator("li").first().isVisible(), true, "the ids are not shown once the disclosure is open");
+});
+
+test("wakes: twelve sessions say 'your answer wakes 12 sessions' and list all twelve, never capped", async (t) => {
+  const it = mk("wake-many", 1, { wakes: WK_MANY });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it), "the item is not drawn");
+  await need(wkTop(page, it).getByText(wkWords(12), { exact: true }), "the top row has no single text run 'your answer wakes 12 sessions'");
+  const box = wkBox(page, it, "Which sessions");
+  await need(box, "no disclosure titled 'Which sessions' for twelve ids");
+  await box.locator("summary").click();
+  assert.deepEqual(await wkIdsIn(box), WK_MANY, "the disclosure does not list all twelve ids as written");
+});
+
+test("control: an item with no wakes, and one with wakes null, draws no wakes line and no session list", async (t) => {
+  const none = mk("wake-none", 1), nul = mk("wake-null", 2, { wakes: null });
+  const page = await open(t, { items: [none, nul] }); if (!page) return;
+  for (const it of [none, nul]) {
+    await need(card(page, it), `${it.id}: the item is not drawn`);
+    assert.equal(await wkAny(page, it), 0, `${it.id}: the card draws a wakes line or a session list`);
+  }
+});
+
+// The three shapes the notes call not valid: an empty list, a string, and a list with a bad entry. Each card says so, once,
+// and draws no disclosure, since there is no valid id to list.
+const WK_BAD = [["an empty list", []], ["a string", WK_IDS[0]], ["a list with a bad entry", [WK_IDS[0], "not-a-session"]]];
+test("wakes: a list that is not valid says so in the top row and draws no disclosure, for an empty list, a string and a bad entry", async (t) => {
+  const items = WK_BAD.map(([, wakes], i) => mk("wake-bad-" + i, 10 + i, { wakes }));
+  const page = await open(t, { items }); if (!page) return;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i], name = WK_BAD[i][0];
+    await need(card(page, it), `${name}: the item is not drawn`);
+    await need(wkTop(page, it).getByText(WK_NOT_VALID, { exact: true }), `${name}: the top row has no 'wake list not valid' line`);
+    assert.equal(await card(page, it).getByText(/your answer wakes/).count(), 0, `${name}: the top row says the answer wakes sessions`);
+    assert.equal(await wkBox(page, it, /Which sessions?/).count(), 0, `${name}: a disclosure lists sessions for a list that is not valid`);
+  }
+});
+
+// Ruling (the owner's pick, not drawn): a ruling card gets no wakes line, though its builder step names one. See the notes' critique.
+test("control: a ruling card draws no wakes line and no session list, even when the ruling names sessions", async (t) => {
+  const ruling = { ...ARBITER, wakes: WK_IDS };
+  const page = await open(t, { items: [DECISION, ruling] }); if (!page) return;
+  await need(card(page, ruling), "the ruling is not drawn");
+  assert.equal(await wkAny(page, ruling), 0, "the ruling card draws a wakes line or a session list");
+});
+
+test("wakes: a card with a saved answer keeps the wakes line in its top row, since the receipt is built on the same top row", async (t) => {
+  const it = mk("wake-saved", 1, { wakes: WK_IDS });
+  const page = await open(t, { items: [it], answers: laSaved(it, "a") }); if (!page) return;
+  await need(card(page, it), "the saved item is not drawn");
+  await need(wkTop(page, it).getByText(wkWords(2), { exact: true }), "the saved card's top row has no 'your answer wakes 2 sessions'");
+});
+
+for (const scheme of ["light", "dark"]) test(`wakes: an answer that wakes sessions stays inside its card at 390 wide, closed and open, a 58-character id included, ${scheme} scheme`, async (t) => {
+  const it = mk("wake-390", 1, { lane: "ci-done-comment", wakes: [WK_LONG, WK_IDS[0]] });
+  const page = await open(t, { items: [it], scheme, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await need(card(page, it), "the item is not drawn at 390 wide");
+  await need(wkTop(page, it).getByText(wkWords(2), { exact: true }), "the top row has no 'your answer wakes 2 sessions' at 390 wide");
+  const closed = await wkFit(page, it);
+  assert.ok(closed.sw <= closed.iw, `closed: the page scrolls sideways, ${closed.sw} over ${closed.iw}`);
+  assert.deepEqual(closed.bad, [], "closed: a part of the card runs past its right edge");
+  const box = wkBox(page, it, "Which sessions");
+  await need(box, "no disclosure titled 'Which sessions' at 390 wide");
+  await box.locator("summary").click();
+  assert.deepEqual(await wkIdsIn(box), [WK_LONG, WK_IDS[0]], "the ids are not all listed at 390 wide");
+  const opened = await wkFit(page, it);
+  assert.ok(opened.sw <= opened.iw, `open: the page scrolls sideways, ${opened.sw} over ${opened.iw}`);
+  assert.deepEqual(opened.bad, [], "open: a part of the card runs past its right edge");
+});
+
+test("wakes: itemFields lists wakes, and an item with wakes draws no unknown-field warning", async (t) => {
+  const it = mk("wake-fields", 1, { wakes: WK_IDS });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const list = JSON.parse(await page.locator("script#itemFields").textContent());
+  assert.ok(list.includes("wakes"), "itemFields does not list wakes");
+  assert.doesNotMatch(await card(page, it).innerText(), /does not draw/, "the item with wakes draws the unknown-field warning");
+});
+
+// The page cannot import Python, so it holds one copy of the session id shape. This case reads that copy and the Python
+// pattern from hooks/own_session.py, so the two cannot drift apart.
+test("the page's SESSION_ID source is '^' plus the pattern of _CREATED_ID in hooks/own_session.py, read from that file", () => {
+  const py = spawnSync("python3", ["-c", "import sys; sys.path.insert(0, sys.argv[1]); from own_session import _CREATED_ID; sys.stdout.write(_CREATED_ID.pattern)", path.join(HERE, "..", "..", "..", "hooks")], { encoding: "utf8" });
+  assert.equal(py.status, 0, "python3 could not read _CREATED_ID from hooks/own_session.py: " + py.stderr);
+  const want = "^" + py.stdout + "$";
+  const m = /^const SESSION_ID = \/(.*)\/;$/m.exec(html);
+  assert.ok(m, "page.html has no line `const SESSION_ID = /.../;`, so it holds no copy of the session id shape");
+  assert.equal(m[1], want, "page.html's SESSION_ID source is not the one _CREATED_ID gives");
+});
+
 // ---------------------------------------------------------------- parked lines: Unpark and Drop
 
 // A parked line is a .pk in .parked .pk-list, with two .btn.pkb acts. A meta/page.parked entry is { id, ref, note }.
