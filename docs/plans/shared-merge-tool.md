@@ -53,7 +53,7 @@ Stays in Banchi:
 - `scripts/githooks/reference-transaction` and `pre-push`. The tool never moves main except to
   a commit origin holds, which allow rule 3 already permits.
 - `scripts/primary_sync.py`, called through `afterMerge`.
-- Its generators, called through `regenerate`: the decision index, the `docs/map.py`
+- Its generators, called through `regenerate`: the decision index, Banchi's `map.py`
   renumber, and the derived tests page.
 - Build steps, numbered by hand and refused through `unclaimed`
   (debt `banchi-build-steps`).

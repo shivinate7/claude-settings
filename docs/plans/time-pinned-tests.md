@@ -11,7 +11,7 @@ Working plan for roadmap step time-pinned-tests-go (tests that pass or fail on c
 - test-cap: a per-test or per-suite time limit.
 - wait-cap: a fixed bound on a wait for a condition or a child process. Most are hang guards, which can stay. Each repo's lane judges each one.
 
-Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`). The repo lane decides each one.
+Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `test_fetch_counter.py`). The repo lane decides each one.
 
 ## Counts
 
@@ -340,41 +340,41 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/DegenUITests/ViewerStripSwipeUITests.swift`: wait-cap 6
 - `native/DegenUITests/WhereSavesGoUITests.swift`: wait-cap 17
 - `native/DegenUITests/WindowSupport.swift`: sleep 2, wait-cap 1
-- `tests/addon/test_jd_folderwatch.py`: wait-cap 3
-- `tests/addon/test_jd_guard.py`: wait-cap 2
-- `tests/addon/test_jd_heal.py`: sleep 2, wait-cap 3
-- `tests/addon/test_jd_update_settings.py`: sleep 1
-- `tests/server/jd_rig.py`: wait-cap 1
-- `tests/server/stills_rig.py`: wait-cap 3
-- `tests/server/test_api_fixtures.py`: wait-cap 1
-- `tests/server/test_disk_floor.py`: wait-cap 2
-- `tests/server/test_fetch_counter.py`: sleep 5, elapsed-assert 1, wait-cap 1
-- `tests/server/test_file_speed_test.py`: sleep 1, wait-cap 1
-- `tests/server/test_hostkit.py`: wait-cap 4
-- `tests/server/test_icon_pacing.py`: sleep 3
-- `tests/server/test_ig_dm.py`: sleep 7
-- `tests/server/test_ig_refusal_log.py`: elapsed-assert 1
-- `tests/server/test_media_cache_repair.py`: wait-cap 1
-- `tests/server/test_media_queue.py`: elapsed-assert 2
-- `tests/server/test_media_save_upload.py`: sleep 3
-- `tests/server/test_service_edges.py`: elapsed-assert 1
-- `tests/server/test_share_lanes.py`: sleep 3
-- `tests/server/test_share_media.py`: sleep 1
-- `tests/server/test_sigterm.py`: wait-cap 1
-- `tests/server/test_tg_api.py`: sleep 1
-- `tests/server/test_tg_chat_follow.py`: sleep 1
-- `tests/server/test_tg_file.py`: sleep 1, wait-cap 1
-- `tests/server/test_tg_file_link.py`: elapsed-assert 2
-- `tests/server/test_tg_file_stream.py`: sleep 4
-- `tests/server/test_tg_session.py`: sleep 1
-- `tests/server/test_tg_thumb_route.py`: wait-cap 1
-- `tests/server/test_tls.py`: wait-cap 2
-- `tests/server/tg_thumb_rig.py`: sleep 3, wait-cap 1
+- `test_jd_folderwatch.py`: wait-cap 3
+- `test_jd_guard.py`: wait-cap 2
+- `test_jd_heal.py`: sleep 2, wait-cap 3
+- `test_jd_update_settings.py`: sleep 1
+- `jd_rig.py`: wait-cap 1
+- `stills_rig.py`: wait-cap 3
+- `test_api_fixtures.py`: wait-cap 1
+- `test_disk_floor.py`: wait-cap 2
+- `test_fetch_counter.py`: sleep 5, elapsed-assert 1, wait-cap 1
+- `test_file_speed_test.py`: sleep 1, wait-cap 1
+- `test_hostkit.py`: wait-cap 4
+- `test_icon_pacing.py`: sleep 3
+- `test_ig_dm.py`: sleep 7
+- `test_ig_refusal_log.py`: elapsed-assert 1
+- `test_media_cache_repair.py`: wait-cap 1
+- `test_media_queue.py`: elapsed-assert 2
+- `test_media_save_upload.py`: sleep 3
+- `test_service_edges.py`: elapsed-assert 1
+- `test_share_lanes.py`: sleep 3
+- `test_share_media.py`: sleep 1
+- `test_sigterm.py`: wait-cap 1
+- `test_tg_api.py`: sleep 1
+- `test_tg_chat_follow.py`: sleep 1
+- `test_tg_file.py`: sleep 1, wait-cap 1
+- `test_tg_file_link.py`: elapsed-assert 2
+- `test_tg_file_stream.py`: sleep 4
+- `test_tg_session.py`: sleep 1
+- `test_tg_thumb_route.py`: wait-cap 1
+- `test_tls.py`: wait-cap 2
+- `tg_thumb_rig.py`: sleep 3, wait-cap 1
 
 ### joyous
 
-- `tests/leads/score.test.ts`: elapsed-assert 1, test-cap 2
-- `tests/tour-pages.test.mjs`: sleep 1, test-cap 36, wait-cap 1
+- `score.test.ts`: elapsed-assert 1, test-cap 2
+- `tour-pages.test.mjs`: sleep 1, test-cap 36, wait-cap 1
 
 ### mailaudit
 

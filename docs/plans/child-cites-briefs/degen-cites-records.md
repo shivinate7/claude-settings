@@ -13,7 +13,7 @@ Read at degen a2ae7ba. Line numbers are for that commit. Re-read each line befor
 
 ## CI step to add
 
-In `.github/workflows/check.yml`, in the job that runs "STE lint", add one step:
+In degen's `check.yml` workflow, in the job that runs "STE lint", add one step:
 
     - name: CLAUDE.md cites records
       uses: shivinate7/claude-settings/actions/claude-md-cites@<sha>

@@ -20,7 +20,7 @@ read with `list_events`. Its scratch files were not carried over. Each quote nam
   <!-- ste-disable-next-line STE001: verbatim owner and coordinator words -->
   > "Git is each artifact's home, and the claude.ai link is just one account's view of it. An artifact is published only from a file in a repo, and listed in that repo's registry. The export saves the page HTML, its supporting files and its database. A cite names the artifact's id and its repo path... That also settles 14 roadmap step links: under (a) they become `artifact:<id>` cites"
 - fb-1509-1 (15:09 CST, event a1426829-348d-4fcf-be1d-27b6e68a2f22): degen PR #324 (merged as 5de5c55d) built its own
-  export, `tools/waiting_export.py`. Coordinator reply (event e67a56c5-94e4-4b8c-99bf-5f633d3fd37f): a second home for
+  export, `waiting_export.py` in its tools folder. Coordinator reply (event e67a56c5-94e4-4b8c-99bf-5f633d3fd37f): a second home for
   one capability; its secret scan raised 5 false alarms, so degen cut its scan to secrets only. A later review says
   this repo's scan refuses 4 of those 5 strings (event 31f89299-0895-4716-aa51-d39823b17299). The 5 strings were not
   recovered.
@@ -50,8 +50,8 @@ Explore (sonnet), 2026-11-02 15:10 CST, event 58a1960f-7cf0-4bd9-b82c-b6b7a886bd
 >    Fix: one PR of the kept mockups into the target repo's docs/design; the brief names the target repo.
 > 2. The waiting page is the only copy. skill `waiting-page`, "Add a design", step 3 pastes the HTML into the page, and its last paragraph drops it
 >    when the question closes. Fix: "Add a design" must find the file on origin before writing the item.
-> 3. An unmerged mockup branch was deleted: degen docs/design/jd-deferred.html (owner pick B, 2026-10-26 23:45 CDT),
->    cited at degen docs/specs/plan.md:1945 and native/Degen/JdDeferredPage.swift:5; on no ref. Product repos hold 0
+> 3. An unmerged mockup branch was deleted: degen's `jd-deferred.html` in its design folder (owner pick B, 2026-10-26 23:45 CDT),
+>    cited at degen's specs folder, `plan.md:1945`, and native/Degen/JdDeferredPage.swift:5; on no ref. Product repos hold 0
 >    archive/* branches. Fix: refuse a branch delete whose diff holds docs/design files main lacks, unless archived.
 > 4. Unpushed worktree loss (unmeasured): no hook pushes for the designer; a container reclaim loses it. Fix:
 >    SubagentStop for the designer refuses to end unless HEAD is on origin.
