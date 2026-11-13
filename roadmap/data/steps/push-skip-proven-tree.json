@@ -1,0 +1,14 @@
+{
+ "id": "push-skip-proven-tree",
+ "title": "A push to main skips its suites when the pushed tree equals the tree the PR tested",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL1snTn6rm7V5Ku3fHA",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:18 CST Nov 13, page item 729 a, in the coordinator's session.",
+ "source": "coordinator 12:20 CST Nov 13, relaying the owner; page item 729",
+ "note": "Doing, lane session_013NEJL1snTn6rm7V5Ku3fHA (tag cs-step:push-skip-proven-tree). Shared CI form skips a push to main's suites in every repo when the pushed tree equals the tested tree; a direct push still runs them. Supersedes ruling 176 b for tree-equal merges only. q_max and degen (722 a, 723 a) take the shared form once it lands; degen's red-main check is read then. Open question for the lane (runner 11): does the form cover a partial PR run (banchi D215, page item 736)?",
+ "updatedAt": "2026-11-13T12:22:06-06:00"
+}

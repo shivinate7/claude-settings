@@ -1,0 +1,10 @@
+{
+ "id": "push-skip-proven-tree",
+ "at": "2026-11-13T12:18:00-06:00",
+ "title": "Skip the push re-run in every repo when the pushed code is identical to what the PR tested",
+ "ruling": "Owner 2026-11-13 12:18 CST, page item 729 (pick-joyous-tree-equal-skip), pick a, typed in the coordinator's session: the shared CI form skips the push re-run in every repo when the pushed tree equals the tree the PR tested. It supersedes ruling 176 b's hold for tree-equal merges only; a direct push still runs its suites. q_max and degen (722 a, 723 a) use the shared form.",
+ "quote": "a) Skip that re-run in every repo when the pushed code is identical to what the PR tested.",
+ "source": "Coordinator message to triage, 12:20 CST Nov 13, relaying the owner's answer in its session. Filed by triage.",
+ "status": "open",
+ "step": "push-skip-proven-tree"
+}
