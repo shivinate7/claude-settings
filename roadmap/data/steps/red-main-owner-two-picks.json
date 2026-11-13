@@ -10,5 +10,5 @@
  "why": "Owner picked 745 b and 746 b on the page, both against the green-run rule on main.",
  "source": "owner 13:20 CST Nov 13, items 745 b and 746 b",
  "note": "Todo, needs a lane. (1) After a red main, merges resume when the revert merges (745 b). (2) While main is red, a lane that touches none of the blamed paths may merge (746 b); the blame step is #3152 act 3 and is not built, so (2) waits on it. A guard or check change: test-author red cases first, builder, reviewer. Decision no-merge-onto-red-main is rewritten in place. Related: revert-then-resume-merges, R42 part 2 (ow-03, ow-04, ow-05), ruling ow-29 (item 622 b). Lane session_013NEJL3KFBPuQT45U4xo8mE started (coordinator 13:24 CST Nov 13). Lane report 14:51 CST Nov 13 (session_013NEJL3KFBPuQT45U4xo8mE): 745 b built as drafts #3267 (merge tool) and #3268 (decision no-merge-onto-red-main), handed to runner 10 as express. 746 b (lanes off the blamed paths) recorded in the decision only; it WAITS on the blame step, PR #3152 act 3, not built. Notes logged on #3268: revert-clear-masks-older-break, revert-quote-clears-run, ci-alarm-no-revert-read (no fix lane yet), others. The alarm question is step ci-alarm-reads-reverts (triage pick yes, own lane).",
- "updatedAt": "2026-11-13T14:51:14-06:00"
+ "updatedAt": "2026-11-13T15:35:24-06:00"
 }

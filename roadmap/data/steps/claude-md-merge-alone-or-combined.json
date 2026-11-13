@@ -1,14 +1,14 @@
 {
  "id": "claude-md-merge-alone-or-combined",
  "title": "CLAUDE.md rule git-integration-branch-merge says a PR merges alone and may combine several reviewed lanes",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKyscjfLmR48TQ6cqza",
  "owner": "triage",
  "blockedBy": [],
  "why": "The rule text says each lane PR merges alone, which the owner ruled is not exclusive; a lane reads it and refuses a combined PR that saves CI.",
  "source": "Owner 15:33 CST Nov 13 (item 767 a, ruling own-767-a-combined-pr), via the retrospective 15:34.",
- "note": "Filed 15:34 CST Nov 13. Wording only: \"Each lane PR merges alone\" becomes \"A PR merges alone; it may combine several reviewed lanes\", in the root CLAUDE.md rule git-integration-branch-merge and anywhere the same sentence sits (glossary, skill ci-hygiene step 8 for the child repos). Not the tool. A rule edit: a record-writer lane, reviewed (a rule's behaviour changes). Coordinator starts the lane.",
- "updatedAt": "2026-11-13T15:34:32-06:00"
+ "note": "Filed 15:34 CST Nov 13. Wording only: \"Each lane PR merges alone\" becomes \"A PR merges alone; it may combine several reviewed lanes\", in the root CLAUDE.md rule git-integration-branch-merge and anywhere the same sentence sits (glossary, skill ci-hygiene step 8 for the child repos). Not the tool. A rule edit: a record-writer lane, reviewed (a rule's behaviour changes). Coordinator starts the lane. Lane 15:35 CST Nov 13 (coordinator 15:35): session_013NEJKyscjfLmR48TQ6cqza, started 15:35.",
+ "updatedAt": "2026-11-13T15:35:24-06:00"
 }
