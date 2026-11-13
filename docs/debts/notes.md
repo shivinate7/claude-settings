@@ -2267,3 +2267,6 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- lane-mail-marker-post-fails: a lane message that sends but whose marker comment fails to post is sent again on each run until a post lands; a duplicate was chosen over a dropped message.
+- lane-mail-unsendable-retries: a lane whose message cannot be sent is tried again on each `merge --reviewed` run and makes it exit 1 each time.
+- footer-session-last-wins: the last `claude.ai/code/session_X` URL in a PR body is read as the footer. A quoted session URL after the footer names the wrong lane. Also, `--leave 5` with `--leave 05` passes the duplicate check.

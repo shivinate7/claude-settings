@@ -12944,9 +12944,11 @@ class PullsHost(merge.Host):
         return self.mail_result
 
     def post_comment(self, n, body):
-        """The fake of Host.post_comment: the comment joins the repo's comment list, as the next read of that list serves it."""
+        """The fake of Host.post_comment: the comment joins the repo's comment list, as the next read of that list serves it. The batch runner
+        posts it, so its author is the repo's owner, as a marker's author must be."""
         self.posted.append((n, body))
-        self.comments.append(review_comment(950000 + len(self.posted), n, body))
+        self.comments.append({**review_comment(950000 + len(self.posted), n, body), "user": {"login": OWNER["login"]},
+                              "author_association": OWNER["association"]})
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -16147,10 +16149,15 @@ def bad_record(n):
     """A review comment whose first line is the record marker and whose body does not parse: the newest record reads bad."""
     return review_comment(800 + n, n, REVIEW_MARKER + "\nnot a record\n")
 
-class ReviewedList(ReviewEnv):
+class ReviewedList(CloudSession, ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
-    then one `no record:` line for the rest."""
+    then one `no record:` line for the rest. The lane mail and its marker are the batch runner's writes, so each case runs as the batch runner
+    unless it says otherwise (CloudSession's role file)."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("batch-runner")
 
     def listing(self, pulls, comments=(), check_rows=None, **reads):
         host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
@@ -16285,6 +16292,47 @@ class ReviewedList(ReviewEnv):
         self.assertIn("mail unknown", out + err, "a failed send printed no `mail unknown` line: %s" % out)
         self.assertRegex(list_line(self, out, 7), r" open: ", "the failed send hid the PR's line: %s" % out)
         self.assertEqual(rc, 1, "a failed send exited %s, not 1: %s" % (rc, out + err))
+
+    def mail_marker(self, cid, n, state, head, by):
+        """A lane-mail marker comment on pull request n for `state` at `head`, as the comment list gives it: its body and its author."""
+        body = "\n".join([merge.LANE_MAIL_MARKER, f"PR: #{n}", f"State: {state}", f"Head: {head}", f"To: {LANE_ADDR}"]) + "\n"
+        return {"id": cid, "created_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{n}", "body": body,
+                "user": {"login": by["login"]}, "author_association": by["association"]}
+
+    def test_a_stranger_mail_marker_does_not_suppress_the_message(self):
+        # The lint marker counts only from the repo's owner, and the mail marker is held to the same test. The owner's marker is the control: it
+        # suppresses the message for its state at its head. A stranger's marker for the same state and head does not.
+        records = [review_comment(1, 7, record_text(rounds=OPEN_ROUNDS))]
+        for by, want in ((OWNER, 0), (NOT_OWNER, 1)):
+            with self.subTest(author=by["association"]):
+                host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], records + [self.mail_marker(2, 7, "open", REVIEW_HEAD, by)])
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(len(host.sends), want, "a lane-mail marker by %s gave %d messages, want %d: %s" % (by["association"], len(host.sends), want, out))
+
+    def test_a_session_with_no_batch_runner_role_sends_and_posts_nothing(self):
+        # The batch runner's run is the control: one message, one marker, and the PR's line. Any other session prints that same PR line, sends
+        # nothing, posts nothing, and says so once.
+        comments = [review_comment(1, 7, record_text(rounds=OPEN_ROUNDS))]
+        host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(host.sends), 1, "the batch runner's control sent %d messages, not 1: %s" % (len(host.sends), out))
+        self.assertEqual(len(host.posted), 1, "the batch runner's control posted %d markers, not 1: %s" % (len(host.posted), out))
+        want = list_line(self, out, 7)
+        other_roles = {
+            "no role file": lambda: os.remove(self.role_file),
+            "a coordinator record": lambda: self.put_role("coordinator"),
+            "another session's batch-runner record": lambda: self.put_role("batch-runner", session="another_session"),
+        }
+        for label, set_role in other_roles.items():
+            with self.subTest(session=label):
+                set_role()
+                host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], comments)
+                self.assertEqual(host.sends, [], "a session with no batch-runner role sent mail: %s" % out)
+                self.assertEqual(host.posted, [], "a session with no batch-runner role posted a marker: %s" % out)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(list_line(self, out, 7), want, "the PR's line differs from the batch runner's: %s" % out)
+                self.assertEqual(sum(1 for l in out.splitlines() if l == "merge: lane mail not sent: no batch-runner role"), 1,
+                                 "want one `merge: lane mail not sent: no batch-runner role` line: %s" % out)
 
     def test_a_failed_pulls_read_exits_one_and_lists_nothing(self):
         host, rc, out, err = self.listing([], pulls_error="reading pulls from GitHub failed")
@@ -17911,6 +17959,21 @@ unexpected(method + " " + rel)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo " + " ".join(f"#{n}" for n in range(1, 13))], out)
+
+    def test_a_done_batch_pr_is_not_named_in_the_batch_line(self):
+        # The batch's own pull request, on batch-nightly with its frozen block, reads done. It is no lane, so the batch line names lane #5 alone.
+        head5, head9 = self.pr_head("5"), self.pr_head("900")
+        batch = batch_pull(900, head9, head_ref="batch-nightly")
+        batch["body"] = freeze_body(freeze_inner("nightly", []))
+        pulls = [batch_pull(5, head5), batch]
+        comments = [record_of(5, head5), lint_of(5, head5), record_of(900, head9), lint_of(900, head9)]
+        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={head5: green(), head9: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/bravo")
+        self.assertTrue(any(" done: " in l for l in pr_lines(blocks["o/bravo"], 900)),
+                        "setup: #900 does not read done, so the batch line has nothing to leave out: %s" % out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], "the batch line names the batch pull request: %s" % out)
 
     def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_batch(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: self.roots_with_done()[self.bravo]}
@@ -21643,6 +21706,92 @@ class LeftOutBatch(CloudSession):
         self.assertEqual(rc, 0, "the same done set again was refused; the freeze allows the same set: %s" % out)
         self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
         self.assert_untouched(pr, snap, out)
+
+    def test_a_same_set_rerun_with_a_leave_prints_the_reason_in_the_body(self):
+        # The batch holds 102 and 103. 104 turns done after the build, and the rerun leaves it out with a reason. The same set again is allowed, so
+        # the reason is printed in the body outside the freeze markers, as a create prints it.
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the first build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.lane(104)
+        self.done(104)
+        rc, out = self.build("--batch-build", "nightly", "--leave", "104", "waits for the schema change")
+        self.assertEqual(rc, 0, "the same set again with a --leave was refused: %s" % out)
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}", f"Lane: #103 {self.heads[103]}"],
+                         "the same set again changed the frozen block: %s" % out)
+        body = self.body(pr)
+        outside = body.split(BATCH_BEGIN)[0] + body.split(BATCH_END)[-1]
+        self.assertIn("#104", outside, "the body outside the freeze markers names no #104 after the rerun: %r" % body)
+        self.assertIn("waits for the schema change", outside, "the same-set rerun dropped the reason of its --leave: %r" % body)
+
+    def test_a_done_record_on_the_batch_pull_request_is_not_a_candidate_and_is_no_crash(self):
+        # The batch's own pull request, on the batch branch, reads done once its record lands. No build takes it, and a rerun must not raise
+        # KeyError on its head: a crash is named as the failed assert here, not as an error.
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the first build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        batch_head = self.head("batch-nightly")
+        self.record(pr, head=batch_head)
+        self.lint(pr, head=batch_head)
+        try:
+            rc, out = self.build("--batch-build", "nightly")
+        except Exception as e:  # the defect is the crash itself: name it as the failed assert
+            self.fail(f"a rerun with a done batch pull request raised {type(e).__name__}: {e}")
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 0, "a rerun with a done batch pull request was refused: %s" % out)
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}", f"Lane: #103 {self.heads[103]}"],
+                         "the batch pull request changed its frozen block: %s" % out)
+
+    def batch_reads_done(self, pr):
+        """Batch pull request pr's own record and lane-lint PASS at the batch head, so merge --reviewed reads pr done on the base."""
+        batch_head = self.head("batch-nightly")
+        self.record(pr, head=batch_head)
+        self.lint(pr, head=batch_head)
+
+    def done_numbers(self):
+        """-> the pull request numbers merge --reviewed reads done: the scope a case reads before it probes one of them."""
+        _lines, done, _pulls, _tell = merge.reviewed_read(self.host)
+        return {n for n, _base, _kind in done}
+
+    def test_a_batch_pr_that_reads_done_is_not_named_left_out_of_a_no_list_rerun(self):
+        # The batch's own pull request reads done once its record and lint land at the batch head. It is no lane, and the batch head holds the
+        # lanes, so a rerun with no PR list must not name it left out of its own batch. Scope first: the read says pr is done.
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the first build with no PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.batch_reads_done(pr)
+        self.assertIn(pr, self.done_numbers(), "setup: #%d does not read done, so the rerun has no done pull request to name" % pr)
+        rc, out = self.build("--batch-build", "nightly")
+        self.assertEqual(rc, 0, "the rerun with no PR list was refused: %s" % out)
+        self.assertNotIn(f"merge: #{pr} left out of batch nightly", out, "the batch pull request is named left out of its own batch: %s" % out)
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}", f"Lane: #103 {self.heads[103]}"],
+                         "the rerun with no PR list changed the lane set: %s" % out)
+
+    def test_a_batch_pr_that_reads_done_is_not_named_left_out_of_a_same_set_rerun_with_a_list(self):
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "102", "103")
+        self.assertEqual(rc, 0, "the first build with a PR list was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        self.batch_reads_done(pr)
+        self.assertIn(pr, self.done_numbers(), "setup: #%d does not read done, so the same-set rerun has no done pull request to name" % pr)
+        rc, out = self.build("--batch-build", "nightly", "102", "103")
+        self.assertEqual(rc, 0, "the same set again was refused: %s" % out)
+        self.assertNotIn(f"merge: #{pr} left out of batch nightly", out, "the same-set rerun names the batch pull request left out of its own batch: %s" % out)
 
     def test_a_done_pull_request_another_open_pull_request_holds_is_left_off_a_build_with_no_list(self):
         self.lane(102)

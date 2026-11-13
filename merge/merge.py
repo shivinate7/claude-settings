@@ -38,7 +38,8 @@
                           (claude.ai/code/session_X), or ` lane unknown (no footer)`. The lane gets one message at cloud/session_X through bin/mail
                           (Host.send_lane_mail), once for each state at each head: a comment on the PR (the lane-mail marker) records the send, and the
                           next run reads it from the one comment read it already makes. A failed send prints `merge: lane mail ... was not sent: ...`,
-                          keeps every line, and exits 1. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
+                          keeps every line, and exits 1. Only a session with the batch-runner role sends or posts; any other prints the same lines and
+                          `lane mail not sent: no batch-runner role`. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
   merge --reviewed [--root DIR ...] --live FILE
                           adds one row per open lane PR in each of five states: `lost-work #N (a-e): WHY; owner OWNER`. a: a done record over 6 h old
                           and no other open PR holds its head. b: an open or bad record whose lane message failed in this run. c: no record, the lane
@@ -1205,8 +1206,8 @@ class Host:
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        mails is {PR number: {(State, Head) of each lane-mail marker comment}}: the marker (LANE_MAIL_MARKER) is the whole first line. The author is not
-        checked: a forged marker can only stop one message, and the poster of a real one is the account that runs the batch.
+        mails is {PR number: {(State, Head) of each lane-mail marker comment}}: the marker (LANE_MAIL_MARKER) is the whole first line and the author is the repo's
+        owner, as for the lint marker: the batch runner posts it as the owner, and a stranger's marker must not silence a lane's message.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and the lane message each take their part."""
         records, lints, mails = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
@@ -1216,7 +1217,7 @@ class Host:
                 records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
             elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
                 lints.setdefault(int(m.group(1)), []).append(body)
-            elif m and first == [LANE_MAIL_MARKER]:
+            elif m and first == [LANE_MAIL_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
                 fields = dict(l.split(": ", 1) for l in body.splitlines()[1:] if ": " in l)
                 mails.setdefault(int(m.group(1)), set()).add((fields.get("State"), fields.get("Head")))
         return records, lints, mails
@@ -4521,14 +4522,20 @@ LANE_MAIL_BODY = ("#{n} {state} at {head9}: {why}\n\n"
                   "Post a review record that reads done at the live head (`merge {n} --review-record ...`, posted as a comment on #{n}), "
                   "or say in this lane why it waits. This is the only message for this state at this head.\n")
 
+LANE_MAIL_NO_ROLE = "lane mail not sent: no batch-runner role"
+
 def tell_lanes(h, tell, failed=None):
     """-> the lines for the lanes of `tell` (reviewed_read): one message to each lane whose pull request reads open or bad and was not told for that state at
     that head, then a marker comment (LANE_MAIL_MARKER) that says so, which the next reviewed_read reads from its one comment list. The message goes through
-    Host.send_lane_mail to cloud/<the footer's session>. A pull request with no session in its footer sends nothing. A failed send prints its failure and a
+    Host.send_lane_mail to cloud/<the footer's session>. A pull request with no session in its footer sends nothing, and a session whose merge role is not batch-runner (read_merge_role) sends
+    nothing and posts no marker: it prints LANE_MAIL_NO_ROLE once when a message was due. A failed send prints its failure and a
     failed marker post prints a line that the message may repeat; either one is a line that starts `merge: lane mail`, and the second value is False.
     `failed`, when a list is given, gains the number of each pull request whose send failed (lost_work_rows state b).
     Cost: one bin/mail send and one comment post per newly told pull request, and nothing for one already told."""
     lines, ok = [], True
+    todo = [t for t in tell if t[4] is not None and not t[5]]
+    if todo and read_merge_role() != "batch-runner":  # the send and the marker post are writes for the batch runner's account, as the owner's marker is the one trusted
+        return [LANE_MAIL_NO_ROLE], True
     for n, state, head, why, session, marked in tell:
         if session is None or marked:
             continue
@@ -4562,15 +4569,16 @@ def batch_candidates(h, done, pulls, base, ignore_ref=None):
     """-> (numbers, busy): the done pull requests of `done` (reviewed_read) on `base`, ascending, that can join a batch now, and the numbers of the ready
     pull requests on `base` with CI running. One that another open pull request on `base` holds (Host.holds_head, drafts included: the batch would
     merge it twice), one that `base` already holds (nothing is left to merge) and one that is ready with CI running (Host.ready_busy) are left out.
-    A pull request whose head ref is `ignore_ref` holds nothing: a build of batch NAME again must not read the lanes of its own batch pull request as held.
+    A pull request whose head ref is `ignore_ref` holds nothing and is no candidate: a build of batch NAME again must not read the lanes of its own batch pull
+    request as held, and that pull request's own done record does not make it a lane.
     The one home of the done set that the `open batch now` line and `--batch-build NAME` with no PR list both read. With no done pull request on `base` it
     reads nothing. A failed read raises Stop. Cost: Host.ready_busy's reads and one git read per candidate and other open pull request on `base`
     (Host.holds_head), and no gh compare."""
-    nums = sorted(n for n, b, _kind in done if b == base)
+    heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base and d["head"]["ref"] != ignore_ref}
+    nums = sorted(n for n, b, _kind in done if b == base and n in heads)  # the pull request of `ignore_ref` is no lane of any batch
     if not nums:
         return [], []
     busy = h.ready_busy(pulls, base)
-    heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base and d["head"]["ref"] != ignore_ref}
     return [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
             and not h.holds_head(heads[n], base)], busy
 
@@ -5579,9 +5587,26 @@ def build_done_set(h, base, leaves, name):
         raise Stop(f"no done pull request on {base} is left to build a batch from (done set: {', '.join('#%d' % n for n in nums) or 'none'}). Nothing was pushed. {FREEZE_CITE}")
     return kept, left
 
+LEFT_HEADING = "Left out by the runner:"
+
 def left_note(left):
     """The lines for the batch pull request body, after the freeze block: each pull request the runner left out with its reason. [] when none."""
-    return ["", "Left out by the runner:", *(f"- #{n}: {' '.join(why.split())}" for n, why in left)] if left else []
+    return ["", LEFT_HEADING, *(f"- #{n}: {' '.join(why.split())}" for n, why in left)] if left else []
+
+def left_rewrite(body, left):
+    """`body` with each (number, reason) of `left` listed under the LEFT_HEADING line, outside the freeze block: the same-set rerun's way to print its --leave
+    reasons. The heading is added at the end when the body has none, and an entry already listed is not listed twice. Any other text is kept."""
+    lines = body.split("\n")
+    entries = [e for e in left_note(left)[2:] if e not in lines]
+    if not entries:
+        return body
+    if LEFT_HEADING in lines:
+        at = lines.index(LEFT_HEADING) + 1
+        while at < len(lines) and lines[at].startswith("- #"):
+            at += 1
+        return "\n".join(lines[:at] + entries + lines[at:])
+    tail = lines[:-1] if lines[-1] == "" else lines  # a body's final newline stays final
+    return "\n".join(tail + ["", LEFT_HEADING, *entries] + ([""] if lines[-1] == "" else []))
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json", leaves=()):
     """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. With no `numbers` and no `ready`, the lane
@@ -5676,6 +5701,11 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
     for n in numbers:
         if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
             raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
+    if left:  # the same set again, with a --leave: the reason prints in the body as a new build prints it
+        text = left_rewrite(info["body"], left)
+        if text != info["body"]:
+            h.set_body(pr, text)
+            info = {**info, "body": text}  # the later rewrites of the block start from this body
     if ready and not info["draft"] and block["linted"] and block["linted"] == fetch_branch(root, branch, FREEZE_CITE):
         say(f"merge: batch {name}: PR #{pr} is already ready.")
         return 0
