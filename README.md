@@ -165,8 +165,9 @@ Run it from inside the repo, or name the repo's checkout with `-C PATH` (`--repo
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
-                        NAME shows in the lock to a waiting run.
+merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, merge, move the local main, clean up.
+                        A confirm that pushes a claim commit stops there: run it again to merge. NAME shows in the lock to a waiting run.
+merge <pr> --ready      mark a lane's draft ready, once: the records step and the repo's ready checks, then the mark. Merges nothing, takes no lock.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]

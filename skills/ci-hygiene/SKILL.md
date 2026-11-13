@@ -61,8 +61,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
-   on the batch head, after the draft step's page push. The batch ready route (`merge --batch-build NAME --ready`) runs the lint, then the repo's ready checks (`merge.readyChecks`), and no touched tests.
+   the PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <PR number>`
+   on the head, after the draft step's page push. The ready route (`merge <pr> --ready`) runs the records step and the repo's ready checks (`merge.readyChecks`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
    satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
@@ -79,15 +79,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
-   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
-   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
-   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
-   stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
-   refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
-   `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
-   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
+   Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
@@ -101,8 +93,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    lanes is two names, so read each lane's diff before you drop either. Example: the failing job
    reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
    (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
-   red.) Store the blame with `merge --batch-build NAME --blame PR --run <run URL>`. Then drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
-   revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
+   red.) Then revert the blamed lane's merge as an ordinary PR, merged with `--base-red-ok "<reason>"` (rule `git-red-main-reverts`). A lane whose merge was reverted re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
    A lane that is red on form (record format, version bump, lint) is dropped like any red lane. Its
