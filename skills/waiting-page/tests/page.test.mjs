@@ -1993,13 +1993,14 @@ const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
 // An item the owner still owes never folds: only an answered card folds. Its options show with no fold control.
+// The new item is a task: a seen decision would lead a task on kind alone, so only the seen sink puts it last.
 test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
-  const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
+  const seen = mk("seen-old", 1, { added: at(5) }), fresh = { ...TASK, id: "fresh-new", n: 2, added: at(20) };
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
-  assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
+  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-new", "seen-old"], "the seen decision leads the new task in Whenever");
+  assert.equal(await card(page, fresh).locator("ol.steps").isVisible(), true, "a new task's steps are hidden");
   assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed decision has a fold control");
   assert.equal(await optsShown(page, seen), true, "a seen, owed decision's options are hidden until a fold press");
 });
@@ -2126,20 +2127,22 @@ test("a seen item sinks below a new one even when the seen item holds the higher
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
 });
 
+// The new item is a task: a seen decision would lead a task on kind alone, so only the seen sink puts it last.
 test("a seen item with a draft keeps its options open and still sinks", async (t) => {
-  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = mk("draft-fresh", 2, { added: at(20) });
+  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = { ...TASK, id: "draft-fresh", n: 2, added: at(20) };
   const storage = { "waiting.draft": JSON.stringify({ [seen.id]: { choice: "b" } }) };
   const page = await open(t, { items: [seen, fresh, sentItem()], storage }); if (!page) return;
-  assert.deepEqual(await idsInSection(page, "calm"), ["draft-fresh", "draft-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.deepEqual(await idsInSection(page, "calm"), ["draft-fresh", "draft-seen"], "the seen decision leads the new task in Whenever");
   assert.equal(await optsShown(page, seen), true, "a seen item with a draft is folded");
 });
 
 test("a seen stood pick sinks under a new one in Pick stands, and its options stay open", async (t) => {
-  const seen = mk("stand-seen", 1, { added: at(5), stands: true }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true });
+  // The seen pick holds the better rank, so only the seen sink puts it last.
+  const seen = mk("stand-seen", 1, { added: at(5), stands: true, rank: 1 }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true, rank: 2 });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await idsInSection(page, "stands"), ["stand-fresh", "stand-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen stood pick is not marked seen");
+  assert.deepEqual(await idsInSection(page, "stands"), ["stand-fresh", "stand-seen"], "the seen stood pick leads the new one in Pick stands");
   assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
 });
 
@@ -2154,14 +2157,14 @@ test("with no answer anywhere, nothing is seen and Whenever stays newest first",
 });
 
 test("a group with one new member is new as a whole, so a seen item in its tier sinks under it", async (t) => {
-  // Newer than the group's oldest member, so under newest first only the seen sink puts it last.
-  const solo = mk("g-solo", 1, { added: at(8) });
-  const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
+  // The seen solo holds the better rank, and the group holds rank 2, so only the seen sink puts the solo under the group.
+  const solo = mk("g-solo", 1, { added: at(8), rank: 1 });
+  const older = mk("g-old", 2, { added: at(5), group: "pair", rank: 2 }), newer = mk("g-new", 3, { added: at(20), group: "pair", rank: 2 });
   const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
-  assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"]);
   assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
+  assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit
