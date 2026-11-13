@@ -2693,6 +2693,30 @@ class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, Session
         self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file named HEAD changed")
         self.assertEqual(self.read_text(local), "local log\n", "the ignored x.log was overwritten by origin's force-added file")
 
+    def test_an_ignored_file_origin_force_adds_is_held_when_the_session_starts_in_a_subfolder(self):
+        # The ignored-file check reads each added path from the process cwd, not from the toplevel. From src/ the toplevel's
+        # build/out.txt is not there to see, so the move runs over it. The toplevel run is the control on the same layout.
+        self.publish_checkout({"src/app.txt": "app\n"}, ["build/"])
+        local = self.write_ignored("build/out.txt", "local content\n")
+        self.assert_ignored_listed("build/out.txt")
+        self.assert_tree_clean()
+        self.assertIn("src/app.txt", vcs(self.primary, "ls-files").stdout.splitlines(), "scope: src/app.txt is not tracked")
+        subfolder = os.path.join(self.primary, "src")
+        self.assertTrue(os.path.isdir(subfolder), "scope: src is not a directory")
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"build/out.txt": "upstream content\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        for label, where in (("toplevel", self.primary), ("subfolder", subfolder)):
+            with self.subTest(cwd=label):
+                before = self.checkout_state(self.primary)
+                lines = self.run_startup(session_cwd=where)
+                self.assert_one_not_ff(lines, "an ignored file is in the way")
+                self.assertTrue(same_checkout(self.not_ff_lines(lines)[0].group("top"), self.primary),
+                                "the not-fast-forwarded line names another checkout: %r" % lines)
+                self.assertEqual(self.checkout_state(self.primary), before,
+                                 "a session started in the %s moved the checkout over an ignored file" % label)
+                self.assertEqual(self.read_text(local), "local content\n",
+                                 "a session started in the %s overwrote the ignored build/out.txt" % label)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
