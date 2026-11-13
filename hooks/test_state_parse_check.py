@@ -843,6 +843,25 @@ class CdAndHeredoc(unittest.TestCase):
                      line=2)
 
 
+    @SHELL_ONLY
+    def test_heredoc_body_that_names_a_json_write_but_writes_nothing_is_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, '{"a": 1,}\n')
+        json_error(self, read_text(path))  # scope: broken before the call
+        command = "cat <<EOF\necho x > bad.json\nEOF\n"
+        self.assertEqual(home.sh(command), 0, "scope: the cat must run")
+        self.assertEqual(read_text(path), '{"a": 1,}\n', "scope: the call must leave bad.json as it was")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_silent(self, ctx, "a heredoc body holding > bad.json, where no write reaches the file")
+        # The twin: the same redirect as a real write is named, so the silence above is not a dead hook.
+        twin = "printf 'x' >> bad.json"
+        self.assertEqual(home.sh(twin), 0, "scope: the append must run")
+        line, column = json_error(self, read_text(path))
+        codes, ctx = home.dispatch("Bash", {"command": twin})
+        assert_named(self, codes, ctx, "the same redirect as a real append", "bad.json", home, line=line, column=column)
+
+
 class WriteForms(unittest.TestCase):
     """Each write form that leaves an inbox with its closing fence lost is named at the open fence, line 2. A shell
     form runs for real. Each PowerShell form is judged on the state the test leaves, as EveryTool does."""
@@ -999,6 +1018,79 @@ class PremisesReadCost(HookRunner, unittest.TestCase):
         handoff = sum(os.path.basename(p) == os.path.basename(home.handoff) for p in run.opened)
         self.assertGreaterEqual(handoff, 1, "scope: the handoff must be read")
         self.assertLessEqual(handoff, 1, "the handoff was opened %d times in one Edit" % handoff)
+
+
+class InPlaceForms(unittest.TestCase):
+    """An in-place write that leaves a state .json broken, by the sed and perl forms with a backup suffix. The sed -i,
+    sed -ni and BSD `sed -i ''` forms are controls: they already name the file."""
+
+    BROKEN = '{"a": 1,}\n'
+    REWRITTEN = '{"b": 1,}\n'  # the same break, after s/a/b/
+
+    def assert_named_after(self, home, path, command, why):
+        line, column = json_error(self, read_text(path))
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_named(self, codes, ctx, why, os.path.basename(path), home, line=line, column=column)
+
+    @SHELL_ONLY
+    def test_sed_with_a_backup_suffix_that_leaves_a_json_broken_is_named(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed -i.bak s/a/b/ bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite bad.json")
+        self.assert_named_after(home, path, command, "sed -i.bak, the suffix form, that leaves a json broken")
+
+    @SHELL_ONLY
+    def test_sed_with_a_backup_suffix_after_cd_that_leaves_a_json_broken_is_named(self):
+        home = Home()
+        path = os.path.join(home.work, "sub", "bad.json")
+        write(path, self.BROKEN)
+        command = "cd sub && sed -i.bak s/a/b/ bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the cd and the sed must run")
+        self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite sub/bad.json")
+        self.assert_named_after(home, path, command, "cd sub, then sed -i.bak, that leaves a json broken")
+
+    @SHELL_ONLY
+    def test_perl_with_a_backup_suffix_that_leaves_a_json_broken_is_named(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "perl -pi.bak -e 's/a/b/' bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the perl must run")
+        self.assertEqual(read_text(path), self.REWRITTEN, "scope: the perl must rewrite bad.json")
+        self.assert_named_after(home, path, command, "perl -pi.bak, the suffix form, that leaves a json broken")
+
+    @SHELL_ONLY
+    def test_sed_dash_i_that_leaves_a_json_broken_is_named_control(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed -i s/a/b/ bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite bad.json")
+        self.assert_named_after(home, path, command, "sed -i, the form that already names the file")
+
+    @SHELL_ONLY
+    def test_sed_dash_ni_that_leaves_a_json_broken_is_named_control(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed -ni 's/a/b/p' bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(read_text(path), self.REWRITTEN, "scope: the sed must rewrite bad.json")
+        self.assert_named_after(home, path, command, "sed -ni, the combined flags, that leaves a json broken")
+
+    @SHELL_ONLY
+    def test_bsd_sed_dash_i_with_an_empty_suffix_that_leaves_a_json_broken_is_named_control(self):
+        # BSD sed reads the '' after -i as the empty suffix. GNU sed would read it as the script, so this state is
+        # written as the BSD sed leaves it, and the call is judged on that state.
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.REWRITTEN)
+        self.assert_named_after(home, path, "sed -i '' 's/a/b/' bad.json",
+                                "sed -i '' with the BSD empty suffix, that leaves a json broken")
 
 
 class FenceHelperPins(unittest.TestCase):
