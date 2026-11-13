@@ -84,7 +84,7 @@ PR	verdict	kind	step	head	reason
 2026	rebuild	code	notes-fix-report	fe431c70808e	feedback-guard fixes (unread_note, STANDING_HOMES/GRANT_HOMES shared parts); conflicts _closed_reason; drop dup note once-home-standing-word-list
 2030	keep	code	notes-fix-report	d1e3aeadec76	split shared_names import in override.py so NOTICE_TAGS survives; test conflicts only (keep both); drop notes.md hunks main holds; "line 442" -> hooks/guard.py:644
 2033	close	code	sim-lease-gaps	090c4c93ec7f	contained in 2061
-2052	close	code	(env-walk group)	964981245f5c	subset of 2171
+2052	close	code	notes-fix-large-1	964981245f5c	subset of 2171
 2055	rebuild	code	export-check-writer-page	5b14714fa5e9	3 parts still wanted: writer from meta/page get of repo's waiting page only; close of read-back item counts as send; block text names [closed]; drop dup failed-sends part (on main); re-cut after 1784/2865 land; debts page-write-without-n, page-block-no-closed-hint open
 2061	rebuild	code	sim-lease-gaps	3ffe6bcb131a	sim lease renew/run limit/drive lease; 8-file conflicts, 4415 commits behind; ruling numbers 10-12 collide with main's; narrows ruling 1; Cost lines fail cost-line-pinned; rebuild on main; owner may need to confirm drive-lease ruling still wanted
 2063	rebuild	code	record-claim-cites-code	788ad60caf98	STALE009/STALE010 CodeClaimReader, dead_name_cites; 2 prose conflicts (reviewer.md, stale-cites-at-merge.md); rerun test_stale_cites.py; re-pin counts
@@ -103,7 +103,7 @@ PR	verdict	kind	step	head	reason
 2156	rebuild	code	bg-tail-loses-verdict	4f479c0f75b2	glued-& reader, any-filter, lone writers; rebuild on top of rebuilt 2015; any-filter may cry wolf (owner/coordinator call: keep or drop widenings)
 2164	close	code	bg-tail-loses-verdict	af053ccf2231	ancestor of 2015
 2167	keep	code	notes-fix-large-3	a474d4bcd9d2	push-CI report check, debt push-report-before-checks; rebase 4 additive hunks; fix cite "owner 2026-11-07 13:20 CST cull-rules" (it is a coordinator ruling, pr-ledger.md:23)
-2171	keep	code	(env-walk group, name unconfirmed)	3845efe4d38e	env-file folder walk; rebase: guard.py:4737 add cwd=cwd, guard_env.py import union, re-home 469 test lines into tests/guard/s08198-env.py / s10739-env.py
+2171	keep	code	notes-fix-large-1	3845efe4d38e	env-file folder walk; rebase: guard.py:4737 add cwd=cwd, guard_env.py import union, re-home 469 test lines into tests/guard/s08198-env.py / s10739-env.py
 2173	rebuild	code	option-tradeoff-pushback	9309aa81d8f3	tradeoff rule (TRADEOFF_RULE, is_pick_of_one, sets_choice) conflicts in all 3 files; fixtures need with_frozen_fields and `recommended`; rebuild after 2024/2987 land or batch together
 2195	rebuild	code	past-ruling-on-send	4422fad7e739	judge_send/send_question/past_ruling_check; 7 files conflict; PAST_RULING_TIMEOUT now 60 s (budget 15+60 and settings timeout 90 wrong); re-point one-git-process test; keep main's _hooks_on_path, COMMENTS_TOOL; sendmessage_state.py is a different check
 2196	rebuild	code	cite-range-symbol-match	936dff70c8b2	STALE011 (+STALE009/010 stack of ~50 commits) not on main; 3 prose conflicts (stale-cites-at-merge.md, claims-carry-backing.md, reviewer.md); confirm earlier PRs #1539/STALE010 ride with it or are superseded; rerun STALE011 in tree mode after rebase
