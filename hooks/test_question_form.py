@@ -1277,6 +1277,202 @@ def case_command_in_item_spans():
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
+# ------------------------------------------------------------------ a span an edit verb quotes is text, not a shell line
+
+def span_scope(name, text, body):
+    """The scope a quoted-span case judges (P7): `text` holds exactly one unfenced span, `body`. Without it a pass
+    could come from a step with no span at all."""
+    spans = call("_code_spans", text)
+    got = [(b, f) for _, b, f in spans] if isinstance(spans, list) else spans
+    check("span scope: " + name, got == [(body, False)], "want one span %r, got %r" % (body, got))
+
+
+def case_quoted_span_after_edit_verb():
+    # An edit verb before a span, with no run verb in its sentence, quotes the span: the step finds or replaces
+    # that line of a file, so the span-flag clause reads `scripts/x.py --y` as text (question_form._shell_line,
+    # `quoted`). The same span after a run verb is a command. A listed program stays a shell line when quoted, and
+    # so does a span whose sentence has both verbs: a run verb in the sentence wins (command_in_item_hit).
+    span = "scripts/x.py --y"
+    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit", "Delete", "Remove"):
+        text = "%s the line `%s` in the page" % (verb, span)
+        span_scope("%s quotes the span" % verb, text, span)
+        page("an edit-verb step (%s) quoting `%s` passes" % (verb, span), "set", entry_of(task_item([text])), None)
+    text = "Run `%s` in the page" % span
+    span_scope("run takes the same span", text, span)
+    page("the same span after run is refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line `git push origin x` in the page"
+    span_scope("find quotes a listed program", text, "git push origin x")
+    page("a quoted git push after find is still refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line and run `%s` in the page" % span
+    span_scope("find and run share one sentence", text, span)
+    page("a sentence with both find and run refuses the span as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+
+
+def case_quoted_span_run_after_is_refused():
+    # A run verb after an edit-verb span, in the same sentence, makes the span a command: "Find `x` and run it" runs
+    # it. The run verb is read after the span up to the sentence break (question_form.SPAN_RUN_AFTER). The control has
+    # no run verb after the span, so the span stays quoted text and passes; the two differ only in that run verb.
+    span = "scripts/x.py --y"
+    text = "Find `%s` in the page" % span
+    span_scope("find quotes the span with no run after it", text, span)
+    page("an edit-verb step quoting `%s` with no run after passes" % span, "set", entry_of(task_item([text])), None)
+    text = "Find `%s` and run it" % span
+    span_scope("find, then run after the span", text, span)
+    page("a step that finds `scripts/x.py --y` and runs it after the span is refused", "set",
+         entry_of(task_item([text])), ("command-in-item", "shell line"))
+
+
+# ------------------------------------------------------------------ a PowerShell string and a step's shell span
+
+def ps_task(ps, mac="git log -1"):
+    """A task whose command is {powershell: ps, mac}, with no gh in either, so only the bash-operator check judges it."""
+    return task_item(["Open PowerShell", "Paste the command below and run it"], command={"powershell": ps, "mac": mac})
+
+
+def case_powershell_bash_forms():
+    # A bash form in a PowerShell command is refused: PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export,
+    # and PS_BASH_FORMS reads the rest with strings and comments blanked. Each bash form is refused, and its
+    # PowerShell twin passes. The traps
+    # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
+    # backslash path that ends a line.
+    for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
+                     ("a leading NAME=value", "FOO=1 git push"),
+                     ("a bracket test", "if [ -f x ]; then git push; fi"),
+                     ("a backslash line end", "git push origin \\\nmain"),
+                     ("a pipe to jq", "Get-Content x | jq ."), ("a pipe to less", "Get-Content x | less"),
+                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi"),
+                     ("a pipe to tail", "Get-Content x | tail -5"), ("a pipe to xargs", "Get-ChildItem | xargs rm"),
+                     ("a pipe to sed", "git log | sed 1d"), ("a pipe to awk", "git log | awk 1"),
+                     ("a pipe to cut", "git log | cut -c1-7"), ("a pipe to wc", "git log | wc -l"),
+                     ("a pipe to uniq", "git log --oneline | uniq"), ("a pipe to tr", "git log | tr a b"),
+                     ("a pipe to tac", "git log | tac"),
+                     ("a while bracket test", "while [ -f x ]; do git push; done"),
+                     ("an until bracket test", "until [ -f x ]; do git push; done"),
+                     ("an elif bracket test", "if false; then git push; elif [ -f x ]; then git push; fi"),
+                     ("a bracket test after an open paren", "git push ( [ -f x ] )"),
+                     ("a bracket test after a semicolon", "git status; [ -f x ]; git push"),
+                     ("a bracket test at a line start", "[ -f x ]\nRun-It")):
+        page("a PowerShell command with %s is refused as a bash operator" % name, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
+    for name, ps in (("cd to a backslash", "cd \\"), ("Set-Location to a backslash", "Set-Location \\"),
+                     ("dir of a backslash", "dir \\")):
+        page("a PowerShell command, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A backslash with a line after it is a continuation, and refuses.
+    page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
+         entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
+    # A lone backslash argument is the drive root, a path, so a line that names a tool after it is no continuation.
+    page("a PowerShell cd to a lone backslash, then a line that names a tool, passes", "set",
+         entry_of(ps_task("cd \\\ntool x")), None)
+    # A backslash glued to a word (origin\) is a path end, not a continuation, and passes as it does today.
+    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes as today", "set",
+         entry_of(ps_task("git push origin\\\nmain")), None)
+    for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
+                     ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
+                     ("a PowerShell if test", "if (Test-Path x) { git push }"),
+                     ("a backtick line continuation", "git push origin `\nmain")):
+        page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A `[ ... ]` with spaces is a test only at a line start, after `;` or `(`, or after `if`, `elif`, `while` or
+    # `until`, so an index with a space after a variable passes. A pipe to a cmdlet whose name starts with a listed
+    # name, such as Trace-Command for `tr`, passes: a listed name must end at a word edge.
+    for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
+                     ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
+                     ("a pipe inside a string", 'Write-Host "a | head"'),
+                     ("a pipe after a comment opener", "git log # | head"),
+                     ("a here-string holding a pipe", "@'\n| head\n'@"),
+                     ("a pipe to Trace-Command, named like tr", "Get-Date | Trace-Command"),
+                     ("an index with a space in brackets after a variable", "Write-Output $names[ 0 ]")):
+        page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hashtable_is_no_bash_form():
+    # The NAME=value form in PS_BASH_FORMS ran its value past a `;`, so the second pair of a hashtable read as a
+    # `NAME=value tool` line and was refused. A hashtable with `;` between its pairs passes. A leading NAME=value
+    # before a command is still refused, and so is one after a `;`.
+    for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
+                     ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for ps in ("FOO=1 tool run", "tool run;FOO=1 tool run"):
+        page("a PowerShell command %s is refused as a bash operator" % ps, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+
+
+def case_powershell_comment_quote_ends_at_its_line():
+    # The quote walk reads `<#` block comments but not `#` line comments, so an unpaired quote in a line comment
+    # opened a quote that ran to the end of the text, and a bash form on the next line was blanked out. A quote in a
+    # line comment is text, so the next line is read as it stands. A contraction in a comment is text too, and a
+    # comment opener inside a string opens no comment.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell comment with an unpaired single quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task("# the 'main branch\ngit log | head -5")), refused)
+    page("a PowerShell comment with an unpaired double quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task('# the "main branch\ngit log | head -5')), refused)
+    page("a PowerShell comment with a contraction, then Get-ChildItem, passes", "set",
+         entry_of(ps_task("# it's fine\nGet-ChildItem")), None)
+    page("a PowerShell block comment with a contraction, then a pipe to head, is refused", "set",
+         entry_of(ps_task("<# it's #>\ngit log | head -5")), refused)
+    page("a PowerShell string holding a comment opener, then a pipe to head on the next line, is refused", "set",
+         entry_of(ps_task('Write-Host "# ok"\ngit log | head -5')), refused)
+
+
+def case_powershell_bash_prefix_braced_expansion():
+    # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
+    # so each is refused. A `$` inside the expansion and one nested expansion are refused too. The hashtable controls
+    # pass: their `}` closes the hashtable, not an expansion.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
+    page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
+         entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    page("a PowerShell command, PORT=${PORT:-$DEFAULT} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-$DEFAULT} node server.js")), refused)
+    page("a PowerShell command, PORT=${A:-${B}} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${A:-${B}} node server.js")), refused)
+    for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
+                     ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
+                     ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hash_mid_token_is_no_comment():
+    # A `#` opens a line comment only at a token start (guard_core.token_start), so a `#` inside a word is text, and
+    # the bash form after it on the same line is read. The next-line and here-string pins hold the refusal too.
+    # Neither depends on that condition: a line comment ends at its newline, and a here-string body is quoted text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, a#b | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("a#b | head")), refused)
+    page("a PowerShell command, https://x/#frag | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("https://x/#frag | head")), refused)
+    page("a PowerShell command, $x#y | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("$x#y | head")), refused)
+    page("a PowerShell command, $x#y then | head on the next line, is refused", "set",
+         entry_of(ps_task("$x#y\n| head")), refused)
+    page("a PowerShell here-string holding # x 'y, then git log | head on a later line, is refused", "set",
+         entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
+
+
+def case_step_shell_programs_partial():
+    # A single-span step is a shell line when its first word is in SHELL_PROGRAMS (a cloud CLI included), or a
+    # lowercase word whose second word is a flag (chmod +x f, rg --files). Each span below is refused. Controls pass:
+    # a bare tool name, a flag alone and a minus between two words. The chained span stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x",
+                 "pnpm install", "aws s3 ls", "az login", "helm list", "rg --files", "sync --dry-run"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    for span in ("kubectl", "--force", "a - b"):
+        page("a step holding `%s` alone is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
+         ("command-in-item", "shell line"))
+    # A program at a path is judged by its bare name, as `chmod` is alone: the word after the directory is the program.
+    page("a step holding `/usr/bin/chmod +x f` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `/usr/bin/chmod +x f`"])), ("command-in-item", "shell line"))
+
+
 # ------------------------------------------------------------------ a question says how it departs from main
 #
 # Rule question-departs: a question is asked only when the work departs from main. A line that restates
@@ -2056,6 +2252,43 @@ def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
           question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
 
 
+# ------------------------------------------------------------------ a press link needs a string label
+
+def case_press_link_label_is_a_string():
+    # A link counts when it has a url, but the page draws a link only when its label is a string too
+    # (skills/waiting-page/page.html isLink). A press whose only link has no
+    # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
+    # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
+    # the page beside it does not save the press.
+    pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
+    # The option names the pr URL's number, so a link must reach that page: with no number in the text any link passes.
+    base = copy.deepcopy(ITEM92["options"])
+    base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
+
+    def with_links(links):
+        options = copy.deepcopy(base)
+        options[1]["links"] = links
+        return entry_of(page_item(options=options))
+
+    page("a press whose link to the page has no label is refused as press-link", "set",
+         with_links([{"url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a null label is refused as press-link", "set",
+         with_links([{"label": None, "url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a numeric label is refused as press-link", "set",
+         with_links([{"label": 5, "url": pr}]), ("press-link", None))
+    page("a press with an unlabelled link to the page beside a labelled link to another PR is refused as press-link",
+         "set", with_links([{"label": "the other pull request", "url": other}, {"url": pr}]), ("press-link", None))
+    page("a press with only a labelled link to another PR stays refused as press-link", "set",
+         with_links([{"label": "the other pull request", "url": other}]), ("press-link", None))
+    page("a press whose link to the page has an empty-string label passes", "set",
+         with_links([{"label": "", "url": pr}]), None)
+    task = task_item(["Open PR #374 on GitHub", "Press Merge."], links=[{"url": pr}])
+    page("a task whose step presses in GitHub, with an unlabelled link to the page, is refused as press-link", "set",
+         entry_of(task), ("press-link", None))
+    page("a task whose step presses in GitHub, with a labelled link to the page, passes", "set",
+         entry_of(dict(task, links=[{"label": "PR #374", "url": pr}])), None)
+
+
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
 #
 # Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
@@ -2674,6 +2907,11 @@ def main():
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
+                 case_powershell_bash_forms, case_powershell_hashtable_is_no_bash_form,
+                 case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
+                 case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
+                 case_quoted_span_after_edit_verb, case_quoted_span_run_after_is_refused,
+                 case_press_link_label_is_a_string,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
