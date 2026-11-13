@@ -25,11 +25,13 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
-   Put the whole mockup in one HTML string. Write `<` as `\u003c`.
+   Put the whole mockup in one HTML file, raw HTML.
 3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, from the saved live page:
-   `<out>` keeps the live roadmap block with the live designs. In `<out>`, add `"slug": "<html string>"` to the JSON in
-   `<script type="application/json" id="designData">`, and change nothing else. Never edit the live
-   page's own code.
+   `<out>` keeps the live roadmap block with the live designs. Add each mockup to `<out>` with
+   `python3 ~/.claude/skills/waiting-page/splice.py --page <out> --add-design <slug>=<mockup file> --out <out>`
+   (repeat `--add-design` for more). It writes `<` as `\u003c` and changes no other byte. `FILE` is read as given from the current directory: run it from the repo root (a wrong directory refuses as a missing file). It works in a local and a cloud
+   session, and a local session needs no file-output tool. It refuses, and writes nothing, on a bad slug, a missing or
+   empty file, or a slug that already holds other html. Never edit the live page's own code.
 4. Add `designs: [{slug, label, file}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - Every design carries `file`, the path of its mockup file, in the repo's design folder (`docs/design/<item folder>/<file>`). Write the mockup there
      first, then commit and push it: git is its home. A machine-home path (`~/Developer/<repo name>-imports`), a path in a Claude app folder,
@@ -51,7 +53,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities. Whether the database stays
+5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities, as "Keep the page on main's code", step 4, says. Whether the database stays
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:

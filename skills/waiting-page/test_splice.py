@@ -15,6 +15,13 @@ predates the block) gives only its designData block; the template keeps its empt
 refuses, and writes nothing, when the template lacks either block, when either file has an unclosed
 or doubled block or a doubled designData slot, or when the live page has no designData slot.
 
+    python3 splice.py --page LIVE.html --add-design SLUG=FILE [--add-design ...] --out OUT.html
+
+The add-design form adds `"SLUG": "<html>"` to the page's one designData object for each FILE, every `<`
+written as a \\u003c escape, and no other byte changed. It runs alone with --page, or with --block or --carry.
+It refuses, and writes no page, when the designData block is missing, doubled or not a JSON object, when a FILE
+is missing, empty or unreadable, when a SLUG is not [a-z0-9-]+, or when a SLUG exists with other html.
+
 SPLICE_UNDER_TEST names the command to run (default: splice.py beside this file), so the same
 cases run red against a checkout that lacks it. Temp files: the run folder of lint/_test_temp.py,
 whose sweep lint/test_find_copies.py proves (decision test-temp-standard).
@@ -70,12 +77,17 @@ def js_literals(code):
     return re.findall(r'"((?:[^"\\]|\\.)*)"', code or "")
 
 
+def design_script(designs):
+    """A designData element holding the JSON object `designs`, written as the page writer writes it: every `<` as a \\u003c escape."""
+    return '<script type="application/json" id="designData">' + json.dumps(designs).replace("<", "\\u003c") + "</script>"
+
+
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 # designData: "<" is written as <, as the writer does. It holds comment openers in strings, a
 # multi-line template literal, a lone quote, a `$1` and backslashes, and the escaped form of a marker.
-DESIGN = '<script type="application/json" id="designData">' + json.dumps({
+DESIGN = design_script({
     "mock": "<p>Don't stop /* here // # `line one\nline two` $1 \\1 \\g<0> <!-- roadmap:data -->é</p>",
-}).replace("<", "\\u003c") + "</script>"
+})
 # Text that looks like a block but is not one: a JS string, and a template literal of several lines.
 DECOY_STRING = '<script>\nconst OPEN = "<!-- roadmap:data -->"; // a string, not a marker\nconst Q = \'/* not a comment\';\n</script>'
 DECOY_TEMPLATE = "<script>\nconst T = `\n<!-- roadmap:data -->\nnot the block\n<!-- /roadmap:data -->\n`;\n</script>"
@@ -396,6 +408,212 @@ class PageName(unittest.TestCase):
                 '}\n')
         self.assertEqual(set_title_statement(code), '(name ? name + " " : "") + "A /* // # Don\'t $1 Cockpit"')
         self.assertIn("A /* // # Don't $1 Cockpit", js_literals(set_title_statement(code)))
+
+
+MANY_DESIGNS = {"m1": "<p>one</p>", "m2": "<p>two</p>", "m3": "<p>three</p>"}
+# A mockup with comment openers, a template literal over two lines, `$1`, `\1`, a lone quote, a letter outside
+# ASCII, and the closing tag and the marker that a naive splice would trip on.
+MOCK_HTML = "<p>Don't stop /* here // # `line one\nline two` $1 \\1 \\g<0> <!-- roadmap:data -->é</p>\n</script>\n"
+
+
+class AddDesign(Folder):
+    """--add-design SLUG=FILE: the page's one designData object gains "SLUG": "<html>" for each FILE, every `<` as a
+    \\u003c escape, and no other byte changes. A refusal names its cause and writes no page. The option is new, so on a
+    checkout without it each case fails at its first assert, on the option being unknown."""
+
+    def command(self, *argv, out="out.html", cwd=None):
+        r = subprocess.run([sys.executable, CMD, *argv, "--out", self.path(out)], capture_output=True, text=True, cwd=cwd)
+        return r.returncode, r.stdout + r.stderr
+
+    @staticmethod
+    def adds(*pairs):
+        """The --add-design arguments for (slug, file) pairs, in order."""
+        return [arg for slug, path in pairs for arg in ("--add-design", "%s=%s" % (slug, path))]
+
+    def added(self, page, *pairs, out="out.html", cwd=None):
+        code, said = self.command("--page", self.write("live.html", page), *self.adds(*pairs), out=out, cwd=cwd)
+        self.assertEqual(code, 0, "--add-design exited %d, so no page was written: %s" % (code, said))
+        return self.read(out)
+
+    def design_span(self, text):
+        try:
+            return SPLICE.design_span(text, "the page")
+        except SystemExit as e:
+            self.fail("the page does not hold one designData block: %s" % e)
+
+    def body(self, text):
+        start, end = self.design_span(text)
+        el = text[start:end]
+        return el[el.index(">") + 1:el.rindex("</script>")]
+
+    def designs(self, text):
+        try:
+            return json.loads(self.body(text))
+        except ValueError as e:
+            self.fail("the designData body is not valid JSON: %s" % e)
+
+    def outside(self, text):
+        """The page's text before and after its designData block."""
+        start, end = self.design_span(text)
+        return text[:start], text[end:]
+
+    def assert_only_designs_added(self, page, out):
+        """Every byte outside designData is the page's own. The body is the page's own text with its closing brace
+        moved past the new members, and it holds no raw `<`."""
+        self.assertEqual(self.outside(out), self.outside(page), "a byte outside designData changed")
+        base = self.body(page).rstrip()
+        self.assertTrue(self.body(out).startswith(base[:base.rindex("}")]), "a member of the page's designData changed")
+        self.assertNotIn("<", self.body(out), "a raw < is in designData")
+
+    def test_adds_one_design_after_the_existing_one(self):
+        page = live_page(extra=DECOY_SLOT)  # the add must reach the real block, not the slot in the JS string
+        out = self.added(page, ("new", self.write("new.html", MOCK_HTML)))
+        self.assertEqual(list(self.designs(out)), ["mock", "new"], "the new design does not follow the existing one")
+        self.assertEqual(self.designs(out)["new"], MOCK_HTML, "the new design is not the file's text")
+        self.assert_only_designs_added(page, out)
+        self.assertIn(OLD_BLOCK, out, "the roadmap block changed")
+        self.assertIn("<title>x: Questions</title>", out, "the title changed")
+
+    def test_adds_two_designs_in_argument_order_after_three_existing_ones(self):
+        page = live_page(design=design_script(MANY_DESIGNS))
+        out = self.added(page, ("b", self.write("b.html", MOCK_HTML)), ("a", self.write("a.html", "<p>a</p>\n")))
+        self.assertEqual(list(self.designs(out)), ["m1", "m2", "m3", "b", "a"],
+                         "the keys are not the existing ones, then the new ones in argument order")
+        self.assertEqual(self.designs(out)["b"], MOCK_HTML, "the first new design is not the file's text")
+        self.assertEqual(self.designs(out)["a"], "<p>a</p>\n", "the second new design is not the file's text")
+        self.assert_only_designs_added(page, out)
+
+    def test_adds_to_an_empty_designdata_without_a_leading_comma(self):
+        page = live_page(design=EMPTY_DESIGN)
+        out = self.added(page, ("new", self.write("new.html", MOCK_HTML)))
+        self.assertEqual(list(self.designs(out)), ["new"])
+        self.assert_only_designs_added(page, out)
+
+    def test_a_full_size_mockup_arrives_whole_and_its_markers_stay_in_the_script(self):
+        page = live_page()
+        out = self.added(page, ("full", self.write("full.html", TEMPLATE)))
+        self.assertEqual(self.designs(out)["full"], TEMPLATE, "the full-size mockup is not the file's text")
+        self.assert_only_designs_added(page, out)
+        self.assertEqual(len(SPLICE.markers(out)), len(SPLICE.markers(page)), "a marker of the mockup became a block marker")
+
+    def test_every_angle_bracket_is_a_u003c_escape_and_the_value_round_trips(self):
+        page = live_page(design=EMPTY_DESIGN)
+        out = self.added(page, ("tricky", self.write("tricky.html", MOCK_HTML)))
+        self.assertEqual(self.body(out).count("\\u003c"), MOCK_HTML.count("<"), "a < is not written as \\u003c")
+        self.assertEqual(self.designs(out)["tricky"], MOCK_HTML, "the value does not round-trip to the file's text")
+        self.assertEqual(len(SPLICE.markers(out)), len(SPLICE.markers(page)), "a marker of the mockup became a block marker")
+
+    def test_add_design_combines_with_carry_and_changes_only_the_designs(self):
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, extra=CHANGED_LINE)
+        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, extra=DECOY_SLOT)
+        template_path, live_path = self.write("template.html", template), self.write("live.html", live)
+        code, said = self.command("--page", template_path, "--carry", live_path, out="carried.html")
+        self.assertEqual(code, 0, "the carry does not run on a good pair: " + said)
+        carried = self.read("carried.html")
+        code, said = self.command("--page", template_path, "--carry", live_path, *self.adds(("new", self.write("new.html", MOCK_HTML))))
+        self.assertEqual(code, 0, "--add-design with --carry exited %d, so no page was written: %s" % (code, said))
+        out = self.read("out.html")
+        self.assertEqual(self.outside(out), self.outside(carried), "the add changed a byte outside designData")
+        self.assertEqual(list(self.designs(out)), ["mock", "new"], "the carried designs and the new one are not in order")
+        self.assertEqual(self.designs(out)["new"], MOCK_HTML, "the new design is not the file's text")
+        self.assertIn(CHANGED_LINE, out, "the template's change is gone")
+        self.assertIn(NEW_BLOCK.strip(), out, "the live roadmap block is not carried")
+
+    def test_a_relative_file_is_read_from_the_working_directory_as_its_whole_path_is(self):
+        page = live_page(design=EMPTY_DESIGN)
+        self.write("mock.html", MOCK_HTML)
+        whole = self.added(page, ("new", self.path("mock.html")), out="whole.html")
+        code, said = self.command("--page", self.path("live.html"), *self.adds(("new", "mock.html")), out="relative.html", cwd=self.tmp.name)
+        self.assertEqual(code, 0, "the relative FILE is not read from the working directory: " + said)
+        self.assertEqual(self.read("relative.html"), whole, "a relative FILE gives other bytes than its whole path")
+
+    def test_a_relative_file_beside_the_page_is_not_read_from_another_working_directory(self):
+        os.makedirs(self.path("pages"))
+        page_path = self.write("pages/live.html", live_page(design=EMPTY_DESIGN))
+        self.write("pages/mock.html", MOCK_HTML)
+        code, said = self.command("--page", page_path, *self.adds(("new", "mock.html")), cwd=self.tmp.name)
+        self.assertNotEqual(code, 0, "a relative FILE beside the page was read")
+        self.assertRegex(said, "(?i)missing|not found|no such|cannot read", "the refusal does not name the missing file")
+        self.assertFalse(os.path.exists(self.path("out.html")), "an output file was left")
+        self.assertEqual(self.read("pages/live.html"), live_page(design=EMPTY_DESIGN), "the live page changed")
+
+    def test_the_same_slug_with_the_same_html_is_a_no_op(self):
+        page = live_page()
+        out = self.added(page, ("mock", self.write("same.html", self.designs(page)["mock"])))
+        self.assertEqual(out, page, "the no-op changed the page")
+
+    def refused(self, page, pairs, word, why):
+        """The same command adds a good design to a good page, so a refusal here is the add's own."""
+        code, said = self.command("--page", self.write("live.html", live_page()), *self.adds(("ok", self.write("ok.html", MOCK_HTML))))
+        self.assertEqual(code, 0, "the add does not run on a good page: " + said)
+        os.remove(self.path("out.html"))
+        code, said = self.command("--page", self.write("live.html", page), *self.adds(*pairs))
+        self.assertNotEqual(code, 0, why + ": the add wrote a page")
+        self.assertNotIn("Traceback", said, why + ": the refusal is a crash, not a refusal")
+        self.assertNotIn("unrecognized arguments", said, why + ": the option was not read")
+        self.assertNotIn("the following arguments are required", said, why + ": an argument is refused, not the design")
+        self.assertNotIn("one of the arguments", said, why + ": an argument group is refused, not the design")
+        self.assertRegex(said, "(?i)" + word, why + ": the refusal does not name its cause")
+        self.assertFalse(os.path.exists(self.path("out.html")), why + ": an output file was left")
+        self.assertEqual(self.read("live.html"), page, why + ": the live page changed")
+
+    def test_a_page_with_no_designdata_block_is_refused(self):
+        self.refused(live_page(design=""), [("new", self.write("new.html", MOCK_HTML))], "designData", "no designData block")
+
+    def test_a_page_with_two_designdata_blocks_is_refused(self):
+        self.refused(live_page(design=DESIGN + "\n" + DESIGN), [("new", self.write("new.html", MOCK_HTML))], "designData", "two designData blocks")
+
+    def test_a_designdata_body_that_is_not_a_json_object_is_refused(self):
+        for body in ["[]", "null", '"text"', "1", "{"]:
+            with self.subTest(body=body):
+                page = live_page(design='<script type="application/json" id="designData">%s</script>' % body)
+                self.refused(page, [("new", self.write("new.html", MOCK_HTML))], "designData", "a designData body of %r" % body)
+
+    def test_a_file_that_is_missing_empty_or_unreadable_is_refused(self):
+        os.mkdir(self.path("dir.html"))
+        with open(self.path("bad.html"), "wb") as f:
+            f.write(b"\xff\xfe<p>\n")
+        cases = [
+            ("missing file", self.path("missing.html"), "missing|not found|no such|cannot read"),
+            ("empty file", self.write("empty.html", ""), "empty"),
+            ("a directory", self.path("dir.html"), "unreadable|cannot read|not readable|directory"),
+            ("bytes that are not utf-8", self.path("bad.html"), "unreadable|cannot read|not readable|utf-?8|decode"),
+        ]
+        for why, path, word in cases:
+            with self.subTest(why):
+                self.refused(live_page(), [("new", path)], word, why)
+
+    def test_a_slug_outside_a_to_z_0_to_9_and_hyphen_is_refused(self):
+        good = self.write("good.html", MOCK_HTML)
+        for slug in ["Bad", "under_score", "has space", "dot.name", "", "ünï", "a/b", "UPPER"]:
+            with self.subTest(slug=slug):
+                self.refused(live_page(), [(slug, good)], "slug", "the slug %r" % slug)
+
+    def test_a_slug_with_a_hyphen_is_accepted_and_lands_in_designdata(self):
+        page = live_page()
+        self.assertNotIn("price-a", self.designs(page), "the page already holds the slug, so the add proves nothing")
+        out = self.added(page, ("price-a", self.write("price-a.html", MOCK_HTML)))
+        self.assertEqual(list(self.designs(out)), ["mock", "price-a"], "the hyphen slug is not added after the existing design")
+        self.assertEqual(self.designs(out)["price-a"], MOCK_HTML, "the hyphen slug's design is not the file's text")
+        self.assert_only_designs_added(page, out)
+
+    def test_a_slug_with_a_digit_is_accepted_and_lands_in_designdata(self):
+        for slug in ["opt2", "2a"]:
+            with self.subTest(slug=slug):
+                page = live_page()
+                self.assertNotIn(slug, self.designs(page), "the page already holds the slug, so the add proves nothing")
+                out = self.added(page, (slug, self.write(slug + ".html", MOCK_HTML)))
+                self.assertEqual(list(self.designs(out)), ["mock", slug], "the digit slug %s is not added after the existing design" % slug)
+                self.assertEqual(self.designs(out)[slug], MOCK_HTML, "the digit slug %s's design is not the file's text" % slug)
+                self.assert_only_designs_added(page, out)
+
+    def test_a_slug_that_exists_with_other_html_is_refused(self):
+        other = self.write("other.html", "<p>different</p>\n")
+        self.refused(live_page(), [("mock", other)], "already|exists|differ", "a slug that exists with other html")
+
+    def test_one_bad_design_among_good_ones_writes_no_page(self):
+        good = self.write("good.html", MOCK_HTML)
+        self.refused(live_page(), [("good", good), ("Bad", good)], "slug", "a bad second design")
 
 
 if __name__ == "__main__":
