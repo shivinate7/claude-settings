@@ -1835,6 +1835,21 @@ class PerLaneMerge(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(self.host.readies, [], "a draft that will not merge was marked ready: %s" % out)
 
+    def test_confirm_holds_no_lock_across_a_ci_wait(self):
+        """No check wait runs while the merge lock is on origin. A wait under the lock holds the base for the whole check run, which the
+        lock's TTL does not cover (decision: the per-lane merge, rule M3). Each wait is checked against the lock ref at its call."""
+        held = []
+        real_wait = self.host.wait_checks
+        def watch(n, sha, d, prior=None):
+            if self.lock_ref():
+                held.append(sha)
+            return real_wait(n, sha, d, prior)
+        self.host.wait_checks = watch
+        rc, out = self.run_merge("7", "--confirm")  # a green head with a pending record: the claim is pushed, then the merge
+        self.assertEqual(held, [], "a check wait ran while the merge lock was held: %s" % held)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+        self.assertEqual(rc, 0, out)
+
 class CutBranch(Env):
     def local_branch(self, extra):
         sh(self.co, "git", "fetch", "-q", "origin")
