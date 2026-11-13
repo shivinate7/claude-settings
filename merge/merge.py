@@ -30,8 +30,8 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
-                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main) that record reads done and SHA is a merge commit whose first
-                          parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
+                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
+                          parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           MODEL must be sonnet on every record (exit 2 otherwise).
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
@@ -3657,7 +3657,7 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round {final} is done, net value {rec['net']}" + note
         if bad and (fix or all(v == "PASS" for i, role, _, v in rounds if i == top and role == REVIEW_ROLES[0])):  # the reviewer passed and the design reviewer did not
-            return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
+            return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
         return "open", f"round {final} is done on a guard or check change, and its net value is owed"
     if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note

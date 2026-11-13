@@ -10,9 +10,9 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 `roles-review-cap-three` (a change gets three review rounds, CLAUDE.md) holds the short rule. This record is the home of the round rules and holds what that rule lacks:
 
 - The rounds, in one place (owner, 2026-11-10 15:44 CST, relayed by the retrospective session, corrected 16:07 CST, item 471 a). Words: `yeah i never wanted round 3 if it passed earlier and was so confused to see that it was occuring`; `agreed A -- can look into the sonnet noise thing later`.
-  - A round that passes ends review. A guard or check change that passes round 1 or 2 is done and takes no round 3, unless a fix verifier ran on it (next line).
+  - A round that passes ends review. A guard or check change that passes round 1 or 2 is done and takes no round 3.
   - A round 2 FAIL, guard or check change or not, is open: it gets round 3.
-  - A guard or check change that gets a fix verifier PASS waits for round 3 and its net value, even after a round 2 PASS. Rounds run in order, so round 2 runs first (item 402 a, below).
+  - A fix verifier PASS ends review after a round 1 PASS, or after a round 1 FAIL and a round 2 PASS. After a round 1 or 2 FAIL it leaves a guard or check change open for round 3 and its net value. After a failed round 3 or 4 it is done, and a negative net value still holds the change.
   - The net-value test runs only for an unclear case that cannot finish: a guard or check change that reaches round 3.
   - The merge tool already reads this way (`review_state` in `merge/merge.py`). Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
   - Not decided: whether round 1 runs Sonnet for every logic change. Deferred, as the owner said.

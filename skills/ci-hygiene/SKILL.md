@@ -149,7 +149,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    round 1 or 2 FAIL, and done after a round 3 FAIL unless the net value is negative (record `pr-review-record`). A PR that merges clean needs no fix verifier and no new log: the log
    stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
    lint verdict names an exact head. A refused chain means that the lane gets the full review of its
-   new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and, after a
+   new head. Two examples: a second fix verifier on a head whose record is open (its fix verifier FAILed, or a guard-yes round 1 or 2 FAIL has only a fix PASS), and, after a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
