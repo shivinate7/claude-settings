@@ -1416,6 +1416,17 @@ def case_powershell_hashtable_is_no_bash_form():
     for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
                      ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
         page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A scriptblock value (`E={ ... }`) holds statements, and its `}` closes the value, not the hashtable's. So a `{`
+    # and a letter after `NAME=` is a scriptblock, not a `NAME=value tool` line. `E={ $_.Name }` is the control: a `$`
+    # after the brace is no command word, and it passes already.
+    for name, ps in (("a PowerShell calculated property whose scriptblock calls a cmdlet",
+                      "Get-Process | Select-Object @{N='x'; E={ Get-Date }}"),
+                     ("a PowerShell calculated property whose scriptblock is an if statement",
+                      "@{L='Size'; E={ if ($_.Length -gt 1) { 1 } else { 2 } }}"),
+                     ("a PowerShell hashtable whose second value is a scriptblock with a command", "@{a=1; b={ foo }}"),
+                     ("a PowerShell calculated property whose scriptblock reads a property (control)",
+                      "Get-Process | Select-Object @{N='x'; E={ $_.Name }}")):
+        page("%s passes: %s" % (name, ps), "set", entry_of(ps_task(ps)), None)
     for ps in ("FOO=1 tool run", "tool run;FOO=1 tool run"):
         page("a PowerShell command %s is refused as a bash operator" % ps, "set",
              entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
