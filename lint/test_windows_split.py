@@ -315,6 +315,7 @@ def shard_base(name):
 # The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
+MUTATE_JOBS = [MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"]  # shard i of 3 runs MUTATE_SHARD=i/3
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
@@ -329,6 +330,7 @@ ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/ro
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
            "checks-guard-2": "checks_guard"}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
+FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS + ("lint",)  # lint: the lane-lint job (step lane-lint-once-fail-fast), no scope condition either
 CANCEL_JOB = "red-lint-comment"  # needs lint, not scope: its steps carry the red-lint condition, checked in lint/test_lint_first_cancel.py
@@ -684,14 +686,20 @@ def guard_problems(text):
 
 
 def mutate_problems(text):
-    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
+    """Cut F. The guard mutation test runs in the MUTATE_JOBS shards on Linux, one shard each (MUTATE_SHARD=i/3), and in no other job."""
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
     problems = []
-    if homes != [MUTATE_JOB]:
-        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly [{MUTATE_JOB!r}]")
-    if MUTATE_JOB in jobs and not (jobs[MUTATE_JOB]["os"] or "").startswith("ubuntu"):
-        problems.append(f"{MUTATE_JOB} runs on {jobs[MUTATE_JOB]['os']}, want ubuntu-latest")
+    if sorted(homes) != sorted(MUTATE_JOBS):
+        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly {MUTATE_JOBS!r}")
+    for index, name in enumerate(MUTATE_JOBS, start=1):
+        if name not in jobs:
+            continue
+        if not (jobs[name]["os"] or "").startswith("ubuntu"):
+            problems.append(f"{name} runs on {jobs[name]['os']}, want ubuntu-latest")
+        shards = [yaml_scalar(str((st.get("env") or {}).get("MUTATE_SHARD", ""))) for st in jobs[name]["steps"] if st.get("run") == MUTATE_CMD]
+        if shards != [f"{index}/{len(MUTATE_JOBS)}"]:
+            problems.append(f"{name}: the mutate step sets MUTATE_SHARD {shards}, want ['{index}/{len(MUTATE_JOBS)}']")
     return problems
 
 
@@ -1209,14 +1217,22 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
-        checks = "jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
-        self.assertEqual(mutate_problems(checks), [])
-        self.assertTrue(mutate_problems(checks.replace("checks-mutate-guard", "checks")))  # in the lint job
-        self.assertTrue(mutate_problems(checks.replace("ubuntu-latest", "windows-latest")))  # on Windows
-        self.assertTrue(mutate_problems("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"
-                                        "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+        def shard_job(name, shard, os_="ubuntu-latest"):
+            return (f"  {name}:\n    runs-on: {os_}\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
+                    f"        env:\n          MUTATE_SHARD: {shard}\n")
+        three = "jobs:\n" + shard_job("checks-mutate-guard", "1/3") + shard_job("checks-mutate-guard-b", "2/3") \
+            + shard_job("checks-mutate-guard-c", "3/3")
+        self.assertEqual(mutate_problems(three), [])
+        self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c", "checks")))  # a shard in the lint job
+        self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c:\n    runs-on: ubuntu-latest",
+                                                      "checks-mutate-guard-c:\n    runs-on: windows-latest")))  # on Windows
+        self.assertEqual(mutate_problems(three.replace("MUTATE_SHARD: 2/3", "MUTATE_SHARD: \"2/3\"  # shard two")), [])  # quotes and comment
+        self.assertEqual(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard-c", "3/3") + shard_job("checks-mutate-guard", "1/3")
+                                         + shard_job("checks-mutate-guard-b", "2/3")), [])  # job order is free
+        self.assertTrue(mutate_problems(three.replace("2/3", "1/3")))  # two shards run the same mutants
+        self.assertTrue(mutate_problems(three.replace("        env:\n          MUTATE_SHARD: 3/3\n", "")))  # no shard set: runs all
+        self.assertTrue(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard", "1/3")))  # shards 2 and 3 missing
+        self.assertTrue(mutate_problems(three + shard_job("checks", "1/3")))  # runs twice
 
 
 def split_doc(jobs):
