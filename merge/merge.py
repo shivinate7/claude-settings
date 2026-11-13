@@ -133,7 +133,7 @@
                           A cloud run needs the batch-runner role. Each run that does not stop ends with one line per pull request that
                           --reviewed reads done on the base and that no lane set, open pull request or base holds: `merge: #N left out of
                           batch NAME: none|prose|conflict` (prose: docs-only; conflict: its head conflicts with the base tip). A failed read
-                          prints `merge: left-out list unknown (why)` and keeps the batch result. Added gh cost: one reviewed_read, one open-PR
+                          prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and keeps the batch result. Added gh cost: one reviewed_read, one open-PR
                           list read (h.batch_pr) for a missing base or lane set, then per done candidate one compare against each other open pull
                           request on the base and one against the base. Per code candidate: one `git fetch` of the base (once per run), a
                           `git cat-file` check, a fetch of its refs/pull/N/head if the clone lacks it, and one `git merge-tree`.
@@ -5052,7 +5052,7 @@ def left_out_lines(root, h, name, numbers, base):
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
     """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. A read error (RELEASE_READ_ERRORS) that reading them raises
-    prints `merge: left-out list unknown (why)` and never hides the batch's own result or its exit code. Returns what batch_build_run returns."""
+    prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and never hides the batch's own result or its exit code. Returns what batch_build_run returns."""
     rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config)
     try:
         frozen = numbers
@@ -5066,7 +5066,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         for line in left_out_lines(root, h, name, set(frozen), base):
             say(line)
     except RELEASE_READ_ERRORS as e:  # merge_reason's later git calls go through sh, which can raise OSError or TimeoutExpired
-        say(f"merge: left-out list unknown ({' '.join(str(e).split())})")
+        say(f"merge: left-out list unknown ({' '.join(str(e).split())}) {UNKNOWN_CITE}")
     return rc
 
 def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
