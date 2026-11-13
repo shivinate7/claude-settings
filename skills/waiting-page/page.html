@@ -1241,7 +1241,7 @@ function sorted() {
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
-  // An item with no valid date counts as oldest, so it sinks to the bottom of its tier; a group sits at its newest member, as the Answered section does.
+  // An item with no valid date counts as oldest, so it comes last among the new items (it is never seen, so seen items still follow it); a group sits at its newest member, as the Answered section does.
   const born = (x) => { const t = ts(x.added); return t === Infinity ? -Infinity : t; };
   const age = (it) => Math.max(...mates(it).map(born));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));

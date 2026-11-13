@@ -1924,8 +1924,8 @@ test("inside a tier, the newest item comes first, and rank still leads", async (
   assert.deepEqual(by["tier-stands"], ["rank-old", "rank-new"], "rank must still lead age");
 });
 
-// A group sits at its newest member's time, as the Answered section does; an item with no valid date sinks to the bottom of its tier.
-test("inside a tier, a group sits at its newest member, and an undated item comes last", async (t) => {
+// A group sits at its newest member's time, as the Answered section does; an item with no valid date comes last among the new items.
+test("inside a tier, a group sits at its newest member, and an undated item comes last among the new items", async (t) => {
   const items = [
     mk("solo-mid", 1, { added: at(5) }), mk("solo-old", 2, { added: at(1) }), mk("undated", 3, { added: "garbage" }),
     mk("grp-old", 4, { added: at(2), group: "g" }), mk("grp-new", 5, { added: at(9), group: "g" }),
