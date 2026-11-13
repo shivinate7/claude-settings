@@ -232,6 +232,12 @@ def fixture_env(home, extra=None):
 
 def git(cwd, args, env, input_text=None, binary=False):
     """binary=True returns bytes. Text mode turns a lone CR into a newline, and the CRLF cases look for that CR."""
+    if isinstance(input_text, bytes):
+        # Text-mode stdin on Windows turns each LF into CRLF, so a CRLF fixture would reach git as CR CR LF.
+        result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text, capture_output=True, timeout=60)
+        if result.returncode:
+            raise RuntimeError("fixture git %s failed: %s" % (args[0], result.stderr.decode("utf-8", "replace").strip()))
+        return result.stdout if binary else result.stdout.decode("utf-8", "replace")
     mode = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text,
                             capture_output=True, timeout=60, **mode)
@@ -278,10 +284,13 @@ class Store:
             return git(self.path, ["cat-file", "blob", "%s:%s" % (self.tip(), path)], self.env, binary=True)
         return git(self.path, ["show", "%s:%s" % (self.tip(), path)], self.env)
 
-    def seed(self, addr, mid, kind, sender, body, re_id="-"):
-        """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case."""
-        text = ("Msg %s from %s to %s kind %s re %s try 1\nReply-to: %s\n\n%s\n"
-                % (mid, sender, addr, kind, re_id, sender, body))
+    def seed(self, addr, mid, kind, sender, body, re_id="-", eol="\n", body_eol=None):
+        """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case.
+        eol ends the header lines and the blank line after them; body_eol ends the body (default: eol). A line ending
+        other than LF is written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF."""
+        body_eol = eol if body_eol is None else body_eol
+        text = ("Msg %s from %s to %s kind %s re %s try 1%sReply-to: %s%s%s%s%s"
+                % (mid, sender, addr, kind, re_id, eol, sender, eol, eol, body, body_eol))
         index = os.path.join(self.path, "seed.index")
         env = dict(self.env, GIT_INDEX_FILE=index)
         if os.path.exists(index):
@@ -291,7 +300,8 @@ class Store:
             git(self.path, ["read-tree", "--empty"], env)
         else:
             git(self.path, ["read-tree", tip], env)
-        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=text).strip()
+        data = text.encode("utf-8") if "\r" in text else text
+        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=data).strip()
         git(self.path, ["update-index", "--add", "--cacheinfo",
                         "100644,%s,mail/%s/%s.md" % (blob, addr, mid)], env)
         tree = git(self.path, ["write-tree"], env).strip()
