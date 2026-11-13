@@ -1526,6 +1526,68 @@ class SessionStartPinNoteTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeT
         self.assertEqual(len(self.alarm_lines(lines)), 1, "scope: the behind line did not print: %r" % lines)
         self.assertEqual(self.note_lines(lines), [], "a note prints with no install log: %r" % lines)
 
+    # A pointer the hook cannot read as a clone: no pin line, a missing folder, or a folder with no .git. The pull's
+    # "no clone path" and "clone not found" exits write their line where no pin alarm can print, so the hook prints the
+    # note on its own in these states.
+
+    def point_config_at(self, text):
+        """Writes the config's CLAUDE.md as `text`: a pin line that names a folder, or a line that names none."""
+        self.put(os.path.join(self.config, "CLAUDE.md"), text)
+
+    def test_no_clone_path_in_claude_md_prints_the_note_for_the_newest_session_start_line(self):
+        self.point_config_at("# fixture CLAUDE.md with no pin line\n")
+        self.write_log(*older_hook_lines(3), NEWEST_HOOK, HELPER_LINE)
+        lines = self.run_checked()
+        # Scope first: no folder is named, so no pin alarm can print.
+        self.assertEqual(self.alarm_lines(lines), [], "scope: an alarm printed with no pin named: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "the note is not the newest session-start line of the log: %r" % lines)
+
+    def test_a_claude_md_naming_a_missing_clone_prints_the_note(self):
+        missing = os.path.join(self.root, "no-such-clone-live")
+        self.assertFalse(os.path.exists(missing), "scope: the named folder exists")
+        self.point_config_at("@%s/CLAUDE.md\n" % missing.replace("\\", "/"))
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        self.assertEqual(self.alarm_lines(lines), [], "scope: an alarm printed for a folder that is not there: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "the note is not the newest session-start line of the log: %r" % lines)
+
+    def test_a_claude_md_naming_a_folder_without_git_prints_the_note(self):
+        bare = os.path.join(self.root, "not-a-clone")
+        os.makedirs(bare)
+        self.assertFalse(os.path.exists(os.path.join(bare, ".git")), "scope: the folder has a .git")
+        self.point_config_at("@%s/CLAUDE.md\n" % bare.replace("\\", "/"))
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        self.assertEqual(self.alarm_lines(lines), [], "scope: an alarm printed for a folder with no .git: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "the note is not the newest session-start line of the log: %r" % lines)
+
+    def assert_no_note_without_a_session_start_line(self):
+        """With the pointer as the case set it, the note prints for a session-start line and for no other log state."""
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        # Control: the note prints for this pointer while the log holds a session-start line.
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "want the note while the log holds a session-start line: %r" % lines)
+        self.write_log(HELPER_LINE)
+        lines = self.run_checked()
+        self.assertEqual(self.note_lines(lines), [], "a note prints for a log with no session-start line: %r" % lines)
+        os.remove(self.log)
+        lines = self.run_checked()
+        self.assertEqual(self.note_lines(lines), [], "a note prints with no install log: %r" % lines)
+
+    def test_no_clone_path_with_no_session_start_line_prints_no_note(self):
+        self.point_config_at("# fixture CLAUDE.md with no pin line\n")
+        self.assert_no_note_without_a_session_start_line()
+
+    def test_a_missing_clone_with_no_session_start_line_prints_no_note(self):
+        missing = os.path.join(self.root, "no-such-clone-live")
+        self.assertFalse(os.path.exists(missing), "scope: the named folder exists")
+        self.point_config_at("@%s/CLAUDE.md\n" % missing.replace("\\", "/"))
+        self.assert_no_note_without_a_session_start_line()
+
 
 # The platform's Stop-hook script, trimmed to what the stop-push cases need. The anchor line and the two lines around it
 # are verbatim from the platform text (~/.claude/stop-hook-git-check.sh, lines 172-175); the rest is cut.
