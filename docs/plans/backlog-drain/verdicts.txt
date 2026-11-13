@@ -131,7 +131,7 @@ PR	verdict	kind	step	head	reason
 2500	close	code	close-replaced-at-open	6209713a48f2	stale earlier copy of 2667; overlaps fully
 2527	rebuild	prose	item-cite-carries-name	c3a1f8cb5735	report-guard half superseded by 2997; carry only prompt line in hooks/precompact_handoff_prompt.md + its test + StalledLineReplyTests case re-pointed at bare_item_cite
 2549	close	code	artifact-guard-matcher-names	e034db8de485	older rival of 2927; 2927 covers 15 tools vs 6, conflicts in 8 files; its two gaps go to 2927 rebase
-2667	rebuild	code	fan-prose-unmapped-1	eb214c9c69a3	close-replaced lines; feature not on main; re-point reopen_lines/replaced_closes to main's (n, base, kind) done triples, red then green
+2667	rebuild	code	close-replaced-at-open	eb214c9c69a3	close-replaced lines; feature not on main; re-point reopen_lines/replaced_closes to main's (n, base, kind) done triples, red then green
 2675	close	code	fan-prose-handoffs	8ee3cb28d733	superseded by 2696
 2677	keep	code	fan-code-handoffs	f3161bcdbfaa	promise guard; merges clean; trim 16 of 21 notes already on main
 2678	keep	code	fan-prose-unmapped-1	25a3c5b6b8dc	shared branch-sweep workflow (cloud branch delete, restart-plan scope k); merges clean
@@ -148,17 +148,17 @@ PR	verdict	kind	step	head	reason
 2709	keep	code	lane-finds-triage	56fc4ded2980	brief names roles (Coordinator, Triage, Batch runner), no session id (R22 point 3); only conflict session-tiers.md Cost lines; check cost-mark lint
 2712	keep	code	fan-prose-handoffs	7ede2542073b	agent-end reap by process marker; regenerate docs/catalog.md after rebase
 2714	close	code	agent-asks-become-refusals	7ed66f06a1e0	ancestor of 2885 (stands only if 2885 stays keep)
-2720	rebuild	code	fan-code-waiting-page	6695a463d414	written-time blank/non-ISO check; code merges clean, 1 decision-file conflict (Cost line); mark read-count clause "(unmeasured)"
+2720	rebuild	code	waiting-page-written-time-check	6695a463d414	written-time blank/non-ISO check; code merges clean, 1 decision-file conflict (Cost line); mark read-count clause "(unmeasured)"
 2723	close	code	fan-prose-handoffs	f222d22a62af	ancestor chain to 2753
 2727	close	code	fan-prose-debts	ea833aa0027a	superseded by 2948 (outside group, 2 conflicts with main); becomes keep if 2948 closes
-2729	rebuild	code	fan-prose-unmapped-1	73fdb5b6f4ee	keep guard half (dead_pr_wait_hit, shared_names, decision dead-pr-waits, test s42907); drop build half dead_pr_waits/prStates (duplicates main waits_on_closed_pulls)
+2729	rebuild	code	dead-pr-wait-guard	73fdb5b6f4ee	keep guard half (dead_pr_wait_hit, shared_names, decision dead-pr-waits, test s42907); drop build half dead_pr_waits/prStates (duplicates main waits_on_closed_pulls)
 2732	keep	prose	fan-code-waiting-page	e14452cc5c19	3 notes; merges clean; land with or after 2720; note says "PR 2720" (renumber if rebuilt as new PR)
 2733	close	code	fan-code-workflows	3737e02663d5	ancestor of 2920
 2735	close	code	fan-prose-debts	21fd3ba402a6	ancestor of 2757
 2737	keep	code	fan-code-workflows	133f9bf1e9da	judge-replay corpus; merges clean; corpus cases sendmessage_state, report_guard.past_ruling may differ from main's 11-13 judges
 2744	close	code	fan-prose-handoffs	61c34de78fd4	ancestor of 2753
 2748	close	code	fan-prose-unmapped-5	63bba812951b	inside 2913
-2749	rebuild	code	fan-code-guard-2	eb03f0e3d975	lint CPU-slot limit wanted; conflicts merge/merge.py + test_lane_lint.py; main added run_touched_tests so slot scope must be redecided
+2749	rebuild	code	lane-lint-cpu-slots	eb03f0e3d975	lint CPU-slot limit wanted; conflicts merge/merge.py + test_lane_lint.py; main added run_touched_tests so slot scope must be redecided
 2750	close	code	fan-code-handoffs	89fec26ec590	ancestor of 2774 and 2824; superseded by 2824
 2751	keep	code	fan-prose-debts	1c9a658278ee	fixes debt lane-ack-skips-every-reply; rebase: 1 text conflict in docs/decisions/questions-go-to-owner.md
 2752	keep	code	fan-prose-debts	9c9f76d45f98	MAP tsconfig alias reads; merges clean
@@ -257,7 +257,7 @@ PR	verdict	kind	step	head	reason
 2938	close	code	challenger-page-against	33dca4c3e5bb	inside 2987
 2939	fresh	-	batch-order-by-pr-number	ddb1d8b8b945	fresh: runner 10 (under 48 h, not reviewed)
 2940	keep	code	review-record-fix-check-reads	664aafccd233	needs main merged plus hand-resolve merge.py; overlaps 3072 (fold into one home)
-2941	close	code	guard-false-alarm-cull	f932b3627115	superseded by 3036
+2941	keep	code	guard-false-alarm-cull	f932b3627115	page item 630 closed as option b: this PR is the fix lane (round 3 PASS, lane-lint PASS on f932b3627); carries old branch work; 3036 closes (coordinator 11:36 CST Nov 13)
 2942	fresh	-	ci-merge-install-split	91e051e4f081	fresh: runner 10 (under 48 h, not reviewed)
 2943	keep	code	coordinator-session-board	98e847bbd507	needs main merged, 3 hunks, union of keys
 2944	fresh	-	brief-reads-owner-rulings	a86c4ea32e9f	fresh: runner 10 (under 48 h, not reviewed)
@@ -285,7 +285,7 @@ PR	verdict	kind	step	head	reason
 2976	fresh	-	filing-check-reads-page	3a5ddf4d2e5b	fresh: runner 10 (under 48 h, not reviewed)
 2977	fresh	-	glossary-same-local-cloud	bcd88602fbef	fresh: runner 10 (under 48 h, not reviewed)
 2979	fresh	-	record-before-fix-push	7d9315123134	fresh: runner 10 (under 48 h, not reviewed)
-2980	keep	code	ci-split-checks-family	472da99ece13	needs main merged, 3 checks.yml hunks; Linux split only
+2980	keep	code	ci-split-checks-family	472da99ece13	needs main merged, 3 checks.yml hunks; Linux split only; lane session_013NEJL2UPotZrZRQ9WLTshH adopts it (coordinator 11:38 CST Nov 13)
 2981	fresh	-	answer-kept-on-close	a91005a70a71	fresh: runner 10 (under 48 h, not reviewed)
 2982	fresh	-	page-narrow-word-breaks	6c01123efbb0	fresh: runner 10 (under 48 h, not reviewed)
 2983	fresh	-	lane-start-checks-open-pr	2ce83361f02e	fresh: runner 10 (under 48 h, not reviewed)
@@ -310,7 +310,7 @@ PR	verdict	kind	step	head	reason
 3018	fresh	-	auto-merge-refused	b56ad9a1464a	fresh: runner 10 (under 48 h, not reviewed)
 3019	keep	code	lane-push-frozen-in-batch	7f112970889f	push-batch-held rule; merges clean; has tests s22670
 3020	fresh	-	cloud-hooks-stale-copy	bc0b812ec521	fresh: runner 10 (under 48 h, not reviewed)
-3021	close	code	ci-linux-windows-once	72d112d72b24	subset of 3088
+3021	keep	code	ci-linux-windows-once	72d112d72b24	KEEP, express, lane ci-mac-once-per-batch, R61/R62 per retro CI plan (coordinator 11:38 CST Nov 13); not a subset-close into 3088
 3023	keep	prose	standing-role-model-rows	9468678779fa	needs main merged (agent-model-cap.md:10); record must say Guard or check yes
 3024	keep	code	guard-paths-agents	c7415fead496	needs main merged (pr-review-record.md:115); step guard-paths-agents-narrow waits on it
 3026	fresh	-	agent-worktree-add-in-tool-dir	369657dc746a	fresh: runner 10 (under 48 h, not reviewed)
@@ -322,12 +322,12 @@ PR	verdict	kind	step	head	reason
 3033	close	code	guard-false-alarm-cull	83c758e965ea	inside 3032
 3034	rebuild	code	guard-false-alarm-cull	d509685230df	scratchpad false alarms; main reworked scratchpad_owner_write; -C hunk and TREE_REFUSE_REASON rename still apply, finished-agent part redo
 3035	keep	code	guard-false-alarm-cull	99b05dd429b6	stays marks on 7 glossary rows
-3036	keep	code	guard-false-alarm-cull	9853d78517ee	narration example-id fix; page item 630 (owner pick b it cites) unverified: if it says otherwise keep 2941, close 3036
+3036	close	code	guard-false-alarm-cull	9853d78517ee	page item 630 option b: 2941 is the keeper; 3036 body says "accept three limits", which is pick c (coordinator 11:36 CST Nov 13)
 3037	keep	code	guard-false-alarm-cull	21ad144f8f7a	frozen-path read-only forms; no overlap with 3030
 3038	keep	code	page-wakes-and-relays	5a074b4104d2	relay-grant-words rule; anchors intact; independent
 3039	fresh	-	notes-fix-reverify-small	1ee95ce1d12e	fresh: runner 10 (under 48 h, not reviewed)
 3040	keep	prose	page-wakes-and-relays	3c957137d942	2 debts + note about 3038; trivial rebase of notes.md; close if 3038 closes
-3042	close	code	ci-linux-windows-once	c877d12e5f6f	subset of 3088
+3042	keep	code	ci-linux-windows-once	c877d12e5f6f	KEEP, express, lane ci-mac-once-per-batch, R61/R62 per retro CI plan (coordinator 11:38 CST Nov 13); not a subset-close into 3088
 3043	keep	code	guard-false-alarm-cull	a2f593dfc82e	debt-retire accepts wrong-refusal notes line; merge before 3056
 3047	keep	code	mutate-guard-timeout-crashed	8b74987b3987	needs main merged (one adjacent insert in mutate_guard.py)
 3050	fresh	-	git-apply-test-path-write	36cebe0502fe	fresh: runner 10 (under 48 h, not reviewed)
