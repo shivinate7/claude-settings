@@ -3224,10 +3224,11 @@ def probe_path():
     return path
 
 
-def repeat_repo(name, step=False, debt=False):
-    """A rolled-out fixture repo. `step` puts the roadmap step at STEP_REF only, so a read of the
-    working tree finds nothing. `debt` writes the debt untracked, so the read is of the working tree."""
-    root = make_repo(name, extras=ROLLED_OUT)
+def repeat_repo(name, step=False, debt=False, extras=ROLLED_OUT):
+    """A rolled-out fixture repo, or one whose layout extras file is `extras`. `step` puts the roadmap step at
+    STEP_REF only, so a read of the working tree finds nothing. `debt` writes the debt untracked, so the read is of
+    the working tree."""
+    root = make_repo(name, extras=extras)
     if step:
         put_ref(root, STEP_REF, {STEP_DIR + "wheel-speed.json": STEP_JSON})
     if debt:
@@ -3540,6 +3541,24 @@ def case_repeat_backlog_debt_text_is_in_the_prompt():
     check("backlog: the prompt holds the debt's ref", "debt:" + DEBT_SLUG in prompt, prompt[-300:])
     check("backlog: the prompt holds the debt's title and text", DEBT_TITLE in prompt and DEBT_SENTENCE in prompt,
           prompt[-300:])
+
+
+def case_repeat_backlog_under_a_bad_mark_keeps_the_debt():
+    """A "rolled-out" that is not JSON true or false: the backlog source still reads the layout's debt folder, so
+    the debt's ref and text go in. The valid mark is the control. A failed read drops the whole source."""
+    bad = json.dumps({"rolled-out": "yes", "kinds": {}}) + "\n"
+    for label, extras in (("valid", ROLLED_OUT), ("bad", bad)):
+        sid = "repeat-backlog-%s" % label
+        root = repeat_repo(sid, debt=True, extras=extras)
+        cfg = new_cfg()
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid)
+        p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+        prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+        check("backlog (%s mark): one model call on the Stop" % label, len(calls) == 1, p.desc())
+        check("backlog (%s mark): the prompt holds the debt's ref" % label, "debt:" + DEBT_SLUG in prompt, p.err[-300:])
+        check("backlog (%s mark): the prompt holds the debt's title and text" % label,
+              DEBT_TITLE in prompt and DEBT_SENTENCE in prompt, p.err[-300:])
 
 
 def case_repeat_cost_one_call_one_grep_and_two_files():
@@ -4502,6 +4521,7 @@ CASES = (
     case_repeat_model_error_fails_open_and_is_not_retried,
     case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once,
     case_repeat_backlog_debt_text_is_in_the_prompt,
+    case_repeat_backlog_under_a_bad_mark_keeps_the_debt,
     case_repeat_cost_one_call_one_grep_and_two_files,
     case_repeat_cap_keeps_each_source_within_its_share,
     case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
