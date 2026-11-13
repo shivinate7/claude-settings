@@ -10,6 +10,7 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import sys
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
@@ -452,3 +453,41 @@ def page_writer_id(records):
 def page_read_ran(records):
     """True when the main session ran an ArtifactData get of meta/page, whatever its result named."""
     return _page_reads(records)[0]
+
+
+# One token: id characters, where `.` and `-` count only between two of them. A trailing period or comma ends it,
+# and `session_X2` is a different token from `session_X`.
+_TOKEN_RE = re.compile(r"\w+(?:[.-]\w+)*")
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+
+
+def _writer_tokens(writer):
+    return _TOKEN_RE.findall(writer) if isinstance(writer, str) else []
+
+
+def writer_ids(writer):
+    """The session ids the page writer string names: each whole token of it that is `session_...` or a UUID,
+    and each `cse_<x>` token as itself and as `session_<x>` (the mapping of override.record_id), so a send
+    to either form of the writer's own id matches. A word with no id shape,
+    such as `Triage`, is no id, so a writer that names none is unknown. Cost: a string scan, and the one-time
+    import of override; no read of the repo, no process."""
+    ids = set()
+    for tok in _writer_tokens(writer):
+        if tok.startswith("session_") or _UUID_RE.fullmatch(tok):
+            ids.add(tok)
+        elif tok.startswith("cse_"):
+            hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+            if hooks not in sys.path:
+                sys.path.insert(0, hooks)
+            from override import record_id
+            mapped = record_id(tok)
+            if mapped:
+                ids.update((tok, mapped))
+    return ids
+
+
+def writer_names_id(writer, ident):
+    """True when `ident` is a whole token of the page writer string, or one of its writer_ids. The writer is
+    the bare id, or a label such as "Triage (session_X)" or "Triage (cse_X)" names it. `session_X2` is no match
+    for `session_X`. Cost: the string scan of writer_ids; no read, no process."""
+    return bool(ident) and (ident in _writer_tokens(writer) or ident in writer_ids(writer))

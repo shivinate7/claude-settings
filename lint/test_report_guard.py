@@ -2497,6 +2497,95 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(["Close q_max #969?"]))])
                 self.assertIsNone(out)
 
+    def test_qm_green_labelled_writer_passes_a_send_to_its_bare_id(self):
+        # Catches: a page writer label "Triage (id)" compared whole, so a send to the bare id is no send to the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id=self.WRITER)),
+                            ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_the_writer_name_in_a_label_does_not_count(self):
+        # Catches: a send to the name "Triage" counted as a send to the writer, because the name is a word of the
+        # label "Triage (id)". Only the id in the label names the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id="Triage")), ("to", self.send(to="Triage"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_to_the_whole_label_does_not_count(self):
+        # Catches: a send to the whole label string counted as a send to the writer, because the label contains
+        # itself. Only the id in the label names the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id=labelled)), ("to", self.send(to=labelled))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_labelled_writer_ack_of_a_bare_id_send_keeps_the_turn(self):
+        # Catches: the writer's ack of a send to its bare id starting a new turn when the page names the writer by
+        # label. The ack must match the id the label names, so the send before it stays in the turn.
+        labelled = "Triage (%s)" % self.WRITER
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_green_cse_writer_passes_a_send_to_its_cse_id(self):
+        # Catches: a send to a cse_ writer's own cse_ id blocked. The writer maps to its session_ id, and the send's
+        # raw cse_ string matches none of the mapped ids.
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_green_cse_writer_ack_of_a_cse_id_send_keeps_the_turn(self):
+        # Catches: the ack of a send to a cse_ writer's cse_ id starting a new turn. The ack's sender is the raw cse_
+        # id, and the ack map holds only the session_ ids the writer maps to.
+        ack = peer_msg("got it", from_session="cse_5b9e")
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_green_labelled_cse_writer_passes_a_send_to_its_cse_id(self):
+        # Catches: a send to the cse_ id that a "Triage (cse_X)" label names blocked. The label's id maps to session_X,
+        # and the send's raw cse_X string matches none of the mapped ids.
+        labelled = "Triage (cse_5b9e)"
+        for label, send in (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_the_whole_cse_label_does_not_count(self):
+        # Catches: a send to the whole "Triage (cse_X)" label counted as a send to the writer. Only the id it names
+        # counts.
+        labelled = "Triage (cse_5b9e)"
+        for label, send in (("session_id", self.send(session_id=labelled)), ("to", self.send(to=labelled))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_to_another_id_than_the_cse_writer_does_not_count(self):
+        # Catches: a send to cse_X2 or session_X2 counted as a send to the writer cse_X. Only the id itself counts.
+        for target in ("cse_5b9e2", "session_5b9e2"):
+            for label, send in (("session_id", self.send(session_id=target)), ("to", self.send(to=target))):
+                with self.subTest(target=target, field=label):
+                    out = self.stop([human("decide"), *self.writer_read("cse_5b9e"), *send,
+                                     assistant_text(self.reply(self.PICK))])
+                    self.assert_blocked(out, "Pick guard")
+
     def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
         # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
         # so the reply that follows it has no send and blocks.
@@ -2823,6 +2912,18 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             for label, send in forms:
                 with self.subTest(shape=shape, field=label):
                     out = self.lane(*self.writer_read(self.WRITER), *incoming, *send,
+                                    assistant_text(self.reply(self.PICK)))
+                    self.assertIsNone(out)
+
+    def test_ln_green_send_to_a_cse_writer_passes(self):
+        # Catches: a lane's send to its page writer's cse_ id refused. The lane's wanted set holds the session_ id the
+        # writer maps to, and the raw cse_ target matches none of them.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("session_id", self.send(session_id="cse_5b9e")), ("to", self.send(to="cse_5b9e")))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, field=label):
+                    out = self.lane(*self.writer_read("cse_5b9e"), *incoming, *send,
                                     assistant_text(self.reply(self.PICK)))
                     self.assertIsNone(out)
 
@@ -4655,15 +4756,16 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
-    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+    # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
+    def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
-    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+    def test_a_prose_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)

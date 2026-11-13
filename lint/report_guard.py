@@ -41,9 +41,9 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`; a label such as `Triage (session_X)` counts only through the id it names), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
+parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
@@ -172,7 +172,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
@@ -1242,6 +1242,17 @@ def _own_lane_read(path, own_id):
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
+
+
+def _is_page_writer(path):
+    """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
+    repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
+    _hooks_on_path()
+    from guard_merge import _own_tier_proved as session_role_proved  # glossary-ok: the name guard_merge exports
+    return session_role_proved(path, PAGE_WRITER_ROLE)
+
+
 def _turn_acts(records, turn, acks):
     """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
@@ -1258,12 +1269,15 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
+    meta/page read's; a label such as `Triage (session_X)` counts only through the id it names (writer_ids).
+    With no such read at all, the layout's `page-writer` (its ack starts no turn either).
     The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
     with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
+    parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
@@ -1271,9 +1285,10 @@ def question_problem(records, turn, text, hook):
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
-    acks = {writer: {writer}} if writer else {}
+    named = writer_ids(writer) or ({writer} if writer else set())
+    acks = {i: {i} for i in named}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    if any(x in named for t in sends for x in t):
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
@@ -1283,8 +1298,12 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+        wanted = ({parent} if parent else set()) | named | PARENT_TARGETS
+        if any(t & wanted for t in sends):
+            return "", ""
+        if not _is_page_writer(hook.get("transcript_path")):
+            return LANE_REFUSAL, ""
+        # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
