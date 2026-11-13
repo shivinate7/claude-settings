@@ -1287,9 +1287,9 @@ def question_problem(records, turn, text, hook):
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
-                            "the page writer is not known to this session; the waiting page is " + page + ". Run list_sessions "
-                            "with the tags filter cs-build:triage and this repo's cs-repo tag, in its own turn first, so one "
-                            "page holds the one triage session, then send the question to it"), ""
+                            "the page writer is not known to this session; the waiting page is " + page + "; a list_sessions call in this turn "
+                            "with the tags filter cs-build:triage and this repo's cs-repo tag names it, since one page then "
+                            "holds the one triage session"), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.

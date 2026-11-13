@@ -245,9 +245,9 @@ carries the badge "Answered, filing pending" or "Answered, filed in <home>". It 
 Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run with one lane, the lane
 wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`. The writer watches the page ("Read the answers"). With no `meta/page` read, the pick guard and the owner-feedback check name the
-writer as the one session tagged `cs-build:triage` and `cs-repo:<repo>` in the transcript's `get_session` or `list_sessions`
-records; run `list_sessions` in its own turn first. A tag-writer send counts only on a delivered result.
+into `meta/page`. The writer watches the page ("Read the answers"). With no `meta/page` read, the pick guard and the owner-feedback check name the writer by its tag.
+The writer is the one session tagged `cs-build:triage` and `cs-repo:<repo>` in this turn's `get_session` or `list_sessions` records.
+Run `list_sessions` in its own turn first; a tag-writer send counts only on a delivered result.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
