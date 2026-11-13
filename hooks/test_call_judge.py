@@ -237,10 +237,15 @@ def _fake_run(argv, **kwargs):
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
     # The dedicated past-ruling call (report_guard.past_ruling_problem) carries "Judge only item 8 below" and answers
     # CJ_PAST_ANSWER; its failure is CJ_PAST_FAIL. Every other call is a chat or form call: CJ_ANSWER, CJ_MODEL_FAIL.
+    # A suite that sets no CJ_PAST_ANSWER (lint/test_report_guard.py) has one model: the item-8 call takes CJ_ANSWER
+    # and fails on CJ_MODEL_FAIL, as the chat and form calls do. A suite that sets it keeps the two calls apart.
     if "Judge only item 8 below" in prompt:
-        if os.environ.get("CJ_PAST_FAIL"):
+        if "CJ_PAST_ANSWER" in os.environ:
+            failure, answer = os.environ.get("CJ_PAST_FAIL"), os.environ["CJ_PAST_ANSWER"]
+        else:
+            failure, answer = os.environ.get("CJ_MODEL_FAIL"), os.environ["CJ_ANSWER"]
+        if failure:
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub past-ruling failure")
-        answer = os.environ["CJ_PAST_ANSWER"]
     else:
         if os.environ.get("CJ_MODEL_FAIL"):
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
