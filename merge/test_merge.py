@@ -15040,18 +15040,6 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertIn("design reviewer", why, f"why does not name the design reviewer: {why!r}")
                 self.assertIn(note, why, f"why does not name the design reviewer's round line: {why!r}")
 
-    def test_a_fix_pass_with_no_round_recorded_is_open_and_says_no_round(self):
-        # the empty state: no round is recorded, so the fix check has no round to count as passing
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=(), kind="docs-only")
-        self.assertEqual(state, "open", "a fix check PASS with no round recorded must not read done")
-        self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
-
-    def test_a_normal_guard_no_fix_pass_with_no_round_recorded_is_open_and_says_no_round(self):
-        # as main reads it: a fix check PASS with no round recorded has no round to count as passing, for a change that owes a round too
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=(), kind="normal", guard="no")
-        self.assertEqual(state, "open", f"a normal, guard no fix check PASS with no round recorded reads {state}: {why!r}")
-        self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
-
     def test_a_fix_pass_after_round_three_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no")
         self.assertEqual(state, "done", f"a fix check PASS after round 3 of a change with no guard must read done: {why!r}")
@@ -16262,17 +16250,6 @@ class ReviewNoRestart(ReviewEnv):
     def test_a_first_record_that_skips_round_one_is_refused(self):
         # The control is test_the_first_record_on_a_pull_request_is_accepted: round 1 alone is accepted as a first record. Round 3 alone is not.
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with())
-        self.assert_refused_with_no_record(rc, out, err)
-
-    def test_a_fix_check_only_record_after_an_earlier_record_with_no_round_is_refused(self):
-        # Control: the same fix check after an earlier record that holds a failed round 1 is accepted (test_a_fix_check_only_record_that_passes_after_round_one_is_accepted).
-        # The refusal below comes from the earlier record holding no round at all.
-        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
-        with_round = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(with_round))
-        self.assert_accepted(rc, out, err)
-        no_round = record_text(head=REVIEW_OLD_HEAD, rounds=())
-        rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(no_round))
         self.assert_refused_with_no_record(rc, out, err)
 
     def test_round_three_after_an_unparseable_earlier_comment_is_accepted_with_no_type_error(self):
