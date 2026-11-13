@@ -2426,15 +2426,53 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check with a symlink in its tree did not PASS\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run with a symlink in its tree\n" + text)
 
-    def test_a_stale_ste_lint_pin_runs_its_own_ste_lint_and_reads_the_pin_unknown(self):  # R67: the pinned tree has no .git
+    def publish_stable(self):
+        """The stable branch of the claude-settings origin, at the fixture's HEAD: the head a moving pin resolves to. The
+        clone's origin is this bare repo. -> the stable head's sha."""
+        home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        bare = os.path.join(home, "origin.git")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, env=ENV)
+        head = git_in(self.source, "rev-parse", "HEAD")
+        git_in(self.source, "push", bare, "%s:refs/heads/stable" % head)
+        git_in(self.source, "remote", "add", "origin", bare)
+        return head
+
+    def test_a_stale_ste_lint_pin_under_step_fails_the_step_and_exits_one(self):  # action-pins-follow-sessions: drift is FAIL
+        pin = self.add_ste_lint()  # the pin is the first commit; the source HEAD after it is the stable head
+        self.publish_stable()
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        drift = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        self.assertEqual(len(drift), 1, "scope: no line names the stale pin\n" + text)
+        self.assertNotIn("Unknown whether it matches", drift[0], "the stale pin read as unknown, not drift\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale ste-lint pin under --step did not FAIL the named step and exit 1\n" + text)
+
+    def test_a_stale_ste_lint_pin_under_lint_exits_three_and_fails(self):  # action-pins-follow-sessions: --lint keeps exit 3
+        pin = self.add_ste_lint()
+        self.publish_stable()
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
+        drift = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        self.assertEqual(len(drift), 1, "scope: no line names the stale pin under --lint\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (3, ["FAIL"]), "a stale ste-lint pin under --lint did not exit 3 with FAIL\n" + text)
+
+    def test_a_stable_head_pin_under_step_passes_with_no_drift(self):  # green control: the pin is the stable head
+        self.add_ste_lint()
+        head = self.publish_stable()
+        self.pin_child("ste-lint", head)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % head)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin at the stable head did not PASS\n" + text)
+
+    def test_an_unresolvable_stable_head_reads_unknown_never_pass(self):  # no origin holds the stable branch
         pin = self.add_ste_lint()
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
-        note = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
-        self.assertEqual(len(note), 1, "scope: no line names the stale pin\n" + text)
-        self.assertIn("Unknown whether it matches", note[0], "the pinned tree read its pin as drift, not unknown\n" + text)
-        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned ste-lint did not PASS\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an unresolvable stable head did not read unknown, never PASS\n" + text)
 
     def test_a_zizmor_pin_runs_its_own_run_sh_and_not_the_local_copy(self):
         rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())  # R67: no flag
