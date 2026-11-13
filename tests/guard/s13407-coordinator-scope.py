@@ -80,12 +80,32 @@ sh("coordinator-scope: a cloud coordinator's shell redirect onto a repository pa
 # Control: main already refuses the merge tool for a coordinator (rule merge-confirm-repo), so no rule is named here.
 sh("coordinator-scope: a cloud coordinator's merge tool run stays refused (control: merge-confirm-repo on main)",
    MERGE_SHIM + " 1 --confirm", "deny", None, cwd=NOGIT, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's gh pr merge in the shell is refused",
+   "gh pr merge 5 --squash", "deny", COORD_RULE, cwd=NOGIT, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's gh pr merge with the repo flag before the verb is refused",
+   "gh -R o/r pr merge 5", "deny", COORD_RULE, cwd=NOGIT, env=COORD_ENV, config=COORD_CFG)
+# gh-write-cloud refuses every gh pr merge in a cloud session, --disable-auto included, and runs after this rule. So the
+# verdict is that rule's deny; this rule's pin is that its reason never names coordinator-scope (the exemption holds).
+sh("coordinator-scope: a cloud coordinator's gh pr merge --disable-auto is not its refusal (gh-write-cloud refuses it)",
+   "gh pr merge --disable-auto 5", "deny", "gh-write-cloud", lacks=COORD_RULE, cwd=NOGIT, env=COORD_ENV,
+   config=COORD_CFG)
 add("coordinator-scope: a cloud coordinator's Agent spawn of a builder is refused", "deny", COORD_RULE,
     tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="builder", prompt="Build the change.")
 add("coordinator-scope: a cloud coordinator's Agent spawn of a general-purpose agent is refused", "deny", COORD_RULE,
     tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="general-purpose", prompt="Do the work.")
 add("coordinator-scope: a cloud coordinator's Agent spawn of an Explore agent is allowed", "allow",
     tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="Explore", prompt="Find the file.")
+add("coordinator-scope: a cloud coordinator's Agent spawn of a Plan agent is allowed", "allow",
+    tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="Plan", prompt="Plan the change.")
+add("coordinator-scope: a cloud coordinator's Agent spawn of a claude-code-guide agent is allowed", "allow",
+    tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="claude-code-guide",
+    prompt="Explain the setting.")
+# The rule reads the Task tool name as well as Agent (SPAWN_TOOLS in hooks/guard.py): a Task spawn of a builder is
+# refused, and a Task spawn of a listed type is allowed. The refused one is the pin: an allow alone passes on main too.
+add("coordinator-scope: a cloud coordinator's Task spawn of a Plan agent is allowed", "allow",
+    tool="Task", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="Plan", prompt="Plan the change.")
+add("coordinator-scope: a cloud coordinator's Task spawn of a builder is refused", "deny", COORD_RULE,
+    tool="Task", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="builder", prompt="Build the change.")
 # The refuter is on the coordinator's list (decision coordinator-spawns-refuter). On main no coordinator rule
 # exists, so this allow is a green control: main allows every spawn. Its red is the mixed Workflow below.
 add("coordinator-scope: a cloud coordinator's Agent spawn of a refuter is allowed", "allow",
@@ -109,6 +129,30 @@ add("coordinator-scope: a cloud coordinator's enable_pr_auto_merge is refused", 
 add("coordinator-scope: a cloud coordinator's create_or_update_file of a repository path that is no record home is refused",
     "deny", COORD_RULE, tool="mcp__github__create_or_update_file", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG,
     owner="o", repo="r", path="src/app.py", content="x", message="m", branch="b")
+
+# --- the false-alarm list: a coordinator's record writes, its scratchpad and an agent's call stay allowed ---
+# Each one is a write the rule must not refuse. A refusal of any of them stops the coordinator writing its own records.
+sh("coordinator-scope: a cloud coordinator's sed -i on a decision record is allowed",
+   "sed -i s/a/b/ docs/decisions/x.md", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's echo appended to the records index is allowed",
+   "echo x >> docs/records.md", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's cp onto a decision record is allowed",
+   "cp /tmp/a docs/decisions/b.md", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's tee into the todo file is allowed",
+   "tee docs/todo.md", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+add("coordinator-scope: a cloud coordinator's create_or_update_file of a decision record is allowed", "allow",
+    tool="mcp__github__create_or_update_file", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG,
+    owner="o", repo="r", path="docs/decisions/x.md", content="x", message="m", branch="b")
+# A repository path inside this session's own scratchpad: PRIVREPO is a repository under the session's scratchpad.
+# Without the scratchpad clause the same path is no record home and is refused, so the allow pins the clause.
+add("coordinator-scope: a cloud coordinator's Write into a repository in its own scratchpad is allowed", "allow",
+    tool="Write", cwd=PRIVREPO, env=COORD_ENV, config=COORD_CFG, session=FAKE_SESSION,
+    file_path=os.path.join(PRIVREPO, "src", "app.py"))
+# An agent's call is not the coordinator's own call (it carries agent_id), so the rule does not judge it. The same
+# Edit without agent_id is refused (the Edit case above), so the allow pins the agent_id clause.
+add("coordinator-scope: a call carrying agent_id is not the coordinator's own call: its Edit of a repo path is allowed",
+    "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_CFG, agent_id="a114eda536eb6f76f",
+    file_path=COORD_REPO_FILE)
 
 # --- no role file: the tier is the cs-build tag the session's own get_session record holds, after its own tag calls ---
 add("coordinator-scope: with no role file, a coordinator record's tier refuses an Edit of a repository path", "deny",
