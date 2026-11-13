@@ -585,9 +585,10 @@ then R29.
 ### 3.15 Spend fewer tokens, measured first
 
 Owner 11:55 CST Nov 11: "spend should also be logged if literally free to do so since it gives us more
-data about how we do things". get_session already returns each session's cost. The batch runner reads
-it at each batch merge, a process already running, and writes one line per session to the record
-branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer, no new process.
+data about how we do things". get_session already returns each session's cost (unmeasured; decision
+spend-log-per-batch). The log is kept only if its reads are literally free, which is also unmeasured.
+If they are, the batch runner reads the cost at each batch merge, a process already running, and
+writes one line per session to the record branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer, no new process.
 
 Owner 13:10 CST Nov 11: "we need to figure out how to avoid container restarts for long running
 sessions (keep them warm)". Read 13:11 CST (chatter audit; decision idle-resume-compacts): the cost is
