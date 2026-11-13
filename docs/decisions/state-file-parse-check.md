@@ -66,11 +66,6 @@ never reverts.
   judges, and at most 20 files per call. It writes no file, which `test_state_parse_check.py`
   proves by listing the folders before and after. It logs nothing, so no log has a reader to name.
 
-## Covers
-
-Step `inbox-fence-check` (the inbox fence check at the edit), proposed in decision
-`mistake-means-missing-guard`. This check covers it. Step `state-file-parse-check` builds it.
-
 ## Note, not a debt
 
 Out of scope, so not seen in a Bash or PowerShell call: a path built at run time, such as
