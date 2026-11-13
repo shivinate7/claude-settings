@@ -211,6 +211,9 @@ PATCH_PRODUCT = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/
 PATCH_MIXED = PATCH_PRODUCT + PATCH_MODIFY_TEST_APP
 PATCH_NAMES_ONLY = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
                     "@@ -1 +1 @@\n-print('old')\n+print('tests/x.py and src/test_app.py are named, not touched')\n")
+# Over the 256 KB read limit, with product headers only: a patch the guard cannot read in full stays allowed.
+PATCH_OVER_LIMIT = ("diff --git a/src/app.py b/src/app.py\nnew file mode 100644\n--- /dev/null\n"
+                    "+++ b/src/app.py\n@@ -0,0 +1,40000 @@\n" + "+x = 1\n" * 40000)
 
 
 def _build_scriptrepo():
@@ -258,6 +261,7 @@ def _build_scriptrepo():
         "patches/names_only.patch": PATCH_NAMES_ONLY,
         "patches/empty.patch": "",
         "patches/dir.patch/notes.txt": "a folder named like a patch\n",
+        "patches/over_limit.patch": PATCH_OVER_LIMIT,
     })
     run_vcs(SCRIPTREPO, "worktree", "add", "-q", SCRIPTWT, "-b", "scriptlane")
     os.makedirs(SCRIPTFRESH, exist_ok=True)
@@ -272,7 +276,8 @@ def _build_scriptrepo():
             # The git apply cases need each patch in place, the folder read as no file, and the missing one absent.
             or not os.path.isfile(os.path.join(SCRIPTREPO, "patches", "to_tests.patch"))
             or not os.path.isdir(os.path.join(SCRIPTREPO, "patches", "dir.patch"))
-            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "missing.patch"))):
+            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "missing.patch"))
+            or os.path.getsize(os.path.join(SCRIPTREPO, "patches", "over_limit.patch")) <= 256 * 1024):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
 
@@ -903,6 +908,18 @@ sh("builder-test: an echo that names a git apply of a test patch is allowed",
    'echo "git apply patches/to_tests.patch"', "allow", **SB)
 sh("builder-test: a trailing comment that names a git apply of a test patch is allowed",
    "ls  # git apply patches/to_tests.patch", "allow", **SB)
+# A patch fed on stdin, by `-` or by a bare heredoc, names no file the guard can read: its headers are read from the
+# command text. A heredoc that names a test path is refused; one that names only product code stays allowed.
+sh("builder-test: git apply - reading a heredoc patch that touches a test path is refused",
+   "git apply - <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply reading a heredoc patch that touches a test path is refused",
+   "git apply <<EOF\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply - reading a heredoc patch that touches only product code is allowed",
+   "git apply - <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: git apply reading a heredoc patch that touches only product code is allowed",
+   "git apply <<EOF\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: git apply of an over-limit patch that touches only product code is allowed",
+   "git apply patches/over_limit.patch", "allow", **SB)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
