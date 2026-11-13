@@ -273,6 +273,17 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The host's auto-merge tool merges the head once its checks pass, so it is refused on a pending or red head as the
+# merge tool is. The shell form `gh pr merge --auto` is judged already (merge-checks: --auto is guarded).
+add("merge-checks: enable auto-merge of the host denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: enable auto-merge of the host denies on a failed head", "deny", "merge-checks",
+    carries="settled: red", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: enable auto-merge of the host is allowed on a green head", "allow",
+    tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 # The batch brake (roadmap step c195): a merge is refused while another ready pull request on the base has a required check
 # pending, by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
@@ -434,12 +445,13 @@ def _build_stamp_repos():
 
 lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
              _build_stamp_repos)
-add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
-    tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
+add("merge-batch: the merge tool of the host asks, not denies, past an ignored running workflow on another ready pr", "ask",
+    BARE_MERGE, carries=BARE_SAYS, tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
-add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
-    tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
+add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "ask",
+    BARE_MERGE, carries=BARE_SAYS, tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y",
+    env_path=GHPINNED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -485,6 +497,17 @@ for _name, _where in (
        cwd=_where, **_BARE_GUARD)
 sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
    silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GUARD)
+# The host's merge tools are judged as `gh pr merge` is (decision bare-merge-asks): a green merge through either tool asks in a
+# repo with a merge block, and allows in a repo without one. A pending head still denies first.
+for _tool in ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge"):
+    add("bare-merge: %s of the host asks in a repo with a merge block" % _tool, "ask", BARE_MERGE, carries=BARE_SAYS,
+        tool=_tool, cwd=STAMPREPO, pullNumber=12, repo="x", owner="y", **_BARE_GUARD)
+    for _name, _where in (("a repo with no stamp.json", STAMPNONE), ("a stamp.json with no merge block", STAMPNOBLOCK)):
+        add("bare-merge: %s of the host allows in %s" % (_tool, _name), "allow", silent=True, tool=_tool, cwd=_where,
+            pullNumber=12, repo="x", owner="y", **_BARE_GUARD)
+add("bare-merge: the merge tool of the host still denies a pending head in a repo with a merge block", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=12, repo="x", owner="y",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("bare-merge: reading a pull request in a repo with a merge block allows",
    "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: the merge tool in a repo with a merge block allows",
