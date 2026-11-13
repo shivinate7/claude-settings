@@ -41,9 +41,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   read as ended). A foreground Bash call stops at 120 s by default, so the STALL report says to run a long
   wait with `run_in_background`. It prints a `still waiting` line every 120 s, so a background wait draws
   no STALL. It cannot read the job's exit code: the job is not its child. Start-time check against pid
-  reuse. Not on Windows. Cost: one process per wait, no file written. At start, the ownership walk runs up to
+  reuse. Not on Windows. Cost: one process per wait, no file written (unmeasured). At start, the ownership walk runs up to
   three short `ps` reads per ancestor level and at most one process-table read (unmeasured count). While it waits, four `/proc` reads a second
-  on Linux, one `ps` a second elsewhere. Unmeasured: no test pins the cost.
+  on Linux, one `ps` a second elsewhere (unmeasured). Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
@@ -89,7 +89,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   its pid, so the report still lists one process. A stalled job of that kind leaves its beat file, and its
   log and marker stay for the prune. A job killed before it can run its trap leaves its files too. A job
   that never stalls is cleaned by the wrapper after `wait`, which keeps a log whose marker exists, as the trap does. The report's `Log:` line says the file is kept
-  7 days after its last write. Cost: two small files created per job and two held handles in the watcher, no new process. A
+  7 days after its last write. Cost: two small files created per job and two held handles in the watcher, no new process (unmeasured). A
   stalled job keeps one log and one marker until 7 days after the log's last write, removed by the first background call after that.
   The prune costs one folder listing per background call (pinned by the listing-count case in `hooks/test_stall_watch.py`: exactly one, for an empty and a full folder). In a wrapped run the watcher no longer polls
   for the beat file. Run by hand with no beat handle, it still tries one open a second.
@@ -121,7 +121,7 @@ time must be later than the previous Stop. Limit: a job whose output file existe
 is gone now is not listed. With no summary, or a summary with no readable timestamp,
 every quiet job is listed. The state is the transcript: no file is written and no process is started.
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
-already makes, at each Stop.
+already makes, at each Stop (unmeasured).
 
 A background agent is a job too. Its launch record is a `toolUseResult` with `isAsync` true, status
 `async_launched` and an `agentId`. `scan_jobs` reads it beside the shells, and the same notice and TaskStop
@@ -134,13 +134,13 @@ transcript, for a quiet agent only. The read is the last 64 KB. It doubles until
 record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
 read is listed.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
-transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
-`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
+transcript's end for each quiet agent not yet listed, pinned by `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in
+`hooks/test_stall_watch_stop.py`. No new process, timer or file.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
 stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
 an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
-age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+age cap (unmeasured). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open

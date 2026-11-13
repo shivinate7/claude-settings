@@ -10,6 +10,7 @@
     python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py restates <child root>
+    python3 lint/compliance_probes.py hooks <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -40,8 +41,10 @@ ios: drift from the iOS standard of skills/ios-apps, one item per line: the make
   iOS app is n/a. Comments do not count.
 words: each retired word in a checked repo, one item per line: `  <word>: <file>:<line> <detail>`, with `-` for
   the line of a path hit. The word list is read live from lint/check_glossary.py and the GLOSSARY.md beside
-  it: its path, identifier, rule anchor, record slug and hook message reads, run on the child's tracked
-  files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
+  it: its path, identifier, rule anchor, record slug and hook message reads, run on what the child's change
+  adds against the merge base with its origin/main (the paths and lines its commits, work tree and untracked
+  files add, as lint/check_glossary.py reads them); the whole tracked tree when it has no origin/main or no
+  merge base. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
   parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
   the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
   term that repeats a claude-settings term, or is the retired word itself, does not. It is an item at its
@@ -78,10 +81,22 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   shared words passes, a record citation included. An item names the file, the line and the record, and the
   remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
   claude-settings checkout is n/a.
+hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks`, with `SessionStart`
+  dropped on both sides, since a cloud install rewrites it. The live file is the one install.sh writes:
+  `$CLAUDE_CONFIG_DIR/settings.json` when that variable is set and not empty, else `~/.claude/settings.json`.
+  Both sides print as key-sorted JSON, so key order is no difference. A difference prints as a unified diff,
+  each line indented two spaces, the clone as `clone` (`-`) and the live file as `live` (`+`). A clone with
+  no settings.json is n/a. The group is unknown when the live file is missing, or when the live or clone
+  file cannot be read, is not UTF-8, is not JSON, is not a JSON object, or has a `hooks` that is not an
+  object. A file with no `hooks` key compares as empty hooks. For in shape and out, the first line after
+  the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where <live> is
+  `~/.claude/settings.json` or `<dir>/settings.json`, the file read: the clone is the trusted side, since
+  install.sh writes the live file from it.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
 """
+import difflib
 import json
 import os
 import re
@@ -95,11 +110,14 @@ import layout  # noqa: E402  the one home of every kind's path
 import rule_audit  # noqa: E402  the one home of the live rule anchors
 import _nowindow  # noqa: E402  the one home of a no-window child start
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as front-end copy
+from shared_names import config_dir  # noqa: E402  the one home of the live config folder
 
 # bin/shoot holds the same default; lint/test_compliance_probes.py pins the two equal.
 SHOOT_CONFIG = ".claude/shoot.json"
 # The pinned CI image of the iOS standard (skills/ios-apps). The starter writes the same name; its test pins the two equal.
 IOS_RUNNER = "macos-26"
+# The one CI exemption form of the iOS standard (skills/ios-apps): an app that needs a newer SDK than any macOS image holds.
+IOS_CI_EXEMPTION = "tools/ios-ci-exemption.json"
 # The account values bin/ios-ship reads from ~/.config/ios-ship/account.json. A test pins them to bin/ios-ship.
 ACCOUNT_KEYS = ("team_id", "device_udid", "asc_key_path", "asc_key_id", "asc_issuer_id")
 # Claude Code's own folders in .claude. Claude Code fixes their names, so no repo chooses them.
@@ -925,6 +943,33 @@ def runs_ui_tests(text, specs):
         TEST_ACTIONS & set(run) and runs_ui_bundle(run, specs) for run in xcodebuild_runs(text))
 
 
+def ci_exemption(root, files):
+    """The CI exemption form of an iOS repo, as (sdk, problem). (None, None): no form. (sdk, None): valid. (None, text): broken.
+    `files`: the tracked paths. A form counts only when tracked. A directory or a file that is not UTF-8 JSON is a problem."""
+    full = os.path.join(root, *IOS_CI_EXEMPTION.split("/"))
+    if not os.path.lexists(full):
+        return None, None
+    if os.path.isdir(full):
+        return None, "%s is a directory, not a form" % IOS_CI_EXEMPTION
+    if IOS_CI_EXEMPTION not in files:
+        return None, "%s is untracked; add it to git" % IOS_CI_EXEMPTION
+    try:
+        with open(full, "rb") as handle:
+            raw = handle.read().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None, "%s cannot be read as UTF-8 text" % IOS_CI_EXEMPTION
+    try:
+        form = json.loads(raw)
+    except ValueError:
+        return None, "%s is not valid JSON" % IOS_CI_EXEMPTION
+    if not isinstance(form, dict):
+        return None, "%s is not a JSON object" % IOS_CI_EXEMPTION
+    bad = [k for k in ("sdk", "reason") if not (isinstance(form.get(k), str) and form[k].strip())]
+    if bad:
+        return None, "%s: %s must be a non-empty string" % (IOS_CI_EXEMPTION, ", ".join(bad))
+    return form["sdk"].strip(), None
+
+
 def probe_ios(root):
     files = tracked(root)
     pbx = [f for f in files if PBXPROJ.search(f)]
@@ -974,16 +1019,32 @@ def probe_ios(root):
     floating = ["%s: %s" % (f, r) for f in flows for r in sorted(set(MACOS_IMAGE.findall(text[f])))
                 if r != IOS_RUNNER and not r.startswith(IOS_RUNNER + "-")]
     pinned = any(RUNS_ON.search(text[f]) and MACOS_IMAGE.search(text[f]) for f in flows)
-    if floating:
+    exempt_sdk, exempt_problem = ci_exemption(root, files)
+    if exempt_problem:
+        item("ci runner", "gap", exempt_problem)
+    elif floating:
         item("ci runner", "gap", "; ".join(floating) + " (want %s)" % IOS_RUNNER)
     else:
         item("ci runner", "pass" if pinned else "gap", IOS_RUNNER if pinned else "no workflow runs on macOS")
-    wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages) + (("compiles the app", compiles_app),)
     on_pr = [f for f in flows if PULL_REQUEST.search(text[f])]
-    lacks = ([] if on_pr else ["no pull_request workflow"]) + [
-        "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
-    item("ci checks", "gap" if lacks else "pass",
-         "; ".join(lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
+    package_wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages)
+    compile_wants = (("compiles the app", compiles_app),)
+
+    def missing(wants):
+        return ([] if on_pr else ["no pull_request workflow"]) + [
+            "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
+
+    # A valid form waives the app compile only; the package tests and the pull_request workflow stay required.
+    lacks = missing(package_wants + (() if exempt_sdk else compile_wants))
+    app_compile_missing = bool(exempt_sdk) and not lacks and missing(compile_wants)
+    if exempt_problem:
+        item("ci checks", "gap", exempt_problem)
+    elif lacks:
+        item("ci checks", "gap", "; ".join(lacks))
+    elif app_compile_missing:
+        item("ci checks", "pass", "exempt: %s (app compile waived)" % exempt_sdk)
+    else:
+        item("ci checks", "pass", "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
     projects = [xcodegen_tests(text[f]) for f in specs]
     slow = [f for f in flows if runs_ui_tests(text[f], projects)]
     item("slow tests", "gap" if slow else "pass",
@@ -1113,6 +1174,44 @@ def probe_slugs(root):
     return finish("slugs", lines, "out" if bad else "in shape", 1 if bad else 0)
 
 
+def hooks_of(path, text, side):
+    """The `.hooks` of a settings.json `text` as a dict, less SessionStart. `path` and `side` name it in a refusal."""
+    try:
+        doc = json.loads(text.lstrip("\ufeff"))
+    except ValueError as err:
+        raise CannotRun("%s settings.json is not JSON: %s (%s)" % (side, err, path))
+    hooks = doc.get("hooks", {}) if isinstance(doc, dict) else None
+    if not isinstance(hooks, dict):
+        raise CannotRun("%s settings.json has no `hooks` object (%s)" % (side, path))
+    return {event: body for event, body in hooks.items() if event != "SessionStart"}
+
+
+def probe_hooks(root):
+    clone_path = os.path.join(root, "settings.json")
+    if not os.path.lexists(clone_path):
+        return finish("hooks", [], "n/a - no settings.json in the clone", 0)
+    clone_text = read(root, "settings.json")
+    if clone_text is None:
+        raise CannotRun("clone settings.json cannot be read as UTF-8 (%s)" % clone_path)
+    # The live file is the one install.sh writes: <CLAUDE_CONFIG_DIR>/settings.json, else ~/.claude/settings.json.
+    live_path = os.path.join(config_dir(), "settings.json")
+    live_name = live_path if os.environ.get("CLAUDE_CONFIG_DIR") else "~/.claude/settings.json"
+    try:
+        with open(live_path, encoding="utf-8") as handle:
+            live_text = handle.read()
+    except (OSError, UnicodeDecodeError) as err:
+        raise CannotRun("live settings.json cannot be read: %s" % err)
+    pretty = lambda hooks: json.dumps(hooks, indent=2, sort_keys=True).splitlines()
+    diff = list(difflib.unified_diff(pretty(hooks_of(clone_path, clone_text, "clone")),
+                                     pretty(hooks_of(live_path, live_text, "live")),
+                                     "clone", "live", lineterm=""))
+    # The clone is the trusted copy: install.sh writes the live file from it.
+    trusts = "  trusts: clone (%s); live (%s) is the copy checked" % (clone_path, live_name)
+    if not diff:
+        return finish("hooks", [trusts], "in shape", 0)
+    return finish("hooks", [trusts] + ["  " + line for line in diff], "out", 1)
+
+
 def probe_words(root):
     try:
         import check_glossary  # the one home of the retired words and of how a name is read
@@ -1145,37 +1244,79 @@ def probe_words(root):
         if time.monotonic() > deadline:
             raise DeadlineHit()
 
+    class NoBase(Exception):
+        pass
+
+    def no_base(why):  # check_glossary.unknown_exit would end this process
+        raise NoBase(why)
+
+    top = git_ok(root, "rev-parse", "--show-toplevel")  # the check reads a change from the repo top, as a path of it
+    top = top.stdout.decode("utf-8", "replace").strip() if top and top.returncode == 0 else ""
+    real_root, real_exit = check_glossary.ROOT, check_glossary.unknown_exit
+    # the check's git and reads now run in the child's repo top: a root below it still reads the whole change
+    check_glossary.ROOT, check_glossary.unknown_exit = top or root, no_base
+    check_glossary._RUN.clear()
     check_glossary.tick = tick  # the check calls it inside its name loop, so one giant file cannot outrun the deadline
     current, done = None, 0
     try:
-        for done, rel in enumerate(files):
-            current = rel
+        # (path, read its path, read it now, its text, its added lines): a child with a merge base is read on what
+        # its change adds, as check_glossary.main reads it; one with none is read whole.
+        try:
+            check_glossary.tips()
+            diff = True
+        except NoBase:
+            diff = False
+        try:
+            if diff:
+                scope, unknown = check_glossary.added_lines()
+                committed, more = check_glossary.committed_lines()
+                if unknown + more:
+                    raise CannotRun(unknown[0] if unknown else more[0])
+                units = [(rel, True, False, None, None) for rel in check_glossary.added()]
+                units += [(rel, False, True, None, lines) for rel, lines in sorted(scope.items())]
+                units += [(rel, False, False, text, lines) for rel, text, lines in committed
+                          if not (scope.get(rel) == lines and read(top, rel) == text)]
+            else:
+                units = [(rel, True, True, None, None) for rel in files]
+            names = list(dict.fromkeys(unit[0] for unit in units))  # each file once, for the deadline count
+            home = top if diff else root  # a path of the diff is relative to the repo top
+        except NoBase as err:
+            raise CannotRun(str(err))
+        for rel, by_path, read_now, body, lines in units:
+            current, done = rel, names.index(rel)
             tick()
-            for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
-                add(rel, "-", problem, problem[len(rel):].strip())
-            body = read(root, rel)
-            if body is None:
-                unread.append(rel)
-                continue
-            if rel.startswith(check_glossary.SKIP_CODE):
+            if by_path:
+                for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
+                    add(rel, "-", problem, problem[len(rel):].strip())
+            if read_now:
+                body = read(home, rel)
+                if body is None:
+                    if diff and rel in check_glossary.untracked() and not check_glossary.binary(rel):
+                        # new work that no read can judge: unknown, as the check says, never clean
+                        raise CannotRun("%s is untracked and cannot be read as text" % rel)
+                    unread.append(rel)
+                    continue
+            if body is None or rel.startswith(check_glossary.SKIP_CODE):
                 continue
             if body.startswith("\ufeff"):  # the check's own read uses utf-8-sig; a BOM would fail the Python parse
                 body = body[1:]
             try:
-                problems = check_glossary.code_problems(rel, body, table, None, spans)
+                problems = check_glossary.code_problems(rel, body, table, lines, spans)
             except SyntaxError as err:
                 raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
             for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
                 line, _, detail = problem[len(rel) + 1:].partition(": ")
                 add(rel, line, problem, detail)
     except DeadlineHit:
-        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(files)))
+        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(names)))
     finally:
         check_glossary.tick = None
+        check_glossary.ROOT, check_glossary.unknown_exit = real_root, real_exit
+        check_glossary._RUN.clear()
     note = "unread: %d files, %s" % (len(unread), ", ".join(unread[:3]) + (", ..." if len(unread) > 3 else ""))
     if not files:
         raise CannotRun("no tracked files")
-    if len(unread) == len(files):
+    if not diff and len(unread) == len(files):
         raise CannotRun("no tracked file could be read (%s)" % note)
     sha = glossary_commit(check_glossary.ROOT)
     stale = glossary_uncommitted(check_glossary.ROOT, check_glossary.GLOSSARY)
@@ -1190,7 +1331,7 @@ def probe_words(root):
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "restates": probe_restates, "scorecard": scorecard}
+          "restates": probe_restates, "hooks": probe_hooks, "scorecard": scorecard}
 
 
 def main(argv):
