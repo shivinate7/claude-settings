@@ -26,6 +26,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator 11:08 CST Nov 13",
+  "reply": "Closed 11:16 CST Nov 13 by triage: you accepted a at 11:13 CST. merge-under-running-batch holds behind #3049; its lane lands only the lost design doc. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Merge under batch: wait for #3049",
   "shown": [
@@ -40,8 +41,8 @@
       "label": "Build the file-disjoint merge now"
     }
   ],
-  "stands": true,
-  "status": "open",
+  "stands": false,
+  "status": "closed",
   "title": "Hold the merge-under-a-running-batch fix behind #3049, which removes the lock?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

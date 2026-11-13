@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:13:16.739Z",
+  "choice": "b",
+  "item": "runner11-sweep-clones",
+  "label": "B: Yes: runner 11 clones the 7 read-only",
+  "n": 704,
+  "note": "runner 11 is to merge in these repos too they're all children of claude-settings given we establish that by everythign under my github accounts no?",
+  "optionId": "yes-runner-clones"
+}
