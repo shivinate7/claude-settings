@@ -744,7 +744,15 @@ def answered_problem(text):
 # word on the line exempts it. A cite is one of a closed list, found anywhere on the line with code spans unwrapped.
 _W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
 _MAIN = r"main(?![\w-])"
-_MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()"
+# After "the main", a branch-like use needs the line end, a punctuation mark (a possessive 's included), or a function
+# word that continues the comparison next; any other word is a noun ("the main window" names a thing, not the branch).
+# With no "the" before it, main is the branch whatever follows ("same as main window" is a claim).
+_MAIN_NEXT = (r"(?=\s*$|\s*[^\w\s]|\s+(?:branch|in|on|at|for|with|and|or|but|so|because|since|while|which|that|is|was|did"
+              r"|does|had|as|by|from|to|per|too|now|today|yet|already|after|before|until|when|if|where|overall|again|still"
+              r"|also|anyway|either|this|one)(?![\w-]))")
+_MAIN_NAME_GUARD = r"(?!\.[A-Za-z])(?!\()"  # main.py and main() are a file and a call name, never the branch
+_MAIN_REF = (r"(?:the\s+" + _MAIN + _MAIN_NAME_GUARD + _MAIN_NEXT
+             + r"|(?<!\bthe\s)" + _MAIN + _MAIN_NAME_GUARD + r")")
 _OWN = r"main['\u2019]s\s+own(?![\w-])"
 MAIN_CLAIM_RE = re.compile(
     _W + r"(?:not\s+a\s+regression|no\s+regressions?)(?![\w-])(?!\s+(?:testing|tests?|suites?)\b)"
@@ -782,7 +790,7 @@ def main_claim_problem(text):
     bad = []
     for body in _prose_lines(text):
         plain = CANNOT_EMPHASIS_RE.sub(
-            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else " ", body))
+            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else "code", body))
         if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
             continue
         if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
