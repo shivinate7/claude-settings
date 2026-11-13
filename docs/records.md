@@ -326,6 +326,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pr-ledger` | Owner, 2026-11-07 12:22 CST, in chat to the coordinator. | [`docs/decisions/pr-ledger.md`](../docs/decisions/pr-ledger.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`docs/decisions/records-index-at-merge.md`](../docs/decisions/records-index-at-merge.md) |
 | `rm-path-wrapper` | `bin/rm` sits ahead of the real `rm` on PATH, for Claude sessions only. | [`docs/decisions/rm-path-wrapper.md`](../docs/decisions/rm-path-wrapper.md) |
+| `ruled-store-one-home` | The owner's rulings that main has not taken in sit in one store: `roadmap/rulings/<slug>.json` on `origin/roadmap`, one file per ruling. | [`docs/decisions/ruled-store-one-home.md`](../docs/decisions/ruled-store-one-home.md) |
 | `session-messages` | Owner asks ask-mw5b3m9hl0 (2026-11-06 12:27 CST) and ask-mw5a0ekdlv (11:56 CST). | [`docs/decisions/session-messages.md`](../docs/decisions/session-messages.md) |
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`docs/decisions/shell-scripts-check-out-lf.md`](../docs/decisions/shell-scripts-check-out-lf.md) |
 | `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
