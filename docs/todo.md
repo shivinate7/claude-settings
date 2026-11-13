@@ -20,3 +20,4 @@ Tasks a session caught and did not do. One line each.
 - The lane-undo check reads two shapes of undo (owner, 2026-11-02 14:19 CST; it grants the 11:26 CST narrowing).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).
+- Step ci-cancel-on-close (lane ci-cancel-on-close): a closed PR cancels its unfinished CI runs. CI speed is express: no fixed time targets, and the proof is measured, a closed PR run shows cancelled within the next minute (owner, 11:34 and 11:36 CST Nov 13, via runner 10). Remove this line when the lane merges.
