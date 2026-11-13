@@ -2,7 +2,7 @@
  "id": "pr-close-by-batch-runner",
  "at": "2026-11-10T14:29:00-06:00",
  "title": "The batch runner closes replaced or superseded PRs, and a close carries a pointer",
- "ruling": "Owner 14:29 CST Nov 10 (batch runner archives superseded work); decision session-tiers line 75 (batch runner closes replaced drafts); R66 part 3 (a close carries a pointer). Found by the retrospective, relayed by the coordinator 11:33 CST Nov 13. Stood pick item pick-pr-closer-runner (711) matches these words. Triage's stale-draft close list skips any PR that has a backlog-drain ledger row (record on decision stalled-steps upkeep, via a record-writer lane).",
+ "ruling": "Owner 14:29 CST Nov 10 (batch runner archives superseded work); decision session-tiers line 75 (batch runner closes replaced drafts); R66 part 3 (a close carries a pointer). Found by the retrospective, relayed by the coordinator 11:33 CST Nov 13. Stood pick item pick-pr-closer-runner (711) matches these words. Triage's stale-draft close list skips any PR that has a backlog-drain ledger row (record on decision stalled-steps upkeep, via a record-writer lane). Record-writer lane for the decision-file home: session_013NEJKygaTjpUFXS68oSd4h (coordinator 11:37 CST Nov 13).",
  "quote": "batch runner archives superseded work",
  "source": "owner 14:29 CST Nov 10; session-tiers line 75; R66 part 3; coordinator relay 11:33 CST Nov 13",
  "status": "open",

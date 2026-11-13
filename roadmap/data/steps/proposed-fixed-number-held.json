@@ -1,0 +1,14 @@
+{
+ "id": "proposed-fixed-number-held",
+ "title": "A reply that proposes a fixed time or count as a target or limit, with no ruling cited, is held at Stop",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 11:35 CST Nov 13 (retrospective): it proposed fixed CI targets (5 min docs-only, 15 min code) to runner 10. Owner 11:36 CST, verbatim: \"these hard static time limits are not something i approve or am a fan of, you should know this\". It breaks R37 (Nov 11, retire unruled fixed numbers). Withdrawn 11:37. Owner message logged as fb-1136-4.",
+ "source": "retrospective 11:37 CST Nov 13; owner 11:36 CST",
+ "note": "Step fixed-number-limits-census covers limits already in code, not new ones a session proposes. Guard: a reply or send_message that proposes a fixed time or count as a target or limit, with no ruling cited, is held at Stop. The remedy names a measured gold instead (before and after, or a derived floor). Checked at Stop on the reply text only; no timer, no log. Needs a false-alarm test: a measured figure with its sample count must pass.",
+ "updatedAt": "2026-11-13T11:37:49-06:00"
+}

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:42:00Z",
+  "context": "Goal: a change merges only when it leaves main no worse.\nProblem (rule): your 13:41 CST Nov 7 answer (356 a) says a round-3 FAIL holds. Main's decision hold-unsafe-after-round-3 and line 93 of pr-review-record.md say a round-3 FAIL merges at zero or positive net value. The decision holds your later words (Nov 8 to 9).\nBased on (ruling): decision hold-unsafe-after-round-3, items 402 a and 471 a; R9.\nDeparts from: main \u2014 main merges a round-3 FAIL at net value zero or above; choosing b makes every round-3 FAIL hold.\nMeanwhile: the review-record lane builds main's line 93.",
+  "home": "step review-record-past-head",
+  "id": "pick-356a-vs-line-93",
+  "kind": "decision",
+  "n": 718,
+  "options": [
+    {
+      "gain": "One rule, from your newest words (items 402 a and 471 a).",
+      "how": "The review-record lane builds to hold-unsafe-after-round-3: zero or positive net value merges; a FAIL fix starts a new lane at round 1.",
+      "id": "decision-governs",
+      "key": "a",
+      "label": "Main's decision governs (triage's pick)",
+      "lose": "Your 13:41 CST Nov 7 answer (356 a) no longer applies as written."
+    },
+    {
+      "gain": "Nothing merges past a round-3 FAIL.",
+      "how": "A round-3 FAIL always holds until the finding is fixed, even at zero or positive net value.",
+      "id": "356a-governs",
+      "key": "b",
+      "label": "356 a governs",
+      "lose": "Changes main's line 93; reworks a decision you gave in Oct and Nov."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "review-record-family lane, coordinator 11:37 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round-3 FAIL: hold or net value?",
+  "shown": [
+    {
+      "id": "decision-governs",
+      "key": "a",
+      "label": "Main's decision governs (triage's pick)"
+    },
+    {
+      "id": "356a-governs",
+      "key": "b",
+      "label": "356 a governs"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Does a round-3 FAIL always hold the change, or does net value decide?",
+  "why": "Triage took this pick (decision governs); it stands unless you choose b."
+}

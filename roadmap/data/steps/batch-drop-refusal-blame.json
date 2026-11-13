@@ -1,0 +1,14 @@
+{
+ "id": "batch-drop-refusal-blame",
+ "title": "--batch-drop takes a blame from a merge-tool refusal",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL4AVqip661i2km7Azq",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 11:37 CST Nov 13: express; lane session_013NEJL4AVqip661i2km7Azq.",
+ "source": "coordinator 11:37 CST Nov 13",
+ "note": "`--batch-drop` takes a blame from a merge-tool refusal, so a dropped lane carries the reason the merge tool refused it. Express (ruling drain-first-hold, part 5, a fix that tracks or lands work). Lane session_013NEJL4AVqip661i2km7Azq.",
+ "updatedAt": "2026-11-13T11:37:49-06:00"
+}
