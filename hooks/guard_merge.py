@@ -1852,14 +1852,14 @@ STEP_DUP_UNKNOWN_REASON = (
 
 
 STEP_PR_REASON = (
-    "open pull request #%s of this repo has the head of step %s, so a lane already holds the step. Send the work to "
-    "that lane, or say in the brief that it `continues #N` or `replaces #N`, then retry." + STEP_DUP_TAIL
+    "open pull request #%(pr)s of this repo has the head of step %(step)s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #%(pr)s` or `replaces #%(pr)s`, then retry." + STEP_DUP_TAIL
 )
 STEP_PR_READ_REASON = (
     "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
     "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
 )
-_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#\d+", re.IGNORECASE)  # a brief that names the pull request it takes over
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#(\d+)", re.IGNORECASE)  # a brief that names the pull request it takes over
 
 
 def _tag_values(tags, prefix: str):
@@ -1945,18 +1945,18 @@ def step_dup_hit(tool: str, tool_input, transcript: str):
 def step_pr_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
     None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
-    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. A brief or prompt
-    that says `continues #N` or `replaces #N` passes, whatever N is, and so does a brief to a target that carries the
-    step. The read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that
-    is no owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
-    Cost: one paged gh read per cs-repo tag, only for a step call with no `continues` or `replaces` line."""
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
+    (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
+    such an open pull request; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
+    owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, for each step call."""
     call = _step_call(tool, tool_input)
     if call is None:
         return None
     steps, target = call
     text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
-    if isinstance(text, str) and _STEP_CONTINUES.search(text):
-        return None
+    taken = set(_STEP_CONTINUES.findall(text)) if isinstance(text, str) else set()
     try:
         subject, mine = _step_subject(tool_input, transcript, target)
         steps = [s for s in steps if s not in mine]
@@ -1974,8 +1974,10 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
                 ref = str(row["head"]["ref"]).lower()
                 for step in steps:
                     if ref in lane_head_refs(step):
+                        if str(row.get("number")) in taken:
+                            return None
                         return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
-                                STEP_PR_REASON % (row.get("number", "?"), step))
+                                STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
     except (Exception, SystemExit):
         return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
     return None
