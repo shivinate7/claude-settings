@@ -44,15 +44,15 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D1 | Inbox hook misses page read-backs | step | step artifact-guard-matcher-names, PRs #2923-#2927 | in flight | none |
 | D2 | Local page republish has no pictures | step + new | step artifact-guard-matcher-names; rest: new step local-page-publish-route | partly in flight | none |
 | D3 | No fix-check exception for merge-forced tests | owner | pr-review-record.md:76-77, merge.py:5561-5568 | asked | none |
-| D4 | No guard on box writes in read-only audits | new | new step readonly-agent-shell-write | to file | none |
-| D5 | No check before a "not worse than main" claim | new | new step claim-vs-main-needs-read, extends #2765 | to file | none |
+| D4 | No guard on box writes in read-only audits | new | new step readonly-agent-shell-write | filed, roadmap 378ff3a35 | none |
+| D5 | No check before a "not worse than main" claim | new | new step claim-vs-main-needs-read, extends #2765 | filed, roadmap 378ff3a35 | none |
 | D6 | CI waits have no enforcer | step + new | wake: step red-job-wakes-runner (#2860); stop: new step ci-wait-stop-needs-checkin | partly in flight | none |
 | D7 | Role-model guard ignores its own override | owner | with D18: guard.py:3836-3849, call_judge.py:32,324-343; step role-model-explore-veto-offer once ruled | asked | none |
 | D8 | Haiku round-1 reviews against Sonnet records | step | step model-table-one-home (#3010), step round1-sonnet-guard-table | in flight | none |
 | D9 | builder-test-edit refuses comment-only edits | owner | decision builders-cannot-edit-tests, ruling 437 a; step builder-test-comment-edit once ruled | asked | none |
-| D10 | Live pin fell 439 commits behind | new | new step session-start-pin-skip-log | to file | none |
-| D11 | Simulator noise list has no shared home | new | new step sim-boot-noise-off (bin/sim-test), one lane with D12 | to file | none |
-| D12 | Simulator wallpaper store grows without limit | new | new step sim-wallpaper-store-drop (bin/sim-test), one lane with D11 | to file | none |
+| D10 | Live pin fell 439 commits behind | new | new step session-start-pin-skip-log | filed, roadmap 378ff3a35 | none |
+| D11 | Simulator noise list has no shared home | new | new step sim-boot-noise-off (bin/sim-test), one lane with D12 | filed, roadmap 378ff3a35 | none |
+| D12 | Simulator wallpaper store grows without limit | new | new step sim-wallpaper-store-drop (bin/sim-test), one lane with D11 | filed, roadmap 378ff3a35 | none |
 | D13 | Pin the Duo to the 27.2 runtime | owner | skill ios-apps device IDs; step sim-lease-gaps asks the owner first | asked | none |
 | D14 | Session checkouts go stale | new + owner | (b) new step guards-read-origin-main-config (git_reads.py:305, question_form.py:1062-1077); (a) owner, reverses step grants-read-from-main | asked | none |
 | D15 | No trusted relay of an owner chat grant | step | step page-wakes-and-relays, PR #3038 | in flight | none |
