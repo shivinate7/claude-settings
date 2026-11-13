@@ -20,12 +20,23 @@ THE CONTRACT THE CASES PIN (the builder meets it):
 - e: the pull request's head ref names a step (lane_head_refs) that is doing, and that step's lane session is absent or archived.
 - A pull request in two states gets one row for each.
 - Cost: no gh call beyond the reviewed read's (the count case). The lost-work rows read the live file and git only.
+- f: a branch on origin, ahead of main, with no open pull request and no `archive/` prefix. `main` and `batch-*` are never listed. Its row is
+  `lost-work branch <name> (f): <why>; owner <owner>`; the owner is the coordinator (LOST_WORK_OWNER["f"]). The branch list comes from the
+  live file's branches list and the ahead counts from local git: no gh call per branch.
+- reviewed_ledger(h, live, verdicts) -> (rows, count_line, ok), the ledger. Its rows are the lost-work rows, one per pull request and one per
+  f branch (pr = the branch name), with the keys in LEDGER_FIELDS, ordered by pr. It reads the live file once, through lost_work_rows.
+  `verdicts` is the path of docs/backlog-drain/verdicts.tsv: a header row, then tab-separated PR, verdict, kind, step, head (the first 12
+  characters of the pull request's head), reason. A row is sorted only when its verdict is keep, rebuild or close and its head is the live
+  head. count_line is `unsorted: N`, or `unsorted: unknown-read` when the verdicts file cannot be read: then every row is unsorted and ok is False.
+- The command line: `merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE` (build_parser).
 
 Each case runs reviewed_block over a PullsHost (merge/test_merge.py, imported, not copied) on one roadmap checkout whose origin is a
 local bare repo behind the GitHub remote name (insteadOf), so Host.holds_head reads real git. The clock is the host's, a fixed NOW.
 """
+import contextlib
 import datetime
 import inspect
+import io
 import json
 import pathlib
 import re
@@ -33,6 +44,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -54,6 +66,12 @@ ROUNDS_DONE = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PA
 ROUNDS_OPEN = ("Round 1: reviewer, sonnet, FAIL",)
 LOST_ROW = re.compile(r"^lost-work #(\d+) \(([a-e])\): (.+); owner (.+)$")
 UNKNOWN_ROW = re.compile(r"^lost-work #(\d+) unknown: (.+)$")
+BRANCH_ROW = re.compile(r"^lost-work branch (\S+) \(f\): (.+); owner (\S+)$")
+BRANCH = "claude/ecstatic-euler-capib9"  # the incident branch: pushed, one commit ahead of main, no pull request (state f)
+BRANCH_FILE = "docs/plans/r42-part2-design.md"
+BRANCH_TEXT = "R42 part 2 design\n"
+VERDICT_COLUMNS = ("PR", "verdict", "kind", "step", "head", "reason")  # the verdicts.tsv header row
+LEDGER_FIELDS = {"pr", "step", "state", "group", "record", "age_h", "commits_not_on_main", "subsumed_by", "files", "verdict", "sorted"}
 NO_MAIL = (0, "")
 NO_ROUTE = (1, "no route to the lane")
 
@@ -94,9 +112,20 @@ def rows_for(lines, n):
     return sorted(found)
 
 
-class LostWorkRows(unittest.TestCase):
-    """reviewed_block over one roadmap checkout. The record branch holds step c3, doing under session_gone. Each case adds its pull requests
-    and lanes, writes the live file, and reads the lines of the batch review."""
+def branch_rows(lines, name):
+    """-> the sorted (why, owner) of each lost-work branch row (state f) that names branch `name`."""
+    matches = [BRANCH_ROW.match(line) for line in lines]
+    return sorted((m.group(2), m.group(3)) for m in matches if m and m.group(1) == name)
+
+
+def row_of(rows, pr):
+    """-> the ledger row for pull request number `pr` (or for branch name `pr`), or None."""
+    return next((row for row in rows if row.get("pr") == pr), None)
+
+
+class LostWorkFixture(unittest.TestCase):
+    """The one roadmap checkout every case in this file builds on. The record branch holds step c3, doing under session_gone. Each case adds
+    its pull requests, pushed branches and lanes, writes the live file, and reads what reviewed_block or reviewed_ledger prints."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
@@ -110,17 +139,37 @@ class LostWorkRows(unittest.TestCase):
         self.main = roadmap.git(self.repo, "rev-parse", "main").strip()
         self.live = pathlib.Path(self.tmp.name) / "live.json"
         self.heads, self.pulls, self.comments, self.checks, self.sessions, self.threads = {}, [], [], {}, [], []
+        self.branches = []  # the live file's branches list: each pushed branch, the publisher's read of origin
         self.publish()
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def pr(self, n, parent=None, head_ref=None, session="session_a", record=None, at=60):
+    def commit_on(self, parent, files=None, message="work"):
+        """A commit on `parent` that adds `files` (path -> text) to its tree, or keeps the parent's tree when `files` is None. -> its sha."""
+        if files:
+            index = {"GIT_INDEX_FILE": str(pathlib.Path(self.tmp.name) / "index")}
+            roadmap.git(self.repo, "read-tree", parent, env=index)
+            for path, text in files.items():
+                source = pathlib.Path(self.tmp.name) / "blob"
+                source.write_text(text, encoding="utf-8")
+                blob = roadmap.git(self.repo, "hash-object", "-w", str(source)).strip()
+                roadmap.git(self.repo, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, path), env=index)
+            tree = roadmap.git(self.repo, "write-tree", env=index).strip()
+        else:
+            tree = roadmap.git(self.repo, "rev-parse", parent + "^{tree}").strip()
+        return roadmap.git(self.repo, "commit-tree", tree, "-p", parent, "-m", message, env=_test_git.apply({})).strip()
+
+    def push_branch(self, name, sha):
+        """Push branch `name` to origin at `sha`, and list it in the live file's branches, as the publisher does. No pull request is opened."""
+        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/heads/%s" % (sha, name))
+        self.branches.append({"name": name})
+
+    def pr(self, n, parent=None, head_ref=None, session="session_a", record=None, at=60, files=None):
         """Open pull request n on main. `record` is "done" or "open", posted `at` minutes before now (a done record comes with a lane-lint
-        PASS at its head), or None for no record. `session` is the lane session in the body's footer (None: no footer)."""
-        tree = roadmap.git(self.repo, "rev-parse", (parent or self.main) + "^{tree}").strip()
-        sha = roadmap.git(self.repo, "commit-tree", tree, "-p", parent or self.main, "-m", "pr %d" % n,
-                          env=_test_git.apply({})).strip()
+        PASS at its head), or None for no record. `session` is the lane session in the body's footer (None: no footer). `files` (path -> text)
+        are the files its commit adds."""
+        sha = self.commit_on(parent or self.main, files, "pr %d" % n)
         roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/%d/head" % (sha, n))
         self.heads[n] = sha
         body = "Lane work.\n\nhttps://claude.ai/code/%s" % session if session else ""
@@ -143,7 +192,7 @@ class LostWorkRows(unittest.TestCase):
     def publish(self, read_at=None):
         """Write the live file: the lanes and threads so far, read `read_at` (default five minutes ago)."""
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": list(self.threads), "pulls": [], "items": [],
-                 "sessions": list(self.sessions)}
+                 "sessions": list(self.sessions), "branches": list(self.branches)}
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
     def host(self, count_gh=False, mail_result=NO_MAIL):
@@ -160,6 +209,9 @@ class LostWorkRows(unittest.TestCase):
             return merge.reviewed_block(h)[0]
         lines, _ok = merge.reviewed_block(h, live=str(self.live) if live else None)
         return lines
+
+class LostWorkRows(LostWorkFixture):
+    """reviewed_block's lost-work rows: the five pull request states, and the pushed branches (state f)."""
 
     # State a: a done record older than 6 h, in no batch.
 
@@ -325,13 +377,284 @@ class LostWorkRows(unittest.TestCase):
         self.assertEqual([row.split(":")[0] for row in rows], ["lost-work #40 (c)"], "a row on a healthy pull request among 26: %r" % lines)
         self.assertEqual(rows_for(lines, 40), [("c", owner_of("c"))], "no state-c row for #40 in the full-size batch: %r" % lines)
 
+    # State f: a pushed branch ahead of main, with no open pull request and no archive/ prefix. Each negative case lists, in the same run, the
+    # branch that must stay listed, so a missing row cannot pass a negative case.
+
+    def test_f_pushed_branch_ahead_of_main_with_no_pr_lists_a_row(self):
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        rows = branch_rows(self.block(self.host()), BRANCH)
+        self.assertEqual(len(rows), 1, "no state-f row for %s, pushed one commit ahead of main with no pull request: %r" % (BRANCH, rows))
+        self.assertTrue(rows[0][0].strip(), "the state-f row for %s gives no why" % BRANCH)
+        self.assertEqual(rows[0][1], owner_of("f"), "the state-f row for %s names %r, not the owner of state f" % (BRANCH, rows[0][1]))
+
+    def test_f_archive_branch_lists_no_row(self):
+        self.push_branch("archive/claude/old-plan", self.commit_on(self.main, {"docs/plans/old.md": "old plan\n"}))
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "archive/claude/old-plan"), [], "a state-f row for an archive/ branch: %r" % lines)
+
+    def test_f_branch_with_an_open_pr_lists_no_f_row(self):
+        self.pr(7, head_ref="claude/pr-held", record=None, session=None)
+        self.push_branch("claude/pr-held", self.heads[7])
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "claude/pr-held"), [], "a state-f row for claude/pr-held, the head of open pull request #7: %r" % lines)
+
+    def test_f_branch_fully_merged_into_main_lists_no_row(self):
+        self.push_branch("claude/merged-last-week", self.main)
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "claude/merged-last-week"), [], "a state-f row for a branch at main, which is not ahead: %r" % lines)
+
+    def test_f_main_and_batch_branches_are_never_listed(self):
+        self.branches.append({"name": "main"})
+        self.push_branch("batch-132", self.commit_on(self.main, {"docs/batch-note.md": "batch\n"}))
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "main"), [], "a state-f row for main: %r" % lines)
+        self.assertEqual(branch_rows(lines, "batch-132"), [], "a state-f row for the integration branch batch-132: %r" % lines)
+
+    def test_f_listing_adds_no_gh_call_to_the_review_read(self):
+        self.pr(7, record="done", at=60)
+        self.lane("session_a")
+        self.publish()
+        without = self.host(count_gh=True)
+        self.block(without)
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.push_branch("archive/claude/old-plan", self.commit_on(self.main, {"docs/plans/old.md": "old plan\n"}))
+        self.push_branch("claude/merged-last-week", self.main)
+        self.publish()
+        with_branches = self.host(count_gh=True)
+        lines = self.block(with_branches)
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s in the run with the branches: %r" % (BRANCH, lines))
+        self.assertEqual(with_branches.gh_calls, without.gh_calls,
+                         "the branch list adds gh calls to the review read: %r over %r" % (with_branches.gh_calls, without.gh_calls))
+
 
 class LostWorkOwners(unittest.TestCase):
     def test_owner_map_names_one_owner_per_state(self):
         self.assertEqual(getattr(merge, "LOST_WORK_OWNER", None),
                          {"a": "batch runner", "b": "the lane's own session", "b-archived": "coordinator", "c": "coordinator",
-                          "d": "coordinator", "e": "triage"},
+                          "d": "coordinator", "e": "triage", "f": "coordinator"},
                          "merge.LOST_WORK_OWNER does not name the owner of each state")
+
+
+class LostWorkLedger(LostWorkFixture):
+    """reviewed_ledger: one row per lost-work pull request and per pushed branch in state f, each with its verdict from the verdicts file. The
+    ledger reads the live file through the batch review's reader, so the states it names are the states the batch review names."""
+
+    def ledger(self, h, verdicts):
+        """-> (rows, count_line, ok) of merge.reviewed_ledger over this checkout's live file and the verdicts file at `verdicts`. A merge.py with
+        no reviewed_ledger gives ([], None, None), so each case fails on the row or the count line it names, not on the missing name."""
+        fn = getattr(merge, "reviewed_ledger", None)
+        if fn is None:
+            return [], None, None
+        return fn(h, str(self.live), str(verdicts))
+
+    def verdict_file(self, *rows):
+        """The verdicts file: its header row, then each (PR, verdict, kind, step, head, reason) of `rows`. -> its path."""
+        path = pathlib.Path(self.tmp.name) / "verdicts.tsv"
+        lines = ["\t".join(VERDICT_COLUMNS)] + ["\t".join(str(cell) for cell in row) for row in rows]
+        path.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+        return path
+
+    def verdict(self, n, verdict="keep", head=None):
+        """A verdict row for pull request n at its live head (`head` replaces the head, to make the row stale). Call after pr(n)."""
+        return (n, verdict, "code", "c1", (head or self.heads[n])[:12], "reason")
+
+    def test_a_lost_pr_row_has_the_fields_the_ledger_names(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertEqual(set(row), LEDGER_FIELDS, "the ledger row's keys are not the fields the ledger names: %r" % sorted(row))
+        self.assertEqual(row["state"], "a", "the ledger row for #7 names state %r, not a: %r" % (row["state"], row))
+        self.assertIs(row["sorted"], True, "#7 has a verdict at its live head and reads sorted %r: %r" % (row["sorted"], row))
+
+    def test_a_pr_with_no_verdict_is_unsorted(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file())
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIs(row["sorted"], False, "#7 has no verdict and reads sorted %r: %r" % (row["sorted"], row))
+        self.assertEqual(count, "unsorted: 1", "the count line for one pull request with no verdict: %r" % count)
+
+    def test_a_pr_with_a_verdict_at_its_live_head_is_sorted(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, "rebuild")))
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIs(row["sorted"], True, "#7 has a verdict at its live head and reads sorted %r: %r" % (row["sorted"], row))
+        self.assertEqual(row["verdict"], "rebuild", "the verdict of #7 is %r, not the one the file gives: %r" % (row["verdict"], row))
+        self.assertEqual(count, "unsorted: 0", "the count line when every row has a verdict: %r" % count)
+
+    def test_a_verdict_at_an_old_head_is_stale_and_unsorted(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, head="0" * 40)))
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIs(row["sorted"], False, "#7's verdict names another head, so it is stale, yet #7 reads sorted: %r" % row)
+        self.assertEqual(count, "unsorted: 1", "the count line for one stale verdict: %r" % count)
+
+    def test_the_unsorted_count_is_one_number_over_all_rows(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.pr(8, record="open", at=30, session="session_b")
+        self.lane("session_b")
+        self.pr(9, record="done", at=60, session="session_d")
+        self.lane("session_d", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(mail_result=NO_ROUTE), self.verdict_file(self.verdict(7)))
+        self.assertEqual([row.get("pr") for row in rows], [7, 8, 9], "scope: the ledger rows are not #7 (a), #8 (b) and #9 (d): %r" % rows)
+        self.assertEqual(count, "unsorted: 2", "the count line for three rows, two with no verdict: %r" % count)
+
+    def test_a_missing_verdicts_file_leaves_every_row_unsorted_and_reads_unknown(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, count, ok = self.ledger(self.host(), pathlib.Path(self.tmp.name) / "no-such-verdicts.tsv")
+        self.assertEqual([row.get("pr") for row in rows], [7], "scope: the ledger has no row for #7: %r" % rows)
+        self.assertEqual([row["sorted"] for row in rows], [False], "a row reads sorted with no verdicts file to read it from: %r" % rows)
+        self.assertEqual(count, "unsorted: unknown-read", "a missing verdicts file reads as a count, not unknown-read: %r" % count)
+        self.assertIs(ok, False, "a missing verdicts file leaves ok True: %r" % ok)
+
+    def test_an_unreadable_verdicts_file_reads_unknown_never_clear(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        directory = pathlib.Path(self.tmp.name) / "verdicts-dir"
+        directory.mkdir()  # a directory cannot be read as the verdicts file
+        rows, count, ok = self.ledger(self.host(), directory)
+        self.assertEqual([row.get("pr") for row in rows], [7], "scope: the ledger has no row for #7: %r" % rows)
+        self.assertEqual([row["sorted"] for row in rows], [False], "a row reads sorted with an unreadable verdicts file: %r" % rows)
+        self.assertEqual(count, "unsorted: unknown-read", "an unreadable verdicts file reads as clear or as a count: %r" % count)
+        self.assertIs(ok, False, "an unreadable verdicts file leaves ok True: %r" % ok)
+
+    def test_a_verdict_word_outside_keep_rebuild_close_is_unsorted(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, "maybe")))
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIs(row["sorted"], False, "#7's verdict word is maybe, not keep, rebuild or close, yet #7 reads sorted: %r" % row)
+        self.assertEqual(count, "unsorted: 1", "the count line for one unknown verdict word: %r" % count)
+
+    def test_a_healthy_pr_gets_no_ledger_row(self):
+        self.pr(7, record="done", at=361)
+        self.pr(12, record="done", at=60)  # healthy: a done record 60 minutes old, its lane live
+        self.lane("session_a")
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7), self.verdict(12)))
+        self.assertIsNotNone(row_of(rows, 7), "scope: no ledger row for the lost pull request #7: %r" % rows)
+        self.assertIsNone(row_of(rows, 12), "a ledger row for #12, a healthy pull request: %r" % rows)
+
+    def test_rows_are_ordered_by_pr_and_a_rerun_writes_the_same_output(self):
+        self.pr(9, record="done", at=361)
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        verdicts = self.verdict_file(self.verdict(7), self.verdict(9))
+        first = self.ledger(self.host(), verdicts)
+        second = self.ledger(self.host(), verdicts)
+        self.assertEqual([row.get("pr") for row in first[0]], [7, 9], "the ledger rows are not in pr order: %r" % first[0])
+        self.assertEqual(json.dumps(first[0], sort_keys=True), json.dumps(second[0], sort_keys=True), "a rerun writes other rows: %r" % first[0])
+        self.assertEqual(first[1:], second[1:], "a rerun counts other unsorted rows: %r" % (first[1:],))
+
+    def test_files_are_the_paths_the_pr_changes_against_its_merge_base(self):
+        self.pr(7, record="done", at=361, files={BRANCH_FILE: BRANCH_TEXT})
+        self.lane("session_a")
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
+        row = row_of(rows, 7)
+        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertEqual(row["files"], [BRANCH_FILE], "the files of #7 are not the paths its commit changes: %r" % row)
+
+    def test_a_pushed_branch_gets_a_ledger_row_with_its_files(self):
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file())
+        row = row_of(rows, BRANCH)
+        self.assertIsNotNone(row, "no ledger row for %s, pushed one commit ahead of main with no pull request: %r" % (BRANCH, rows))
+        self.assertEqual(row["state"], "f", "the ledger row for %s names state %r, not f: %r" % (BRANCH, row["state"], row))
+        self.assertEqual(row["files"], [BRANCH_FILE], "the files of %s are not the paths it changes: %r" % (BRANCH, row))
+
+    def test_the_ledger_reads_the_live_file_once_as_the_batch_review_does(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        build = merge.load_roadmap_build()  # one module object, so the spy sees each read the ledger and the review make
+        with mock.patch.object(build, "live_work", wraps=build.live_work) as reads, mock.patch.object(merge, "load_roadmap_build", lambda: build):
+            self.block(self.host())
+            batch = reads.call_count
+            self.ledger(self.host(), self.verdict_file(self.verdict(7)))
+            ledger = reads.call_count - batch
+        self.assertEqual(batch, 1, "control: the batch review reads the live file %d times, not once" % batch)
+        self.assertEqual(ledger, 1, "the ledger reads the live file %d times, not once as the batch review does" % ledger)
+
+    def test_the_ledger_and_the_batch_review_name_the_same_states(self):
+        self.pr(7, record="done", at=361)
+        self.lane("session_a")
+        self.pr(8, record="open", at=30, session="session_b")
+        self.lane("session_b")
+        self.pr(9, record=None, session="session_c")
+        self.lane("session_c", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(9, minutes=781)
+        self.pr(10, record="done", at=60, session="session_d")
+        self.lane("session_d", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
+        self.pr(11, head_ref="c3", record="done", at=60, session="session_gone")
+        self.pr(12, record="done", at=60)
+        self.publish()
+        lines = self.block(self.host(mail_result=NO_ROUTE))
+        batch = {n: "".join(state for state, _owner in rows_for(lines, n)) for n in range(7, 13)}
+        self.assertEqual(batch, {7: "a", 8: "b", 9: "c", 10: "d", 11: "e", 12: ""}, "scope: the batch review's states are not one per pull request: %r" % lines)
+        rows, _count, _ok = self.ledger(self.host(mail_result=NO_ROUTE), self.verdict_file())
+        ledger = {n: (row_of(rows, n) or {}).get("state", "") for n in range(7, 13)}
+        self.assertEqual(ledger, batch, "the ledger names other states than the batch review names: %r" % rows)
+
+    def test_an_empty_batch_writes_no_rows_and_a_zero_count(self):
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual(rows, [], "ledger rows with no open pull request: %r" % rows)
+        self.assertEqual(count, "unsorted: 0", "the count line with no rows: %r" % count)
+
+    def test_full_size_batch_writes_only_the_pr_in_a_state(self):
+        self.lane("session_a")
+        for n in range(2, 27):
+            self.pr(n, record="open", at=30)
+        self.pr(40, record=None, session="session_b")
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(40, minutes=781)
+        self.publish()
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual([row.get("pr") for row in rows], [40], "the ledger rows among 26 pull requests are not #40 alone: %r" % rows)
+        self.assertEqual(count, "unsorted: 1", "the count line for one row with no verdict among 26: %r" % count)
+
+    def test_the_ledger_flags_are_on_the_command_line(self):
+        argv = ["--reviewed", "--live", "live.json", "--ledger", "--out", "lost-prs.json", "--verdicts", "verdicts.tsv"]
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                parsed = merge.build_parser().parse_args(argv)
+        except SystemExit:
+            parsed = None
+        self.assertIsNotNone(parsed, "merge's command line refuses `merge --reviewed --live FILE --ledger --out FILE --verdicts FILE`")
 
 
 if __name__ == "__main__":
