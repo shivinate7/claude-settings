@@ -1043,7 +1043,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   3. The hold ends when R66's ledger shows no row without a final verdict, and when the fixes that track
      and land new work (handin-cannot-drop, lost-work-sweep, lane-step-dup-check) are on main.
   4. Every fix that tracks or lands work takes the express lane (R55, R65), ahead of the drain. That
-     covers the three above and the coordinator-pick guard (#2870, step pick-reaches-page). Owner 10:54
+     covers the three above, the coordinator-pick guard (#2870, step pick-reaches-page) and R39's
+     challenge and deference fixes (#2963, #3143, step ruling-challenge-passes). Owner 10:56 CST: "fast
+     track all of those". Owner 10:54
      CST: "yo fast track that too can you just think for a fucking second about how i said already my
      rulings are being read too strictly". R55's list names the kinds of fix it means; it is not a
      closed list to read word by word.
