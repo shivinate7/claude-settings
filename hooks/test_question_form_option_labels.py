@@ -731,9 +731,25 @@ def case_pick_is_a_drawn_field():
              tqf.entry_of(tcj.good_page_item(pick="a")), None)
 
 
+def case_fn_page_label_hit_never_raises_on_an_unreadable_transcript():
+    """page_label_hit gives an unknown verdict, never an exception, for a missing transcript file, a path that names
+    no file, a non-string path and no path. A write that carries no options reads nothing and passes."""
+    writes = [("set", {"doc_id": "never-raise-case", "data": label_item("never-raise-case")})]
+    for path in ("${", "/nonexistent/chat.jsonl", None, "", 7):
+        try:
+            got = question_form.page_label_hit(writes, path)
+        except Exception as exc:  # a crash is a wrong verdict, shown by name
+            got = ("RAISED", "%s: %s" % (type(exc).__name__, exc))
+        check("fn: page_label_hit with transcript %r is unknown, not a raise" % (path,),
+              got[0] == question_form.LABELS_UNKNOWN and got[1], "got %r" % (got,))
+    bare = [("set", {"doc_id": "never-raise-case", "data": {"kind": "decision", "status": "open"}})]
+    check("fn: page_label_hit reads no transcript for a write with no options",
+          question_form.page_label_hit(bare, "${") == ("", ""), "a write with no options was judged")
+
+
 # ------------------------------------------------------------------ the run
 
-CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_short_form_passes_page_short_refused,
+CASES = (case_fn_page_label_hit_never_raises_on_an_unreadable_transcript, case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_short_form_passes_page_short_refused,
          case_fn_differing_label_refuses_naming_the_letter, case_fn_no_cited_id_passes,
          case_fn_other_item_passes, case_fn_letter_missing_from_chat_passes, case_fn_letter_is_position,
          case_wire_differing_set_is_refused, case_wire_differing_update_is_refused,

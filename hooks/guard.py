@@ -4710,11 +4710,13 @@ def data_tool_label_hit(item_writes, transcript_path, cwd=""):
     and logs one `noted` line."""
     import question_form
     try:
-        return question_form.page_label_hit(item_writes, transcript_path, cwd)
-    except Exception as err:
-        record(DATA_TOOL, "noted", "option-labels-match-chat",
-               "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        rule, matched = question_form.page_label_hit(item_writes, transcript_path, cwd)
+    except Exception as err:  # page_label_hit never raises; this keeps an unexpected error from denying a write
+        rule, matched = question_form.LABELS_UNKNOWN, type(err).__name__ + ": " + str(err)
+    if rule == question_form.LABELS_UNKNOWN:
+        record(DATA_TOOL, "noted", "option-labels-match-chat", "unknown: " + cap_safe(matched, 100))
         return "", ""
+    return rule, matched
 
 
 def data_tool_hit(tool_input, cwd="", session_id=None):

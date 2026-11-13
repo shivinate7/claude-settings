@@ -1554,13 +1554,23 @@ def chat_text_citing(transcript_path, item_id, options=None) -> str:
     return bare
 
 
+LABELS_UNKNOWN = "unknown"  # the rule slot of a verdict that could not be read: the caller allows and notes it
+
+
 def page_label_hit(writes, transcript_path, cwd=""):
     """(rule, matched) for the first set or update in `writes` whose open-decision options carry a label that
     differs from the chat's text for its letter (chat_page_label_hit), else ("", ""). The transcript is read
-    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. Raises ValueError when a
-    write carries options and the payload names no transcript, and OSError when the transcript cannot be read:
-    the caller treats each as unknown. Raises UnreadChat, after every write is judged, when no write is refused and a
-    chat line for an item reads as no option line (unread_chat_line)."""
+    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. It never raises: a write that
+    carries options when the payload names no transcript, a transcript that cannot be read, and a chat line for an
+    item that reads as no option line (unread_chat_line, checked after every write is judged) each give
+    (LABELS_UNKNOWN, the reason), which the caller allows and notes."""
+    try:
+        return _page_label_hit(writes, transcript_path, cwd)
+    except (ValueError, OSError) as err:  # UnreadChat is a ValueError
+        return LABELS_UNKNOWN, type(err).__name__ + ": " + str(err)
+
+
+def _page_label_hit(writes, transcript_path, cwd=""):
     unread = ""
     for op, entry in writes:
         if op not in ("set", "update"):
