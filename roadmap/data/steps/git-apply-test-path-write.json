@@ -1,14 +1,14 @@
 {
  "id": "git-apply-test-path-write",
  "title": "git apply onto a test path is refused only at commit, not at write",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1D2KbhtSuqpNvJViz",
  "owner": "triage",
  "blockedBy": [],
  "why": "A builder ran git apply on a patch that touches a test path. The write went through, and only the commit-time diff check refused it. That left hooks/mutate_guard.py half-applied in the worktree.",
  "source": "coordinator 18:57 CST Nov 12, from lane record-before-fix-push (session_013NEJL419X64MWpu8fiDyB7), #2979",
  "note": "Fix: the write-time test-path guard reads the file list of a git apply patch (git apply --numstat) and refuses before it writes, as it already does for Edit and Write. Test red on main first.",
- "updatedAt": "2026-11-12T18:57:08-06:00"
+ "updatedAt": "2026-11-12T18:58:17-06:00"
 }

@@ -1,14 +1,14 @@
 {
  "id": "fix-branch-merge-main-deny",
  "title": "Pushing a clean merge of main onto a fix-checked branch is refused",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3Fq3KUGQfJvmJWwRq",
  "owner": "triage",
  "blockedBy": [],
  "why": "The fix-branch deny reads only the push destination, so every lane that merges main after a fix check is refused, although owner ruling R1 (14:07 CST Nov 10, decision pr-review-record) says a clean merge of main keeps the review record. A false alarm against a ruling, likely hit in normal work.",
  "source": "coordinator 18:57 CST Nov 12, from lane record-before-fix-push (session_013NEJL419X64MWpu8fiDyB7), #2979",
  "note": "Fix: the deny allows a push whose new commits are only a clean merge of main (no conflict, no other change) onto the fix-checked head, and still refuses other pushes. Test red on main first: a clean main merge onto a fix-checked branch is refused today. Home: decision pr-review-record (lines 75-76).",
- "updatedAt": "2026-11-12T18:57:08-06:00"
+ "updatedAt": "2026-11-12T18:58:17-06:00"
 }
