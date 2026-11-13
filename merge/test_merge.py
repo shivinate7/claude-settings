@@ -1602,7 +1602,7 @@ class ScopedRepo:
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+                put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
@@ -1617,7 +1617,7 @@ class ScopedRepo:
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{start or branch}")
         for path, text in files.items():
-            put(os.path.join(o, path), text)
+            (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
 class SmallBaseMove(ScopedRepo, Env):
