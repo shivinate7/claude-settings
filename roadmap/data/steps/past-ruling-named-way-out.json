@@ -1,0 +1,14 @@
+{
+ "id": "past-ruling-named-way-out",
+ "title": "The past-ruling guard passes a question whose pick is the ruling's own way out",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The past-ruling guard (Stop hook) read item 684 as reopening R26 (batch-freeze-lane-set-enforce) and decision no-merge-onto-red-main, but the recommended option is the way out that decision names (--base-red-ok for the batch that carries the fix, Cockpit 178 a); the owner's word was needed only because the harness classifier blocked the runner.",
+ "source": "coordinator 23:37 CST Nov 12, first sighting",
+ "note": "A note until it repeats (rule building-guard-needs-incident). Fix candidate: the judge reads whether the recommended option is a path the cited ruling itself allows, and passes it.",
+ "updatedAt": "2026-11-12T23:38:19-06:00"
+}
