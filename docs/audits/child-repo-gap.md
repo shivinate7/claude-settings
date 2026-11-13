@@ -1,4 +1,4 @@
-# Plan: child repo gap (step child-repo-gap, part 1)
+# Audit: child repo gap (step child-repo-gap, part 1)
 
 Goal (owner, 2026-11-11 14:05 CST, R44: "on r44 yea agreed A build all 3"): each child repo follows
 claude-settings main, with cited exceptions only. This record is part 1, the measure. Parts 2 and 3
