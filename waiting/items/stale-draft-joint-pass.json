@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-13T15:08:00Z",
+  "context": "Goal: the 401 open PRs shrink to live work.\nProblem (rule): the stale-draft pass closes only drafts new to the build's list (18, 3, 0, 0 tonight), so about 350 listed since 23:41 CST Nov 12 stay open; the draft pass keeps a draft whose lane is open, and the idle-lanes pass keeps a lane that holds an open PR, so each waits on the other.\nBased on (read): plans/stale-drafts-2026-11-13.md, sixth pass: 352 listed, 3 new, 0 closed.\nBased on (read): the merge tool's idle-lanes help: a lane with an open pull request prints no line.\nDeparts from: main closes drafts and archives lanes in two separate passes \u2014 adds one pass that does both for the same draft.",
+  "home": "step stale-draft-joint-pass",
+  "id": "stale-draft-joint-pass",
+  "kind": "decision",
+  "n": 688,
+  "options": [
+    {
+      "gain": "The backlog clears in one pass; the archive branch keeps all the code, and a closed draft can be reopened.",
+      "how": "For each draft over 12 h whose step is done or missing and whose lane has been idle over 12 h: push its branch to archive/, close the draft, archive the lane, in one act. A lane builds it.",
+      "id": "joint-pass",
+      "key": "a",
+      "label": "One joint pass (recommended)",
+      "lose": "One lane's work, about one batch."
+    },
+    {
+      "gain": "A smaller change.",
+      "how": "Step stale-draft-reads-runner-holds runs; the two passes stay separate.",
+      "id": "fix-hold-side",
+      "key": "b",
+      "label": "Fix only the draft pass's hold reading",
+      "lose": "The two holds can still wait on each other, so the backlog may stay."
+    },
+    {
+      "gain": "No work.",
+      "how": "Nothing changes.",
+      "id": "leave-it",
+      "key": "c",
+      "label": "Leave it",
+      "lose": "The list keeps growing."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 09:07 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Clear the stale draft backlog",
+  "shown": [
+    {
+      "id": "joint-pass",
+      "key": "a",
+      "label": "One joint pass (recommended)"
+    },
+    {
+      "id": "fix-hold-side",
+      "key": "b",
+      "label": "Fix only the draft pass's hold reading"
+    },
+    {
+      "id": "leave-it",
+      "key": "c",
+      "label": "Leave it"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Should one pass close a stale draft and archive its idle lane together?",
+  "why": "It changes how open PRs and lanes are closed, which two passes set today."
+}
