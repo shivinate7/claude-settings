@@ -11033,14 +11033,14 @@ class JobCapWarning(Env):
 
     def test_a_cancel_at_the_full_cap_is_a_timeout_not_a_test_failure(self):
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = self.read(host, lambda h: h.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_a_cancel_sooner_than_the_cap_is_not_a_timeout(self):
         host = CapsHost(self.co, [check("checks", "cancel", 2)], [run("cancelled")])
-        (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = self.read(host, lambda h: h.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
@@ -11144,8 +11144,8 @@ class CapReviewRound1(Env):
         os.chdir(os.path.join(self.co, "docs", "decisions"))
         self.addCleanup(os.chdir, old)
         host = CapsHost(None, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_a_double_quoted_cap_reads_as_its_number_for_the_warning(self):
@@ -11157,8 +11157,8 @@ class CapReviewRound1(Env):
     def test_f5_a_single_quoted_cap_reads_as_its_number_for_a_timeout(self):
         push_base(self, {".github/workflows/checks.yml": cap_workflow("'50'")})
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_an_expression_cap_is_unknown_so_it_gives_no_warning_and_no_timeout(self):
@@ -11168,8 +11168,8 @@ class CapReviewRound1(Env):
         self.assertIn("job scope: 9 of 10 min", out, "the literal cap must still warn: the control proves the path is live")
         self.assertNotIn("job checks", out)
         host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
-        self.assertFalse(ok, why)
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
@@ -11267,7 +11267,8 @@ class NestedCheckout(Env):
         os.makedirs(nested)
         sh(nested, "git", "init", "-q")
         host = CapsHost(nested, [check("checks", "cancel", 50)], [run("cancelled")])
-        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        (verdict, why), _ = captured(lambda: host.head_read(7))
+        self.assertEqual(verdict, "red", why)
         self.assertNotIn(RE_CAP, why)
 
 
