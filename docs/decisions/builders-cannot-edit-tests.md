@@ -15,12 +15,18 @@ Judge the result, not the commands. The act is a test path in a change the build
 
 Owner, 2026-11-12 21:59 CST, page item 679 a (builder-test-comment-edit), is filed in the ruling paragraph above. `comment_only_change` in `hooks/guard.py` is the one judge. The write tool (`role_write_hit`) judges the file's text now against its text after the Edit, MultiEdit or Write. Commit, push and stop (`role_offences`) judge the path's text in the base against its text in the builder's change. It answers True only when proven:
 
-- **Python** (`.py`): stdlib `tokenize`. The code tokens of the two texts match, with comments and blank-line tokens left out. A docstring is a string token, so a changed docstring is code. A change to a coding line (PEP 263) in the first two lines is code. A tokenize error is False.
+- **Python** (`.py`): stdlib `tokenize`. The code tokens of the two texts match, with comments and blank-line tokens left out. A docstring is a string token, so a changed docstring is code. Only the PEP 263 coding lines among the first two lines are compared, in place: a changed cookie is code, a comment added above or after it is not. A tokenize error is False.
 - **JS and TS** (`.js .mjs .cjs .jsx .ts .tsx`): `hooks/comment_only.mjs` parses both texts with the TypeScript on PATH (`lint/typescript_on_path.mjs`, shared with `lint/comment_scan.mjs`). It is False when either text has a parse error. It compares each leaf token of the tree by kind and text, and by whether a line break comes before it, so a block comment that holds a line break cannot hide a change to a `return` or to automatic semicolon insertion. JSX text and template pieces are tokens. A JSDoc comment is a comment. No `node`, no `tsc`, a timeout or any error is False.
 - **Fail-closed.** Every other language, a new file, a deleted file, a file whose text is identical on both sides (a mode change, an invalid byte), an Edit whose old string is not in the file or not unique, a symlink that resolves to another path, and any unreadable file stay refused.
 - **Unchanged rules.** A mutation test (`AUTHOR_MUTATION_TESTS`) stays refused for any change. Test config keeps `disables_tests`, so a comment that adds a disabling line is refused. The shell check (`builder_shell_test_hit`) is unchanged: a shell write to a test path stays refused.
-- **Known gap.** A comment that a runner reads as an instruction, such as a Jest docblock `@jest-environment` or a TypeScript `// @ts-nocheck` or `// @ts-expect-error`, counts as a comment.
-- **Cost.** `tokenize` or one `node` run happens only when a builder's test path differs, once per such path at each commit, push, stop and write call (unmeasured). The node run has a 20 s cap, writes no file and starts no long-lived process.
+- **Write call.** A call that holds `content` and also `old_string`, `new_string` or `edits` is refused: which text the tool applies is not known. A Write is judged by its `content`.
+- **Known gaps.**
+  - A comment a runner or compiler reads counts as a comment: `// @ts-nocheck`, `// @ts-expect-error`, webpack magic comments, and the `@jest-environment` and `@vitest-environment` docblocks all change how a test runs.
+  - A whitespace-only Python change (`x = 1` to `x  =  1`) passes, as no token changes.
+  - A docstring is code, so a docstring change refuses.
+  - The worktree read at commit time uses `errors=replace`, so a test file that is not UTF-8 is judged by its replaced text there. The write call reads strict, so it refuses such a file.
+  - Windows: `lint/typescript_on_path.mjs` looks for `tsc` without an extension, so an npm Windows shim may fail the lookup. JS and TS comment edits then refuse there (fail closed). Open debt `comment-only-tsc-windows` (the `tsc` lookup misses a Windows shim).
+- **Cost.** `own_changes` re-judges every builder commit in the HEAD reflog on each commit, push and stop. Each test path that differs costs two `git show` calls (unmeasured). Python `tokenize` has no cap. A node run has a 20 s cap, writes no file and starts no long-lived process.
 
 An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
 
@@ -38,7 +44,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list (unmeasured). Commits of the builder's own add one rev-list, and one parent read and one diff each (unmeasured). A merge commit or a merge in progress adds one `merge-tree`. `rev-parse` runs on each refused test-author product write, and `merge-tree` runs once per such write while MERGE_HEAD exists (unmeasured). Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 190 of 192 `builder-refuse` cases pass on this tip. The two others (a test edit that matches neither of two received bases) write a comment-only change and expect a refusal: they wait for a test-author to re-point them to a code change.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 212 of 212 cases pass on this tip.
 
 ## Roles
 

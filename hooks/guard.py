@@ -2047,8 +2047,9 @@ def _python_code_tokens(text: str):
 
 
 def _python_comment_only(old: str, new: str) -> bool:
-    head = lambda text: text.splitlines()[:2]  # noqa: E731  the lines a coding cookie may sit on
-    if head(old) != head(new) and any(PY_CODING_COOKIE.search(line) for line in head(old) + head(new)):
+    # Only the cookie lines themselves are compared, so a comment added above or after a cookie is allowed.
+    cookies = lambda text: [line for line in text.splitlines()[:2] if PY_CODING_COOKIE.search(line)]  # noqa: E731
+    if cookies(old) != cookies(new):
         return False
     try:
         return _python_code_tokens(old) == _python_code_tokens(new)
@@ -2503,7 +2504,7 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
 
 def write_call_texts(tool_input, full: str):
     """The whole text of the file `full` before and after a write tool call, as (old, new), or None when the
-    call is not one the guard can replay: the file is missing or not UTF-8, an edit's old string is not in the
+    call is not one the guard can replay: the file is missing or not UTF-8, the call holds `content` and an edit, an edit's old string is not in the
     file, an edit's old string is not unique (and `replace_all` is not set), or the call is no Edit, MultiEdit or Write."""
     if not isinstance(tool_input, dict):
         return None
@@ -2512,6 +2513,9 @@ def write_call_texts(tool_input, full: str):
             disk = handle.read()
     except Exception:
         return None
+    has_edit = isinstance(tool_input.get("edits"), list) or "old_string" in tool_input or "new_string" in tool_input
+    if has_edit and "content" in tool_input:
+        return None  # one call that holds a whole text and an edit: which one the tool applies is not known
     if isinstance(tool_input.get("edits"), list):
         steps = tool_input["edits"]
     elif "old_string" in tool_input or "new_string" in tool_input:
