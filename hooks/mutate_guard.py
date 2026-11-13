@@ -2232,8 +2232,12 @@ MUTATIONS = [
     ("role-diff: conftest.py is no test path",
      '|conftest\\.py"', '|never-seen\\.py"', "guard", "builder-test: Edit of src/conftest.py is refused"),
     ("role-diff: no directory part makes a test path",
-     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
      'TEST_DIRS = set()', "guard", "builder-test: Edit of tests/helper.py is refused"),
+    ("role-diff: the testing folder is no test folder",
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     "guard", "test-author: Write of testing/shallow_clone.py is allowed"),
     ("role-diff: Swift test basenames are plural only (cries wolf)",
      'SWIFT_TEST = re.compile(r"^\\w+Tests\\.swift$")', 'SWIFT_TEST = re.compile(r"^\\w+Tests?\\.swift$")',
      "guard", "swift-test: Edit of non-test App/LoginTest.swift is allowed"),
@@ -4077,6 +4081,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
