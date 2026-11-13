@@ -4,7 +4,7 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
-    python3 lint/ruled_store.py stale [REPO]          one line per open entry whose step is done or has no lane; exit 0
+    python3 lint/ruled_store.py stale [REPO]          one line per open entry whose step is done, dropped or doing with no lane; exit 0
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -30,8 +30,9 @@ step. So `stale` reads: the entries (ls-tree and cat-file), main blobs only when
 only when an open entry names a step. A missing ref, a missing folder or a failed git start gives [], never an error.
 
 stale_entries(repo_dir) lists the open entries that sit open too long: each step the entry names (_steps_of) has its
-file on origin/roadmap and is done or has no `lane` (missing, null or empty). A missing step file is unknown, so the
-entry is not listed. It has no age or numeric limit. Each item is (entry id, reason).
+file on origin/roadmap and is done, dropped, or "doing" with no `lane` (missing, null, empty or not a string). A
+"ready" or "todo" step is queued work, so its entry is not listed; nor is a step in any other state. A missing step
+file is unknown, so the entry is not listed. It has no age or numeric limit. Each item is (entry id, reason).
 
 An unchecked entry (`supersedes_none` starts with "unread": triage has not read what it supersedes) informs a session
 and is marked "(unchecked, not law)" in the past-ruling search. It never governs a guard: ruling_for_guard and
@@ -402,9 +403,22 @@ def _has_lane(step):
     return isinstance(lane, str) and bool(lane.strip())
 
 
+def _stale_reason(steps, slug):
+    """Why the step makes its entry stale: "step X is done", "step X is dropped" or "step X has no lane"; None when
+    the step is queued (ready, todo), in another state, or is doing with a lane."""
+    status = steps[slug].get("status")
+    if status == "done":
+        return "step %s is done" % slug
+    if status == "dropped":
+        return "step %s is dropped" % slug
+    if status == "doing" and not _has_lane(steps[slug]):
+        return "step %s has no lane" % slug
+    return None
+
+
 def stale_entries(repo_dir):
     """[(entry id, reason)] for each open entry that sits open too long, oldest first: every step it names has a step
-    file on STORE_REF, and each is done or has no `lane`, while main lacks the ruling. An entry with no step, or one
+    file on STORE_REF, and each is done, dropped, or doing with no `lane`, while main lacks the ruling. An entry with no step, or one
     whose step file is missing (unknown), is not listed. No age limit. [] when the store is absent or unreadable."""
     opened = open_entries(ruled_entries(repo_dir), repo_dir)
     steps = _step_files(repo_dir, [slug for e in opened for slug in _steps_of(e)])
@@ -413,9 +427,8 @@ def stale_entries(repo_dir):
         slugs = _steps_of(entry)
         if not slugs or any(slug not in steps for slug in slugs):
             continue
-        if all(_is_done(steps, slug) or not _has_lane(steps[slug]) for slug in slugs):
-            reasons = ["step %s is done" % slug if _is_done(steps, slug) else "step %s has no lane" % slug
-                       for slug in slugs]
+        reasons = [_stale_reason(steps, slug) for slug in slugs]
+        if all(reasons):
             listed.append((entry.get("id", "?"), ", ".join(reasons) + ", and the ruling is not on main"))
     return listed
 
@@ -442,8 +455,11 @@ def main(argv):
         if len(argv) in (1, 2) and argv[0] in ("list", "check", "stale"):
             repo = argv[1] if len(argv) == 2 else "."
             return {"list": _list, "check": _check, "stale": _stale}[argv[0]](repo)
-    except Exception:
-        return 0 if argv[:1] in (["--session-line"], ["stale"]) else 2
+    except Exception as exc:
+        if argv[:1] == ["--session-line"]:
+            return 0
+        sys.stderr.write("ruled_store %s failed: %s\n" % (argv[0], " ".join(str(exc).split()) or type(exc).__name__))
+        return 2
     sys.stderr.write(__doc__.split("\n\n")[0] + "\n")
     return 2
 
