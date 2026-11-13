@@ -26,6 +26,18 @@ Change it only in a PR, never as this update.
 Use the compaction summary above. Read the digest file the reorient message named, when
 it named one. Together they cover the work since the handoff's last write.
 
+After a compaction, also send one Explore agent on Sonnet to audit the handoff. Its brief's
+first line is `Audit:`. It reads the session transcript from the previous
+"This session is being continued" marker to the end (with no earlier marker, from the start),
+and compares it with the handoff. A marker is a `compact_boundary` system record and the
+summary that follows it. A line that only quotes the text, such as this prompt in a tool
+result, is no marker. The transcript is
+`<config dir>/projects/<project>/<session_id>.jsonl`; the session id is in the handoff's
+path. It reports three lists in 40 lines or fewer: MISSING (rulings, facts and work in the transcript
+that the handoff lacks), STALE (handoff lines the transcript replaced) and DONE (handoff
+lines whose work landed). Then rewrite the handoff whole (step 4) from that report. One
+agent per compaction, never per Stop checkpoint.
+
 ## 4. Rewrite the whole file
 
 Write the file again from the top, with one whole-file write. Never append a block, a
