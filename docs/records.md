@@ -485,6 +485,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `prose-tending-contract` | Plan: one shared tending contract and runner | [`docs/plans/prose-tending-contract.md`](../docs/plans/prose-tending-contract.md) |
+| `prose-tending-move-stores` | Plan: move each prose store to the shared tending contract | [`docs/plans/prose-tending-move-stores.md`](../docs/plans/prose-tending-move-stores.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `restart-plan` | Restart plan: how claude-settings lands work after the freeze | [`docs/plans/restart-plan.md`](../docs/plans/restart-plan.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
