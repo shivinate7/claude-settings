@@ -1,0 +1,14 @@
+{
+ "id": "inbox-accepts-roadmap-ruling-home",
+ "title": "The Stop hook owner-feedback-inbox accepts a ruling filed on the roadmap branch as a home",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane runner-repos-in-parallel, 13:09 CST Nov 13: its Stop hook wanted R67 and the draft-PR grant in main's docs/decisions, .claude/rules or CLAUDE.md, but rulings live on the roadmap branch, which never merges to main.",
+ "source": "lane session_013NEJL4RgQWEJ7kqZC5AfMD, 13:09 CST Nov 13",
+ "note": "Todo, a possible false alarm (check the guard's record first). A lane that carries an owner grant from a roadmap ruling (drain-first-hold, lane-draft-pr-grant-owner) cannot satisfy the hook with a main home; the hook keeps asking, so the lane files a page item instead. Fix to consider: the hook accepts a ruling id found in roadmap/rulings/ on origin/roadmap as a home. Related, not the same: outbox-ruling-home-check (reads whether a ruling's main home holds its words). Measure first: how often the hook fires on a roadmap-only ruling (unmeasured).",
+ "updatedAt": "2026-11-13T13:09:32-06:00"
+}
