@@ -8,14 +8,15 @@ extension XCUIElement {
     @MainActor
     func tapCentre(in app: XCUIApplication) {
         let window = app.windows.firstMatch
+        let origin = window.frame.origin
         let size = window.frame.size
-        let centre = CGVector(dx: frame.midX / size.width, dy: frame.midY / size.height)
+        let centre = CGVector(dx: (frame.midX - origin.x) / size.width, dy: (frame.midY - origin.y) / size.height)
         window.coordinate(withNormalizedOffset: centre).tap()
     }
 
     // Wait on state, never on time.
     @MainActor
-    func waitUntilVisible(timeout: TimeInterval = 10) -> Bool {
+    func waitUntilPresent(timeout: TimeInterval = 10) -> Bool {
         waitForExistence(timeout: timeout)
     }
 }

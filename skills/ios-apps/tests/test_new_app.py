@@ -116,6 +116,11 @@ class Starter(unittest.TestCase):
         self.assertIn("func tapCentre", support)
         self.assertRegex(support, r"\.frame")
         self.assertRegex(support, r"coordinate\(withNormalizedOffset")
+        self.assertRegex(support, r"midX\s*-\s*(origin\.x|\w+\.frame\.(origin\.x|minX))", "x is made window-relative")
+        self.assertRegex(support, r"midY\s*-\s*(origin\.y|\w+\.frame\.(origin\.y|minY))", "y is made window-relative")
+        self.assertNotRegex(support, r"dx:\s*0\.5|dy:\s*0\.5", "a fixed offset is not the element's centre")
+        self.assertIn("func waitUntilPresent", support)
+        self.assertNotIn("waitUntilVisible", support)
         for path in ("native/TallyUITests/LaunchTests.swift", "native/TallyUITests/UITestSupport.swift"):
             self.assertNotRegex(files[path], r"sleep\(|Thread\.|Date\(|DispatchTime|CFAbsoluteTime", path)
         self.assertIn("waitForExistence", files["native/TallyUITests/LaunchTests.swift"] + support)
