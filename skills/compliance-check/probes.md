@@ -109,9 +109,12 @@ The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 
 ## Words
 
-`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child. A retired word is a
-"Not" name in a row of `GLOSSARY.md`. The probe reads the child's tracked files only, and never edits
-or pushes to the child.
+`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child's change. A retired word is a
+"Not" name in a row of `GLOSSARY.md`. The probe reads what the child adds against the merge base with its
+`origin/main`. It reads the paths and the lines that its commits, work tree and untracked files add, as the check
+reads them. With a merge base, reported paths are relative to the repo top: a root in a subfolder reads the whole
+repo's change. With no `origin/main` or no merge base it reads the root's tracked files, with paths relative to the
+root. It never edits or pushes to the child.
 
 The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check_glossary.py` from the
 parent clone. It calls the check's own readers: the path read, and the read of identifiers, rule
@@ -121,7 +124,7 @@ A term of the child's own `GLOSSARY.md`, at its root, spans a retired word, as a
 Terms come only from a four-column `## Terms` table there. Another shape gives no terms.
 A child term that repeats a claude-settings term, or is the retired word, does not.
 
-The probe reads every tracked file, so it can take a minute on a large repo. The check reads hook
+A whole-tree read can take a minute on a large repo. The check reads hook
 messages in `hooks/` only. That fits the layout of claude-settings, and a child with another layout has
 no message read.
 
@@ -130,14 +133,15 @@ newline. A path hit has `-` for the line. One more line, `glossary read at <sha>
 names the parent commit whose glossary the run read. It adds `(uncommitted)` when `GLOSSARY.md` differs
 from that commit. Name the commit in the report, so a later run on a moved list is read against it.
 
-A tracked file that does not decode as text, such as a binary, is still read by its path. One note line,
-`unread: <N> files, <the first three>`, names those files. They do not make the group `unknown`.
+A committed file that does not decode as UTF-8 text, or an untracked binary, is still read by its path. One note
+line, `unread: <N> files, <the first three>`, names those files. They do not make the group `unknown`. An untracked
+file that is not UTF-8 text and not binary makes the group `unknown`, as the check does.
 
 | Exit | Group line |
 | --- | --- |
 | 0 | `words: in shape` |
 | 1 | `words: out`, one item line per hit |
-| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, no tracked file could be read, or the run passed `WORDS_DEADLINE` (`stopped at <file>, N of M read`) |
+| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, no tracked file could be read (whole-tree read), the check cannot read the diff, an untracked file that is not UTF-8 text and not binary, or the run passed `WORDS_DEADLINE` (`stopped at <file>, N of M read`) |
 
 A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
 is `unknown`, never `in shape`.
