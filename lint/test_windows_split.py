@@ -133,7 +133,7 @@ LINUX_SUITES = {
     "python3 lint/test_windows_split.py": (NO_MD_GATE, None),
     "python3 lint/test_all_jobs_passed.py": (NO_MD_GATE, None),
     "python3 lint/test_ci_scope.py": (NO_MD_GATE, None),
-    "python3 lint/test_checks_step_scope.py": (NO_MD_GATE, None),
+    "python3 lint/test_checks_step_scope.py": (None, None),
     "python3 lint/test_rm_shim.py": (LINUX_CODE, None),
     "python3 hooks/test_mutate_shared.py": (None, None),
     "python3 hooks/test_mutate_report.py": (NO_MD_GATE, None),

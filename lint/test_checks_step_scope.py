@@ -123,7 +123,6 @@ NO_MD = [
     'Record stamp engine fixture suite',
     'Scanner trap lint',
     'Record stamp action fixture suite',
-    'Checks step scope suite',
 ]
 
 # The audit's NAMES-ONLY steps: each names a file, or copies only hooks/ and lint/ files, which already set `code`.
@@ -191,6 +190,7 @@ MUST_STAY_UNGATED = [
     'Debt retire fixture suite',
     'Comment narration fixture suite',
     'Ruling kind fixture suite',
+    'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it were gated
 ]
 
 # The steps that run only on a pull request, each with its own `if:`. The scope gate does not touch them.
@@ -413,12 +413,6 @@ ALLOWED = {
     "skills/roadmap/test_build.py": (["README.md", "docs/todo.md"], "fixture repo files"),
     "skills/waiting-page/test_stale_pages.py": (["CLAUDE.md"], "written into a temp claude folder"),
 }
-
-# This file holds the names above as data, so the check finds them here. It opens no .md file: its entry is their union.
-ALLOWED["lint/test_checks_step_scope.py"] = (
-    sorted({name for names, _ in ALLOWED.values() for name in names}),
-    "the names of this ALLOWED list, which the check compares with git ls-files",
-)
 
 ENTRY = re.compile(r"(?:^|[\s;&|(])(?:python3?|bash|node)\s+(?!-)([^\s'\"]+)", re.M)
 MD_TOKEN = re.compile(r"[\w.\-/]*\.md\b")
