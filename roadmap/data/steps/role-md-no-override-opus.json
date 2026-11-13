@@ -1,0 +1,14 @@
+{
+ "id": "role-md-no-override-opus",
+ "title": "No role file, skill or decision text tells a role it may run above its row; each role file states only its own model and effort",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Prose that offers Opus by override confuses roles and prompts the owner.",
+ "source": "Owner 14:09 CST Nov 13 via the retrospective: \"this shd be true for the other roles markdowns too frankly\".",
+ "note": "Filed 14:10 CST Nov 13. Broadens ruling own-r3-reviewer-sonnet-high from the reviewer to every role. Done-check: a grep over agents/ and skills/ for override-to-Opus wording finds no role line; the guard refusal stays as the backstop. Fold with step model-layout-to-table (round-3 cleanup). Exceptions in agent-model-cap (Plan, designer, design reviewer, refuter, Audit: Explore) are rows of the table, not override wording; the lane keeps them as each role's own line.",
+ "updatedAt": "2026-11-13T14:10:52-06:00"
+}

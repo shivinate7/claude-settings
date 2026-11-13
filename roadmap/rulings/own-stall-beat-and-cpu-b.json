@@ -1,0 +1,10 @@
+{
+ "id": "own-stall-beat-and-cpu-b",
+ "at": "2026-11-13T14:09:00-06:00",
+ "title": "False STALL on merge --batch-build: the tool beats every 120 s, and the watcher reads CPU time before calling a stall",
+ "ruling": "Owner 14:09 CST Nov 13, relayed by the retrospective, on its 14:08 options: \"B\". Meaning (retrospective's reading): (a) merge.py prints a beat every 120 s in every phase (STALL_WATCH_BEAT), AND (b) the stall watcher reads the CPU time of the job's process tree before calling a stall; a tree whose CPU time advanced in the quiet window is no stall. This rewrites decision stall-watch (2026-10-18 15:15 CDT, stall = output silence) in place. Red cases: batch 138 and batch 139 build 4. Keep the playwright lock-wait hang (no CPU) as the still-a-stall case. The question-form hook flagged b as widening a shared tool; the retrospective reads that as a false alarm (b changes the watcher for every job, no per-repo or per-role exception; c was the exception). Triage did not post item 759: this ruling settles it. Note: ruling stall-watch-exceptions-180a is about timers, not this question.",
+ "quote": "B",
+ "source": "Owner word \"B\" 14:09 CST Nov 13 via the retrospective 14:09; filed by triage 14:10 CST Nov 13. Unread by triage: decision stall-watch, merge.py.",
+ "status": "open",
+ "step": "merge-tool-beats-every-phase"
+}
