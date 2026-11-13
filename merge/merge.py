@@ -39,6 +39,12 @@
                           (Host.send_lane_mail), once for each state at each head: a comment on the PR (the lane-mail marker) records the send, and the
                           next run reads it from the one comment read it already makes. A failed send prints `merge: lane mail ... was not sent: ...`,
                           keeps every line, and exits 1. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
+  merge --reviewed [--root DIR ...] --live FILE
+                          adds one row per open lane PR in each of five states: `lost-work #N (a-e): WHY; owner OWNER`. a: a done record over 6 h old
+                          and no other open PR holds its head. b: an open or bad record whose lane message failed in this run. c: no record, the lane
+                          completed or review ready, its newest thread (pr N) over 12 h old. d: the lane is archived. e: the head ref names a doing
+                          step whose lane is absent or archived. A lane read that cannot run prints `lost-work #N unknown: WHY; owner coordinator`
+                          and exits 1. Cost: the live file and the record branch, read once; git reads for a state-a candidate; no gh call.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
@@ -4444,7 +4450,7 @@ def footer_session(body):
     found = FOOTER_SESSION.findall(body or "")
     return found[-1] if found else None
 
-def reviewed_read(h):
+def reviewed_read(h, facts=None):
     """-> (lines, done, pulls, tell): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
     for each pull request whose newest record reads done (kind is the record's Kind); the open pull request rows; and `tell`, one (number, state, head, why,
     lane session or None, marked) entry for each pull request whose line reads open or bad (`marked` is True when a lane-mail marker comment already holds that
@@ -4454,7 +4460,8 @@ def reviewed_read(h):
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. The lane-mail markers come from that same list, so the lane message adds no read here. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
-    request's own base."""
+    request's own base. `facts`, when a dict is given, gains {number: (state, created_at of the newest record)} for each open pull request (state None
+    for one with no record): what lost_work_rows reads, from the same two list reads, so it adds no gh call."""
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
@@ -4466,6 +4473,8 @@ def reviewed_read(h):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
         if not bodies:
             bare.append(f"#{n}")
+            if facts is not None:
+                facts[n] = (None, None)
             continue
         rec = parse_review(bodies[-1])
         rec = rec if rec and rec["n"] == n else None
@@ -4482,6 +4491,8 @@ def reviewed_read(h):
             session = footer_session(d.get("body"))
             lane = f" lane {session}" if session else " lane unknown (no footer)"
             tell.append((n, state, sha, why, session, (state, sha) in mails.get(n, ())))
+        if facts is not None:
+            facts[n] = (state, rows[n][-1][1])
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}{lane}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, tell
 
@@ -4490,11 +4501,12 @@ LANE_MAIL_BODY = ("#{n} {state} at {head9}: {why}\n\n"
                   "Post a review record that reads done at the live head (`merge {n} --review-record ...`, posted as a comment on #{n}), "
                   "or say in this lane why it waits. This is the only message for this state at this head.\n")
 
-def tell_lanes(h, tell):
+def tell_lanes(h, tell, failed=None):
     """-> the lines for the lanes of `tell` (reviewed_read): one message to each lane whose pull request reads open or bad and was not told for that state at
     that head, then a marker comment (LANE_MAIL_MARKER) that says so, which the next reviewed_read reads from its one comment list. The message goes through
     Host.send_lane_mail to cloud/<the footer's session>. A pull request with no session in its footer sends nothing. A failed send prints its failure and a
     failed marker post prints a line that the message may repeat; either one is a line that starts `merge: lane mail`, and the second value is False.
+    `failed`, when a list is given, gains the number of each pull request whose send failed (lost_work_rows state b).
     Cost: one bin/mail send and one comment post per newly told pull request, and nothing for one already told."""
     lines, ok = [], True
     for n, state, head, why, session, marked in tell:
@@ -4505,6 +4517,8 @@ def tell_lanes(h, tell):
         if code:
             lines.append(f"merge: lane mail for #{n} to {addr} was not sent: {' '.join(out.split())[:300]}")
             ok = False
+            if failed is not None:
+                failed.append(n)
             continue
         lines.append(f"merge: lane mail for #{n} sent to {addr}: {' '.join(out.split())[:120]}")
         try:
@@ -4514,12 +4528,15 @@ def tell_lanes(h, tell):
             ok = False
     return lines, ok
 
-def reviewed_lines(h):
+def reviewed_lines(h, live=None):
     """-> (lines, ok) of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo): its lines, then the lane mail lines (tell_lanes), and
-    ok is False when a lane message or its marker failed. `--root` runs this once per root, so the gh calls scale with the number of roots; no new file or timer."""
-    lines, _done, _pulls, tell = reviewed_read(h)
-    mail, ok = tell_lanes(h, tell)
-    return lines + mail, ok
+    ok is False when a lane message or its marker failed. `--root` runs this once per root, so the gh calls scale with the number of roots; no new file or timer.
+    With `live` (the publisher's live-work file) the lines end with the lost-work rows (lost_work_rows), and an unknown row makes ok False."""
+    facts, failed = {}, []
+    lines, _done, pulls, tell = reviewed_read(h, facts)
+    mail, ok = tell_lanes(h, tell, failed)
+    rows, rows_ok = lost_work_rows(h, pulls, facts, failed, live)
+    return lines + mail + rows, ok and rows_ok
 
 def batch_candidates(h, done, pulls, base, ignore_ref=None):
     """-> (numbers, busy): the done pull requests of `done` (reviewed_read) on `base`, ascending, that can join a batch now, and the numbers of the ready
@@ -4537,7 +4554,99 @@ def batch_candidates(h, done, pulls, base, ignore_ref=None):
     return [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
             and not h.holds_head(heads[n], base)], busy
 
-def reviewed_block(h):
+LOST_WORK_OWNER = {"a": "batch runner", "b": "the lane's own session", "b-archived": "coordinator", "c": "coordinator", "d": "coordinator", "e": "triage"}  # who fixes each state's row
+LOST_WORK_UNKNOWN_OWNER = "coordinator"  # an unread lane has no state to route by; the coordinator wakes the silent lane
+LOST_WORK_DONE_HOURS = 6  # a done record older than this, in no batch: state a (the roadmap build's STALE_HANDIN_HOURS)
+LOST_WORK_IDLE_HOURS = 12  # a lane idle longer than this with no record: state c
+
+def lost_work_rows(h, pulls, facts, failed, live):
+    """-> (lines, ok): one `lost-work #N (STATE): WHY; owner OWNER` row for each open lane pull request in each of five states, and ok False when any row
+    reads unknown. a: a done record older than 6 h and no other open pull request on its base holds its head (Host.holds_head). b: an open or bad record
+    whose lane message failed in this run (`failed`, from tell_lanes); the owner is the lane's session, or the coordinator when that lane is archived.
+    c: no record, the lane completed or review ready, and its newest thread (`pr` = N) over 12 h before h.now(). d: the lane in the body's footer is archived.
+    e: the head ref names a doing step (lane_head_refs) whose lane session is absent or archived. A pull request in two states gets a row for each. A batch
+    integration pull request is no lane's and gets none. A lane read that cannot run (a stale live file, no record branch, no thread that names the pull
+    request) is `lost-work #N unknown: WHY; owner coordinator` for each pull request it would judge, never no row. Without `live` nothing is read and no row prints.
+    `facts` is reviewed_read's {number: (state, record time)}. Cost: the live file and the record branch, read once, and holds_head's git reads for a
+    state-a candidate only; no gh call."""
+    if live is None:
+        return [], True
+    repo = pathlib.Path(h.cwd or ".").resolve()
+    now = h.now()
+    try:
+        build = load_roadmap_build()
+        source, steps, why = build.record_steps(repo)
+        if not why:
+            work = build.live_work(live, steps, h.repo or build.github_slug(repo, build.extras(repo, source)[0]))
+            why = build.live_why(work)
+    except (Exception, SystemExit) as e:
+        why = f"the lane read stopped: {type(e).__name__}: {' '.join(str(e).split())[:200]}"
+    sessions = {r["id"]: r for r in work.get("laneSessions") or []} if not why else {}
+    heads_by_base = {}
+    for d in pulls:
+        heads_by_base.setdefault(d["base"]["ref"], {})[d["number"]] = d["head"]["sha"]
+
+    def hours_since(iso):
+        try:
+            return (now - datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()) / 3600
+        except (AttributeError, ValueError):
+            return None
+
+    out, unknown = [], False
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        n, ref, session = d["number"], d["head"]["ref"], footer_session(d.get("body"))
+        if is_integration_pr({"branch": ref, "body": d.get("body")}):
+            continue
+        state, created = facts.get(n, (None, None))
+        rows = []
+
+        def row(key, text, owner=None):
+            rows.append((key, f"lost-work #{n} ({key}): {text}; owner {owner or LOST_WORK_OWNER[key]}"))
+
+        def unread(text):
+            rows.append(("unknown", f"lost-work #{n} unknown: {text}; owner {LOST_WORK_UNKNOWN_OWNER}"))
+
+        if state == "done":
+            age = hours_since(created)
+            if age is None:
+                unread("the done record's time was not read, so its age is unknown")
+            elif age > LOST_WORK_DONE_HOURS:
+                try:
+                    others = [sha for m, sha in heads_by_base[d["base"]["ref"]].items() if m != n]
+                    if not any(h.holds_head(d["head"]["sha"], sha) for sha in others):
+                        row("a", f"done record {age:.0f} h old, in no batch")
+                except Stop as e:
+                    unread(' '.join(str(e).split())[:300])
+        lane = sessions.get(session)
+        archived = lane is not None and lane["session_status"] == build.ARCHIVED_SESSION
+        if state in ("open", "bad") and n in failed:
+            row("b", f"the {state} record's lane message was not sent", owner="coordinator" if archived else session)
+        if why:
+            unread(why)
+        else:
+            if archived:
+                row("d", f"lane {session} is archived, pull request open")
+            if state is None and lane is not None and not archived and lane.get("status_bucket") in build.IDLE_BUCKETS:
+                if work["threads"] is None:
+                    unread(work["threadsWhy"])
+                else:
+                    times = [t["lastActivity"] for t in work["threads"] if t.get("pr") == n and isinstance(t.get("lastActivity"), str)]
+                    ages = [a for a in map(hours_since, times) if a is not None]
+                    if not ages:
+                        unread(f"no thread names #{n}, so how long lane {session} has been idle is unread")
+                    elif min(ages) > LOST_WORK_IDLE_HOURS:
+                        row("c", f"no review record and lane {session} idle {min(ages):.0f} h")
+            for sid, step in steps.items():
+                if ref in build.lane_head_refs(sid) and str(step.get("status")).strip().casefold() in build.LIVE_STATUS:
+                    owner = step.get("lane").strip() if isinstance(step.get("lane"), str) else ""
+                    held = sessions.get(owner)
+                    if held is None or held["session_status"] == build.ARCHIVED_SESSION:
+                        row("e", f"head ref {ref} names step {sid}, doing, and its lane {owner or '(none)'} is gone")
+        out += [text for _key, text in sorted(rows)]
+        unknown = unknown or any(key == "unknown" for key, _text in rows)
+    return out, not unknown
+
+def reviewed_block(h, live=None):
     """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
     done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
     included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
@@ -4547,10 +4656,13 @@ def reviewed_block(h):
     only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
     runs, then one git read per done pull request and other open pull request on the base, and one per done pull request against the base (no gh compare;
     Host.holds_head), after one fetch of the pull request heads. The lane messages (tell_lanes) come before the batch line: a failed send keeps every line and
-    makes ok False."""
-    lines, done, pulls, tell = reviewed_read(h)
-    mail, mail_ok = tell_lanes(h, tell)
-    out = [f"repo {h.repo}:", *lines, *mail]
+    makes ok False. With `live`, the lost-work rows (lost_work_rows) follow the lane messages, and an unknown row makes ok False."""
+    facts, failed = {}, []
+    lines, done, pulls, tell = reviewed_read(h, facts)
+    mail, mail_ok = tell_lanes(h, tell, failed)
+    rows, rows_ok = lost_work_rows(h, pulls, facts, failed, live)
+    mail_ok = mail_ok and rows_ok
+    out = [f"repo {h.repo}:", *lines, *mail, *rows]
     if not any(b == h.base for _n, b, _kind in done):
         return out, mail_ok
     try:
@@ -4676,14 +4788,14 @@ def root_host(root, hosts, config):
     h.refuse_pinned_mismatch()
     return h
 
-def reviewed_roots(roots, hosts, config):
+def reviewed_roots(roots, hosts, config, live=None):
     """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given. A root whose read or config stops, or whose folder
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
     --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, then no gh compare: one fetch of the pull request heads and one git read per done pull
     request and other open pull request on the base and per done pull request against the base (Host.holds_head), 0 gh compares for 8 done x 12 open, where it was 96;
-    one bin/mail send and one comment post per newly told lane; no new long-lived process, file or timer."""
+    one bin/mail send and one comment post per newly told lane; no new long-lived process, file or timer. `live` goes to each block."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
@@ -4691,7 +4803,7 @@ def reviewed_roots(roots, hosts, config):
             with contextlib.redirect_stdout(config_says):
                 h = root_host(r, hosts, config)
             with contextlib.redirect_stdout(read_says):
-                block, block_ok = reviewed_block(h)
+                block, block_ok = reviewed_block(h, live)
             ok = ok and block_ok
         except Stop as e:
             block, ok = [f"repo {r}: unknown ({' '.join(str(e).split())})"], False
@@ -5591,6 +5703,17 @@ def kind_misfits(kind, files):
 
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
+def load_roadmap_build():
+    """-> the roadmap build module (IDLE_BUILD). A build that exits at import raises RuntimeError, so a caller catches Exception alone."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("roadmap_build", IDLE_BUILD)
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+    except SystemExit as e:
+        raise RuntimeError(f"it exited at import ({e})")
+    return build
+
 def idle_lanes(live, repo_dir=None):
     """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
@@ -5599,11 +5722,8 @@ def idle_lanes(live, repo_dir=None):
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
         return 1
     try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("roadmap_build", IDLE_BUILD)
-        build = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(build)
-    except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
+        build = load_roadmap_build()
+    except Exception as e:
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
     c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
@@ -5652,7 +5772,7 @@ def build_parser():
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
-    p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
+    p.add_argument("--live", default=None, metavar="FILE", help="the publisher's live-work file: with --idle-lanes its lanes to archive, with --reviewed the lost-work rows")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
@@ -5709,8 +5829,8 @@ def main(argv, host=None, lock=None, hosts=None):
         for n, _, _ in a.lint:
             if [m for m, _, _ in a.lint].count(n) > 1:
                 p.error(f"--lint gives pull request #{n} more than one verdict")
-    if a.live is not None and not a.idle_lanes:
-        p.error("--live goes with --idle-lanes")
+    if a.live is not None and not (a.idle_lanes or a.reviewed):
+        p.error("--live goes with --idle-lanes or --reviewed")
     if a.root and not a.reviewed:
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
@@ -5840,7 +5960,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.root:  # every block is built before any is printed
-            lines, ok = reviewed_roots(a.root, hosts, a.config)
+            lines, ok = reviewed_roots(a.root, hosts, a.config, a.live)
             say(*lines)
             return 0 if ok else 1
         if (a.confirm or batch) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
@@ -5930,7 +6050,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
-            lines, ok = reviewed_lines(h)
+            lines, ok = reviewed_lines(h, a.live)
             say(*lines)
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
