@@ -1226,6 +1226,15 @@ def case_page_mail_send_refusals_block():
         expect_send_missing("page: %s does not prove 98" % label, p, "fb-0958-7", "98")
 
 
+def case_page_mail_send_to_address_proves_nothing():
+    """A mail send whose --to address is `x/98` and whose body names no item does not prove page item 98: the address is
+    no part of the message."""
+    p = page_run(new_cfg(), "page-mail-to", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), mail_rec("Noted.", head="mail send --to x/98 --kind inform --body-file -")])
+    expect_send_missing("page: a mail send whose --to is x/98 and whose body is Noted. does not prove 98", p,
+                        "fb-0958-7", "98")
+
+
 CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # a cloud send_message failure
 # A failed local SendMessage (unknown name) has no is_error flag: the text is this JSON, and the user record's
 # toolUseResult carries success false. The name here is a fixture, since the real message is not fixed.
@@ -1893,6 +1902,15 @@ def case_repo_mail_send_refusals_block():
               result_rec("m1", MAIL_FAILED, is_error=True)])):
         p = page_run(new_cfg(), "repo-mail-refused", [("rename", (REPO_ITEM,))], records)
         expect_repo_unsent("repo: %s does not prove the item" % label, p, "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_mail_send_to_address_proves_nothing():
+    """A mail send whose --to address is acme/widgets and whose body names no repo does not prove the repo item: the
+    address is no part of the message."""
+    p = page_run(new_cfg(), "repo-mail-to", [("rename", (REPO_ITEM,))],
+                 [owner_rec("rename"), mail_rec("Noted.", head="mail send --to acme/widgets --kind inform --body-file -")])
+    expect_repo_unsent("repo: a mail send whose --to is acme/widgets and whose body is Noted. does not prove the item",
+                       p, "fb-0958-21", REPO_SLUG)
 
 
 def case_repo_send_with_error_result_does_not_count():
@@ -4439,6 +4457,7 @@ CASES = (
     case_page_sendmessage_proof_passes,
     case_page_mail_send_proof_passes,
     case_page_mail_send_refusals_block,
+    case_page_mail_send_to_address_proves_nothing,
     case_page_send_with_error_result_does_not_count,
     case_page_send_with_ok_result_still_counts,
     case_page_error_result_of_another_call_does_not_cancel_the_send,
@@ -4481,6 +4500,7 @@ CASES = (
     case_repo_send_naming_the_repo_passes,
     case_repo_mail_send_naming_the_repo_passes,
     case_repo_mail_send_refusals_block,
+    case_repo_mail_send_to_address_proves_nothing,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
