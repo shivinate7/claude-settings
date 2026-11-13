@@ -6,6 +6,8 @@ description: Use when a session has a question, a decision or a task for the own
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
 that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only triage writes an item (owner, 2026-11-10 14:30-14:32 CST). A lane that wears triage's hat in a run with one lane writes as triage (owner, 2026-11-10 14:33 CST).
 
+In a larger build the owner talks in two places: the page for anything waiting on the owner, and the coordinator's chat for anything new, never a lane (decision `session-tiers`, the session roles; owner, 2026-11-10 16:46 CST, G15, the two-places ruling).
+
 A lane never writes an item, unless it wears triage's hat in a run with one lane. A lane puts its
 question in its report, and sends it to its parent in the same turn. Triage writes the item with the asking session as `owner`, and routes the
 answer back to the lane or its next try. Not built: the route from a lane to triage.
@@ -14,6 +16,24 @@ Every repo's page is the same template. The page is fixed. All content lives in 
 through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
 "Add a design") and the roadmap block (see "Update the roadmap block"). Rule `questions-go-to-owner` (questions go to the owner) sends each
 question here. Decision `questions-go-to-owner` holds the rulings.
+
+The rest of the page's rules live in sibling files under `reference/`. Read a file only when its row applies.
+
+| Topic | File | Read it when |
+|---|---|---|
+| Keep the page on main's code | `reference/republish.md` | Before the page is republished, at each writer wake. |
+| Rebuild a page from the repo | `reference/republish.md` | The page is gone, or moved to an org this account cannot read. |
+| Merge a copy into a live page | `reference/republish.md` | Two accounts each wrote a page for one repo. |
+| Keep a copy in the repo | `reference/copies-and-accounts.md` | At each writer wake, before any republish, and in a rebuild or a merge. |
+| Register and cite an artifact | `reference/copies-and-accounts.md` | A repo registers an artifact, or a decision or debt cites one. |
+| Before you switch Claude accounts | `reference/copies-and-accounts.md` | Before the account, the org or the machine changes. |
+| Rotate the writer | `reference/routing-and-sessions.md` | The writer role moves to a new session. |
+| Route an ask | `reference/routing-and-sessions.md` | An ask arrives in `asks/`. |
+| Message another session | `reference/routing-and-sessions.md` | A session sends or reads a message to or from another session. |
+| Make a repo's page | `reference/repo-pages.md` | `layout.py waiting-page` prints `unknown` for a repo, a fork makes its own page, or a page is rebuilt. |
+| Update the roadmap block | `reference/repo-pages.md` | The roadmap block is rebuilt. |
+| Update a repo's pages | `reference/repo-pages.md` | A batch changes `page.html`. Also before a write that sets a ruling, `reply`, `replied`, `lastAnswer`, `lane`, `waits`, `multi` or `ranked`, and when a design is republished. |
+| Add a design | `reference/designs.md` | An option needs a mockup picture. |
 
 ## Find the page
 
@@ -109,7 +129,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
     A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
     command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
-    (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
+    (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `style-hand-off-gh-login`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
@@ -232,11 +252,6 @@ extras key `page-writer`; the pick guard uses it when the transcript has no `met
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
 
-## Rotate the writer
-
-A rotation moves the writer role to a new session, and the page and its open asks must follow it.
-The steps are in project-ops `templates/operating-model.md`, "Rotation of standing sessions", steps 1 and 5.
-
 ## Chat first
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
@@ -264,191 +279,6 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
 - The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo").
-
-## Keep the page on main's code
-
-The writer runs this at each wake and before each republish. A lane never runs it. Every republish
-is main's `page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (owner,
-2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
-
-1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
-   A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
-   `<items>` and `<answers>` are what `ArtifactData list items` and `ArtifactData list answers` saved. It
-   compares the page's code outside `designData` with `skills/waiting-page/page.html` on
-   claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
-   read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
-   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
-   `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
-   (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
-3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
-   republish, so the copy holds the page as it was.
-4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
-   step 2), never the live page: `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <out>`
-   (`<folder>` is the fetch of "Keep a copy in the repo", step 2). It writes nothing. Hold the republish on any exit but 0.
-   `held item <n>: ...` (exit 4): fix that item, check again. `checks unknown: ...` (exit 3), or no page file (exit 2):
-   a check that cannot read its input fails, never passes (owner ruling, item 276 a): say the line in the reply,
-   and republish nothing until a check passes. `checks pass` (exit 0): go on.
-   `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
-   `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
-   (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
-   When you also add a design, do it in
-   `<out>` first and republish once ("Add a design").
-5. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
-   could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
-   `origin/main` in it). Only main proves a page current; the installed copy never does.
-
-The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
-repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
-publish of main's page stamps main's page version, and the next session start says when the page is behind.
-
-Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
-`--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
-
-## Keep a copy in the repo
-
-A page that is lost or moved to another org takes its items with it. Once, 80 items were rebuilt from old
-transcripts because no repo held them. So the writer keeps a copy of the page's data in the repo (decision
-`waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
-request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
-
-The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
-never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
-
-1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
-   Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
-   and use that path inside the worktree.
-2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
-   `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
-   Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
-   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
-   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
-   is an empty folder with that marker. Make the folder by hand if the tool wrote none.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
-   `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
-   `page/page.html`, written only when it changed.
-   Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
-   collection is `unknown`.
-4. Read the verdict line.
-   - `same`: stop. Commit nothing.
-   - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
-     commit and push the record branch. The commit message names the count.
-   - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
-     draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
-   - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
-     the kind, never the value. Fix the item on the page first, then run the steps again.
-   - `unknown`: nothing was written. Say the line in the reply. A missing collection folder or marker, an
-     emptied collection and a crash (exit 3) are the usual causes.
-
-The copy holds one JSON file per doc, `<collection>/<doc id>.json`, and `page/designData.json`. The mockups live
-in the page's `designData` block, not in the database.
-The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set with `=`, bare bearer or basic credentials,
-passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
-(`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
-phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
-A password word with a placeholder, a mask or a plain word as its value, and only blanks or plain prose after it on
-its line, passes. Prose is a function word, then letter words. After a `,` `;` or and/or/but/is/are, a later word on the
-line that is no function word refuses. The `,` `;` or `.` that ends the value does not count. So `none, then swordfish`
-passes, and `none and swordfish` does not. `PWD=<path>`, a no-reply address and the ssh remote of a public git host pass
-too. So does a `key` that ends one of nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey,
-hockey, lackey), when the word starts at a non-letter or the string start: `turnkey=` passes, `superturnkey=` refuses.
-
-Cost: one list call per page of each collection, one python process, and one commit when something changed. No
-timer, no watcher.
-
-## Register and cite an artifact
-
-Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
-(`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
-`account`. A role other than `waiting-page` also has `collections`, the collections to export. An empty list
-(`"collections": []`) makes a page-only entry: its page and files export, and no database does. `id` is a slug of
-32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
-the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
-folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
-has that role.
-
-A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and
-the registry then needs one edit. `python3 lint/check_artifact_cites.py` refuses a bare link and an unregistered id
-in decisions and debts. A brief or a handoff is a working file, and the check does not read it. The roadmap steps
-of a repo may still hold links. List them for triage to move with `python3 ~/.claude/lint/check_artifact_cites.py --root <repo root> --steps list`.
-
-## Before you switch Claude accounts
-
-Run this once before the account, the org or the machine changes. It copies every registered artifact, not only
-the waiting page. A page that moves loses its read access, and the repo then holds its last copy.
-
-1. Check out the record branch in its own worktree, as "Keep a copy in the repo" step 1 says.
-2. Make one new folder. For each entry of the registry, make `<folder>/<id>/`. In it, run `ArtifactData list` for
-   each collection the entry lists, with `out_dir` set to `<folder>/<id>`, `query.limit` 1000, and
-   `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
-   stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `<folder>/<id>/<collection>/.complete`. Make the folder by hand if the tool wrote none. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
-   and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
-   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
-   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. When the session
-   can read only one account's pages, pass `--account <label>` with its own account's label from the registry; without
-   it, each page the session cannot fetch prints `<id>: unknown`. An entry of another account prints
-   `<id>: skipped - account <its account>`, needs no folder and writes nothing. A label no entry holds, or an empty
-   one, prints one `unknown` line, writes nothing and exits 2. The page and each
-   text file are scanned like the docs; a find refuses that artifact only.
-4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
-   branch. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
-   the reply, and fix the cause first.
-
-Cost: one list call per page of each collection of each entry, one python process, and one commit when something
-changed. No timer, no watcher.
-
-## Rebuild a page from the repo
-
-Use this when the page is gone, or moved to an org this account cannot read. It needs the repo only, never the
-live page.
-
-1. Make a new page ("Make a repo's page"), and note its URL. The new page has an empty database.
-2. Check out the record branch in its own worktree and name the copy folder in it, as "Keep a copy in the repo"
-   step 1 says.
-3. Make one new empty folder. Run
-   `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
-   For an artifact other than the waiting page, add `--collections <names>`: the `collections` of its registry entry,
-   or its folders are `unknown`. It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop
-   and say so. A page-only copy (registry `collections: []`) has no docs, so `--rebuild` reports it holds no docs.
-   Restore it by publishing its `page/page.html` (and `page/files/`) to a new page.
-4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
-5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
-   the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
-   it to the new URL, as "Keep the page on main's code" step 4 says.
-6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
-7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
-   in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
-
-## Merge a copy into a live page
-
-Use this when two accounts each wrote a page for the same repo. One account's page is live. The other account's
-export is in the repo copy. This adds the copy's missing items to the live page. The live page wins, so a live item
-is never changed.
-
-1. Check out the record branch in its own worktree and name the copy folder, as "Keep a copy in the repo" step 1 says.
-2. Fetch the live page's collections into one new folder, `<live folder>`, as "Keep a copy in the repo" step 2 says.
-   Touch `.complete` in each collection folder after its last page. A folder with no marker is `unknown`. Also read
-   the live page with `Artifact` action `read`, and use the file the read names as `<html file>`. A read that gives a
-   summary, not the raw page, is `unknown`.
-3. Make one new empty folder, `<out folder>`. Run
-   `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <out folder> --live-page <html file>`.
-   For an artifact other than the waiting page, add `--collections <names>`.
-4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r> designs <d>`. `renumbered` counts the copied
-   items that took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. A copy
-   answer is skipped when the live page holds its item. An `unknown` line writes nothing. Say it in the reply.
-5. Send each `batch-NNN.json` list to the live page as one `ArtifactData batch`, in order. Each entry is a `set`.
-6. Read the live page's items back. Their count must equal the count of live items from step 2, plus the items among
-   the `<n>` written docs.
-7. Put the mockups in, on main's code ("Keep the page on main's code"). Run its read, `stale_pages.py --write` and copy
-   steps on the live page. The page that `--write` writes is main's `page.html` with the live roadmap block carried
-   over. In that page, replace the text inside the `designData` script element with `<out folder>/designData.json`,
-   as is. The file already writes each `<` as `\u003c`, so no string can close the script. Publish that page once to
-   the live URL, as that section's republish step says.
-8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<out folder>/renumbered.json`: the
-   key is the old `n`, and the value is the new one. Commit it on the record branch.
 
 ## Add an item
 
@@ -668,216 +498,3 @@ re-route the item. Unpark (an `unpark` answer on that line) reopens `items/<id>`
 In the same wake it removes the entry and deletes the answer. At each wake while `meta/page.parked` is not empty, the writer
 saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`.
 It then finishes what that names: `parked-open <id>` is an entry to remove, and `park-answer-old <key>` is an answer to route or delete.
-
-## Route an ask
-
-Several asks may share one `at`: route each on its own, never as one.
-
-An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that holds its subject. An
-ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the writer"):
-
-1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
-2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
-3. Feedback (about the page, a rule or the way of working) is filed like a chat message. Jot it to the feedback inbox,
-   `~/.claude/handoffs/<session id>.inbox.md`: a heading `### <stamp>`, then the text in a backtick fence (use more
-   backticks if the text holds three), then one item line under the fence: `- fb-<HHMM>-<n> [<kind>] -> <home>`.
-   The stamp is Central time with its offset, for example `2026-11-10 12:08 CST (UTC-06:00)`. Read the time from
-   `~/.claude/bin/now-central --full`, and add `(UTC-06:00)` for CST or `(UTC-05:00)` for CDT. `<HHMM>` is the stamp's
-   hour and minute. Then move it to its home. Write `home` and `filed`, and a short `reply`.
-   A comment wake in claude-settings needs one of two item lines under its block, or the Stop guard blocks the turn.
-   The guard checks every wake on the waiting page that starts with the banner `[Artifact comment sent to Claude]`:
-   Asked, Replied, owner prose, and a Saved wake whose items carry a note in parentheses. Only a plain Saved wake,
-   with no note in its items, and an Undone wake are exempt. An Undone wake reopens items and carries no form to check.
-   The two item lines:
-   `- fb-<HHMM>-<n> [task] -> step:<slug>`, where that step's file on the record branch names `skills/waiting-page`;
-   or `- fb-<HHMM>-<n> [note] -> not-page-form`, when the comment is not page form.
-4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
-
-An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
-If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
-
-The owner may Mark read a routed ask: its root has a `home` and a `reply`, and no record in the thread waits. That sets `dismissed` on its
-root ask. The page draws Mark read only on a routed ask. An ask with no `home` stays a full card. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
-
-## Message another session
-
-Draft: decision `session-messages` is open. The git mailbox is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Build step 2 (the Mac and Windows auth check) has not run.
-
-Decision `session-messages` (messages between sessions) sets this.
-
-- Cloud to cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
-- Local: `SendMessage` to the name `ListAgents` gives.
-- To or from the owner's computer, use the git mailbox. Cloud `send_message` to the owner's computer is refused.
-- The mailbox commands: `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, `mail read [--addr <addr>] [<id>]`, `mail take [--addr <addr>] <id>`. They need `MAILBOX_REPO` in the session's env. The settings.json default is not set yet.
-- Addresses: a cloud session is `cloud/session_<id>`. Its env holds `cse_<id>`, the same id. A local session has its own folder `pc/<host-slug>/<owner>-<repo>/<session id>` and the repo folder `pc/<host-slug>/<owner>-<repo>`. A turn-start line gives the `--addr` to read or take a message with.
-- A message starts with this line: `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The next line is `Reply-to: <addr>`, then a blank line and the body. `<id>` is 12 lowercase hex characters. `re` names the message it answers, or `-`.
-- At turn start, each open message gets one `mail:` line with its `mail read` and `mail take` commands. Act on a message only after `mail take` exits 0. `mail unknown: <reason>` means the check failed (for example `timeout` or `auth`). It never means no mail.
-- Exit codes: 0 ok; 1 not sent, not taken, "taken by another", or "mail unknown"; 2 bad use or `MAILBOX_REPO` not set.
-- The reply is the ack. An `inform` needs no reply. Send no separate ack: each local `SendMessage` spends the peer guard and the desktop cap.
-- One `request` and one `reply` per exchange.
-- A push race keeps the id and raises `try` by one, inside one `mail send`. A new `mail send` is a new id. A `SendMessage` resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it. A second `mail take` is refused, so the receiver acts on an id once.
-- The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
-- A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local). A `mail send` that prints "not sent" is not sent.
-- Q4 is answered (owner, 2026-11-10 09:39 CST): a waiting session checks at its next turn start, and a cloud session may also set one `send_later` check-in for that one reply, as decision `session-messages` says.
-- A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
-
-## Make a repo's page
-
-Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
-The repo has no page. The coordinator-and-triage setup is the grant: the first triage does this, with no
-separate grant. It never marks the repo rolled out.
-
-A fork (a worktree whose work never reaches main) makes its own page and writes its own `waiting-page`
-key. It never reuses main's.
-
-1. Load the `artifact-capabilities` skill.
-2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
-   `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
-   `<title>` to "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST). Change nothing else. A republish keeps the title, and renames an old "Queue" or "Roadmap" title to "<repo> Cockpit" (`splice.carry`). A page
-   published with `db` only keeps working and wakes no one. Republish it with both capabilities
-   to turn this on.
-3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
-   `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
-   `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
-   then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
-   invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Set the URL once: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`. It writes the
-   `waiting-page` key of the repo's extras file, `.claude/layout-extras.json`. Exit 0 wrote it. Exit 1 means
-   the key is already set: it prints the URL and writes nothing. Exit 2 means the URL is not an artifact
-   link, or the extras file cannot be read or written. The file alone does not mark the repo as rolled
-   out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
-5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
-
-A local session can write to the database (measured on the Mac, Oct 26). A Windows session is
-unmeasured.
-
-## Add a design
-
-A question about how something looks carries one design per option. The owner picks by looking, so
-a link to a folder, a repo, a file or another artifact does not count. The Designs tab pages through
-every mockup whose question is open. Each option's picture sits at the top of its
-own option card. A tap on an option's picture opens the viewer. A tap on the rest of the card
-picks the option. A "View" control, 40px or more high, sits in a row under the picture. It never covers the picture. A design that no option names shows at the front
-of the item, before the options. An option that names a design (`design`) which the item does not
-carry shows a warning line in its card in place of the picture.
-
-Each option gets its own mockup, drawn in that option's state. Two options never show the same picture with the same `focus`.
-The page refuses an item where they do, or where a `focus` finds nothing.
-The guard runs `check_designs.mjs` on the published page at each item write that carries a design, and refuses a write the page would refuse or draw as a strip (rule `page-item-design`, decision `page-item-design`). Republish the design first: the check reads the page you last published.
-
-1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
-   phone width for a web app. Draw it at the width of the first device that
-   `python3 ~/.claude/lint/layout.py devices <repo root>` prints. Where it prints `unknown` or no
-   size, draw at the page's default width (`FIT_W` in `page.html`; read it once with
-   `grep -n 'const FIT_W' <skill folder>/page.html`) and leave `drawn` unset. Set `drawn` whenever
-   you draw at another width. The page scales it to the card. A picture taller
-   than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
-2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
-   what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
-   Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, from the saved live page:
-   `<out>` keeps the live roadmap block with the live designs. In `<out>`, add `"slug": "<html string>"` to the JSON in
-   `<script type="application/json" id="designData">`, and change nothing else. Never edit the live
-   page's own code.
-4. Add `designs: [{slug, label, file}]` to the item, one per option, and set `design: "<slug>"` on each option.
-   - Every design carries `file`, the path of its mockup file, in the repo's design folder (`docs/design/<item folder>/<file>`). Write the mockup there
-     first, then commit and push it: git is its home. A machine-home path (`~/Developer/<repo name>-imports`), a path in a Claude app folder,
-     such as `side-session-notes`, or a link is refused: an account switch loses it (guard rule `mockup-home`, decision `mockup-home`).
-   - A design may carry `focus`, a selector of an element inside the mockup. The option card then
-     shows that element, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, and opens at the top of what the card shows. It draws as wide as a 390 × 844 phone picture (221.8px), or as the card's column less its border and scrollbar if that is less. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element
-     being decided, such as the late-package row with its buttons.
-   - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
-     focused element, else the whole mockup). The card reserves that height before the mockup loads,
-     so the first paint does not jump.
-   - A design may carry `drawn` (a number, the width in mockup pixels it is laid out at; default `FIT_W` in `page.html`).
-     The page draws the mockup that wide and scales it to the width it has, so a 1200 wide design
-     shows whole. Set it on any design wider than a phone.
-   - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
-     width of an option is one more design with that `option`. The first design of an option is its
-     picture on the card.
-   - A design may carry `state`, a slug such as `late-package`: the state of the mockup this picture shows. The mockup side of the contract: the mockup reads `#s=<state>` from its URL hash on load and on `hashchange`, and draws each state as an element with `data-state="<state>"`. The page opens the picture at that state, in the card frame and the viewer, and adds the state to the viewer title. The viewer's "Open this state" opens the mockup at that state in a new tab. The button on a front preview opens the viewer at that design. A `state` that no `data-state` element in its mockup carries blocks the item, with a line that names the option. Two options may share one mockup and differ by `state`: give each such design its `option` key.
-   - The viewer lists every option's designs at every width, in option order. Its label reads
-     "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
-     wrap at the ends. A width with no name reads `Phone`.
-5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities. Whether the database stays
-   is unmeasured until the step 4 live check of "Update a repo's pages".
-   A republish replaces the whole page, so run this step in one session at a time. A second session
-   that read the page earlier would overwrite the first one's mockups. A lane never does this step:
-   triage does (see "Add an item").
-
-The mockup leaves the page when its question closes and the page is next republished. The page
-holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
-
-## Update the roadmap block
-
-The roadmap build makes the Status tab's data, the roadmap block. The page writer alone
-publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
-The Status tab draws each phase id that its steps use, and a step with no phase goes under "No phase".
-
-1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
-   (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`; its item rows carry `lane` when the page item has one; its `landedPulls` rows are the pull requests
-   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`). Exit 1 with `todo step with an open PR`
-   lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1
-   with `stalled step:` lines does the same: splice, publish, then dispose each one (a step: set it `todo` or
-   `done`, or write its `paused` field; an item: re-route it, close it, or resume its lane). The unknown
-   lines (`stalled step: unknown (...)`, `stalled step: items unknown (...)`) exit 0 and need no disposal.
-2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
-   older copy: the live page holds the designs for the items still open.
-3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
-   It replaces the roadmap block, from `<!-- roadmap:data -->` to `<!-- /roadmap:data -->`, and keeps
-   every other byte, the `designData` block among them. It refuses a page with no roadmap block or an
-   unclosed one. A page that predates the roadmap block has none: first carry it into the template
-   (`splice.py --page <skill folder>/page.html --carry <live page> --out <carried page>`), then splice
-   the block into `<carried page>`.
-4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
-   at a time, never with `force`. Whether the database stays is unmeasured until the step 4 live
-   check of "Update a repo's pages".
-5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
-   `designData` block of the live page and keeps the roadmap block.
-
-Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
-
-## Update a repo's pages
-
-A batch that changes `page.html` republishes each waiting page this account can reach, before the
-batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `~/.claude/lint/layout.py`.
-
-1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
-   that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
-   raw HTML, or that does not name this account a writer, is unreadable too. Write an empty
-   `<artifact id>.notfound` instead only when the read says "not found" AND `Artifact` action `list`
-   with scope `all` holds no such id. Page the list to its end (`page_token` until none is returned)
-   before an id counts as absent. Any other failed read stays `.unreadable`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
-   `behind`, `unknown` or `not-found` with its owner, and exits non-zero. An unread page is never
-   current. A `not-found` page is reported with the claude-settings waiting page as the place to re-file that
-   repo's items: the URL recorded in the extras file of the claude-settings checkout that holds the script, not
-   fetched. The target reads `the claude-settings waiting page is unknown` when that checkout has no page, its
-   extras file cannot be read, or its page has a `.notfound` or `.unreadable` marker in the folder. The check
-   never repoints a page: the owner decides.
-3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
-   from plain `page.html`, as "Keep the page on main's code" step 2 says:
-   `stale_pages.py --page <fetched page> --write <new page>`.
-   `--write` carries the live `designData` block, roadmap block and `<title>` text into main's page, byte for byte. A live
-   page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
-   block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
-   lacks either block, when the live page has no `designData` block, or when either file has a
-   broken or doubled block. Before the republish, check the pictures of the open items against `<new page>`, never the live page:
-   `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <items folder> --page <new page>`, one `<items folder>` per behind page. It holds
-   the `items` and `answers` of that page's own artifact, fetched as "Keep a copy in the repo" step 2 does (`ArtifactData list`
-   on that page's `url`, `.complete` after each last page), never this repo's copy. It writes nothing. Hold the republish on any exit but 0, as in the other two
-   republish routes (exit 4 a held item, exit 3 `checks unknown`, exit 2 no page file). Republish `<new page>` to the same URL
-   with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
-   republish of plain `page.html` drops the open items' designs and the Status tab.
-   `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
-   reads such a page current. After the publish, re-read the republished page (`Artifact` action
-   `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
-4. Update one page first, then read its items: they must all still be there. That the database and
-   its saved answers survive a republish is unmeasured until this live check is run.
-5. Run the command again. The batch report lists its verdict line, with each `unknown` or `not-found` page
-   and its owner.

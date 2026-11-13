@@ -2,6 +2,8 @@
 """The PreToolUse matcher that routes to hooks/guard.py must cover every tool the guard judges.
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
+It also pins the page-tool names in settings.json's permissions.allow: cloud page writes must not ask,
+and ArtifactComments posts visible text, so it stays asking.
 """
 import ast, glob, json, os, re, sys, unittest
 
@@ -249,6 +251,14 @@ class Matcher(unittest.TestCase):
         matchers = guard_matchers()
         self.assertTrue(any(re.fullmatch(m, "Artifact") for m in matchers),
                         "no guard matcher covers Artifact: %r" % matchers)
+
+    def test_guard_matcher_covers_artifact_comments(self):
+        # Rule page-thread-reply refuses a reply into a comment thread on the waiting page, made by the
+        # ArtifactComments tool, so the guard must see that call. Matchers are whole-name regexes, so
+        # Artifact and ArtifactData do not reach it.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "ArtifactComments") for m in matchers),
+                        "no guard matcher covers ArtifactComments: %r" % matchers)
 
     def test_guard_matcher_covers_trust_card_tools(self):
         # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
@@ -744,6 +754,41 @@ class JudgeModelRows(unittest.TestCase):
         judges = call_judge_judges()
         wrong = dict(judges, Agent=(judges["Agent"][0], "claude-haiku-9-9") + tuple(judges["Agent"][2:]))
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
+
+
+class PermissionsAllow(unittest.TestCase):
+    """permissions.allow in settings.json holds the page-tool names that cloud page writes need, so the writes do
+    not ask. ArtifactComments posts visible text, so it stays off the list. Each name is a literal here. The list
+    itself is read from SETTINGS, never copied."""
+
+    def allow_list(self):
+        # Scope first: a moved key or an empty list must fail here, or the absence case would pass on nothing.
+        with open(SETTINGS, encoding="utf-8") as handle:
+            permissions = json.load(handle).get("permissions")
+        self.assertIsInstance(permissions, dict, "settings.json has no permissions object")
+        allow = permissions.get("allow")
+        self.assertIsInstance(allow, list, "settings.json permissions.allow is not a list")
+        self.assertTrue(allow, "settings.json permissions.allow is empty")
+        return allow
+
+    def test_artifactdata_is_allowed(self):
+        self.assertIn("ArtifactData", self.allow_list(),
+                      "ArtifactData is missing from permissions.allow, so cloud page writes would ask")
+
+    def test_db_usage_is_allowed(self):
+        self.assertIn("mcp__claude-artifacts__db_usage", self.allow_list(),
+                      "db_usage is missing from permissions.allow, so its page write would ask")
+
+    def test_read_artifact_is_allowed(self):
+        self.assertIn("mcp__claude-artifacts__read_artifact", self.allow_list(),
+                      "read_artifact is missing from permissions.allow, so its page write would ask")
+
+    def test_artifactcomments_is_not_allowed(self):
+        # ArtifactComments posts visible text, so it stays asking. A scoped form such as ArtifactComments(...)
+        # allows it too, so that form is held as well.
+        held = [entry for entry in self.allow_list()
+                if entry == "ArtifactComments" or entry.startswith("ArtifactComments(")]
+        self.assertFalse(held, "ArtifactComments is on permissions.allow, but it posts visible text and must stay asking")
 
 
 if __name__ == "__main__":

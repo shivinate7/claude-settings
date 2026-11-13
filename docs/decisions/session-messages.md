@@ -5,9 +5,12 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
-(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
-Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
+A Windows round trip passed (request 8933ab505319 to the cloud, reply
+7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
+`MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
+measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
+with no address, or a store with no mail ref, prints nothing (the store case has a test; the no-address case is read from the code only). A Mac is not held: its round trip passed 1 of 1 (mail 4d31137fd16c Mac to cloud, 71c5f84d64a8 cloud to Mac, 20:30 CST Nov 12; record: branch roadmap, commit e86503c2a). `HELD_PLATFORMS` in `hooks/mail.py` is empty; a platform listed there prints nothing at turn start and `mail` exits 2 unless `MAILBOX_HOLD_OFF=1`. The refusal text names no variable. A local Linux session is not held and is unmeasured.
+The 20-message trial (step 5) is still open.
 
 ## Ruling
 
@@ -20,7 +23,7 @@ Ruling: every message between sessions goes through the git mailbox, cloud to cl
 The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
 The mailbox is read at turn start, so it cannot wake anyone.
 The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
-Local-computer checks: measured on a Mac only; Windows unmeasured.
+Local-computer checks: measured on a Mac only; the mail round trip alone is also measured on Windows (11:52 CST Nov 12), and the other Windows checks are unmeasured.
 
 Why:
 
@@ -143,6 +146,9 @@ Design:
   `bin/mail`, with `bin/mail.cmd` beside it. The cache is a bare clone: `MAILBOX_CACHE`, else
   `~/.claude/mail.git`. It uses plumbing only: read-tree into a temporary index, hash-object,
   update-index, write-tree, commit-tree, then push to refs/heads/mail. It never uses a working tree.
+  Each git call encodes its stdin as UTF-8 bytes, so Windows adds no CR to an index path. Before the push, it reads the new tree
+  back: each added path must hold the blob of its text. A git call that prints "Ignoring path" on stderr
+  is an error, because git then exits 0 and skips the path. Either failure prints "not sent".
   Push race: file names are unique. On a non-fast-forward push, it syncs and rebuilds on the new tip. It
   makes six tries in all: the first push and at most five retries. Any other refusal, such as a hook or
   ACL refusal, is not retried. On failure it prints "not sent: <reason>" and exits 1. On success it
@@ -157,19 +163,19 @@ Design:
   age lookup prints "age unknown" and keeps the line. No prompt can open: GIT_TERMINAL_PROMPT=0,
   GCM_INTERACTIVE=never, and ssh in BatchMode with a 3 s ConnectTimeout, unless the caller set its own
   ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start
-  and one network call when the sha is unchanged. When it moved, at most four git starts. Files are
+  and one network call when the sha is unchanged (not pinned). When it moved, at most four git starts. Files are
   written only in the cache, and only on a move. Test: a process-start stand-in and a files-written
   snapshot, as in `hooks/test_daily_note.py`.
 - Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
   `done/<addr>/<id>.md` and appends `Taken-by: <addr> <time> <token>`. It exits 0 and prints `taken <id>`
   after the push succeeds, and a session acts only then. In a take race, the loser finds the open path
-  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A
+  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A take whose read-back fails (the open file stays in the new tree, or the done file is missing) prints "mail unknown: message file missing from the commit" and exits 1. A
   request gets a reply file: `mail send --kind reply --re <id>`, sent to its Reply-to. An inform closes by
   the take alone.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
-  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
-  not set.
+  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
+  not set, or the platform held.
 - Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
   each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
@@ -205,12 +211,12 @@ Design:
    `cloud/session_rtripb`), 2026-11-09 19:34 CST: send message 2979e0b314d0 (request), read, take (exit 0),
    reply message 60884f559348, reply read and taken by the sender (exit 0), second take of 2979e0b314d0
    refused "taken by another" (exit 1). Cloud only; Mac and Windows auth still not measured.
-   Not yet measured: Mac and Windows auth for `ls-remote`.
+   Not yet measured then: Mac and Windows auth for `ls-remote` (later: Windows round trip passed 2026-11-12; Mac passed 2026-11-12).
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
 4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
-   `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
-   Windows auth for `ls-remote`.
+   `hooks/local_time.py` call. The `settings.json` env default was left unset here. The owner set it by
+   ruling on 2026-11-12 (page item 556 a), before the Mac measure.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 

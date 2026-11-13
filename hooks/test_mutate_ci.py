@@ -36,7 +36,9 @@ The modes, as the builder implements them. This file is their interface.
   `runpy.run_path`) whose path names `<stem>.py`. The loads are
   found with `ast`, never a grep. A path that a function takes as a parameter counts too: a call of a function defined in
   the same file counts when its argument for that parameter, by position or by keyword, names `<stem>.py`. Calls through
-  an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped.
+  an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped. A guard section
+  file (a `.py` in the folder that `hooks/test_guard.py` reads its sections from) that loads the module counts as a load
+  of `hooks/test_guard.py`, which is printed in its place. The section file itself is never printed.
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
 `replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
@@ -78,6 +80,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import mutate_guard  # noqa: E402  REPORT_TARGETS, and the mode entry points once built
 import mutate_shared  # noqa: E402
+import rule_audit  # noqa: E402  SECTION_DIR's one ast reader (lint/rule_audit.py)
 from test_mutate_js import git, unique_line  # noqa: E402  the one home of these helpers
 from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  the one home of the fixture writers
 
@@ -120,6 +123,18 @@ def show(repo, ref, path):
     if done.returncode != 0:
         raise AssertionError("%s has no %s: %s" % (ref, path, done.stderr.strip()))
     return done.stdout
+
+
+def guard_section_files(ref):
+    """{path: text} of the guard section files at `ref`. The folder is the runner's SECTION_DIR, read from the runner at
+    `ref` by rule_audit, so a section file is found whatever its name."""
+    runner = os.path.join(REPO, "hooks", "test_guard.py")
+    folder = rule_audit._section_dir(ast.parse(show(REPO, ref, "hooks/test_guard.py")), runner)
+    if not folder:
+        return {}
+    rel = os.path.relpath(os.path.normpath(folder), REPO).replace(os.sep, "/")
+    listed = git(REPO, "ls-tree", "--name-only", ref, rel + "/")
+    return {path: show(REPO, ref, path) for path in listed.split("\n") if path.endswith(".py")}
 
 
 def rev(repo, ref):
@@ -1687,14 +1702,39 @@ class TestsForTests(unittest.TestCase):
     def test_a_load_bound_inside_a_function_is_the_rm_var_family_line_for_guard_rm_var(self):
         target = "hooks/guard_rm_var.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
-        loader = "hooks/test_guard.py"
-        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$',
-                         "the fixture: %s binds the guard_rm_var path inside a function" % loader)
+        sections = guard_section_files("HEAD")
+        self.assertTrue(sections, "the fixture: no guard section file is read from the runner's SECTION_DIR at HEAD")
+        loaders = sorted(path for path, text in sections.items()
+                         if re.search(r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$', text))
+        self.assertEqual(len(loaders), 1, "the fixture: one guard section file binds the guard_rm_var path inside a "
+                         "function, found %s" % loaders)
+        self.assertTrue(mutate_guard._loads_module(sections[loaders[0]], "guard_rm_var"),
+                        "the fixture: %s loads guard_rm_var, as the walk reads it" % loaders[0])
+        runner = "hooks/test_guard.py"
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["%s::rm-var" % loader],
-                         "guard_rm_var's only walk suite is the whole %s, which is dropped: its rm-var family line "
-                         "stands in for it" % loader)
+        self.assertEqual(out.splitlines(), ["%s::rm-var" % runner],
+                         "guard_rm_var's only walk suite is the rm-var family line of %s" % runner)
+
+    def test_a_module_only_a_guard_section_file_loads_prints_the_whole_runner(self):
+        """hooks/reread_check.py is loaded by a tests/guard section file alone. The runner that runs that section file is
+        printed in its place, and the section file is not. The module has no GUARD_MODULE_FAMILIES row, so no family line."""
+        target = "hooks/reread_check.py"
+        self.assertNotIn(target, guard_table(), "the fixture: %s has no GUARD_MODULE_FAMILIES row" % target)
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s is no REPORT_TARGETS row" % target)
+        sections = guard_section_files("HEAD")
+        loaders = sorted(path for path, text in sections.items() if mutate_guard._loads_module(text, "reread_check"))
+        self.assertTrue(loaders, "the fixture: a guard section file at HEAD loads reread_check, as the walk reads it")
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        printed = out.splitlines()
+        self.assertIn("hooks/test_guard.py", printed,
+                      "--tests-for %s must list hooks/test_guard.py, the runner of %s" % (target, loaders[0]))
+        self.assertEqual([line for line in printed if "::" in line], [],
+                         "%s has no GUARD_MODULE_FAMILIES row, so no hooks/test_guard.py::<family> line is printed" % target)
+        section_folder = os.path.dirname(loaders[0]) + "/"
+        self.assertEqual([line for line in printed if line.startswith(section_folder)], [],
+                         "the section file %s is never printed: the runner stands for it" % loaders[0])
 
     def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
         """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
@@ -1730,7 +1770,7 @@ WALK_SUITES = {
     "hooks/guard_stream.py": [],
     "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_settings_matcher.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_report_guard_review.py", "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
 }
@@ -1865,6 +1905,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         the print."""
         target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
         self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
+        self.assertIn(suite, WALK_SUITES[target], "the fixture: WALK_SUITES names %s for %s" % (suite, target))
         tree = ast.parse(show(REPO, "HEAD", suite))
         module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
         self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
@@ -1874,7 +1915,8 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite, "lint/test_settings_matcher.py"]),
+        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | set(WALK_SUITES[target])
+        self.assertEqual(out.splitlines(), sorted(expected),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
 

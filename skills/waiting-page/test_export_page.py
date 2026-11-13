@@ -776,12 +776,20 @@ def read_bytes(path):
         return f.read()
 
 
+def skill_file_with(heading):
+    """The text of the skill file that holds the section which starts with the `heading` line: SKILL.md, or one of its
+    reference/*.md files, where the skill moved its topics. Read from disk each time, never copied here."""
+    for path in [os.path.join(HERE, "SKILL.md")] + sorted(glob.glob(os.path.join(HERE, "reference", "*.md"))):
+        text = read_text(path)
+        if heading in text:
+            return text
+    raise AssertionError("neither SKILL.md nor reference/*.md has a '%s' section" % heading)
+
+
 def skill_step(heading, n):
-    """The text of step `n` in the SKILL.md section that starts with the `heading` line, read from SKILL.md and never copied
-    here. The step runs to the next step, or to the next section."""
-    sections = read_text(os.path.join(HERE, "SKILL.md")).split(heading, 1)
-    if len(sections) != 2:
-        raise AssertionError("SKILL.md has no '%s' section" % heading)
+    """The text of step `n` in the section that starts with the `heading` line, read from the skill file that holds it and
+    never copied here. The step runs to the next step, or to the next section."""
+    sections = skill_file_with(heading).split(heading, 1)
     steps = sections[1].split("\n## ", 1)[0].split("\n%d. " % n, 1)
     if len(steps) != 2:
         raise AssertionError("the '%s' section has no step %d" % (heading, n))
@@ -2305,8 +2313,8 @@ class All(Base):
     def test_the_switch_steps_out_dir_fetch_exports_each_artifact_changed(self):
         # Step 2 of "Before you switch Claude accounts" names out_dir and the marker's path in backticks. ArtifactData
         # writes each doc to <out_dir>/<collection>/<doc_id>.json. The marker is touched where the step names it, and an
-        # empty collection gets a folder only where the step says to make one by hand. The text is read from SKILL.md,
-        # never copied here, so a change to that step is what this case checks.
+        # empty collection gets a folder only where the step says to make one by hand. The text is read from the skill's
+        # files (SKILL.md and reference/*.md), never copied here, so a change to that step is what this case checks.
         step2 = skill_step("## Before you switch Claude accounts", 2)
         found = re.search(r"`out_dir`\s+(?:set\s+to|=)\s*`([^`]+)`", step2)
         self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
@@ -3190,8 +3198,9 @@ class AnswersPassed(Copied):
 
 
 class RepublishChecksFirst(Base):
-    """SKILL.md "Update a repo's pages" step 3: `export_page.py --check` runs on the `stale_pages.py --write` output before
-    the republish. The step's text is read from SKILL.md by skill_step, never copied here. Not gated: no node runs."""
+    """reference/repo-pages.md "Update a repo's pages" step 3: `export_page.py --check` runs on the `stale_pages.py --write`
+    output before the republish. The step's text is read from the skill's files by skill_step, never copied here. Not gated:
+    no node runs."""
 
     def test_step_3_runs_the_check_on_the_write_output_before_the_republish(self):
         step = " ".join(skill_step("## Update a repo's pages", 3).split())

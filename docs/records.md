@@ -50,7 +50,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-no-merge-during-batch-ci` | While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`). | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-slug-then-claim-number` | Never allocate a numbered record on a branch. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -150,6 +150,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `commit-refuses-conflict-markers` | Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. | [`docs/decisions/commit-refuses-conflict-markers.md`](../docs/decisions/commit-refuses-conflict-markers.md) |
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
+| `cost-line-pinned` | A Cost sentence may name a file or state a count only when the same sentence backs it: | [`docs/decisions/cost-line-pinned.md`](../docs/decisions/cost-line-pinned.md) |
 | `cross-repo-question-checked` | An open decision or task on a repo's waiting page names the repo it is about. | [`docs/decisions/cross-repo-question-checked.md`](../docs/decisions/cross-repo-question-checked.md) |
 | `cull-guard-wrong-refusals` | It sits beside decision `cull-rules` (how a cull runs, owner ruling 2026-10-17). | [`docs/decisions/cull-guard-wrong-refusals.md`](../docs/decisions/cull-guard-wrong-refusals.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
@@ -281,6 +282,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `test-strategy-reset` | A test must not fail on runner speed. | [`docs/decisions/test-strategy-reset.md`](../docs/decisions/test-strategy-reset.md) |
 | `test-temp-standard` | Each test run writes temp files only in its own run folder, under one temp root per repo, and removes that folder at teardown. | [`docs/decisions/test-temp-standard.md`](../docs/decisions/test-temp-standard.md) |
 | `the-janitor-is-one-machine-wide-sweep` | The sweep deletes a local branch that holds no unique work. | [`docs/decisions/the-janitor-is-one-machine-wide-sweep.md`](../docs/decisions/the-janitor-is-one-machine-wide-sweep.md) |
+| `trust-error-docs-silent` | Written 2026-11-11 22:52 CST. | [`docs/decisions/trust-error-docs-silent.md`](../docs/decisions/trust-error-docs-silent.md) |
 | `unattended-sweep-stops-proven-orphans` | **What an unattended run can stop.** A `--confirm` run, run by the SessionEnd hook or the scheduled task, can send one signal to one process. | [`docs/decisions/unattended-sweep-stops-proven-orphans.md`](../docs/decisions/unattended-sweep-stops-proven-orphans.md) |
 | `uniform-over-variants` | Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo changes to match it. | [`docs/decisions/uniform-over-variants.md`](../docs/decisions/uniform-over-variants.md) |
 | `ux-house-rules` | The UX rules that every repo with screens shares, beyond the three third-party sets, live in `docs/design/`. | [`docs/decisions/ux-house-rules.md`](../docs/decisions/ux-house-rules.md) |
@@ -328,7 +330,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`docs/decisions/shell-scripts-check-out-lf.md`](../docs/decisions/shell-scripts-check-out-lf.md) |
 | `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
-| `stalled-steps` | `doing` is derived from live work, not typed. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
+| `stalled-steps` | Nobody types a step's `doing` status. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
 | `two-worktrees-one-branch` | Coordinator, 2026-11-07 14:29 CST, under lane override-plain-ask: the incident below gets its guard now. | [`docs/decisions/two-worktrees-one-branch.md`](../docs/decisions/two-worktrees-one-branch.md) |
 
 ## Debts
@@ -346,11 +348,15 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `builder-diff-auto-merge-reflog` | A builder's merge that git commits with a strategy option is not judged. | [`docs/debts/builder-diff-auto-merge-reflog.md`](../docs/debts/builder-diff-auto-merge-reflog.md) |
 | `cannot-claim-object-past-comma` | On PR #2058 (branch cannot-claim-follow-up-4; main does not have this code yet), `_non_pr_object` reads the object from a 6-word window that runs past a comma, a parenthesis, "and" or "so". | [`docs/debts/cannot-claim-object-past-comma.md`](../docs/debts/cannot-claim-object-past-comma.md) |
 | `carry-source-words` | `SOURCE_RE` accepts only the words git, page and digest as the source of a Recovered item. | [`docs/debts/carry-source-words.md`](../docs/debts/carry-source-words.md) |
+| `ci-wake-cloud-unproven` | No live cloud run shows the CI-done wake firing after an MCP ready call. | [`docs/debts/ci-wake-cloud-unproven.md`](../docs/debts/ci-wake-cloud-unproven.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs once more, at once, after the first judged run, and judges any run that shows there. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
-| `ci-wake-misses-mcp-ready` | A cloud session marks a PR ready by MCP `update_pull_request`, since `gh pr ready` gets a GraphQL 403. | [`docs/debts/ci-wake-misses-mcp-ready.md`](../docs/debts/ci-wake-misses-mcp-ready.md) |
 | `clause-adverb-exp-backtrack` | On PR #2058 (branch cannot-claim-follow-up-4; main does not have this code yet), `ADVERB_PATTERN` in `lint/_clause.py` lists adverbs ending in -ly (really, simply, actually, currently, directly, unfortunately), and `[a-z]{3,}ly` in the same alternation matches them too. | [`docs/debts/clause-adverb-exp-backtrack.md`](../docs/debts/clause-adverb-exp-backtrack.md) |
 | `code-check-pin-drift` | `bin/ste-changed` warns when CI pins the ste-lint or zizmor action at a commit whose files differ from the session's copy. | [`docs/debts/code-check-pin-drift.md`](../docs/debts/code-check-pin-drift.md) |
+| `comment-narration-limits` | The check has no suppression marker. | [`docs/debts/comment-narration-limits.md`](../docs/debts/comment-narration-limits.md) |
+| `cost-pins-line-range-suffix` | `LINE_SUFFIX` drops only a trailing `:digits`. | [`docs/debts/cost-pins-line-range-suffix.md`](../docs/debts/cost-pins-line-range-suffix.md) |
+| `cost-pins-time-noun-missing` | `COST_NOUN` has `times` but not `time`, so a count before the singular noun passes unflagged. | [`docs/debts/cost-pins-time-noun-missing.md`](../docs/debts/cost-pins-time-noun-missing.md) |
+| `cost-pins-verb-past-tense` | `WORK_VERB` has no past tense, so a count after a past verb passes unflagged. | [`docs/debts/cost-pins-verb-past-tense.md`](../docs/debts/cost-pins-verb-past-tense.md) |
 | `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
 | `design-branch-deleted-unmerged` | An unmerged design branch was deleted, and its mockup is on no ref. | [`docs/debts/design-branch-deleted-unmerged.md`](../docs/debts/design-branch-deleted-unmerged.md) |
 | `duo-fold-pin-bump-stale-clone` | `duo_fold_fetch_hinge` skips the clone when `$work/hinge/.git` exists, then runs `git checkout` of the pinned sha. | [`docs/debts/duo-fold-pin-bump-stale-clone.md`](../docs/debts/duo-fold-pin-bump-stale-clone.md) |
@@ -363,6 +369,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `fork-step-grants-read-roadmap` | In a fork worktree, the Opus step-grant lookup reads `origin/roadmap`, main's record branch. | [`docs/debts/fork-step-grants-read-roadmap.md`](../docs/debts/fork-step-grants-read-roadmap.md) |
 | `frozen-dup-in-subshell` | From a frozen working folder (the live pin `<clone>-live`, or `~/.claude/hooks`), the frozen-path rule still refuses `x=$(ls 2>&1)`, `(ls 2>&1)`, a backtick form, and `ls 2>&1&`. | [`docs/debts/frozen-dup-in-subshell.md`](../docs/debts/frozen-dup-in-subshell.md) |
 | `granted-round-4-briefs` | The review record now accepts a granted round 4, which is the final round. | [`docs/debts/granted-round-4-briefs.md`](../docs/debts/granted-round-4-briefs.md) |
+| `guard-split-f821-lint-gap` | After the guard split, `ruff` reads each section file alone. | [`docs/debts/guard-split-f821-lint-gap.md`](../docs/debts/guard-split-f821-lint-gap.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
 | `handoff-choice-exempts-line` | "your call" exempts the whole "Why yours" line, so a false "can't" on that line passes with no cite. | [`docs/debts/handoff-choice-exempts-line.md`](../docs/debts/handoff-choice-exempts-line.md) |
 | `handoff-verb-list-closed` | A capability line in these words passes with no cite: "do not have access", "no permission", "not able to", "only the owner can", "cant", "can not". | [`docs/debts/handoff-verb-list-closed.md`](../docs/debts/handoff-verb-list-closed.md) |
@@ -392,12 +399,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-py-base-name-match` | `py-facts.py` resolves an import by the module's last name. | [`docs/debts/map-py-base-name-match.md`](../docs/debts/map-py-base-name-match.md) |
 | `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
 | `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
-| `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` is judged by green checks only. | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
+| `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` has one merge test, the `MERGE_TOOLS` clause in `judge` (read `hooks/guard.py` `judge`). | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
 | `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
 | `merge-reason-paren-cuts-args` | The merge-confirm-repo clause stops reading a merge's arguments at the first token that ends in `)` or `&`. | [`docs/debts/merge-reason-paren-cuts-args.md`](../docs/debts/merge-reason-paren-cuts-args.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
+| `merge-remedy-hits-role-refusal` | The remedy text for `merge <pr> --confirm` now sends a cloud lane into the merge role refusal. | [`docs/debts/merge-remedy-hits-role-refusal.md`](../docs/debts/merge-remedy-hits-role-refusal.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
 | `mutate-guard-split` | `checks-mutate-guard` runs every guard mutant in one job, 4 at a time. | [`docs/debts/mutate-guard-split.md`](../docs/debts/mutate-guard-split.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed, bin/ci-job and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`docs/debts/nowindow-bin-no-fallback.md`](../docs/debts/nowindow-bin-no-fallback.md) |
@@ -409,11 +417,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `opus-ask-exclusion-words` | A plain Opus ask that names two or more roles, joined to an exclusion the scope read does not list, grants exactly the excluded roles for 2h. | [`docs/debts/opus-ask-exclusion-words.md`](../docs/debts/opus-ask-exclusion-words.md) |
 | `opus-ask-scheduled-text` | A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. | [`docs/debts/opus-ask-scheduled-text.md`](../docs/debts/opus-ask-scheduled-text.md) |
 | `other-checkout-cwd-outside` | `other_checkout_hit` returns `""` when the call's `cwd` is in no checkout of the clone. | [`docs/debts/other-checkout-cwd-outside.md`](../docs/debts/other-checkout-cwd-outside.md) |
+| `other-clone-unread-writers` | Into a separate clone, as into another checkout, these forms pass the write scan: `touch`, `mkdir`, `rsync -a src/ <dir>/`, `curl -o`, `tar -C`, `make -C`, `env -C`, `bash -c 'cd X && touch f'`, and `cd $HOME/...`. | [`docs/debts/other-clone-unread-writers.md`](../docs/debts/other-clone-unread-writers.md) |
 | `page-answer-second-click` | One waiting-page answer needed a second approval. | [`docs/debts/page-answer-second-click.md`](../docs/debts/page-answer-second-click.md) |
 | `page-only-copy-of-mockup` | A mockup lives only inside the `designData` block of the waiting page. | [`docs/debts/page-only-copy-of-mockup.md`](../docs/debts/page-only-copy-of-mockup.md) |
 | `pin-missing-files-no-install` | `merge/install_from_main.sh` treats a pin at main that has only missing tracked files as dirty: it exits 1 and installs nothing. | [`docs/debts/pin-missing-files-no-install.md`](../docs/debts/pin-missing-files-no-install.md) |
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`docs/debts/pinoff1-freshness-flaky.md`](../docs/debts/pinoff1-freshness-flaky.md) |
-| `playwright-rows-measure` | Unmeasured: whether the Playwright rows in `hooks/test_guard.py` still stop a real mistake. | [`docs/debts/playwright-rows-measure.md`](../docs/debts/playwright-rows-measure.md) |
+| `playwright-rows-measure` | Unmeasured: whether the Playwright rows in the guard suite (family `kill`, `tests/guard/`) still stop a real mistake. | [`docs/debts/playwright-rows-measure.md`](../docs/debts/playwright-rows-measure.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`docs/debts/pr-ready-unguarded.md`](../docs/debts/pr-ready-unguarded.md) |
 | `press-clause-hides-owner-press` | The press-link check excuses a session-subject clause when it holds no `you` and no owner's name as subject of a present or future press or act verb. | [`docs/debts/press-clause-hides-owner-press.md`](../docs/debts/press-clause-hides-owner-press.md) |
 | `ps-assign-in-braces` | A PowerShell assignment inside braces is not read, so a write to a frozen path `T` through that variable is allowed. | [`docs/debts/ps-assign-in-braces.md`](../docs/debts/ps-assign-in-braces.md) |
@@ -430,6 +439,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`docs/debts/refresh-lock-untested.md`](../docs/debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
 | `refusal-settle-reads` | When the refusals file holds a row with a `tool_use_id`, each Stop reads the whole transcript and every `<session>/subagents/*.jsonl` file, to tell an agent's refused call from the orchestrator's. | [`docs/debts/refusal-settle-reads.md`](../docs/debts/refusal-settle-reads.md) |
+| `retire-run-footer-refused` | `lint/check_debt_retire.py` reads `Retire-run:` only from the PR body's last paragraph. | [`docs/debts/retire-run-footer-refused.md`](../docs/debts/retire-run-footer-refused.md) |
 | `review-record-model-not-served` | `merge --review-record` refuses a non-Sonnet fix check or round 2/3 line, but only reads the model as typed. | [`docs/debts/review-record-model-not-served.md`](../docs/debts/review-record-model-not-served.md) |
 | `route-flag-stop-untested` | No test feeds a refusal row that carries `route_flag` through the Stop read, so that path has no test. | [`docs/debts/route-flag-stop-untested.md`](../docs/debts/route-flag-stop-untested.md) |
 | `ruling-pr-kind-unchecked` | The merge tool takes the lane's Kind claim. | [`docs/debts/ruling-pr-kind-unchecked.md`](../docs/debts/ruling-pr-kind-unchecked.md) |
@@ -454,7 +464,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
 | `windows-main-run-flakes` | Two main push runs went red on Windows only, and each blocked the next batch until a rerun went green. | [`docs/debts/windows-main-run-flakes.md`](../docs/debts/windows-main-run-flakes.md) |
-| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 3 Windows shards and the merge git-half suite in 5. | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
+| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 3 Windows shards (read .github/workflows/checks.yml:1453) and the merge git-half suite in 5 (read .github/workflows/checks.yml:1661). | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
@@ -465,6 +475,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `align-watchers` | Plan: one direction for watches, wakes, sweeps, reaps and logs | [`docs/plans/align-watchers.md`](../docs/plans/align-watchers.md) |
 | `builtin-hook-survey` | Plan: which model-call hooks can move to the built-in prompt hook | [`docs/plans/builtin-hook-survey.md`](../docs/plans/builtin-hook-survey.md) |
 | `child-guard-promotion` | Plan: child guards go up or out | [`docs/plans/child-guard-promotion.md`](../docs/plans/child-guard-promotion.md) |
+| `claude-md-scope-audit` | Plan: Global CLAUDE.md scope audit | [`docs/plans/claude-md-scope-audit.md`](../docs/plans/claude-md-scope-audit.md) |
 | `debate-model-tiers` | Plan: which refuters run Opus | [`docs/plans/debate-model-tiers.md`](../docs/plans/debate-model-tiers.md) |
 | `grant-reaches-lanes` | Plan: an owner grant typed in one session reaches the session it names | [`docs/plans/grant-reaches-lanes.md`](../docs/plans/grant-reaches-lanes.md) |
 | `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |

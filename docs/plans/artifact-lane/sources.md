@@ -48,8 +48,8 @@ Explore (sonnet), 2026-11-02 15:10 CST, event 58a1960f-7cf0-4bd9-b82c-b6b7a886bd
 >    skills/design-explore/SKILL.md:67-74 gathers onto an unnamed design branch with no PR step. The designer writes
 >    into the repo that spawned it (designer.md:14-15): banchi screens drawn from claude-settings never reach banchi.
 >    Fix: one PR of the kept mockups into the target repo's docs/design; the brief names the target repo.
-> 2. The waiting page is the only copy. skills/waiting-page/SKILL.md:15, :464 paste the HTML into the page; :493 drops
->    it when the question closes. Fix: "Add a design" must find the file on origin before writing the item.
+> 2. The waiting page is the only copy. skill `waiting-page`, "Add a design", step 3 pastes the HTML into the page, and its last paragraph drops it
+>    when the question closes. Fix: "Add a design" must find the file on origin before writing the item.
 > 3. An unmerged mockup branch was deleted: degen docs/design/jd-deferred.html (owner pick B, 2026-10-26 23:45 CDT),
 >    cited at degen docs/specs/plan.md:1945 and native/Degen/JdDeferredPage.swift:5; on no ref. Product repos hold 0
 >    archive/* branches. Fix: refuse a branch delete whose diff holds docs/design files main lacks, unless archived.

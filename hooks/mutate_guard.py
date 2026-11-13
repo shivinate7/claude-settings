@@ -418,12 +418,59 @@ MUTATIONS = [
     ("push-main: a main refspec before an agent name asks push-main",
      'if not agent and (to_main or',
      'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
-    ("push-main: --all no longer asks",
+    ("push-all-main: --all no longer refuses",
      '    if every:\n',
-     '    if False:\n', "guard", 'main, --all reaches main and asks'),
-    ("push-main: --all from an agent checkout asks push-main",
-     '        return "agent" if main() and current() and AGENT_BRANCH.fullmatch(current()) else main()',
-     '        return main()', "guard", 'agent checkout, --all with main asks the agent rule'),
+     '    if False:\n', "guard", '--all from a lane checkout, local main ahead of origin/main, refuses'),
+    ("push-agent-branch: --all from an agent checkout is not the agent rule's",
+     '        if current() and AGENT_BRANCH.fullmatch(current()):\n            return "agent"',
+     '        if False:\n            return "agent"', "guard", 'agent checkout, --all with main asks the agent rule'),
+    ("push-all-main: an --all that may update main is silent",
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return "all"',
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return ""', "guard", '--all from a main checkout, local main ahead of origin/main, refuses'),
+    ("push-all-main: a glob to a local-path origin is refused",
+     '(unreadable or reach or globs) and main()',
+     '(unreadable or reach or globs) and True', "guard",
+     'glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead'),
+    # Against the fixed text: git's `*` matches an empty name, so the reach test takes `>=`. The anchor is the whole
+    # comparison, since a bare `>=` occurs on other lines. Its killer is the lane row that names main with `main*`.
+    ("push-all-main: a glob whose star matches an empty name is not read as reaching main",
+     'len(full) >= len(target_pre) + len(target_suf)',
+     'len(full) > len(target_pre) + len(target_suf)', "guard",
+     'glob refspec refs/heads/main*:refs/heads/main* from a lane checkout'),
+    # Against the fixed text: a colon-less glob keeps its empty target and reads as unreadable. The tag row kills it.
+    # The anchor starts at the partition line: the bare `target = target if colon else source` also sits in _push_dest.
+    ("push-all-main: a colon-less glob refspec is read as unreadable",
+     'spec.partition(":")\n    target = target if colon else source',
+     'spec.partition(":")\n    target = target', "guard",
+     'glob refspec refs/tags/v* (colon-less) from a lane checkout, local main ahead, is silent'),
+    ("push-all-main: a matching tracking ref is refused",
+     'shas.get("refs/remotes/" + remote + "/" + name) != shas[source]',
+     'shas.get("refs/remotes/" + remote + "/" + name) == shas[source]', "guard",
+     '--all from a main checkout, local main equal to origin/main, is silent'),
+    ("push-all-main: an absent local main or master is an update",
+     'if source in shas and shas.get("refs/remotes/" + remote + "/" + name) != shas[source]:',
+     'if shas.get("refs/remotes/" + remote + "/" + name) != shas.get(source, ""):', "guard",
+     '--all with no local main or master, from a lane checkout, is silent'),
+    ("push-all-main: a failed ref read is silent",
+     '    if answer is None or answer.returncode != 0:\n        return True',
+     '    if answer is None or answer.returncode != 0:\n        return False', "guard",
+     '--all with a failed read of the tracking refs, and a local agent-named branch, refuses for the update'),
+    ("push-all-main: a second remote's tracking refs are read under origin",
+     '_push_updates_default(cwd, state["remote"].get("name", ""), reach)',
+     '_push_updates_default(cwd, "origin", reach)', "guard",
+     '--all to a second remote whose main ref equals local main, is silent'),
+    ("push-all-main: the remote's name is not kept for its tracking refs",
+     'resolved["name"] = remote',
+     'resolved["name"] = "origin"', "guard",
+     '--all with no remote named, a branch tracking a second remote, is silent'),
+    ("push-all-main: a push-all-main verdict is not refused",
+     'elif kind == "all":',
+     'elif kind == "all" and False:', "guard",
+     '--all from a main checkout, local main ahead of origin/main, refuses'),
+    ("push-all-main: the all-branches refusal prints the agent reason",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON,',
+     'refuse(tool, "deny", "push-all-main", PUSH_AGENT_REASON,', "guard",
+     '--all from a main checkout, local main ahead of origin/main, refuses'),
     ("push-main: a bare push that writes main no longer asks",
      '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
      '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push asks'),
@@ -471,9 +518,10 @@ MUTATIONS = [
     ("push-stray-branch: another remote than the upstream's is judged",
      'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
      'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
-    ("push-main: --branches is not read as --all",
+    ("push-all-main: --branches is not read as --all",
      '            elif name in ("--all", "--branches"):',
-     '            elif name == "--all":', "guard", 'main, --branches reaches main and asks'),
+     '            elif name == "--all":', "guard",
+     '--branches from a lane checkout, no origin/main tracking ref, refuses'),
     ("push-stray-branch: a -u push of the local name still asks",
      'if merge == current() or upstream:',
      'if merge == current():', "guard", 'stacked lane, -u HEAD is silent'),
@@ -512,6 +560,97 @@ MUTATIONS = [
     ("push-agent-branch: the refusal is not wired",
      '                elif kind == "agent":',
      '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
+    # The all-agent kind (rule push-all-main, decision plain-push-asks): a --all, --branches or glob push that sends a
+    # local branch named like an agent worktree while the tracking refs show no update. Its code is split across
+    # guard_push_delete.py (_local_agent_branches, _glob_sends, push_ask_hit, PUSH_ALL_AGENT_REASON) and guard.py (the
+    # deny). Each anchor is found once across the guard family, so an entry names its file by its text alone.
+    ("push-all-main: a local branch read as agent-named whatever its name",
+     'if AGENT_BRANCH.fullmatch(ref.removeprefix("refs/heads/"))]', 'if True]', "guard",
+     "with no local main or master, from a lane checkout"),
+    ("push-all-main: a local branch is matched without its refs/heads/ prefix, so no agent name matches",
+     'if AGENT_BRANCH.fullmatch(ref.removeprefix("refs/heads/"))]', 'if AGENT_BRANCH.fullmatch(ref)]', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: a failed listing of the local branches reads as no agent-named branch",
+     '        return None\n    return [ref for ref in answer.stdout.split()',
+     '        return []\n    return [ref for ref in answer.stdout.split()', "guard",
+     "--all with a failed read of the local branches"),
+    ("push-all-main: a glob's short source name is not read under refs/heads/",
+     'pre, _, suf = _qualified(spec.partition(":")[0]).partition("*")',
+     'pre, _, suf = spec.partition(":")[0].partition("*")', "guard",
+     "glob refspec agent-*:agent-* with a local agent-named branch refuses"),
+    ("push-all-main: a glob's source prefix is not checked, so any branch with its suffix matches",
+     'ref.startswith(pre) and ref.endswith(suf) and len(ref)', 'ref.endswith(suf) and len(ref)', "guard",
+     "glob refspec refs/heads/main* with a local agent-named branch"),
+    ("push-all-main: a glob's source suffix is not checked, so any branch with its prefix matches",
+     'ref.startswith(pre) and ref.endswith(suf) and len(ref)', 'ref.startswith(pre) and len(ref)', "guard",
+     "glob refspec refs/heads/agent-*x with a local agent-named branch"),
+    ("push-all-main: a glob whose prefix and suffix overlap matches a name shorter than both",
+     'ref.endswith(suf) and len(ref) >= len(pre) + len(suf)]', 'ref.endswith(suf)]', "guard",
+     "glob refspec whose prefix and suffix overlap"),
+    ("push-all-main: --all never reads the local branches, so an agent-named branch is silent",
+     '        sent = _local_agent_branches(cwd)\n        return "all" if sent is None else "all-agent" if sent else ""',
+     '        sent = []\n        return "all" if sent is None else "all-agent" if sent else ""', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: --all with an agent-named branch names the update's reason",
+     'return "all" if sent is None else "all-agent" if sent else ""',
+     'return "all" if sent is None else "all" if sent else ""', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: --all with a failed read of the local branches is silent",
+     '"all" if sent is None else "all-agent"', '"" if sent is None else "all-agent"', "guard",
+     "--all with a failed read of the local branches"),
+    ("push-all-main: --all with main ahead names an agent-named branch before the update",
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):\n            return "all"',
+     '        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]) '
+     'and not _local_agent_branches(cwd):\n            return "all"', "guard",
+     "--all with main ahead of its tracking ref and a local agent-named branch refuses for the update"),
+    ("push-all-main: a glob with a failed read of the local branches is silent",
+     '                if local is None:\n                    return "all"',
+     '                if local is None:\n                    return ""', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with a failed read of the local branches refuses"),
+    ("push-all-main: a glob is refused for any agent-named branch, whatever its source side matches",
+     'if any(_glob_sends(spec, local) for spec in globs):', 'if local:', "guard",
+     "glob refspec refs/heads/main* with a local agent-named branch"),
+    ("push-all-main: a glob is not judged by the agent-named branches it sends",
+     '            if globs:\n                local = _local_agent_branches(cwd)',
+     '            if False:\n                local = _local_agent_branches(cwd)', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with a local agent-named branch"),
+    ("push-all-main: a glob that reaches no main is not read for an agent-named branch",
+     'if not agent and (unreadable or reach or globs) and main():',
+     'if not agent and (unreadable or reach) and main():', "guard",
+     "glob refspec refs/heads/agent-*:refs/heads/agent-* with a local"),
+    ("push-all-main: a glob with main ahead names an agent-named branch before the update",
+     '            if unreadable or updates_default(reach):',
+     '            if unreadable or (updates_default(reach) and not _local_agent_branches(cwd)):', "guard",
+     "glob refspec refs/heads/*:refs/heads/* with main ahead of its tracking ref"),
+    ("push-all-main: the all-agent reason does not name an agent worktree",
+     'a local branch named like an agent worktree "', 'a local branch named like a worktree "', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason does not say that every branch is sent",
+     'this push sends every branch it matches, and a local', 'this push sends a branch it matches, and a local', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason's remedy is not a push of the lane's own branch",
+     "plain-push-asks). Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`.",
+     "plain-push-asks). Remedy: push the lane's own branch by name: `git push origin <lane-branch>`.", "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: the all-agent reason claims that the default branch may update",
+     'is among them (rule push-all-main, decision ',
+     'is among them, and it may update the default branch (rule push-all-main, decision ', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent verdict is not refused",
+     '                elif kind == "all-agent":', '                elif kind == "all-agent" and False:', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal prints the update's reason",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal is filed under the agent rule",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "deny", "push-agent-branch", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
+    ("push-all-main: an all-agent refusal asks instead of denying",
+     'refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))',
+     'refuse(tool, "ask", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))', "guard",
+     "--all with a local agent-named branch, main matching its tracking ref, refuses"),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
@@ -2093,8 +2232,12 @@ MUTATIONS = [
     ("role-diff: conftest.py is no test path",
      '|conftest\\.py"', '|never-seen\\.py"', "guard", "builder-test: Edit of src/conftest.py is refused"),
     ("role-diff: no directory part makes a test path",
-     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
      'TEST_DIRS = set()', "guard", "builder-test: Edit of tests/helper.py is refused"),
+    ("role-diff: the testing folder is no test folder",
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}',
+     'TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}',
+     "guard", "test-author: Write of testing/shallow_clone.py is allowed"),
     ("role-diff: Swift test basenames are plural only (cries wolf)",
      'SWIFT_TEST = re.compile(r"^\\w+Tests\\.swift$")', 'SWIFT_TEST = re.compile(r"^\\w+Tests?\\.swift$")',
      "guard", "swift-test: Edit of non-test App/LoginTest.swift is allowed"),
@@ -3841,13 +3984,43 @@ def _loads_module(source: str, stem: str) -> bool:
     return False
 
 
+def _guard_section_sources(tracked) -> list:
+    """The text of each tracked `.py` file directly in the folder that the runner SUITE reads its guard sections from. The
+    folder is the runner's SECTION_DIR, found by `rule_audit._section_dir`, the one home of that path. Empty when the runner
+    names no folder. A file that cannot be read is skipped."""
+    import ast
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import rule_audit
+    try:
+        with open(SUITE, encoding="utf-8") as handle:
+            folder = rule_audit._section_dir(ast.parse(handle.read()), SUITE)
+    except (OSError, ValueError, SyntaxError):
+        return []
+    if not folder:
+        return []
+    rel = os.path.relpath(os.path.normpath(folder), os.path.dirname(HERE)).replace(os.sep, "/")
+    sources = []
+    for item in tracked:
+        if os.path.dirname(item) != rel or not item.endswith(".py"):
+            continue
+        try:
+            with open(item, encoding="utf-8") as handle:
+                sources.append(handle.read())
+        except (OSError, ValueError):
+            continue
+    return sources
+
+
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
     suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A file with a row
-    in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
-    `hooks/test_guard.py`. Any other file prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
-    `claude_settings` profile. A file with no suite prints nothing."""
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A guard section
+    file (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
+    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
+    `hooks/test_guard.py`. A non-`.py` file prints the suites beside it only. A suite that cannot be read or parsed is skipped.
+    It is the `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -3881,6 +4054,9 @@ def tests_for_main(argv) -> int:
                     continue
                 if _loads_module(source, stem):
                     names.add(item)
+            # The runner reads each guard section file, so it stands for a section file that loads the module.
+            if any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
+                names.add("hooks/test_guard.py")
         if path in GUARD_MODULE_FAMILIES:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
@@ -3905,6 +4081,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's

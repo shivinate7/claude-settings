@@ -161,26 +161,46 @@ class Layout(unittest.TestCase):
             return
         self.assertEqual((done.returncode, out), (0, "layout: in shape"))
 
-    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+    def this_extras(self):
+        """This checkout's extras file, as text."""
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, *EXTRAS.split("/")), encoding="utf-8") as handle:
-            text = handle.read()
+            return handle.read()
+
+    def this_repo(self, text):
+        """A rolled-out fixture that holds `text` as its extras file, every core kind, and the waiting copy on its
+        record branch, so the probe reads the folders that extras file names."""
+        repo = Repo(self).core().write(EXTRAS, text)
+        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
+        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+        return repo.commit("waiting copy").git("checkout", "-q", "-")
+
+    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        text = self.this_extras()
         kinds = json.loads(text)["kinds"]
         files = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
         for name, kind in kinds.items():
             where = kind["path"].strip("/")
             self.assertNotIn("*", where, name)
             self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
-        repo = Repo(self).core().write(EXTRAS, text)
-        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
-        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
-        repo.commit("waiting copy").git("checkout", "-q", "-")
+        repo = self.this_repo(text)
         for kind in kinds.values():
             repo.write(kind["path"].strip("/") + "/a.x")
         self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
         code, out = repo.write("undeclared/a.x").run("layout")
         self.assertEqual(code, 1, out)
         self.assertIn("folder undeclared/: neither", out)
+
+    def test_tests_guard_folder_is_accepted_as_an_extra_of_this_repo(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/guard/a.py").run("layout")
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"),
+                         "tests/guard is not an extra of this repo\n" + out)
+
+    def test_other_tests_folder_is_still_flagged(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/other/a.py").run("layout")
+        self.assertEqual(code, 1, out)
+        self.assertIn("folder tests/", out)
 
     def test_not_a_git_repo_is_unknown(self):
         root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)

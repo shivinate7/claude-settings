@@ -331,6 +331,15 @@ class Selector(unittest.TestCase):
         self.assertNotIn(suite, files, "a HEAVY suite was listed for a lane push")
         self.assertTrue(named(stdout, suite, HEAVY_KEY), "the log does not name the HEAVY suite with its reason")
 
+    def test_guard_section_file_touched_names_the_heavy_guard_suite(self):
+        # A section file is a part of hooks/test_guard.py. Its change runs in that suite's shard jobs, so the
+        # selector lists no file of the section folder and names hooks/test_guard.py with its HEAVY reason.
+        section = "tests/guard/s00442-misc.py"
+        files, stdout = self.listed({section: "old\n"}, {section: "new\n"})
+        self.assertNotIn(section, files, "a section file was listed for a lane push")
+        self.assertTrue(named(stdout, "hooks/test_guard.py", HEAVY_KEY),
+                        "the log does not name hooks/test_guard.py with its HEAVY reason for a section file change")
+
     def test_needs_setup_suite_touched_is_not_listed_and_is_named(self):
         page = "skills/alpha/tests/page.test.mjs"
         files, stdout = self.listed({page: "old\n"}, {page: "new\n"})

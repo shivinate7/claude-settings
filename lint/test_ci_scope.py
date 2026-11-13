@@ -341,6 +341,18 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"checks_windows", "checks_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows", "checks_macos", "code", "guard"})
 
+    # A section file of the guard suite is a part of hooks/test_guard.py, so it sets that suite's flags. It is not
+    # under hooks/, so the new-file rule that adds shell_macos for hooks/ does not reach it.
+    SECTION_FILE = "tests/guard/s00442-misc.py"
+
+    def test_guard_section_file_sets_the_flags_of_test_guard_not_shell_macos(self):
+        want = self.true_set(run(["hooks/test_guard.py"], existing=["hooks/test_guard.py"]))
+        self.assertEqual(want, {"checks_windows", "checks_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([self.SECTION_FILE])), want,
+                         "a new section file sets flags other than hooks/test_guard.py's")
+        self.assertEqual(self.true_set(run([self.SECTION_FILE], existing=[self.SECTION_FILE])), want,
+                         "an edited section file sets flags other than hooks/test_guard.py's")
+
     # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, run only on the
     # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on checks_windows and
     # checks_macos too, or a mod-only pull request starts neither job and the step never runs there.
@@ -450,11 +462,15 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
     # The waiting page export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`.
-    # It reads these four paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
-    # (its run folder), and SKILL.md (the steps it reads). Named failure: a PR that changes only one of them leaves `shoot`
-    # off, so the suite is skipped.
+    # It reads these paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
+    # (its run folder), and the steps it reads, in SKILL.md and in reference/copies-and-accounts.md and reference/repo-pages.md.
+    # Every reference/*.md is read by the page suite (skills/waiting-page/tests/page.test.mjs), whose job gates on `shoot` too.
+    # Named failure: a PR that changes only one of them leaves `shoot` off, so the suite is skipped.
     def test_waiting_page_export_suite_paths_turn_on_shoot(self):
-        for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md"):
+        for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md",
+                  "skills/waiting-page/reference/copies-and-accounts.md", "skills/waiting-page/reference/repo-pages.md",
+                  "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/republish.md",
+                  "skills/waiting-page/reference/routing-and-sessions.md"):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=["shoot"])
 

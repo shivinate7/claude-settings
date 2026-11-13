@@ -27,6 +27,10 @@ TRANSFER_BOUND = 30  # bin/mail's own git calls, which no prompt waits on
 LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
+# Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. MAILBOX_HOLD_OFF=1
+# lifts it for one command. Empty: no platform is held.
+HELD_PLATFORMS = ()
+HOLD_OFF = "MAILBOX_HOLD_OFF"
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
 
 
@@ -39,6 +43,12 @@ def safe(value):
     return bool(SAFE.match(value)) and not any(part in (".", "..") for part in value.split("/"))
 
 
+def utf8(text):
+    """The one encode of message text: a lone surrogate (a non-UTF-8 byte read in text mode) becomes "?", as text mode did,
+    so the pushed blob and the sha the read-back computes hold the same bytes."""
+    return text.encode("utf-8", errors="replace")
+
+
 def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     """One git process. Returns (returncode, stdout, stderr). Raises MailError on a timeout or a missing git.
     No prompt can open: a hook has no terminal to answer it. A ssh command or GIT_SSH program the caller set is kept;
@@ -48,14 +58,21 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
         run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=3"
     prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
+    # Bytes in and out: text mode on Windows may rewrite "\n" to "\r\n" on the child's stdin, which would change
+    # blob bytes and put a CR in an index path.
+    data = None if input_text is None else utf8(input_text)
     try:
-        done = _nowindow.run(prefix + args, env=run_env, input=input_text, capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=timeout)
+        done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise MailError("timeout")
     except OSError as error:
         raise MailError("git: %s" % error)
-    return done.returncode, done.stdout, done.stderr
+    return done.returncode, _text(done.stdout), _text(done.stderr)
+
+
+def _text(value):
+    """Child output as text. A str passes through: test_mail.py's SshBatchDefault patches _nowindow.run with str output."""
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
 
 
 def reason(stderr):
@@ -63,13 +80,20 @@ def reason(stderr):
     if re.search(r"Authentication failed|could not read (Username|Password)|Permission denied", text):
         return "auth"
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return re.sub(r"^(fatal|error): ", "", lines[-1])[:120] if lines else "git failed"
+    if not lines:
+        return "git failed"
+    # git ends a refused push with a generic "failed to push some refs" line; the cause sits in an earlier line.
+    cause = next((line for line in lines if re.match(r"(! \[(remote )?rejected\]|error:|remote:)", line)), lines[-1])
+    return re.sub(r"^(fatal|error): ", "", cause)[:160]
 
 
 def must(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     code, out, err = git(args, env, cache, timeout, input_text)
     if code:
         raise MailError(reason(err))
+    # git exits 0 when core.protectNTFS skips an index path and prints only "Ignoring path" on stderr.
+    if "Ignoring path" in (err or ""):
+        raise MailError("git ignored a path")
     return out
 
 
@@ -112,7 +136,7 @@ def commit_tree(env, tip, adds, removes, message):
     """One commit on `tip` (None for the first) that adds {path: bytes-as-text} and removes paths. A temp index inside the cache."""
     cache = cache_path(env)
     ensure_cache(cache)
-    index =os.path.join(cache, "mail.index.%d" % os.getpid())
+    index = os.path.join(cache, "mail.index.%d" % os.getpid())
     step = dict(env, GIT_INDEX_FILE=index)
     try:
         must(["read-tree"] + ([tip] if tip else ["--empty"]), step, cache)
@@ -123,10 +147,29 @@ def commit_tree(env, tip, adds, removes, message):
         entries += ["0 %s\t%s\n" % ("0" * 40, path) for path in removes]
         must(["update-index", "--index-info"], step, cache, input_text="".join(entries))
         tree = must(["write-tree"], step, cache).strip()
+        verify_tree(env, cache, tree, adds, removes)
         return must(["commit-tree", tree, "-m", message] + (["-p", tip] if tip else []), env, cache).strip()
     finally:
         if os.path.exists(index):
             os.remove(index)
+
+
+def blob_sha(text):
+    data = utf8(text)
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def verify_tree(env, cache, tree, adds, removes):
+    """Read the new tree back: each added path holds the blob of its text, each removed path is gone. A silent
+    update-index failure leaves the parent's tree, and a CR in an index line leaves a path ending in CR."""
+    listing = must(["ls-tree", "-r", "-z", "--full-tree", tree], env, cache)
+    held = {}
+    for row in listing.split("\0"):
+        meta, _, path = row.partition("\t")
+        if path:
+            held[path] = meta.split()[2]
+    if any(held.get(path) != blob_sha(text) for path, text in adds.items()) or any(path in held for path in removes):
+        raise MailError("message file missing from the commit")
 
 
 def push(env, commit):
@@ -259,10 +302,15 @@ def read_listing(path):
         return {}
 
 
+def held(env):
+    """True on a held platform unless the caller sets MAILBOX_HOLD_OFF=1."""
+    return sys.platform in HELD_PLATFORMS and env.get(HOLD_OFF) != "1"
+
+
 def turn_start_lines(payload, env):
     """The lines a UserPromptSubmit hook prints: one per open message, or one "mail unknown: <reason>". Nothing when
-    MAILBOX_REPO is unset or the session has no address."""
-    if not env.get("MAILBOX_REPO"):
+    MAILBOX_REPO is unset, the session has no address, or the platform is held (`held`)."""
+    if not env.get("MAILBOX_REPO") or held(env):
         return []
     try:
         addrs = own_addrs((payload or {}).get("session_id"), (payload or {}).get("cwd"), env)

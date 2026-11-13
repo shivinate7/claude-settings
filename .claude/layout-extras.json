@@ -34,6 +34,7 @@
     "output-styles": {"path": "output-styles"},
     "skills": {"path": "skills"},
     "testing": {"path": "testing"},
+    "tests-guard": {"path": "tests/guard"},
     "tools": {"path": "tools"}
   },
   "rolled-out": true,

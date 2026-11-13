@@ -389,6 +389,9 @@ jobs:
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
+      - name: Cost line pin fixture suite
+        run: python3 lint/test_check_cost_pins.py
+
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
@@ -418,6 +421,9 @@ jobs:
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      - name: Cost line pins
+        run: python3 lint/check_cost_pins.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
       - name: Red-run trailer
@@ -641,8 +647,10 @@ jobs:
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
-    # n30 green, median 17.7, slowest 21.0 min (run 42283179251): cap 30 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 30
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 30 push runs on main (to run 43164094808):
+    # 29 green, slowest green 26.7 min (run 43148329817); run 43164094808 attempt 1 ended at the old cap, 30.2 min, cancelled (attempt 2 was green, 25.1 min).
+    # Slow steps: the install.sh checkout-detection suite (own cap below) and the Merge tool git-half fixture suite, 689 s (run 43164094808). The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -697,8 +705,8 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap: n6 min: 7.90, 8.62, 8.67, 9.60, 9.68 green (runs 42682869856, 42733987294, 42669400649, 42717988296, 42700538152) and 10.22 cut at the old 10 min cap (run 42708195330, a floor); cap 15 = 10.22 / 0.7 = 14.6, rounded up (decision ci-job-caps).
-        timeout-minutes: 15
+        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 12.6 min (754 s, run 43164094808 attempt 2). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
+        timeout-minutes: 30
         run: sh hooks/test_install_src.sh
 
       - name: cloud-setup.sh suite
@@ -784,11 +792,10 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps). The 30 runs predate the
-    # waiting page suite, which moved to checks-waiting-page after it ran 9.5 min and hit this cap. The
-    # browser install is the only network step, and it no longer waits on apt. Re-measure this job
-    # without that suite before lowering the cap.
-    timeout-minutes: 10
+    # 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # 29 green, slowest 7.9 min (run 42700538152, before the waiting page suite moved out); 3.1 min or less since run 42826151332.
+    # The browser install is the only network step. The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -904,8 +911,9 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # n30 green, slowest 23.2 min with its suite step at 11.68 (run 42120437163), so about 11.5 min of other steps; the suite step's floor is now 16.2 min (n6, runs 42708195330, 42717988296): 27.7 min is a projection: the step floor 16.2 plus about 11.5 min of other steps from run 42120437163; run 42733987294 measured 24.4 min for the job; cap 40 = 27.7 / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 40
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
+    # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -924,8 +932,8 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap: n7 (green 9.65, 11.08, 14.32, 14.98, 15.00 min, runs 42700538152, 42682869856, 42676155839, 42733987294, 42669400649; 16.22 and 16.2 min, runs 42708195330 and 42717988296, each cut at the old 16 min cap with every case passing, so floors): cap 24 = 16.2 / 0.7, rounded up (decision ci-job-caps).
-        timeout-minutes: 24
+        # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step ran 1293 s (21.6 min) in run 43184587111 and 1221 s in run 43164094808.
+        timeout-minutes: 45
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
@@ -978,11 +986,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Shard 1 measured slowest 13.23 min,
-      # median 9.33 (n 31 green steps, same window as `checks`). hooks/test_guard.py holds the shard switch.
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1106 s (18.4 min) in run 43197518392, the slowest of 29 completed push runs.
+      # hooks/test_guard.py holds the shard switch.
       - name: Guard fixture suite (shard 1 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        timeout-minutes: 22
+        timeout-minutes: 45
         env:
           GUARD_SHARD: 1/2
         run: python3 hooks/test_guard.py
@@ -1202,8 +1210,9 @@ jobs:
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    # n30 green, median 20.95, slowest 26.5 min (run 42682869856, attempt 1): cap 38 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 38
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # 29 green, median 25.5, slowest 30.7 min (run 43197518392). The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1216,11 +1225,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Shard 2 measured slowest 11.20 min,
-      # median 9.10 (n 31 green steps, same window as `checks`). hooks/test_guard.py holds the shard switch.
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1168 s (19.5 min) in run 43197518392, the slowest job run.
+      # hooks/test_guard.py holds the shard switch.
       - name: Guard fixture suite (shard 2 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        timeout-minutes: 22
+        timeout-minutes: 45
         env:
           GUARD_SHARD: 2/2
         run: python3 hooks/test_guard.py
@@ -1373,7 +1382,10 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel.
+  # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel, then split into 3 shards that run in
+  # parallel too: this job and its -b and -c copies. Each sets MUTATE_SHARD=i/3 on its mutate step, so `run_mutants` runs
+  # entries[i-1::3] and each mutant runs in exactly one job (lint/test_windows_split.py, mutate_problems). `main` checks every
+  # anchor before it slices. Debt mutate-guard-split.
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
@@ -1383,8 +1395,8 @@ jobs:
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving. The cap
     # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
-    # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
-    timeout-minutes: 75
+    # One shard holds a third of the list (batch 103's unsplit job ran 35 min). Provisional 60 min cap until 5 green runs (ci-job-caps, How to measure again item 6); each shard's time is unmeasured until the first PR run.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1397,8 +1409,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard mutation test
+      - name: Guard mutation test, shard 1/3
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 1/3
         run: python3 hooks/mutate_guard.py
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
@@ -1409,6 +1423,52 @@ jobs:
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
         run: python3 hooks/test_guard_beat.py
+
+  checks-mutate-guard-b:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Shard 2/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation test, shard 2/3
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 2/3
+        run: python3 hooks/mutate_guard.py
+
+  checks-mutate-guard-c:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Shard 3/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation test, shard 3/3
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 3/3
+        run: python3 hooks/mutate_guard.py
 
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
@@ -1528,10 +1588,9 @@ jobs:
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    # Off pull_request (the PR slice has median 2.2): n24 green, median 11.8, slowest 13.6 min (run 42125979458).
-    # All 5 merge shards share cap 22. It comes from checks-windows-merge-2: run 42282722326 ended at its 15 min cap at 15.2 min or more,
-    # and 15.2 / 0.7 = 21.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 22
+    # Off pull_request (the PR slice has median 2.2). 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # 29 green, median 17.6, slowest 21.2 min (run 43155288101). All 5 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
@@ -1570,9 +1629,9 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-merge, with the same cap.
-    # n23 green, median 13.5, slowest green 14.5 min; run 42282722326 ended at the 15 min cap mid-suite (15.2 min or more).
-    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
-    timeout-minutes: 22
+    # 29 green, median 16.8, slowest 20.7 min (run 43197518392), same window as checks-windows-merge.
+    # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1594,9 +1653,9 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-merge, with the same cap.
-    # n25 green, median 12.5, slowest 13.8 min.
-    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
-    timeout-minutes: 22
+    # 29 green, median 17.1, slowest 21.2 min (run 43197518392), same window as checks-windows-merge.
+    # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1618,9 +1677,9 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-merge, with the same cap.
-    # n24 green, median 10.8, slowest 12.2 min.
-    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
-    timeout-minutes: 22
+    # 29 green, median 16.5, slowest 21.1 min (run 43136344305), same window as checks-windows-merge.
+    # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1642,9 +1701,9 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-merge, with the same cap.
-    # n25 green, median 11.8, slowest 13.7 min.
-    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
-    timeout-minutes: 22
+    # 29 green, median 16.0, slowest 18.2 min (run 43119184355), same window as checks-windows-merge.
+    # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1691,8 +1750,9 @@ jobs:
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
-    # n30 green, median 19.25, slowest 25.8 min (run 42682869856, attempt 1): cap 37 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 37
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main (run 42445434802 on; run 43184587111 was still running):
+    # 29 green, slowest 30.4 min (run 43070476960). Slowest step: Guard wrappers fixture suite, 277 s. The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
@@ -1814,6 +1874,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_daily_note.py
 
+      - name: Git mailbox suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_mail.py
+
       - name: Guard wrappers fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_wrappers.py
@@ -1930,6 +1994,8 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-b
+      - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
       - checks-windows-merge
@@ -1966,6 +2032,8 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-b
+      - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2

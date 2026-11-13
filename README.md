@@ -88,6 +88,24 @@ rm -f "$f"
 exit 0
 ```
 
+Also set these as environment variables in the same cloud environment menu. They are
+the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
+but a session can start without them. Measured in another session: the SessionStart refresh
+rewrites `settings.json` after Claude Code reads it.
+
+* `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
+* `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
+* `MAILBOX_REPO=https://github.com/shivinate7/session-mailbox.git` (decision `session-messages`)
+
+The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
+`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
+script's `playwright install` without that path downloads a second copy to the default cache,
+which sessions never read. Install only when the browser that the pinned Playwright needs is
+missing from `/opt/pw-browsers`. Agents never install a browser (decision
+`playwright-install-once`).
+
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
@@ -95,12 +113,22 @@ install.sh also writes a `SessionStart` hook that re-runs it, so each new or res
 re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 `CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
 
+A repo's own `.claude/settings.json` hooks, deny rules, and `SessionStart` hooks do not run in a
+project's cloud thread. The docs say repo hooks run "outside a project thread" in
+[Setup scripts vs. SessionStart hooks](https://code.claude.com/docs/en/cloud-environments#setup-scripts-vs-sessionstart-hooks).
+So a repo that needs a `SessionStart` hook or its own deny rule for setup or safety must provision
+in the environment setup script instead. A guard that must hold in project threads belongs in this
+repo's guard, `hooks/guard.py`: it still loads there, while the repo's own settings did not
+(measured 2026-11-03 in a project thread). Whether the `SessionStart` refresh above runs in project
+threads is not measured.
+
 ## Verify the install
 
 * `/context`, in any session, lists `~/.claude/CLAUDE.md` and the imported file under
   **Memory files**.
 * `/status` shows the `shiv-stylisms` output style.
-* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`.
+* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`. If
+  it prints nothing, set the variable as an environment variable, as above.
 * On Windows in copy mode, check `~\.claude\claude-settings-install.log` for a dated line from
   the last run.
   The line reads `settings.json=<mode> agents/lint=<mode>`. A mode is `symlink`, `copy`, or `kept`.
@@ -186,14 +214,21 @@ A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write
   set to `shivinate7/claude-settings`. Any other result stops before a pull request read. A
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
 * **Another checkout.** A batch runner that merges in a second checkout runs
-  `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. It runs
-  in the foreground (Bash timeout up to 600000), never with `run_in_background`. Measured
-  2026-11-03 16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule
-  and ran. The same call in the background went to the auto-mode classifier, which refused it. In a
-  cloud session the guard reads the checkout from the flag, else the `cd`, else the working
-  directory. It allows `--confirm` only when a `cs-repo` tag of the session's own `get_session`
-  record names that checkout's repo (guard rule `merge-confirm-repo`, claude-settings decision
-  `merge-confirm-repo`). A path that is no checkout stops the merge tool before any read.
+  `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. The flag
+  is `-C` (or `--repo-dir`); the tool refuses a prefix such as `--repo`. It runs in the
+  foreground (Bash timeout up to 600000), never with `run_in_background`. Measured 2026-11-03
+  16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule and ran. The
+  same call in the background went to the auto-mode classifier, which refused it. In a cloud
+  session the guard reads the checkout from the flag, else the `cd`, else the working directory
+  (read `hooks/guard_merge.py` `_merge_target_repo`). It allows `--confirm` only when a `cs-repo`
+  tag of the session's own newest `get_session` record names that checkout's repo, and no
+  `set_session_tags` call follows that record (read `hooks/guard_merge.py` `repo_proof_hit`; its
+  tag reader is `hooks/shared_names.py` `repo_tag_names`). Guard rule `merge-confirm-repo` (read
+  `hooks/guard.py` `judge_shell`) refuses a merge that fails the check. Decision
+  `merge-confirm-repo`: a cloud merge confirm acts only in a repo its own record names. A `-C`
+  value that names no folder stops the merge tool before any read. A `-C` value that is no git
+  checkout stops it before its lock and any pull request read (read `merge/merge.py` `main`: the
+  stops say `-C names no folder` and `not in a git checkout`).
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
   SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the

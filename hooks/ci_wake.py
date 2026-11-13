@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""After `gh pr ready <N>`, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs.
+"""After the shell ready command `gh pr ready <N>` (Bash or PowerShell), or an `mcp__github__update_pull_request` call with `draft` false, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs.
 
-PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
-`gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
-A push starts none. Neither does MCP `update_pull_request`, the cloud's ready route: the hook's matcher
-sees only Bash and PowerShell, and `gh pr ready` gets 403 in cloud (route pr-ready-gh-cli-cloud; debt ci-wake-misses-mcp-ready). Per PR it reads the head once. It lists that head's runs until a run that
+PostToolUse hook for the Bash and PowerShell tools and for the GitHub MCP `update_pull_request` tool,
+registered with `asyncRewake: true`. Two calls start a watch: `gh pr ready <N>`, and an MCP `update_pull_request`
+with `draft` false (the cloud's ready route, since `gh pr ready` gets 403 in cloud; route pr-ready-gh-cli-cloud;
+decision ci-wait-reads-run-status, The CI wake-up). The MCP call names its PR by `owner`, `repo` and `pullNumber` in tool_input.
+A call with `draft` absent or true starts none. Each `gh pr ready` in a command gets its own watch, in this one
+process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
 ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
@@ -37,6 +39,7 @@ if HERE not in sys.path:
 # The sibling modules (guard_core, guard_env, guard_merge, _nowindow) load inside main() and gh(), so a
 # failed import ends in an unknown line, never a traceback and exit 1.
 
+MCP_READY_TOOL = "mcp__github__update_pull_request"   # the cloud's ready route: draft false marks a PR ready
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
 STATUS_PAUSE = 30         # seconds between two reads in the first BACKOFF_FLAT seconds, and before a retry
 BACKOFF_FLAT = 240        # seconds the gap stays STATUS_PAUSE
@@ -211,6 +214,21 @@ def triggers(command, powershell):
         if call:
             found.append(call)
     return found
+
+
+def mcp_ready_calls(tool_input):
+    """-> [(selector, repo)] for a GitHub MCP update_pull_request call that marks a PR ready, else [].
+    Only `draft` false is a ready call: an absent or true `draft` starts none. The PR is the owner, repo
+    and pullNumber of tool_input, in the same form `gh pr ready <N> --repo <owner>/<repo>` gives
+    (guard.py reads the same keys). A call that names no PR starts none."""
+    if not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return []
+    owner, repo, number = tool_input.get("owner"), tool_input.get("repo"), tool_input.get("pullNumber")
+    if not (isinstance(owner, str) and owner and isinstance(repo, str) and repo):
+        return []
+    if isinstance(number, bool) or not (isinstance(number, int) or (isinstance(number, str) and number.isdigit())):
+        return []
+    return [(str(number), "%s/%s" % (owner, repo))]
 
 
 def lock_pr(pr, lock_dir):
@@ -403,13 +421,16 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
 
 def main():
     data = json.load(sys.stdin)
-    if not isinstance(data, dict) or data.get("tool_name") not in ("Bash", "PowerShell"):
+    if not isinstance(data, dict) or data.get("tool_name") not in ("Bash", "PowerShell", MCP_READY_TOOL):
         return 0
-    command = data["tool_input"]["command"]
-    if "ready" not in command.lower():
-        return 0   # no `gh pr ready` can hide here: no import, so a broken install wakes no `ls`
     cwd = data.get("cwd") if isinstance(data.get("cwd"), str) and os.path.isdir(data["cwd"]) else None
-    calls = triggers(command, data["tool_name"] == "PowerShell")
+    if data["tool_name"] == MCP_READY_TOOL:
+        calls = mcp_ready_calls(data.get("tool_input"))
+    else:
+        command = data["tool_input"]["command"]
+        if "ready" not in command.lower():
+            return 0   # no `gh pr ready` can hide here: no import, so a broken install wakes no `ls`
+        calls = triggers(command, data["tool_name"] == "PowerShell")
     if not calls:
         return 0
     try:

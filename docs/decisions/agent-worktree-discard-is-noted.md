@@ -58,7 +58,7 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
   worktree" above), and the call asks only when it holds a `cd`. Incident: 2026-11-08 03:37
   CST, with coordinator rulings at 04:38 and 05:16 CST. An agent-owned worktree keeps its named-file
   allow.
-  - Cost: 0 git starts when no file of that name exists, 1 when it is a revision, 2 otherwise.
+  - Cost: 0 git starts when no file of that name exists, 1 when it is a revision, 2 otherwise (unmeasured).
   - A staged-only change is refused, the same as main's `git checkout -- <path>`, even though git
     keeps the staged change.
   - An unreadable git answer allows and logs `subject-unread`.
@@ -79,7 +79,7 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 ## Path reset and work-tree discards
 
 Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
-`hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
+`tests/guard/` (family `shared-tree`, block titled THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
 holds only over uncommitted work. A clean tree allows, as the rows
 `subject: a hard reset in a clean tree takes nothing` and
 `subject: restoring the whole clean tree changes nothing` show.

@@ -12,7 +12,9 @@ Contract the builder codes against. Each case asserts one named cause. Pinned ch
 that pass on the base commit, and why each stays.
 - bin/mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file F
   The sender's address is cloud/<CLAUDE_CODE_REMOTE_SESSION_ID>. It writes mail/<addr>/<id>.md on
-  refs/heads/mail with plumbing only, never a working tree.
+  refs/heads/mail with plumbing only, never a working tree. It exits 0 only when the pushed tip's tree holds
+  that file and no path in the tree holds a CR. Otherwise it exits 1 with "not sent: <reason>", and the mail
+  ref does not move.
 - bin/mail read [<id>]  prints the open messages, or one message with its body. With no --addr, the open
   messages of the session's own folder (CLAUDE_CODE_SESSION_ID locally) are listed too.
 - bin/mail take <id>    one commit moves mail/<addr>/<id>.md to done/<addr>/<id>.md with a
@@ -38,10 +40,15 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
 5. The pc/<host> form is covered in-process. The checkout gets an origin URL, and socket.gethostname is
    patched to a fixed host. The CLI subprocess sees the real host, so the --addr cases pass the address.
 6. The sweep of old run folders is proven in hooks/test_feedback_inbox.py. Not repeated here.
-7. A stand-in git (a script named git, first on the case's PATH; POSIX only, CI runs on ubuntu) stands in
-   for the git calls of one machine. It logs each call's env, fails a named subcommand, or runs an
-   interloper once before its push, then execs the real git. ReadShowFails, PushRefusedRetry,
-   TakeBothFromOneTip and PromptEnv use it.
+7. A stand-in git (a script named git, first on the case's PATH) stands in for the git calls of one machine.
+   It logs each call's env, fails a named subcommand, drops a named update-index (its stdin is read and
+   dropped, exit 0), feeds an update-index --index-info CRLF lines (the "crlf" action), feeds a hash-object
+   --stdin CRLF lines (the "crlf-stdin" action), drops the removal lines of an update-index --index-info (the
+   "drop-removal" action), or runs an interloper once before its push, then execs the real git. Each
+   intercepting action writes a marker file, and its case asserts the marker, so an unrun stub fails the case.
+   ReadShowFails, PushRefusedRetry, TakeBothFromOneTip, PromptEnv, IndexUpdateDropped, CrlfIndexLines,
+   CrlfBlobHashed and TakeRemovalDropped use it. The stub is an extensionless POSIX script, and Windows
+   CreateProcess never runs such a file, so those cases skip on Windows with that reason.
 8. Timeouts. Each git call of a turn start carries its own bound. The bounds of one moved turn sum to
    10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. The case
    pins that shape. A shared-deadline build passes each call the time left, so its recorded bounds
@@ -56,16 +63,25 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    PushRefusedRetry (retries set to 1: "not sent", exit 1), TakeBothFromOneTip (a lost push read as a win:
    the second taker prints taken), TakeSameSecond (the nonce removed from the Taken-by line: both takers
    print taken), SshBatchDefault (the default removed: its two default cases go red) and AgeUnknown (the
-   fallback removed: the message is not listed). TakeBothFromOneTip gives its two machines distinct git
-   identities. TakeSameSecond keeps one identity and one address, and pins the clock, so two takers build
-   the same commit unless the Taken-by line carries a nonce.
+   fallback removed: the message is not listed), ReadBackFromTip (a CRLF blob from hash-object's stdin: its
+   body and no-CR checks go red), IndexUpdateDropped and CrlfIndexLines (the send's read-back refuses a
+   dropped or CRLF index update: the clause or check that refuses goes red) and TakeRemovalDropped (the
+   removal clause of the take read-back: with it removed, the take prints taken). TakeBothFromOneTip gives
+   its two machines distinct git identities. TakeSameSecond keeps one identity and one address, and pins
+   the clock, so two takers build the same commit unless the Taken-by line carries a nonce.
 12. Local read. `bin/mail read` with no --addr takes its session folder from CLAUDE_CODE_SESSION_ID.
    LocalSessionRead runs bin/mail's main in this process with the host set to PC_HOST, since the CLI
    subprocess sees the real host.
+13. Stdin that is not UTF-8 is refused: "not sent: body is not UTF-8" and exit 1. bin/mail reads stdin as strict
+   UTF-8, so a lone surrogate never reaches git(). StdinNotUtf8 pins it.
+14. A git call that reports "Ignoring path" on stderr and exits 0 is an error. The stub kind warn keeps every
+   index entry and writes the warning to stderr. IgnoredPathStderr pins that the send then says not sent.
+   Any other stderr line is not an error: the same class's allow case pins that the send still prints sent.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
 import contextlib
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -92,7 +108,8 @@ MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
 SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
             "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT",
+            "MAILBOX_HOLD_OFF")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
@@ -107,6 +124,9 @@ REAL_GIT = shutil.which("git")  # resolved before any case edits PATH: the stand
 ORIGIN = "https://github.com/acme/widgets.git"  # the pc slug is acme-widgets
 PC_HOST = "box-one"
 PC_BASE = "pc/box-one/acme-widgets"
+# The one skip reason of every case that needs the stand-in git. Windows CreateProcess runs no extensionless file.
+NT_NO_STUB = ("the stand-in git is an extensionless script, which Windows CreateProcess never runs, "
+              "so git is not intercepted on Windows")
 # The stand-in git. @PYTHON@, @CONF@ and @REAL@ are filled in by Machine.install_stub.
 STUB = """#!@PYTHON@
 import json, os, subprocess, sys
@@ -126,6 +146,13 @@ with open(CONF, encoding="utf-8") as handle:
     conf = json.load(handle)
 args = sys.argv[1:]
 sub = subcommand(args)
+
+
+def mark():
+    if conf.get("marker"):
+        open(conf["marker"], "w").close()
+
+
 if conf.get("log"):
     with open(conf["log"], "a", encoding="utf-8") as handle:
         handle.write(json.dumps({"sub": sub, "env": {k: os.environ.get(k) for k in WATCH}}) + "\\n")
@@ -133,6 +160,32 @@ action = (conf.get("actions") or {}).get(sub)
 if action and action["kind"] == "fail":
     sys.stderr.write(action["stderr"] + "\\n")
     sys.exit(128)
+if action and action["kind"] == "drop":
+    if "--index-info" in args:
+        mark()
+        sys.stdin.buffer.read()
+    sys.exit(0)
+if action and action["kind"] == "crlf" and "--index-info" in args:
+    mark()
+    done = subprocess.run([REAL] + args, input=sys.stdin.buffer.read().replace(b"\\n", b"\\r\\n"))
+    sys.exit(done.returncode)
+if action and action["kind"] == "crlf-stdin" and "--stdin" in args:
+    mark()
+    done = subprocess.run([REAL] + args, input=sys.stdin.buffer.read().replace(b"\\n", b"\\r\\n"))
+    sys.exit(done.returncode)
+if action and action["kind"] == "drop-removal" and "--index-info" in args:
+    mark()
+    kept = [line for line in sys.stdin.buffer.read().splitlines(True) if not line.startswith(b"0 ")]
+    done = subprocess.run([REAL] + args, input=b"".join(kept))
+    sys.exit(done.returncode)
+if action and action["kind"] == "warn" and "--index-info" in args:
+    # The real git runs on the same stdin, so every entry lands. Its stderr gets the warning, and the exit code stays.
+    mark()
+    data = sys.stdin.buffer.read()
+    done = subprocess.run([REAL] + args, input=data, capture_output=True)
+    sys.stdout.buffer.write(done.stdout)
+    sys.stderr.buffer.write(done.stderr + action["stderr"].encode("utf-8"))
+    sys.exit(done.returncode)
 if action and action["kind"] == "before" and not os.path.exists(action["once"]):
     open(action["once"], "w").close()
     done = subprocess.run(action["argv"], env=action["env"], capture_output=True, text=True)
@@ -162,7 +215,9 @@ def turn_start_lines(payload, env):
 
 
 def scrubbed_environ():
-    return {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env["MAILBOX_HOLD_OFF"] = "1"  # a case never depends on the host platform; MacHold removes it
+    return env
 
 
 def fixture_env(home, extra=None):
@@ -175,12 +230,14 @@ def fixture_env(home, extra=None):
     return env
 
 
-def git(cwd, args, env, input_text=None):
+def git(cwd, args, env, input_text=None, binary=False):
+    """binary=True returns bytes. Text mode turns a lone CR into a newline, and the CRLF cases look for that CR."""
+    mode = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text,
-                            capture_output=True, text=True, encoding="utf-8", errors="replace",
-                            timeout=60)
+                            capture_output=True, timeout=60, **mode)
     if result.returncode:
-        raise RuntimeError("fixture git %s failed: %s" % (args[0], result.stderr.strip()))
+        stderr = result.stderr if isinstance(result.stderr, str) else result.stderr.decode("utf-8", "replace")
+        raise RuntimeError("fixture git %s failed: %s" % (args[0], stderr.strip()))
     return result.stdout
 
 
@@ -202,14 +259,23 @@ class Store:
                                 env=self.env, capture_output=True, text=True, timeout=60)
         return result.stdout.strip() or None
 
-    def files(self, prefix=""):
+    def files(self, prefix="", raw=False):
+        """The tip's paths that start with prefix, sorted. raw=True reads them with -z: git C-quotes a path with
+        a CR in text output, so only the raw listing shows that CR."""
         tip = self.tip()
         if tip is None:
             return []
-        listing = git(self.path, ["ls-tree", "-r", "--name-only", tip], self.env)
-        return sorted(path for path in listing.splitlines() if path.startswith(prefix))
+        if raw:
+            listing = git(self.path, ["ls-tree", "-r", "-z", "--name-only", tip], self.env, binary=True)
+            paths = [path.decode("utf-8") for path in listing.split(b"\0") if path]
+        else:
+            paths = git(self.path, ["ls-tree", "-r", "--name-only", tip], self.env).splitlines()
+        return sorted(path for path in paths if path.startswith(prefix))
 
-    def read(self, path):
+    def read(self, path, raw=False):
+        """The blob at path on the tip. raw=True returns bytes, so a CR in the content survives."""
+        if raw:
+            return git(self.path, ["cat-file", "blob", "%s:%s" % (self.tip(), path)], self.env, binary=True)
         return git(self.path, ["show", "%s:%s" % (self.tip(), path)], self.env)
 
     def seed(self, addr, mid, kind, sender, body, re_id="-"):
@@ -269,6 +335,7 @@ class Machine:
             env["GIT_TRACE2_EVENT"] = trace
         self.env = env
         self.stub_conf = None
+        self.stub_marker = None
         if stub:
             self.install_stub()
 
@@ -277,6 +344,7 @@ class Machine:
         folder = os.path.join(self.case, self.name + "-stub")
         os.makedirs(folder)
         self.stub_conf = os.path.join(folder, "conf.json")
+        self.stub_marker = os.path.join(folder, "intercepted")
         script = os.path.join(folder, "git")
         body = (STUB.replace("@PYTHON@", sys.executable).replace("@CONF@", repr(self.stub_conf))
                 .replace("@REAL@", repr(REAL_GIT)))
@@ -287,10 +355,14 @@ class Machine:
         self.stub_actions({})
 
     def stub_actions(self, actions, log=None):
-        """actions: {git subcommand: {"kind": "fail", "stderr": ...} | {"kind": "before", "once", "argv", "env", "record"}}.
-        log: a file that gets one line per git start (its subcommand and the two prompt variables)."""
+        """actions: {git subcommand: {"kind": "fail", "stderr": ...}
+        | {"kind": "before", "once", "argv", "env", "record"}
+        | {"kind": "drop" | "crlf" | "drop-removal" | "warn"} on update-index --index-info
+        | {"kind": "crlf-stdin"} on hash-object --stdin}.
+        log: a file that gets one line per git start (its subcommand and the two prompt variables).
+        Each intercepting action writes self.stub_marker, which assert_stub_intercepted reads."""
         with open(self.stub_conf, "w", encoding="utf-8") as handle:
-            json.dump({"actions": actions, "log": log}, handle)
+            json.dump({"actions": actions, "log": log, "marker": self.stub_marker}, handle)
 
 
 class Starts:
@@ -356,15 +428,21 @@ def snapshot(folder):
     return tree
 
 
-def run_cli(machine, *args, input_text=None, input_bytes=None):
-    """input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below). input_bytes goes to
-    it unchanged, for a stdin that is not UTF-8; its output comes back decoded as UTF-8."""
-    if input_bytes is not None:
-        raw = subprocess.run([sys.executable, MAIL_CLI, *args], env=machine.env, cwd=machine.checkout,
-                             input=input_bytes, capture_output=True, timeout=60)
+def run_cli(machine, *args, stdin=None, env_extra=None, input_text=None, input_bytes=None):
+    """bin/mail in a subprocess as one machine. stdin, or input_bytes (its alias, which StdinNotUtf8 passes), when given,
+    is bytes piped to the CLI unchanged, and the result's stdout and stderr are then decoded as UTF-8 with replace, so
+    a case reads the bytes the CLI wrote.
+    input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below). env_extra overrides the
+    machine's env for this run only."""
+    env = dict(machine.env, **(env_extra or {}))
+    if stdin is None:
+        stdin = input_bytes
+    if stdin is not None:
+        raw = subprocess.run([sys.executable, MAIL_CLI, *args], env=env, cwd=machine.checkout, input=stdin,
+                             capture_output=True, timeout=60)
         return subprocess.CompletedProcess(raw.args, raw.returncode, raw.stdout.decode("utf-8", "replace"),
                                            raw.stderr.decode("utf-8", "replace"))
-    return subprocess.run([sys.executable, MAIL_CLI, *args], env=machine.env,
+    return subprocess.run([sys.executable, MAIL_CLI, *args], env=env,
                           cwd=machine.checkout, input=input_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=60)
 
@@ -455,7 +533,10 @@ def cli_in_process(machine, *args):
 
 class MailCase(unittest.TestCase):
     def setUp(self):
-        self.case = os.path.join(ROOT, self.id().rsplit(".", 1)[-1])
+        # A short name keeps git's paths under the Windows path limit. The test id is in each failure
+        # message, so the folder needs only a unique name. makedirs refuses a clash.
+        digest = hashlib.sha256(self.id().encode("utf-8")).hexdigest()[:10]
+        self.case = os.path.join(ROOT, digest)
         os.makedirs(self.case)
         self.counter = 0
 
@@ -482,6 +563,31 @@ class MailCase(unittest.TestCase):
         if re_id is not None:
             args += ["--re", re_id]
         return run_cli(machine, *args)
+
+    def assert_send_is_honest(self, sent, store, to, before):
+        """The send contract: exit 0 only when the pushed tip's tree holds mail/<to>/<id>.md, <id> from the
+        'sent <id>' line, and no path in that tree holds a CR. Otherwise exit 1 with a 'not sent: ' line, and the
+        mail ref stays at before (None for an empty store)."""
+        if sent.returncode != 0:
+            self.assertEqual(sent.returncode, 1, "a refused send exited %d, expected 1: %s"
+                             % (sent.returncode, combined(sent)))
+            self.assertIn("not sent: ", combined(sent), "a refused send printed no 'not sent: <reason>' line: %r"
+                          % combined(sent))
+            self.assertEqual(store.tip(), before, "a refused send moved the mail ref")
+            return
+        cr = [path for path in store.files(raw=True) if "\r" in path]
+        self.assertEqual(cr, [], "a send that exited 0 pushed a path with a CR in it: %r" % cr)
+        sent_lines = [line for line in sent.stdout.splitlines() if line.startswith("sent ")]
+        self.assertTrue(sent_lines, "a send that exited 0 printed no 'sent <id>' line: %r" % combined(sent))
+        path = "mail/%s/%s.md" % (to, sent_lines[0].split()[1])
+        self.assertIn(path, store.files(raw=True), "a send that exited 0 has its message in no pushed tree: %s" % path)
+
+    def assert_stub_intercepted(self, machine, call="update-index --index-info",
+                                effect="no update was dropped or CRLF'd"):
+        """The stand-in git ran the git call that its action names. Without this, a case whose stub never ran
+        passes on the old code, because the real git builds the healthy tree."""
+        self.assertTrue(os.path.exists(machine.stub_marker),
+                        "the stand-in git never intercepted %s, so %s" % (call, effect))
 
 
 class RoundTrip(MailCase):
@@ -591,6 +697,7 @@ class Offline(MailCase):
                                 "control: the turn never read the remote: %d git starts" % len(starts.git_starts()))
         self.assertFalse([line for line in lines if line.startswith(UNKNOWN)],
                          "a healthy empty store printed 'mail unknown:': %r" % lines)
+        self.assertEqual(lines, [], "a store with no mail ref printed a line: %r" % lines)
 
 
 class Cost(MailCase):
@@ -643,6 +750,8 @@ class NotSent(MailCase):
         notices = [line for line in combined(sent).splitlines() if line.startswith("not sent: ")]
         self.assertTrue(notices, "a refused send printed no 'not sent: <reason>' line: %r" % combined(sent))
         self.assertTrue(notices[0][len("not sent: "):].strip(), "the 'not sent:' line gives no reason: %r" % notices[0])
+        self.assertIn("refused by the test store", notices[0],
+                      "the 'not sent:' line does not hold the hook's stderr text: %r" % notices[0])
         self.assertEqual(store.files(), [], "a refused message landed on the store anyway")
 
     def test_non_fast_forward_on_every_try_makes_six_pushes_then_not_sent_exit_1(self):
@@ -800,6 +909,7 @@ class LocalTimeMailLines(MailCase):
 
 
 class ReadShowFails(MailCase):
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_read_with_git_show_failing_prints_mail_unknown_not_no_open_message(self):
         store = self.store()
         store.seed("cloud/sess-b", "0a1b2c3d4e81", "request", "cloud/sess-a", "Body marker: show\n")
@@ -818,6 +928,7 @@ class ReadShowFails(MailCase):
 
 
 class PushRefusedRetry(MailCase):
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_push_refused_by_an_interloper_lands_on_try_two(self):
         store = self.store()
         store.seed("cloud/sess-b", "0a1b2c3d4e95", "request", "cloud/sess-x", "Body marker: base\n")
@@ -844,6 +955,7 @@ class PushRefusedRetry(MailCase):
 
 
 class TakeBothFromOneTip(MailCase):
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_two_takers_from_one_tip_one_takes_and_the_other_is_taken_by_another(self):
         store = self.store()
         mid = "0a1b2c3d4e96"
@@ -868,6 +980,7 @@ class TakeBothFromOneTip(MailCase):
 
 
 class PromptEnv(MailCase):
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_every_git_start_sets_no_prompt_and_no_credential_prompt(self):
         store = self.store()
         store.seed("cloud/sess-b", "0a1b2c3d4e97", "request", "cloud/sess-a", "Body marker: prompt\n")
@@ -964,6 +1077,101 @@ class SshBatchDefault(MailCase):
                          % command)
 
 
+class MacNotHeld(MailCase):
+    """No platform is held by default (step mail-mac-unhold)."""
+
+    def test_no_platform_is_held(self):
+        self.assertEqual(MAIL_MODULE.HELD_PLATFORMS, (), "a platform is held by default: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
+
+    def test_mac_turn_start_lists_the_message_with_no_hold_off(self):
+        store = self.store()
+        mid = "0a1b2c3d4ebb"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-open\n")
+        reader = self.machine("b", store, session="sess-b")
+        reader.env.pop("MAILBOX_HOLD_OFF")
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "a Mac turn start is still held: %r" % lines)
+
+
+class MacHold(MailCase):
+    """Step mail-mac-unhold: the hold mechanism for a platform in HELD_PLATFORMS. The cases below patch the tuple to
+    ("darwin",) and prove the turn-start line and the `mail` command are both held there, and that MAILBOX_HOLD_OFF=1 lifts
+    the hold. The default tuple is empty; `MacNotHeld` pins that."""
+
+    def setUp(self):
+        super().setUp()
+        for module in (MAIL_MODULE, cli_module().mail):  # bin/mail holds its own copy of hooks/mail.py
+            patch = mock.patch.object(module, "HELD_PLATFORMS", ("darwin",))
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def seeded_reader(self, hold_off=False):
+        store = self.store()
+        mid = "0a1b2c3d4eaa"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-hold\n")
+        reader = self.machine("b", store, session="sess-b")
+        if hold_off:
+            reader.env["MAILBOX_HOLD_OFF"] = "1"
+        else:
+            reader.env.pop("MAILBOX_HOLD_OFF")
+        return mid, store, reader
+
+    def test_linux_turn_start_lists_the_message(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "linux"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "control: a Linux turn does not list the message: %r" % lines)
+
+    def test_mac_turn_start_prints_nothing_for_an_open_message(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(lines, [], "a Mac turn start read the mailbox before its check passed: %r" % lines)
+
+    def test_mac_turn_start_lists_the_message_with_the_hold_off(self):
+        mid, _, reader = self.seeded_reader(hold_off=True)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "MAILBOX_HOLD_OFF=1 on a Mac did not lift the hold: %r" % lines)
+
+    def test_mac_send_is_refused_and_stores_nothing(self):
+        mid, store, reader = self.seeded_reader()
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("held-send"))
+        self.assertEqual(code, 2, "a held Mac send exited %r, not 2: %r %r" % (code, out, err))
+        self.assertIn("held", err, "the refusal does not say the mailbox is held: %r" % err)
+        self.assertNotIn("sent", out, "a held Mac send printed sent: %r" % out)
+        self.assertEqual(store.tip(), tip, "a held Mac send moved the mail ref")
+
+    def test_mac_read_is_refused(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "read", "--addr", "cloud/sess-b")
+        self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
+        self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
+        self.assertIn("held", err, "the held read printed no refusal: %r" % err)
+        self.assertNotIn("MAILBOX_HOLD_OFF", err, "the held refusal names the variable that lifts the hold: %r" % err)
+
+    def test_only_one_lifts_the_hold(self):
+        for value in ("0", "false", ""):
+            with self.subTest(value=value), mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+                self.assertTrue(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": value}), "MAILBOX_HOLD_OFF=%r lifted the hold" % value)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            self.assertFalse(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": "1"}), "MAILBOX_HOLD_OFF=1 did not lift the hold")
+
+    def test_mac_send_runs_with_the_hold_off(self):
+        mid, store, reader = self.seeded_reader(hold_off=True)
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("open-send"))
+        self.assertEqual(code, 0, "the Mac check send exited %r with the hold off: %r %r" % (code, out, err))
+        self.assertNotEqual(store.tip(), tip, "the Mac check send stored nothing")
+
+
 class AgeUnknown(MailCase):
     def healthy_line(self, store, mid):
         """The turn-start line of a machine whose git log works, so each failing case has a line to compare."""
@@ -972,6 +1180,7 @@ class AgeUnknown(MailCase):
         self.assertNotIn("age unknown", lines[0], "control: a healthy turn says age unknown: %r" % lines[0])
         return lines[0]
 
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
     def test_failing_git_log_still_lists_the_message_as_age_unknown(self):
         store = self.store()
         mid = "0a1b2c3d4e99"
@@ -995,6 +1204,213 @@ class AgeUnknown(MailCase):
         listed = listed_with(lines, mid)
         self.assertEqual(len(listed), 1, "a timed-out git log hid the message from the turn start: %r" % lines)
         self.assertIn("age unknown", listed[0], "a timed-out git log did not print age unknown: %r" % listed[0])
+
+
+class IndexUpdateDropped(MailCase):
+    """A git helper drops the update-index stdin and does nothing, exiting 0. The tree write-tree then builds is the
+    parent's, so the send must not report success. Stub action: drop, on update-index."""
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_dropped_index_update_on_a_seeded_store_is_not_sent_and_keeps_the_tip(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e51", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "dropped-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"update-index": {"kind": "drop"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "dropped-send")
+        self.assert_stub_intercepted(sender)
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", before)
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_dropped_index_update_on_an_empty_store_is_not_sent_and_creates_no_ref(self):
+        store = self.store()
+        self.assertIsNone(store.tip(), "control: the store should start with no mail ref")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"update-index": {"kind": "drop"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "dropped-empty")
+        self.assert_stub_intercepted(sender)
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", None)
+
+
+class CrlfIndexLines(MailCase):
+    """update-index reads each index line with a CR before its LF, as a text-mode pipe on Windows writes it. Git keeps
+    that CR in the path. Stub action: crlf, on update-index --index-info."""
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_crlf_index_lines_never_push_a_path_with_a_cr(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e61", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "crlf-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"update-index": {"kind": "crlf"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-send")
+        self.assert_stub_intercepted(sender)
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", before)
+
+
+class ReadBackFromTip(MailCase):
+    """A good send, read back from the pushed tip: mail/<to>/<id>.md holds the body file's bytes, and no path or
+    content in the tip's tree holds a CR. Linux writes LF, so this case holds on any correct send; it guards the
+    read-back, and the CR defects are simulated in CrlfIndexLines and IndexUpdateDropped."""
+
+    def send_and_read_back(self, store, sender, marker):
+        body_path = self.body(marker)
+        sent = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", body_path)
+        self.assertEqual(sent.returncode, 0, "a good send exited %d: %s" % (sent.returncode, combined(sent)))
+        self.assertTrue(sent.stdout.startswith("sent "), "a good send printed no 'sent <id>' line: %r" % combined(sent))
+        path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
+        tree = store.files(raw=True)
+        self.assertIn(path, tree, "the pushed tip's tree holds no %s" % path)
+        cr = [entry for entry in tree if "\r" in entry]
+        self.assertEqual(cr, [], "the pushed tip's tree holds a path with a CR in it: %r" % cr)
+        with open(body_path, "rb") as handle:
+            body = handle.read()
+        content = store.read(path, raw=True)
+        self.assertNotIn(b"\r", content, "the pushed message holds a CR: %r" % content)
+        self.assertIn(b"\n\n", content, "the pushed message has no body after its header: %r" % content)
+        self.assertEqual(content.split(b"\n\n", 1)[1], body,
+                         "the pushed body is not the body file's bytes: %r" % content)
+
+    def test_good_send_into_an_empty_store_reads_back_its_body_bytes(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        self.send_and_read_back(store, sender, "read-back-empty")
+
+    def test_good_send_into_a_store_with_mail_reads_back_its_body_bytes(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e71", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a")
+        self.send_and_read_back(store, sender, "read-back-full")
+
+
+class TakeRemovalDropped(MailCase):
+    """A take whose index update keeps the add line and drops the removal line. The take read-back must see the message
+    still on the tip, so the take prints no "taken" line and fails. Stub action: drop-removal, on update-index."""
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_take_whose_removal_line_is_dropped_prints_no_taken_and_keeps_the_message_open(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e83", "request", "cloud/sess-x", "Body marker: take-control\n")
+        store.seed("cloud/sess-b", "0a1b2c3d4e84", "request", "cloud/sess-x", "Body marker: take-dropped\n")
+        taker = self.machine("b", store, session="sess-b", stub=True)
+        control = run_cli(taker, "take", "0a1b2c3d4e83")
+        self.assertEqual(control.returncode, 0, "control: a healthy take exited %d: %s"
+                         % (control.returncode, combined(control)))
+        self.assertIn("taken 0a1b2c3d4e83", control.stdout.splitlines(),
+                      "control: a healthy take printed no taken line: %r" % control.stdout)
+        before = store.tip()
+        taker.stub_actions({"update-index": {"kind": "drop-removal"}})
+        taken = run_cli(taker, "take", "0a1b2c3d4e84")
+        self.assert_stub_intercepted(taker)
+        printed = [line for line in taken.stdout.splitlines() if line.startswith("taken ")]
+        self.assertEqual(printed, [], "a take whose removal line was dropped printed taken, "
+                         "with the old file still open: %r" % taken.stdout)
+        self.assertEqual(taken.returncode, 1, "a take whose removal line was dropped exited %d, expected 1: %s"
+                         % (taken.returncode, combined(taken)))
+        self.assertIn("message file missing from the commit", taken.stderr,
+                      "a take whose removal line was dropped failed for another cause: %r" % taken.stderr)
+        self.assertEqual(store.tip(), before, "a take whose removal line was dropped moved the mail ref")
+        self.assertIn("mail/cloud/sess-b/0a1b2c3d4e84.md", store.files("mail/cloud/sess-b/"),
+                      "the message left its open folder although the take did not finish")
+        self.assertEqual(store.files("done/cloud/sess-b/0a1b2c3d4e84"), [],
+                         "a take that did not finish left a done file behind")
+
+
+class StdinAsciiBody(MailCase):
+    """An ASCII body piped on stdin is pushed as its own bytes. A body that is not UTF-8 is StdinNotUtf8's case."""
+
+    def send_stdin(self, machine, body):
+        return run_cli(machine, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-", stdin=body)
+
+    def test_control_ascii_body_on_stdin_sends_and_pushes_its_bytes(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        body = b"Body marker: stdin-control\n"
+        sent = self.send_stdin(sender, body)
+        self.assertEqual(sent.returncode, 0, "control: an ASCII body on stdin exited %d: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assertTrue(sent.stdout.startswith("sent "), "control: an ASCII body on stdin printed no sent line: %r"
+                        % sent.stdout)
+        path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
+        self.assertIn(path, store.files(), "control: the pushed tip holds no %s" % path)
+        self.assertTrue(store.read(path, raw=True).endswith(body), "control: the pushed message lost its body bytes")
+
+
+class IgnoredPathStderr(MailCase):
+    """Git prints "Ignoring path" on stderr and still exits 0. The entries land in this stand-in, so only the stderr
+    shows the skip. A git call that reports an ignored path is an error, and the send must say not sent."""
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_send_whose_git_reports_an_ignored_path_is_not_sent(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), 1, "control: a healthy send did not land its message")
+        sender.stub_actions({"update-index": {"kind": "warn",
+                                              "stderr": "Ignoring path mail/cloud/sess-b/ignored.md\n"}})
+        landed_before = len(store.files("mail/cloud/sess-b/"))
+        sent = self.send(sender, "cloud/sess-b", "request", "warned")
+        self.assert_stub_intercepted(sender)
+        self.assertNotEqual(sent.returncode, 0, "git printed 'Ignoring path' and the send exited 0: %r" % combined(sent))
+        self.assertIn("not sent: ", sent.stderr, "a failed send printed no 'not sent:' line: %r" % sent.stderr)
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), landed_before,
+                         "the send landed a message after git printed 'Ignoring path'")
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_benign_stderr_line_from_git_still_lets_the_send_print_sent(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"update-index": {"kind": "warn",
+                                              "stderr": "hint: a benign git note, not an ignored path\n"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "benign")
+        self.assert_stub_intercepted(sender)
+        self.assertEqual(sent.returncode, 0, "git printed a benign stderr line and the send exited %d: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", None)
+
+
+class CrlfBlobHashed(MailCase):
+    """hash-object reads its stdin with a CR before each LF, as a text-mode pipe on Windows writes it. The blob
+    it stores is not the blob of the text, so the tree holds other bytes than the body the send was given. The send
+    refuses it, and the mail ref does not move. Stub action: crlf-stdin, on hash-object --stdin."""
+
+    def assert_refused(self, machine, store, before, sent):
+        self.assert_stub_intercepted(machine, "hash-object --stdin", "no blob was made from CRLF stdin")
+        self.assertEqual(sent.returncode, 1, "a send whose blob came from CRLF stdin exited %d, expected 1: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assertIn("not sent: message file missing from the commit", sent.stderr,
+                      "a send whose blob came from CRLF stdin was refused for another cause: %r" % sent.stderr)
+        self.assertEqual(store.tip(), before, "a send whose blob came from CRLF stdin moved the mail ref")
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_blob_from_crlf_stdin_is_not_sent_on_a_seeded_store_and_keeps_the_tip(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e91", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "crlf-blob-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"hash-object": {"kind": "crlf-stdin"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-blob-send")
+        self.assert_refused(sender, store, before, sent)
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_blob_from_crlf_stdin_is_not_sent_on_an_empty_store_and_creates_no_ref(self):
+        store = self.store()
+        self.assertIsNone(store.tip(), "control: the store should start with no mail ref")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"hash-object": {"kind": "crlf-stdin"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-blob-empty")
+        self.assert_refused(sender, store, None, sent)
 
 
 MARKER = "ascii-ok: flow → kept"  # U+2192 has no cp1252 code point
@@ -1111,6 +1527,16 @@ class MailboxOff(MailCase):
         read = run_cli(receiver, "read", "0123456789ab")
         self.assertEqual(read.returncode, 2,
                          "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
+
+
+class SettingsDefault(unittest.TestCase):
+    """The mailbox store is a default of every session: settings.json `env` names it, so no session sets it by hand."""
+
+    def test_settings_env_names_the_mailbox_store(self):
+        with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+            env = json.load(handle).get("env", {})
+        self.assertEqual(env.get("MAILBOX_REPO"), "https://github.com/shivinate7/session-mailbox.git",
+                         "settings.json env has no MAILBOX_REPO default, so a session reads no mail: %r" % env.get("MAILBOX_REPO"))
 
 
 if __name__ == "__main__":

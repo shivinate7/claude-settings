@@ -124,7 +124,8 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+// timers: the page's timers run on a fake clock, installed before load, so a case moves time on with clock.runFor and never waits on it.
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, timers = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -144,6 +145,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
+  if (timers) await page.clock.install();
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -521,6 +523,10 @@ const markState = (page) => page.evaluate(() => {
   return { icon: m.classList.contains("icon"), img: img ? img.getAttribute("src") : null, alt: img ? img.getAttribute("alt") : null, text: m.textContent, hidden: m.hidden, tile: m.style.getPropertyValue("--tile"), aria: m.getAttribute("aria-hidden") };
 });
 const named = (page, name) => page.waitForFunction((n) => document.getElementById("repoName").textContent === n, name);
+// n requestAnimationFrame callbacks: a layout that a resize or a repaint starts has run when this resolves.
+const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+// A picture's fit arrives by postMessage once its frame loads, so a layout read waits for one fit per design, then three frames.
+const fitAll = (page, slugs) => page.waitForFunction((ks) => ks.every((k) => Object.keys(FIT).some((x) => x.startsWith(k + "|"))), slugs).then(() => frameWait(page, 3));
 
 test("a dark icon shows on a white tile in place of the letter, alt empty and aria-hidden kept", async (t) => {
   const icon = svgIcon("#11151b");
@@ -544,7 +550,8 @@ test("an icon that is not an inline svg or png data URI, or is too long, leaves 
   for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
     const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
     await named(page, "Compass");
-    await page.waitForTimeout(150);
+    await page.waitForFunction(() => +document.getElementById("mark").dataset.iconRuns >= 1).catch(() => {}); // a dropped icon's pass still counts, and the assert below names a miss
+    assert.ok(+(await page.getAttribute("#mark", "data-icon-runs")) >= 1, "the mark never counted its finished icon pass");
     const m = await markState(page);
     assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
     await page.close();
@@ -578,7 +585,7 @@ test("a meta write with the same icon keeps it shown, with no flash of the lette
     const m = document.getElementById("mark"); let lost = false;
     new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
     state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // the observer delivers a lost icon before the next frame
     return lost;
   }, icon);
   assert.equal(flashed, false);
@@ -589,15 +596,22 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
   await named(page, "Compass");
   const slow = svgIcon("#11151b", "<!--slow-->");
-  await page.evaluate((slow) => {
+  const base = await page.evaluate((slow) => {
     const decode = HTMLImageElement.prototype.decode;
-    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400))); };
+    // The slow decode holds on a latch the test opens, so it finishes after the newer identity's pass.
+    window.__slowGo = new Promise((r) => { window.__slowRelease = r; });
+    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && window.__slowGo); };
+    const base = +document.getElementById("mark").dataset.iconRuns;
     state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
     state.meta = { identity: { name: "Compass" } }; applyIdentity();
+    window.__slowRelease();
+    return base;
   }, slow);
-  await page.waitForTimeout(700);
+  assert.ok(Number.isInteger(base), "the mark never counted its finished icon pass");
+  await page.waitForFunction((b) => +document.getElementById("mark").dataset.iconRuns === b + 2, base).catch(() => {}); // the stale pass counts after the release
+  assert.equal(+(await page.getAttribute("#mark", "data-icon-runs")), base + 2, "the stale pass did not count");
   const m = await markState(page);
-  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
+  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""], "a stale decode drew its icon over the newer identity");
 });
 
 // ---------------------------------------------------------------- designs
@@ -727,10 +741,12 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("SKILL.md and the designer agent carry the mockup convention", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+test("SKILL.md, reference/designs.md and the designer agent carry the mockup convention", async () => {
+  // The mockup convention moved from SKILL.md to reference/designs.md, so the skill's text is read from both files.
+  const skill = ["SKILL.md", path.join("reference", "designs.md")]
+    .map((f) => fs.readFileSync(path.join(HERE, "..", f), "utf8")).join("\n");
   const designer = fs.readFileSync(path.join(HERE, "..", "..", "..", "agents", "designer.md"), "utf8");
-  for (const [name, text] of [["SKILL.md", skill], ["designer.md", designer]]) {
+  for (const [name, text] of [["SKILL.md and reference/designs.md", skill], ["designer.md", designer]]) {
     assert.match(text, /"Sample" banner/, name + " has no Sample banner line");
     assert.match(text, /"Today: <part>"/, name + " has no Today label");
     assert.match(text, /"New: <part>"/, name + " has no New label");
@@ -916,10 +932,10 @@ test("a resize or a repaint keeps the owner's scroll, the same box, and the scro
   await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
   assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
   await page.setViewportSize({ width: 1300, height: 900 });
-  await page.waitForTimeout(300);
+  await frameWait(page, 2); // the resize fits the pictures in the frames after it
   assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
   await choose(page, it, "b");
-  await page.waitForTimeout(300);
+  await frameWait(page, 2); // the pick repaints in the frames after it
   const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
   assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
   const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
@@ -954,17 +970,17 @@ test("a touch drag scrolls the picture and opens nothing, and a tap opens View, 
   await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
   const r = await page.locator(boxSel(it.id)).boundingBox();
   const x = r.x + 40, y = r.y + 380;
+  await page.locator(boxSel(it.id)).evaluate((w) => { window.__ended = false; w.addEventListener("scrollend", () => { window.__ended = true; }, { once: true }); }); // registered before the drag
   await touch("touchStart", [{ x, y }]);
-  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await frameWait(page, 1); }
   await touch("touchEnd", []);
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => window.__ended).catch(() => {}); // the drag's scroll end; a drag that never scrolls leaves the assert below to name it
   assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
   assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
-  await page.waitForTimeout(300);
   const r2 = await page.locator(boxSel(it.id)).boundingBox();
   await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
   await touch("touchEnd", []);
-  await page.waitForTimeout(400);
+  await page.locator("#dsheet").waitFor({ state: "visible" }).catch(() => {}); // a tap opens View at once; the assert below names a miss
   assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
 });
 
@@ -1505,7 +1521,7 @@ test("a tap on each star on two cards and one Send gives exactly one notice for 
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 300))); // a second send would land in this window
+  await page.waitForFunction(() => !state.sending); // a second send can only land while this batch is in flight
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -1672,7 +1688,7 @@ test("pressing Send again while a batch is in flight does nothing", async (t) =>
   await takePick(page, DECISION);
   await send(page);
   await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("send").click(); });
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
+  await page.waitForFunction(() => window.__sent.length >= 1 && !state.sending); // the notice is out, and sendAll has cleared sending last
   assert.equal((await sent(page)).length, 1, "a second notice went out");
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
 });
@@ -1720,7 +1736,7 @@ test("Undo refuses a delete once 8 seconds from the send have passed", async (t)
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
   await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+  await frameWait(page, 2); // the stub store settles in microtasks, so a late delete lands before the next frame
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
   assert.ok((await answers(page))[DECISION.id]);
 });
@@ -1914,8 +1930,16 @@ test("rank never moves an item across tiers", async (t) => {
   assert.deepEqual(tiers.map((x) => x[1]), [["hold-rank9"], ["calm-rank0"], ["stand-rank0"]]);
 });
 
-test("SKILL.md names the page's one writer and the rank field", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+// The skill's text: SKILL.md plus every reference/*.md, since its steps moved into reference/. A check on what the skill says reads all of it.
+function skillText() {
+  const dir = path.join(HERE, "..", "reference");
+  const refs = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  assert.ok(refs.length > 0, "reference/ has no .md file, so the skill's text would be SKILL.md alone");
+  return [fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8"), ...refs.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))].join("\n");
+}
+
+test("the skill names the page's one writer and the rank field", async () => {
+  const skill = skillText();
   assert.match(skill, /`writer`/);
   assert.match(skill, /`rank`/);
   assert.match(skill, /re-rank/i);
@@ -1926,8 +1950,8 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
 
 // Decision questions-go-to-owner, "Answer on the page, not in a comment thread":
 // a rebuilt page drops its threads, so a session rewrites the item instead.
-test("SKILL.md answers a comment by rewriting the item, never in a comment thread", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+test("the skill answers a comment by rewriting the item, never in a comment thread", async () => {
+  const skill = skillText();
   assert.doesNotMatch(skill, /action `reply`/);
   assert.doesNotMatch(skill, /reply in the comment thread/i);
   assert.match(skill, /never reply in a comment thread/i);
@@ -5472,7 +5496,6 @@ const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { con
 // and the cards below it rise by what the sent cards drop.
 const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
 const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits.", added: `2026-10-0${n}T00:00:00Z` }));
-const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
 // Scrolls so the card's top or bottom edge sits `offset` px below the band's top edge. A negative offset puts it above the band.
 const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
   const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
@@ -5496,8 +5519,8 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
 // sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
-const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove, timers }) => {
+  const page = await open(t, { items, scheme, timers, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -5818,7 +5841,7 @@ test("answered-sink: control: Undo of a Send from a card in view returns it to i
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false, timers: true }); if (!page) return;
   await settleAt(page, inView, "top", 40);
   const pre = await cardMap(page);
   const I = "item-in-view", B = "item-below";
@@ -5828,8 +5851,7 @@ async function answerWithoutSend(t, { width, scheme }) {
   assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 1, "the page wrote an answer of its own");
   const atOnce = await cardMap(page);
   assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
-  await frameWait(page, 2);
-  await page.waitForTimeout(600);
+  await page.clock.runFor(700); // a card in view is never dropped on a timer: the fake clock runs past any drop timer, with no wait
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
   assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
@@ -5906,7 +5928,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
     const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, phone(o.design)]));
     const page = await open(t, { items: [it], designData, scheme, viewport: { width, height: 900 } }); if (!page) return;
     await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
+    await fitAll(page, LOOK_OPTS.map((o) => o.design));
     const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt`)].map((o) => {
       const b = o.getBoundingClientRect(), pw = o.querySelector(".dfitwrap"), w = pw.getBoundingClientRect();
       const text = [...o.querySelectorAll(".how, .lab, .tr, .pick, .nopick, .dwarn")].map((x) => x.getBoundingClientRect()).filter((x) => x.height > 0);
@@ -5927,8 +5949,9 @@ test("a rail jump after Send lands on its card", async (t) => {
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
+  await page.evaluate(() => { window.__ended = false; window.addEventListener("scrollend", () => { window.__ended = true; }, { once: true }); }); // registered before the jump
   await page.click("#c-q9");
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(() => window.__ended).catch(() => {}); // the jump's scroll end; a jump that never scrolls leaves the band assert to name it
   // The card lands inside the band, just under the header's bottom edge.
   const band = await bandOf(page);
   const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
@@ -5942,10 +5965,11 @@ test("a receipt wholly below the screen drops its height without moving the page
   await choose(page, items[0], "a");
   await page.evaluate(() => window.scrollTo(0, 60));
   const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
-  const at = await railTop();
+  const at = await railTop(), h0 = await card(page, items[0]).evaluate((e) => e.getBoundingClientRect().height);
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  await page.waitForTimeout(600);
+  await page.waitForFunction((h) => document.getElementById("item-q0").getBoundingClientRect().height < h - 1, h0).catch(() => {}); // the card drops once its receipt is off screen, after a short timer
+  assert.ok((await card(page, items[0]).evaluate((e) => e.getBoundingClientRect().height)) < h0 - 1, "the card did not drop its height once its receipt was off screen");
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
@@ -5955,7 +5979,7 @@ for (const width of SIZES) test(`an option's picture is at most 480px high and c
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
   const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
   await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
   for (const o of m) {
     assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
@@ -6027,9 +6051,11 @@ function sweepPage() {
 test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
   const failures = [];
   for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
-    const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
+    const spec = make();
+    const page = await open(t, { ...spec, scheme, viewport: { width, height: 900 } }); if (!page) return;
     if (act) await act(page);
-    await page.waitForTimeout(150);
+    if (spec.designData) await fitAll(page, Object.keys(spec.designData)); // a picture's layout is final only after its frame posts its fit
+    await frameWait(page, 3); // the state's layout settles in its frames
     for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
     await page.close();
   }
@@ -6043,27 +6069,30 @@ const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#ite
 
 test("a capped picture grows back when its card widens and stays inside when it narrows", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(844), viewport: { width: 1070, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(300);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const narrow = (await picBox(page))[0].w;
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.waitForTimeout(400);
+  await frameWait(page, 3); // the card's width changes, and the picture follows it in the frames after
   const wide = await picBox(page);
   assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
   await page.setViewportSize({ width: 1066, height: 900 });
-  await page.waitForTimeout(400);
+  await frameWait(page, 3); // the card's width changes, and the picture follows it in the frames after
   for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
 });
 
 test("a very tall mockup with no focus is never a thin strip", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(3000), viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   for (const b of await picBox(page)) assert.ok(b.w >= 120, "the picture is a strip, " + b.w + "px wide");
 });
 
 test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks", async (t) => {
   const page = await sentPage(t, false); if (!page) return;
   await page.evaluate(() => { window.__stamp = document.querySelector("#sent .stamp"); });
-  await page.waitForTimeout(2300);
+  const undoCount = () => page.locator("#undoBtn").textContent().then((s) => { const m = /\((\d+)\)/.exec(s); return m ? +m[1] : NaN; });
+  const start = await undoCount();
+  await page.waitForFunction((s) => { const m = /\((\d+)\)/.exec(document.getElementById("undoBtn").textContent); return !!m && +m[1] <= s - 2; }, start).catch(() => {}); // two ticks of the count pass, and the stamp must survive them
+  assert.ok(start - (await undoCount()) >= 2, "the Undo count did not tick twice");
   assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
   assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
 });
@@ -6116,7 +6145,7 @@ test("option pictures of different heights keep the View bars at 44px", async (t
   const data = Object.fromEntries(LOOK_OPTS.map((o, i) => [o.design, `<body style="margin:0"><div style="width:390px;height:${[844, 300, 560][i]}px;background:#eee"></div></body>`]));
   const it2 = { ...it, designs: it.designs.map((d, i) => ({ ...d, size: { w: 390, h: [844, 300, 560][i] } })) };
   const page = await open(t, { items: [it2], designData: data, viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const hs = await page.evaluate(() => [...document.querySelectorAll("#item-grow-pics .opic .view")].map((v) => Math.round(v.getBoundingClientRect().height)));
   assert.deepEqual(hs, [44, 44, 44]);
 });
@@ -6374,7 +6403,7 @@ test("an option whose links is a string, not a list, renders with no page error 
   });
   const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
   if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
-  await page.waitForTimeout(200); // a page error can land a tick after the card appears
+  await frameWait(page, 2); // a page error can land a tick after the card appears
   assert.deepEqual(errors, [], "the page threw on a string links value");
   assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
   assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
@@ -6409,7 +6438,7 @@ async function openStatus(page) {
   assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
   await tab.click();
   await panel.waitFor({ state: "visible" });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  await frameWait(page, 3); // a late read would land here
   return panel;
 }
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).

@@ -1592,7 +1592,35 @@ path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
-class SmallBaseMove(Env):
+class ScopedRepo:
+    """The fixture for a repo whose CI is the real ci-scope.sh and a checks workflow. scoped() puts them on main, and feat then holds
+    main's tip. on() commits a file set to a branch. SmallBaseMove and ExpressPath both use these: neither copies them."""
+
+    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
+        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if scope:
+            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+                put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+        put(os.path.join(o, ".github/workflows", name), workflow)
+        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
+        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
+        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
+        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def on(self, branch, files, start=None):
+        """Commit `files` to `branch` and push it. The branch is made from origin/`start` when given, else from origin/`branch`: a new branch needs `start`."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{start or branch}")
+        for path, text in files.items():
+            (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+class SmallBaseMove(ScopedRepo, Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
     no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
@@ -1672,29 +1700,6 @@ class SmallBaseMove(Env):
             ok, why = merge.small_base_move(repo, "main", n_head)
         self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
         self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
-
-    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
-        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        if scope:
-            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
-        put(os.path.join(o, ".github/workflows", name), workflow)
-        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
-        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
-        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
-        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
-        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
-
-    def on(self, branch, files):
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
-        for path, text in files.items():
-            put(os.path.join(o, path), text)
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
     def refused(self):
         self.host.merged = False
@@ -12621,9 +12626,12 @@ class PullsHost(merge.Host):
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
     `base_compare_error` answers only the base branch's read. `files` are the changed files of the pull requests (`pulls/<n>/files`, one page
     per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
-    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it."""
+    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
+    parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
+    commit sha to its tree sha, which the same answer names under commit.tree.sha."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
+                 commits=None, trees=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12638,6 +12646,9 @@ class PullsHost(merge.Host):
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
+        self.commit_reads = []  # the sha of each commits/<sha> read, in order
+        self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
+        self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -12662,6 +12673,16 @@ class PullsHost(merge.Host):
             if self.compare_error or (is_base and self.base_compare_error):
                 return self.compare_error or self.base_compare_error
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
+        m = re.search(r"/commits/([0-9a-f]{40})$", route)
+        if m:
+            sha = m.group(1)
+            self.commit_reads.append(sha)
+            if sha not in self.commits:
+                return 1, "gh: Not Found (HTTP 404)"
+            answer = {"sha": sha, "parents": [{"sha": p} for p in self.commits[sha]]}
+            if sha in self.trees:
+                answer["commit"] = {"tree": {"sha": self.trees[sha]}}
+            return 0, json.dumps(answer)
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
     def pull_reply(self, n):
@@ -12915,6 +12936,337 @@ class BatchBrake(Env):
         lines = [l for l in out.splitlines() if l.startswith("  batch:")]
         self.assertEqual(len(lines), 1, out)
         self.assertIn("#2", lines[0])
+
+class ExpressPath(ScopedRepo, Env):
+    """confirm with a bare --express: a prose-only pull request whose body names a ruling in the store (origin/roadmap's rulings) goes on
+    to the merge. Every other case refuses before anything is pushed, and the batch brake still refuses a live batch run."""
+
+    RULINGS = ("r55", "timer-allowed-when-cheaper")  # the real ids; the second has the hyphens the id pattern allows
+    FLAG_ARGV = ("7", "--confirm", "--express")
+    FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
+    SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
+    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
+                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
+
+    def setUp(self):
+        super().setUp()
+        self.scoped()  # the real ci-scope.sh and landed-dirs.txt on main; feat holds main's tip, plus its own pending record only
+
+    def store(self, ids):
+        """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
+        self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
+
+    def stub_scope(self, prelude, branch="feat"):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
+        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+        script turns every flag on through main's own arm, so the head must not diff the script against main."""
+        with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+            first, rest = f.read().split("\n", 1)
+        self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
+        if branch == "main":
+            o = self.other
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def scope_run(self, branch="feat", head_ref="", base=False):
+        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
+        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
+        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
+        script = os.path.join(o, ".github/scripts/ci-scope.sh")
+        if base:
+            script = os.path.join(self.t, "base-ci-scope.sh")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+        out_file = os.path.join(self.t, "scope.out")
+        if os.path.exists(out_file):
+            os.remove(out_file)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        flags = {}
+        if os.path.exists(out_file):
+            with open(out_file, encoding="utf-8") as f:
+                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        return r.returncode, flags
+
+    def test_scope_run_finds_bash_through_resolve_program(self):
+        """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
+        bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
+        argvs = []
+        def fake_run(argv, *a, **k):
+            argvs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with unittest.mock.patch.object(merge, "resolve_program", lambda name, env=None: "/resolved/" + name), \
+             unittest.mock.patch.object(subprocess, "run", fake_run):
+            self.scope_run()
+        self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
+        self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
+
+    @staticmethod
+    def turned_on(flags):
+        """The flags that are on, not counting mutation_report (it is set only for a batch branch)."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+
+    def assert_prose_only(self):
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertTrue(flags, "the real ci-scope.sh wrote no flags for the fixture")
+        self.assertEqual(self.turned_on(flags), [], "the fixture is not prose-only: the real ci-scope.sh turns on %r" % self.turned_on(flags))
+
+    def assert_turns_on(self):
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertTrue(self.turned_on(flags), "the real ci-scope.sh turns no job on for this fixture, so the case proves nothing: %r" % flags)
+
+    def require_express_flag(self):
+        """The scope assert, before any case relies on the flag (P7): merge's parser takes a bare --express. A parser that refuses it
+        fails here, with the last line of its own message, and the case stops before it runs."""
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                merge.build_parser().parse_args(list(self.FLAG_ARGV))
+        except SystemExit:
+            last = (err.getvalue().strip().splitlines() or ["(no message)"])[-1]
+            self.fail("merge's parser has no --express flag, so the express path cannot run: " + last)
+
+    def record_express(self):
+        """Wrap merge.express_refusal to keep each call's return. Patched only after require_express_flag, so the name it wraps is read on a parser that takes the flag."""
+        self.require_express_flag()
+        real = merge.express_refusal
+        calls = []
+        def recording(*a, **k):
+            result = real(*a, **k)
+            calls.append(result)
+            return result
+        patch = unittest.mock.patch.object(merge, "express_refusal", recording)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def run_express(self):
+        """-> (rc, out) of `merge 7 --confirm --express`, after the flag assert. Its temp files go to the run folder."""
+        self.require_express_flag()
+        with tempfiles_in_run_folder():
+            return self.run_merge(*self.FLAG_ARGV)
+
+    def assert_refused(self, rc, out, before, *markers):
+        """A refusal: rc 1, nothing pushed (the refs are as they were before the run), no merge, and each marker named in the output."""
+        self.assertEqual(rc, 1, "expected a refusal with rc 1:\n" + out)
+        self.assertEqual(self.refs(), before, "the refused run pushed to origin:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), "the refused run merged:\n" + out)
+        for m in markers:
+            self.assertIn(m.lower(), out.lower(), "the refusal does not name %r:\n%s" % (m, out))
+
+    @staticmethod
+    def brake_text(out):
+        """The batch brake's text in a refusal: from the line that says the pull request does not merge to its base, to the end of the
+        output, less merge's closing sentence. Nothing before the brake is compared."""
+        lines = out.splitlines()
+        start = next((i for i, l in enumerate(lines) if "does not merge to" in l), None)
+        if start is None:
+            return None
+        return "\n".join(lines[start:]).split(" No override lifts", 1)[0]
+
+    def test_the_store_path_is_one_constant(self):
+        self.assertEqual(getattr(merge, "RULED_STORE_PATH", None), "roadmap/rulings/{id}.json",
+                         "merge.RULED_STORE_PATH is not the one store path the express check reads")
+
+    def test_the_parser_takes_a_bare_express_flag(self):
+        self.require_express_flag()
+        args = merge.build_parser().parse_args(list(self.FLAG_ARGV))
+        self.assertIs(args.express, True, "--express is not a bare flag: it parsed as %r" % (args.express,))
+
+    def test_express_takes_no_value(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            merge.build_parser().parse_args(["7", "--confirm", "--express", "r55"])
+
+    def test_a_prose_only_pr_with_r55_merges(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_prose_only_pr_with_a_hyphenated_ruling_merges(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: timer-allowed-when-cheaper\n"
+        self.assert_prose_only()
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_code_file_in_the_pr_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/note.py")
+
+    def test_an_unmapped_file_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"notes.txt": "a note\n"})  # no arm of ci-scope.sh names it: the catch-all turns every job on
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "notes.txt")
+
+    def test_a_hooks_md_file_that_a_suite_reads_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"hooks/x.md": "# Note\n"})  # a .md file, but the hooks/* arm comes first and turns suites on
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/x.md")
+
+    def test_a_plain_english_map_md_file_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"skills/plain-english-map/x.md": "# Note\n"})  # a .md file the map suite reads: the mods arm
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "skills/plain-english-map/x.md")
+
+    def test_a_missing_store_entry_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r56\n"  # the store holds r55 and the hyphenated id, not r56
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "r56")
+
+    def test_no_roadmap_branch_is_refused(self):
+        self.host.body = "Ruling: r55\n"  # origin has no roadmap branch at all
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "roadmap")
+
+    def test_a_store_with_no_rulings_is_refused(self):
+        self.on("roadmap", {"roadmap/README.md": "# Roadmap\n"}, start="main")  # the branch exists, and holds no ruling
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "r55")
+
+    def test_an_invalid_ruling_line_is_refused(self):
+        self.store(self.RULINGS)
+        self.assert_prose_only()
+        bodies = {  # each body, and the express refusal's own text for it (merge.express_refusal)
+            "no Ruling line": ("", "it has none"),
+            "a Ruling line with no id": ("Ruling:\n", "reads ''"),
+            "an uppercase id": ("Ruling: R55\n", "reads 'R55'"),
+            "a path, not an id": ("Ruling: ../r55\n", "reads '../r55'"),
+            "an invalid first line, then a valid one": ("Ruling: R55\nRuling: r55\n", "reads 'R55'"),
+        }
+        for name, (body, text) in bodies.items():
+            with self.subTest(body=name):
+                self.host.body = body
+                before = self.refs()
+                rc, out = self.run_express()
+                self.assert_refused(rc, out, before, "--express needs a `Ruling: <id>` line", text)
+
+    def test_a_scope_script_that_fails_is_refused_as_unknown(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.FAIL_PRELUDE, branch="main")
+        rc_scope, _ = self.scope_run()
+        self.assertEqual(rc_scope, 3, "the stub scope script does not fail with exit 3: exit %d" % rc_scope)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown")
+
+    def test_a_scope_script_that_writes_nothing_is_refused_as_unknown(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.SILENT_PRELUDE, branch="main")
+        self.assertEqual(self.scope_run(), (0, {}), "the stub scope script does not exit 0 with no flag")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown")
+
+    def test_a_live_batch_run_under_express_refuses_with_the_plain_brake_text(self):
+        """Under --express a live batch run still refuses, with the brake text it has without the flag: the express path adds no sentence."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()  # the express check passes, so the refusal is the batch brake's
+        self.host.batch = [BATCH_BLOCKER]
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "#2")
+        self.assertIn((7, "main"), self.host.batch_calls, "the batch brake was not read, so the refusal is not the brake's:\n" + out)
+        self.assertNotIn("cancel", out.lower(), "the express brake refusal names a cancel:\n" + out)
+        plain_rc, plain_out = self.run_merge("7", "--confirm")
+        self.assertEqual(plain_rc, 1, plain_out)
+        self.assertEqual(self.brake_text(out), self.brake_text(plain_out), "the express brake text differs from the plain one:\n%s\n--- plain:\n%s" % (out, plain_out))
+
+    def test_without_express_the_batch_refusal_is_the_plain_brake(self):
+        self.host.body = "Ruling: r55\n"
+        self.host.batch = [BATCH_BLOCKER]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("#2", out, out)
+        self.assertIn("does not merge to main", out, "the refusal without --express is not the batch brake:\n" + out)
+        self.assertNotIn("cancel", out.lower(), "the batch refusal without --express names a cancel:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_without_express_a_non_prose_pr_merges_as_before(self):
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_without_express_a_failing_scope_script_changes_nothing(self):
+        self.stub_scope(self.FAIL_PRELUDE)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_the_head_scope_script_is_not_the_one_read(self):
+        """The classifier reads origin/main's ci-scope.sh. This head edits that script to write every flag off and exit 0: a HEAD: read
+        would run that copy and accept it. Main's copy refuses it for two reasons: a diff that touches ci-scope.sh turns every flag on
+        through main's own arm, and hooks/note.py turns code on. The refusal names hooks/note.py because the diff lists it."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.ALL_OFF_PRELUDE)  # feat's own copy: every flag off, exit 0
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        head_rc, head_flags = self.scope_run()
+        self.assertEqual(head_rc, 0, "the head's own script does not exit 0: %d" % head_rc)
+        self.assertEqual(self.turned_on(head_flags), [], "the head's own script should say prose-only, or the case proves nothing: %r" % head_flags)
+        base_rc, base_flags = self.scope_run(base=True)
+        self.assertEqual(base_rc, 0, "main's script does not exit 0 on feat: %d" % base_rc)
+        self.assertIn("code", self.turned_on(base_flags), "main's script should turn code on for hooks/note.py: %r" % base_flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/note.py")
+
+    def test_a_prose_pr_on_a_batch_head_ref_still_merges(self):
+        """A batch- head ref sets mutation_report, which is not a job: the express check ignores it, so a prose-only PR on batch-x merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/feat:refs/heads/batch-x")
+        self.host.branch = "batch-x"
+        rc_scope, flags = self.scope_run(branch="batch-x", head_ref="batch-x")
+        self.assertEqual(rc_scope, 0, "the real ci-scope.sh does not exit 0 on batch-x: %d" % rc_scope)
+        self.assertEqual(flags.get("mutation_report"), "true", "the batch- head ref did not set mutation_report, so the case proves nothing: %r" % flags)
+        self.assertEqual(self.turned_on(flags), [], "the batch- head ref turns a job on: %r" % flags)
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
@@ -13834,7 +14186,7 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *grant, *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
+def fix_verifier_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
@@ -13929,7 +14281,7 @@ class ReviewFixForm(unittest.TestCase):
     Each refusal sits beside a well-formed sibling that must parse, so the case is red until the parser knows the line."""
 
     def test_the_fix_line_parses_to_its_four_fields(self):
-        rec = parse_text(self, record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),)))
+        rec = parse_text(self, record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),)))
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
 
     def test_a_record_with_no_fix_line_has_no_fix(self):
@@ -13945,50 +14297,50 @@ class ReviewFixForm(unittest.TestCase):
     def test_review_body_prints_the_fix_line_after_the_rounds_and_before_net_value(self):
         body = body_with_fix(self, [(1, "reviewer", "sonnet", "PASS")], "not owed", REVIEW_FIX_PASS)
         self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
-                                             "Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
+                                             "Round 1: reviewer, sonnet, PASS", fix_verifier_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_full_form_with_a_fix_line_round_trips(self):
         # full size: three rounds with design-reviewer lines, then the fix line, a guard change with a positive net value
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
                   "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
-        text = record_text(rounds=rounds, guard="yes", net="positive", fix=(fix_check_line(),))
+        text = record_text(rounds=rounds, guard="yes", net="positive", fix=(fix_verifier_line(),))
         rec = parse_text(self, text)
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
         self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
 
     def test_a_malformed_fix_line_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        bad_lines = {"verdict PARTIAL": fix_check_line(verdict="PARTIAL"), "verdict MAYBE": fix_check_line(verdict="MAYBE"),
-                     "role design-reviewer": fix_check_line(role="design-reviewer"), "a 39-character head": fix_check_line(head=REVIEW_OLD_HEAD[:39]),
-                     "an upper-case head": fix_check_line(head=REVIEW_OLD_HEAD.upper()), "no model": f"Fix check: {REVIEW_OLD_HEAD}, reviewer, PASS"}
+        bad_lines = {"verdict PARTIAL": fix_verifier_line(verdict="PARTIAL"), "verdict MAYBE": fix_verifier_line(verdict="MAYBE"),
+                     "role design-reviewer": fix_verifier_line(role="design-reviewer"), "a 39-character head": fix_verifier_line(head=REVIEW_OLD_HEAD[:39]),
+                     "an upper-case head": fix_verifier_line(head=REVIEW_OLD_HEAD.upper()), "no model": f"Fix check: {REVIEW_OLD_HEAD}, reviewer, PASS"}
         for cause, line in bad_lines.items():
             with self.subTest(cause=cause):
                 self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(line,))), f"parse_review accepted a fix line with {cause}")
 
     def test_two_fix_lines_are_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(), fix_check_line(verdict="FAIL")))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(), fix_verifier_line(verdict="FAIL")))),
                           "parse_review accepted two fix lines")
 
     def test_a_fix_line_before_a_round_line_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(fix_check_line(), "Round 1: reviewer, sonnet, PASS"))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(fix_verifier_line(), "Round 1: reviewer, sonnet, PASS"))),
                           "parse_review accepted a fix line before a round line")
 
     def test_a_fix_line_whose_reviewed_head_is_the_record_head_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(head=REVIEW_HEAD),))),
                           "parse_review accepted a fix line whose reviewed head is the record's Head")
 
     def test_a_posted_fix_check_naming_haiku_still_parses(self):
         # A record posted before the model rule still parses: parse_review never checks the model. Owner item 444 a (decision pr-review-record)
         # reads a fix check on another model open on every record, and ReviewFixSonnet judges that state.
         # The case sits in the parser's class, so a builder that moves the model check into parse_review fails here.
-        haiku = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(model="haiku"),))
+        haiku = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(model="haiku"),))
         self.assertEqual(parse_text(self, haiku).get("fix"), (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS"), "the posted haiku fix check did not parse")
 
 class ReviewRecordForm(unittest.TestCase):
@@ -14076,7 +14428,7 @@ class ReviewRecordForm(unittest.TestCase):
         # Pins the incident's own text: a note line after the CI line, with a blank line before it. The field case above has no blank
         # line, so this one is not redundant. The same record with no note parses, keeps its fix check, and is done at its head.
         head, fix_head = "d35865d42dae16eef06d9cc516c56f904c287fe1", "5acce9e26c7520dc8808304f87dfeb6805192300"
-        body = record_text(n=2189, head=head, guard="yes", net="positive", fix=(fix_check_line(head=fix_head, model="sonnet"),),
+        body = record_text(n=2189, head=head, guard="yes", net="positive", fix=(fix_verifier_line(head=fix_head, model="sonnet"),),
                            rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS"))
         note = 'Note, Fix: none, Until: 2026-11-21: the remedy says "copy your edited files aside"; on real git a copy leaves the file in place.'
         with_note = body.rstrip("\n") + "\n\n" + note + REVIEW_FOOTER
@@ -14318,18 +14670,18 @@ class ReviewFixRules(unittest.TestCase):
     def test_a_fix_fail_after_round_three_is_open_and_says_new_lane(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="no")
         self.assertEqual(state, "open", "a failed fix check must not read done")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
         self.assertIn("new lane", why)
 
     def test_a_fix_fail_after_round_three_with_a_positive_net_value_is_open(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="yes", net="positive")
         self.assertEqual(state, "open", "a failed fix check must not read done, even when round 3's net value is positive")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
 
     def test_a_fix_fail_after_a_delete_only_round_one_is_open(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASS, kind="delete-only", guard="no")
         self.assertEqual(state, "open", "a failed fix check must not read done, even after a delete-only round 1")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
         # A fix PASS after the first round counts as that round passing, for a normal change with guard no
@@ -14448,7 +14800,7 @@ class ReviewFixRules(unittest.TestCase):
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
                 model = merge.REVIEW_FIX_GUARD_MODEL
-                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, model=model),))
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_verifier_line(verdict=verdict, model=model),))
                 self.assertEqual(record_state(self, text), want)
 
     def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
@@ -14475,10 +14827,143 @@ class ReviewEnv(Env):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def record_host(self, *comments, head=REVIEW_HEAD, files=None):
+    def record_host(self, *comments, head=REVIEW_HEAD, files=None, **reads):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
-        (default: one non-guard file)."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files)
+        (default: one non-guard file). `reads` are PullsHost's other scripted reads, such as commits and compares."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files, **reads)
+
+    def git_commit(self, parent, changes, *more_parents):
+        """-> the sha of a commit whose tree is `parent`'s tree with `changes` ({path: text}) written over it, and whose parents are `parent`
+        then `more_parents`. The tree is built in an index of this run's folder, so the checkout's own files and index stay as they are."""
+        env = {**os.environ, "GIT_INDEX_FILE": os.path.join(self.t, "fixture.index"), "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+               "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+
+        def git_in(*cmd, text=None):
+            r = subprocess.run(cmd, cwd=self.co, env=env, input=text, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, f"the fixture's {cmd[1]} failed:\n{r.stderr}")
+            return r.stdout.strip()
+
+        git_in("git", "read-tree", parent)
+        for path, text in changes.items():
+            blob = git_in("git", "hash-object", "-w", "--stdin", text=text)
+            git_in("git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+        tree = git_in("git", "write-tree")
+        parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
+        return git_in("git", "commit-tree", tree, *parents, "-m", "fixture")
+
+    def is_ancestor(self, a, b):
+        """True when commit `a` is an ancestor of `b` in the checkout."""
+        return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=self.co, capture_output=True).returncode == 0
+
+    def real_commits(self):
+        """Real commits, pushed to origin, so a read of their objects finds what a real repo would. origin's main is `seed` before the fixture and
+        `main3` after it; main, main2 and main3 are its plain commits. `fixed` is a head whose fix diff started at `pre`. `feat` is a branch off
+        `seed` that is not on main. Each merge has `fixed` first, except where its name says otherwise: `clean` and `clean2` are git's clean merges
+        of main and main2, `edited` is the clean merge plus one file, `conflicted` is a conflict with main3 resolved by hand, `stacked` merges
+        `feat`, and `octopus` has three parents. `plain` is a commit on `fixed`, `clean_plain` a commit on `clean`, and `after_plain` a clean merge
+        of main on `plain`. `empty` and `clean_empty` add a commit with no change on `fixed` and on `clean`. -> the shas by name, with `parents` and
+        `trees` for each (git's own answers), `on_main`, the compare answers on main, and `on_stack`, the compare answers of `feat` (the second parent
+        of `stacked`) on feat-base, which holds `feat`, and on main, which does not."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        seed = sh(self.co, "git", "rev-parse", "origin/main")
+        pre = self.git_commit(seed, {"p.txt": "p\n"})
+        fixed = self.git_commit(pre, {"a.txt": "a\n"})
+        main = self.git_commit(seed, {"b.txt": "b\n"})
+        main2 = self.git_commit(main, {"c.txt": "c\n"})
+        main3 = self.git_commit(main2, {"a.txt": "m\n"})
+        feat = self.git_commit(seed, {"d.txt": "d\n"})
+        plain = self.git_commit(fixed, {"e.txt": "e\n"})
+        clean = self.git_commit(fixed, {"b.txt": "b\n"}, main)
+        clean2 = self.git_commit(clean, {"c.txt": "c\n"}, main2)
+        clean_plain = self.git_commit(clean, {"f.txt": "f\n"})
+        after_plain = self.git_commit(plain, {"b.txt": "b\n"}, main)
+        edited = self.git_commit(fixed, {"b.txt": "b\n", "x.txt": "x\n"}, main)
+        conflicted = self.git_commit(fixed, {"a.txt": "resolved\n", "b.txt": "b\n", "c.txt": "c\n"}, main3)
+        stacked = self.git_commit(fixed, {"d.txt": "d\n"}, feat)
+        octopus = self.git_commit(fixed, {"b.txt": "b\n"}, main, seed)
+        empty = self.git_commit(fixed, {})
+        clean_empty = self.git_commit(clean, {})
+        names = dict(seed=seed, pre=pre, fixed=fixed, main=main, main2=main2, main3=main3, feat=feat, plain=plain, clean=clean, clean2=clean2,
+                     clean_plain=clean_plain, after_plain=after_plain, edited=edited, conflicted=conflicted, stacked=stacked, octopus=octopus,
+                     empty=empty, clean_empty=clean_empty)
+        pushes = [f"{sha}:refs/heads/fixture-{name}" for name, sha in names.items()]
+        sh(self.co, "git", "push", "-q", "origin", *pushes, f"{main3}:refs/heads/main", f"{feat}:refs/heads/feat-base")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        shas = list(names.values())
+        parents = {c: sh(self.co, "git", "log", "-1", "--format=%P", c).split() for c in shas}
+        trees = {c: sh(self.co, "git", "rev-parse", f"{c}^{{tree}}") for c in shas}
+        on_main = {(c, "main"): ("identical" if c == main3 else "ahead") for c in shas if self.is_ancestor(c, "origin/main")}
+        for name, p1, p2, merged in (("clean", fixed, main, clean), ("clean2", clean, main2, clean2), ("stacked", fixed, feat, stacked),
+                                     ("after_plain", plain, main, after_plain)):
+            r = subprocess.run(["git", "merge-tree", "--write-tree", p1, p2], cwd=self.co, capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout.split()[:1]), (0, [trees[merged]]), f"the fixture's {name} merge is not git's clean merge")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fixed, main], cwd=self.co, capture_output=True, text=True)
+        self.assertNotEqual(r.stdout.split()[:1], [trees[edited]], "the fixture's edited merge has git's clean merge tree")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fixed, main3], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "the fixture's hand-resolved merge does not conflict with main3 in git")
+        # on_stack is scripted as GitHub answers it: feat...feat-base reads identical, and feat...main reads diverged. The cases then never rely on
+        # the host's default answer for either compare.
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/feat-base"), feat, "fixture: origin's feat-base is not feat, so on_stack is not true")
+        self.assertFalse(self.is_ancestor(feat, "origin/main"), "fixture: feat is on origin's main, so on_stack's main answer is not true")
+        on_stack = {(feat, "feat-base"): "identical", (feat, "main"): "diverged"}
+        return types.SimpleNamespace(**names, parents=parents, trees=trees, on_main=on_main, on_stack=on_stack)
+
+    def reviewed_host(self, fx, head, base="main", comments=None, more=(), compares=None):
+        """Pull request 7 at `head` on base `base`, with the repo's commits, trees and compares as `fx` gives them. The record is a PASS on fx.fixed
+        with no fix line, and a lane-lint PASS names `head`: a done record reads done only with that lint at the live head (decision
+        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given. `more` holds the other open pull requests, as batch_pull gives them.
+        `compares` replaces fx.on_main, for a case that reads a compare of another base."""
+        if comments is None:
+            comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS)), lint_of(7, head)]
+        compares = fx.on_main if compares is None else compares
+        return PullsHost([batch_pull(7, head, base=base), *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=compares)
+
+    def reviewed_line(self, host, head, state, msg):
+        """-> the output of `merge --reviewed`, after one check: pull request 7's line names `head` and reads `state`."""
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {head[:9]} {state}: ", msg)
+        return out
+
+    def main_only_clone(self):
+        """A clone of origin that holds main's history alone, as a single-branch clone does: the commits of the other branches are absent until a fetch.
+        --no-local makes git send only the objects reachable from main, where a local clone would copy every object of origin."""
+        path = os.path.join(self.t, "main-only")
+        sh(self.t, "git", "clone", "-q", "--no-local", "--single-branch", "--branch", "main", self.bare, path)
+        return path
+
+    def has_commit(self, cwd, sha):
+        """True when the checkout at `cwd` holds `sha` as a commit."""
+        return subprocess.run(["git", "-C", cwd, "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True).returncode == 0
+
+    def facts(self, fx, shas):
+        """Add the parents and trees of `shas` to fx, from git's own answers in this checkout."""
+        for line in sh(self.co, "git", "log", "--no-walk=unsorted", "--format=%H %P %T", *shas).splitlines():
+            sha, *parents, tree = line.split()
+            fx.parents[sha], fx.trees[sha] = parents, tree
+
+    def fork_merge(self, fx):
+        """-> the sha of a merge of main into a commit off the reviewed head, which only this checkout holds: it is never pushed, so origin lacks it
+        and a main-only clone cannot read it. The merge's tree is git's clean merge of its parents. Its parents and trees go into fx."""
+        fork = self.git_commit(fx.fixed, {"g.txt": "g\n"})
+        live = self.git_commit(fork, {"b.txt": "b\n"}, fx.main)
+        self.facts(fx, [fork, live])
+        return live
+
+    def clean_merges_after_fixed(self, fx, n):
+        """-> the shas of n clean merges of main after fx.fixed, oldest first. Main's k-th commit adds m<k>.txt to main's (k-1)-th, and merge k
+        joins it to the merge before, adding the same file, so git's merge of the two is clean and its tree is that sum. The compares say each
+        main commit holds, as the scripted answers do elsewhere. Adds the parents, trees and compares of each commit to fx."""
+        heads, mains, main = [fx.fixed], [], fx.seed
+        for k in range(1, n + 1):
+            main = self.git_commit(main, {f"m{k}.txt": f"{k}\n"})
+            mains.append(main)
+            heads.append(self.git_commit(heads[-1], {f"m{k}.txt": f"{k}\n"}, main))
+        self.facts(fx, mains + heads[1:])
+        for m in mains:
+            fx.on_main[(m, "main")] = "ahead"
+        return heads[1:]
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -14628,7 +15113,7 @@ class ReviewFixFlag(ReviewEnv):
     def test_the_printed_record_carries_the_fix_line_after_the_rounds(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
-        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
+        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_verifier_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_printed_fix_line_parses_back_to_the_flag_value(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
@@ -14722,8 +15207,10 @@ class ReviewFixBase(ReviewEnv):
 
     def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
         # the head already has its fix check, so a second fix check from it would be a fix after a fix
-        fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER_HEAD),))
-        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, fixed)))
+        fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(head=self.EARLIER_HEAD),))
+        # the new head is a plain commit on that fixed head, so the refusal stays the same once the head's parents are read
+        host = self.record_host(review_comment(1, 7, fixed), commits={REVIEW_HEAD: [REVIEW_OLD_HEAD]})
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assert_refused(rc, out, err)
 
     def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
@@ -14736,7 +15223,7 @@ class ReviewFixBase(ReviewEnv):
 
     def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
         # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
-        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(head=self.OTHER_HEAD),)))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
         self.assertEqual(rc, 0, "a base on the newest record, which has no fix line, was refused:\n" + out + err)
@@ -14755,6 +15242,403 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+class ReviewFixAfterMainMerge(ReviewEnv):
+    """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
+    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
+    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, a merge with a commit off main, or a
+    merge whose first parent is not the fixed head, is refused. The newest record's fix check must have passed: a fix check after a FAIL one
+    is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
+
+    PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
+    MAIN_TIP = "3f" * 20  # a commit on main, the second parent of the merge
+    SIDE = "7c" * 20  # a commit that is not on main
+    ON_MAIN = {(MAIN_TIP, "main"): "ahead", ("main", MAIN_TIP): "behind"}  # the compares that say MAIN_TIP is on main
+    OFF_MAIN = {(SIDE, "main"): "diverged", ("main", SIDE): "diverged"}
+    FAIL_ROUND = ("Round 1: reviewer, sonnet, FAIL",)  # a first round that failed, as a record line
+    FAIL_ROUND_VALUE = "1:reviewer:sonnet:FAIL"  # the same round as a --round value
+
+    def newest_record(self, verdict="PASS", rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD, pre=PRE_FIX_HEAD):
+        """The newest earlier record: its head is `head`, and its fix check line starts from `pre`. `verdict` and `rounds` set the fix check's
+        verdict and the round lines. The defaults are the passed fix of (b) to (e), on made-up shas."""
+        return review_comment(1, 7, record_text(head=head, rounds=rounds, fix=(fix_verifier_line(verdict=verdict, head=pre),)))
+
+    def fixed_host(self, parents, compares, verdict="PASS", rounds=REVIEW_PASS, live=REVIEW_HEAD, head=REVIEW_OLD_HEAD, pre=PRE_FIX_HEAD, trees=None):
+        """The pull request at `live`, whose commit has `parents`, with the newest record (head `head`, fix from `pre`) and the compares given."""
+        return self.record_host(self.newest_record(verdict, rounds, head, pre), head=live, commits={live: parents}, compares=compares, trees=trees)
+
+    def real_fixed_host(self, fx, live, verdict="PASS"):
+        """The pull request at `live`, a commit of real_commits, with the newest record (head fx.fixed, fix from fx.pre) and every commit, tree and
+        compare of fx. The walk over clean merges reads each commit it passes, so a host with one scripted commit cannot serve it."""
+        return self.record_host(self.newest_record(verdict, head=fx.fixed, pre=fx.pre), head=live, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+
+    def fix_from_fixed_head(self, host, round_value="1:reviewer:sonnet:PASS", fixed=REVIEW_OLD_HEAD, live=REVIEW_HEAD):
+        """--review-record of the live head, with a fix check from the newest record's head. `round_value` is the --round of the posted record."""
+        return self.run_args("7", "--review-record", "--head", live, *REVIEW_FLAGS[:-1], round_value,
+                             "--fix-check", f"{fixed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+
+    def assert_listed_done(self, earlier, body, why="", live=REVIEW_HEAD):
+        """`merge --reviewed` lists pull request 7 at `live` as done, with a why that starts with `why`, once the posted record `body`
+        follows the `earlier` record. A done record also needs a lane-lint PASS at `live`, so the comments hold one (lint_of)."""
+        listed = PullsHost([batch_pull(7, live)], {}, comments=[earlier, lint_of(7, live), review_comment(2, 7, body)])
+        rc, out, err = self.run_args("--reviewed", host=listed)
+        self.assertEqual(rc, 0, "merge --reviewed refused the listing:\n" + out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {live[:9]} done: {re.escape(why)}",
+                         "merge --reviewed does not read the new fix record as done, with that why")
+
+    def test_a_fix_verifier_after_a_merge_of_main_is_accepted_and_reads_done(self):
+        # The merge is git's own conflict, resolved by hand: a conflicted merge of main, which the fix check accepts. Its parents and tree are git's.
+        fx = self.real_commits()
+        host = self.fixed_host(fx.parents[fx.conflicted], fx.on_main, live=fx.conflicted, head=fx.fixed, pre=fx.pre, trees=fx.trees)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.conflicted)
+        self.assertEqual(rc, 0, "a fix check after a merge of main into the fixed head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.conflicted, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+        self.assert_listed_done(self.newest_record(head=fx.fixed, pre=fx.pre), body, live=fx.conflicted)
+
+    def test_b_a_fix_verifier_after_a_plain_commit_on_the_fixed_head_is_refused(self):
+        host = self.fixed_host([REVIEW_OLD_HEAD], {})
+        self.assertEqual(host.commits[REVIEW_HEAD], [REVIEW_OLD_HEAD], "the fixture's head is not one plain commit on the fixed head")
+        rc, out, err = self.fix_from_fixed_head(host)
+        self.assertEqual(rc, 2, "a fix check after a plain commit on the fixed head was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_c_a_fix_verifier_after_a_merge_of_a_commit_off_main_is_refused(self):
+        # Control: a clean merge of main on the fixed head is accepted. The case differs in its second parent alone, feat, a branch that main does
+        # not hold. The scope checks: git's merge of the fixed head and feat is clean, so only the base check can refuse the case.
+        fx = self.real_commits()
+        rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.clean), fixed=fx.fixed, live=fx.clean)
+        self.assertEqual(rc, 0, "control: a fix verifier after a clean merge of main was refused:\n" + out + err)
+        self.assertFalse(self.is_ancestor(fx.feat, "origin/main"), "fixture: feat is on main, so the base check does not refuse the case")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.fixed, fx.feat], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout.split()[:1]), (0, [fx.trees[fx.stacked]]), "fixture: git's merge of the fixed head and feat is not clean")
+        rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.stacked), fixed=fx.fixed, live=fx.stacked)
+        self.assertEqual(rc, 2, "a fix verifier after a merge of a commit off main was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("is unknown", err, "the refusal is a failed read, not the base check")
+
+    def test_d_a_fix_verifier_after_a_merge_of_main_whose_first_parent_is_not_the_fixed_head_is_refused(self):
+        # Control: a clean merge of main two merges past the fixed head is accepted, since the walk reads clean merges back to the fixed head.
+        # The case differs in its first parent alone: a plain commit on the fixed head that changes a file. The walk stops there and refuses.
+        fx = self.real_commits()
+        rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.clean2), fixed=fx.fixed, live=fx.clean2)
+        self.assertEqual(rc, 0, "control: a fix verifier after two clean merges of main was refused:\n" + out + err)
+        self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the merge is not a merge of the plain commit and main")
+        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit changes no file, so the walk has nothing to refuse")
+        rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.after_plain), fixed=fx.fixed, live=fx.after_plain)
+        self.assertEqual(rc, 2, "a fix verifier after a merge of main whose first parent is a plain commit was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("is unknown", err, "the refusal is a failed read, not the walk")
+
+    def test_e_a_fix_verifier_after_a_merge_of_main_is_refused_when_the_newest_fix_verifier_failed(self):
+        # Control: the same conflicted merge after a PASS fix verifier is accepted. The case differs in the newest fix verifier's FAIL alone. That
+        # record reads open, so the prior-done gate refuses the fix verifier before the merge's parents are read.
+        fx = self.real_commits()
+        rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.conflicted), fixed=fx.fixed, live=fx.conflicted)
+        self.assertEqual(rc, 0, "control: a fix verifier on a conflicted merge of main after a PASS fix verifier was refused:\n" + out + err)
+        host = self.real_fixed_host(fx, fx.conflicted, verdict="FAIL")
+        self.assertEqual(record_state(self, host.comments[0]["body"], head=fx.fixed), "open", "fixture: the newest record with a FAIL fix verifier does not read open")
+        self.assertEqual(fx.parents[fx.conflicted], [fx.fixed, fx.main3], "fixture: the conflicted merge is not a merge of the fixed head and main3")
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=fx.conflicted)
+        self.assertEqual(rc, 2, "a fix verifier after a merge of main was accepted though the newest record's fix verifier is FAIL:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_f_a_merge_fix_verifier_posted_over_a_failed_round_reads_the_pr_as_done(self):
+        # the posted round failed, so only its fix check PASS makes the pull request done: no fresh full review is owed
+        # The merge is git's own conflict, resolved by hand, as in (a).
+        fx = self.real_commits()
+        earlier = self.newest_record(rounds=self.FAIL_ROUND, head=fx.fixed, pre=fx.pre)
+        host = self.fixed_host(fx.parents[fx.conflicted], fx.on_main, rounds=self.FAIL_ROUND, live=fx.conflicted, head=fx.fixed, pre=fx.pre,
+                               trees=fx.trees)
+        rc, out, err = self.fix_from_fixed_head(host, round_value=self.FAIL_ROUND_VALUE, fixed=fx.fixed, live=fx.conflicted)
+        self.assertEqual(rc, 0, "a fix check after a merge of main was refused over a failed round:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the passed fix check")
+        self.assert_listed_done(earlier, body, why="round 1 is FAIL, and the fix check passed", live=fx.conflicted)
+
+    def test_g_a_conflicted_merge_of_main_after_a_clean_merge_takes_a_fix_verifier_on_the_reviewed_head(self):
+        # A record survives a clean merge of main. A conflicted merge of main after the review takes one more fix check.
+        # The merges after the reviewed head F are M1, a clean merge of main, and M2, a merge of main on M1 that conflicts and is resolved
+        # by hand. The fix check names F, so the fix diff is F..M2.
+        fx = self.real_commits()
+        m2 = self.git_commit(fx.clean, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        self.facts(fx, [m2])
+        self.assertEqual(fx.parents[m2], [fx.clean, fx.main3], "the fixture's head is not a merge of the clean merge and main3")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.clean, fx.main3], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: the clean merge and main3 do not conflict in git:\n" + r.stdout + r.stderr)
+        host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m2, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m2)
+        self.assertEqual(rc, 0, "a fix check on a conflicted merge of main after a clean merge of main was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], m2, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+
+    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_refused(self):
+        # Control: a plain commit between the reviewed head and the conflicted merge is no clean merge of main, so that fix check stays refused.
+        fx = self.real_commits()
+        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        self.facts(fx, [m3])
+        self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the plain commit is not on the reviewed head")
+        host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m3, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m3)
+        self.assertEqual(rc, 2, "a fix check after a plain commit and a conflicted merge of main was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+class ReviewCleanMainMerge(ReviewEnv):
+    """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
+    A clean merge is a merge commit whose second parent is on origin's main and whose tree is git's clean merge
+    of its parents. Any other commit after the record's head makes the record stale, as today. Each case with a negative clause first reads the
+    clean merge as done: today's code reads that as stale, so the case is red on the old code for the rule under test."""
+
+    def assert_clean_merge_done(self, fx):
+        self.reviewed_line(self.reviewed_host(fx, fx.clean), fx.clean, "done",
+                           "control: a clean merge of main after the reviewed head must read done, not stale, before the merge under test is read")
+
+    def test_a_clean_merges_of_main_after_the_reviewed_head_read_done(self):
+        fx = self.real_commits()
+        self.reviewed_line(self.reviewed_host(fx, fx.fixed), fx.fixed, "done", "the record does not read done at its own head, so the cases below test nothing")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.clean), fx.clean, "done", "a clean merge of main after the reviewed head must read done, not stale")
+        self.assertNotIn(REVIEW_MARKER, out, "--reviewed printed a review record, but it posts none and a clean merge needs no new one")
+        self.reviewed_line(self.reviewed_host(fx, fx.clean2), fx.clean2, "done", "two clean merges of main after the reviewed head must read done, not stale")
+
+    def test_b_a_merge_whose_tree_has_an_extra_file_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.edited), fx.edited, "stale", "a merge whose tree holds one file more than git's clean merge must not read done")
+
+    def test_b_a_conflict_fixed_by_hand_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.conflicted), fx.conflicted, "stale", "a merge of a conflict fixed by hand must not read done")
+
+    def test_c_a_plain_commit_after_the_reviewed_head_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.plain), fx.plain, "stale", "a plain commit after the reviewed head must read stale, as today")
+
+    def test_c_a_plain_commit_after_a_clean_merge_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.clean_plain), fx.clean_plain, "stale",
+                           "a plain commit after a clean merge must read stale: the commit read must reach every commit after the record")
+
+    def test_c_a_clean_merge_after_a_plain_commit_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.after_plain), fx.after_plain, "stale",
+                           "a clean merge whose first parent is a plain commit must read stale: the plain commit is not a clean merge")
+
+    def test_d_a_merge_of_a_branch_on_the_base_but_not_on_main_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        host = self.reviewed_host(fx, fx.stacked, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        self.reviewed_line(host, fx.stacked, "stale",
+                           "a merge whose second parent is on the pull request's base but not on origin's main must not read done")
+        self.assertTrue(any(first == fx.feat for first, _ in host.compare_reads), "the walk did not compare the second parent with any base, so the case tests nothing")
+
+    def test_e_a_three_parent_merge_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        self.reviewed_line(self.reviewed_host(fx, fx.octopus), fx.octopus, "stale", "a merge with three parents must not read done")
+
+    def test_f_a_lint_pass_on_the_reviewed_head_does_not_carry_to_a_clean_merge_of_main(self):
+        # The lint gate reads the live head only (decision lanes-run-no-full-ci-job). The default host's lint names the clean merge, so the control reads done.
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        record = review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS))
+        self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=[record, lint_of(7, fx.fixed)]), fx.clean, "no lint",
+                           "a lane-lint PASS of the reviewed head must not make a clean merge of main read done: the lint names the live head")
+
+    def test_g_a_clean_merge_of_main_after_a_conflict_fixed_by_hand_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        main4 = self.git_commit(fx.main3, {"z.txt": "z\n"})
+        fx.on_main[(main4, "main")] = "ahead"  # main4 is local only, so its compare is scripted as main's answer, as clean_merges_after_fixed does
+        top = self.git_commit(fx.conflicted, {"z.txt": "z\n"}, main4)
+        self.facts(fx, [main4, top])
+        host = self.reviewed_host(fx, top)
+        out = self.reviewed_line(host, top, "stale", "a clean merge of main after a conflict fixed by hand must not read done: the walk stops at the conflicted merge")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
+        self.assertIn((fx.main3, "main"), host.compare_reads, "the walk did not reach the conflicted merge, so the case tests nothing")
+
+    def test_h_an_empty_commit_after_a_conflict_fixed_by_hand_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        top = self.git_commit(fx.conflicted, {})
+        self.facts(fx, [top])
+        host = self.reviewed_host(fx, top)
+        out = self.reviewed_line(host, top, "stale", "an empty commit after a conflict fixed by hand must not read done: the walk stops at the conflicted merge")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
+        self.assertIn(top, host.commit_reads, "the walk did not read the empty commit, so the case tests nothing")
+
+
+class ReviewUnknownReads(ReviewEnv):
+    """A commit the checkout lacks reads unknown, never a conflict. A main-only clone fetches origin's heads once when a parent is missing, so a
+    head on origin reads done there, while a commit that only a fork holds stays unknown: the record reads stale with the word unknown, and a fix
+    check on that merge exits 2 (decision pr-review-record; merge/merge.py merge_tree, merge_state and live_review_state)."""
+
+    def test_a_commit_the_checkout_lacks_reads_unknown_not_conflict(self):
+        fx = self.real_commits()
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fx.fixed), "fixture: the main-only clone holds fixed, so the read below is not of a missing commit")
+        state, _files = merge.conflicting_files(self.co, fx.fixed, fx.main3)
+        self.assertEqual(state, "conflict", "control: two commits the checkout holds, and that conflict, read %r, not conflict" % state)
+        state, _files = merge.conflicting_files(clone, fx.fixed, fx.main3)
+        self.assertEqual(state, "unknown", "a merge of a commit the checkout lacks read %r, not unknown: a missing commit is no conflict" % state)
+
+    def test_a_head_on_origin_reads_done_in_a_main_only_clone(self):
+        fx = self.real_commits()
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fx.fixed), "fixture: the main-only clone holds fixed, so the fetch of origin's heads is not tested")
+        host = self.reviewed_host(fx, fx.clean)
+        host.cwd = clone
+        self.reviewed_line(host, fx.clean, "done", "a clean merge whose parent is on origin must read done in a main-only clone: one fetch of origin's heads brings it")
+
+    def test_a_fork_head_reads_stale_and_says_unknown(self):
+        fx = self.real_commits()
+        live = self.fork_merge(fx)
+        fork = fx.parents[live][0]
+        clone = self.main_only_clone()
+        self.assertTrue(self.has_commit(self.co, fork), "fixture: the checkout lacks the fork commit")
+        self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the fork commit, so no fetch can hide the missing commit")
+        host = self.reviewed_host(fx, live)
+        host.cwd = clone
+        out = self.reviewed_line(host, live, "stale", "a fork head the checkout cannot read must read stale")
+        self.assertIn("unknown", list_line(self, out, 7), "the stale line does not say unknown, so a failed read reads as a plain stale record")
+
+    def test_a_fix_verifier_on_a_merge_git_cannot_read_exits_two(self):
+        fx = self.real_commits()
+        live = self.fork_merge(fx)
+        fork = fx.parents[live][0]
+        clone = self.main_only_clone()
+        # The earlier record reads done on its own head with a PASS fix check, so only the merge's read can refuse the new fix check.
+        prior = review_comment(1, 7, record_text(head=fork, rounds=REVIEW_PASS, fix=(fix_verifier_line(head=fx.pre),)))
+        host = self.record_host(prior, head=live, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        host.cwd = clone
+        rc, out, err = self.run_args("7", "--review-record", "--head", live, *REVIEW_FLAGS[:-1], "1:reviewer:sonnet:PASS",
+                                     "--fix-check", f"{fork}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+        self.assertEqual(rc, 2, "a fix check on a merge git cannot read was accepted (rc %r):\n%s%s" % (rc, out, err))
+        self.assertIn("unknown", err, "the refusal does not say the merge is unknown:\n" + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+
+
+class ReviewCleanMainWalk(ReviewEnv):
+    """The walk over clean merges of main reads at most REVIEW_MERGE_WALK merge commits (50). A record reads done for a head 50 merges on, and
+    stale for one 51 on, and the walk costs one commit read and one compare for each merge commit (decision pr-review-record)."""
+
+    def test_fifty_clean_merges_read_done_and_fifty_one_read_stale(self):
+        cap = merge.REVIEW_MERGE_WALK
+        fx = self.real_commits()
+        merges = self.clean_merges_after_fixed(fx, cap + 1)
+        with self.subTest("the cap"):
+            self.reviewed_line(self.reviewed_host(fx, merges[cap - 1]), merges[cap - 1], "done",
+                               "%d clean merges of main after the reviewed head must read done: the walk reads that many commits" % cap)
+        with self.subTest("one past the cap"):
+            out = self.reviewed_line(self.reviewed_host(fx, merges[cap]), merges[cap], "stale",
+                                     "%d clean merges of main after the reviewed head must read stale, past the walk's cap" % (cap + 1))
+            self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the cap")
+
+    def test_a_clean_merges_after_the_head_read_one_commit_and_one_compare_per_merge_commit(self):
+        fx = self.real_commits()
+        merges = self.clean_merges_after_fixed(fx, 3)
+        host = self.reviewed_host(fx, merges[-1])
+        self.reviewed_line(host, merges[-1], "done", "fixture: three clean merges of main after the reviewed head do not read done")
+        self.assertEqual(host.commit_reads, list(reversed(merges)), "the walk reads the commits %r, not one read of each merge commit, newest first"
+                         % host.commit_reads)
+        holds = [c for c in host.compare_reads if c[1] == "main"]
+        self.assertEqual(holds, [(fx.parents[m][1], "main") for m in reversed(merges)],
+                         "the walk does not compare each merge's second parent with main once, newest first")
+
+
+class ReviewEmptyCommits(ReviewEnv):
+    """An empty commit makes the record stale, after the reviewed head or after a clean merge of main. Only clean merges of main keep a record:
+    owner, Nov 10 14:07 CST ("a review log survives a clean main merge"), and waiting-page item 514, option b, Nov 11 14:38 CST, which drops the
+    reading that an empty commit keeps it too."""
+
+    def test_an_empty_commit_on_the_reviewed_head_reads_stale(self):
+        fx = self.real_commits()
+        self.reviewed_line(self.reviewed_host(fx, fx.fixed), fx.fixed, "done",
+                           "control: the record does not read done at its own head, so the case below tests nothing")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.empty), fx.empty, "stale",
+                                 "an empty commit on the reviewed head must read stale: only clean merges of main keep a record")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
+
+    def test_an_empty_commit_after_a_clean_merge_of_main_reads_stale(self):
+        fx = self.real_commits()
+        self.reviewed_line(self.reviewed_host(fx, fx.clean), fx.clean, "done",
+                           "control: a clean merge of main after the reviewed head must read done, before the case below is read")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.clean_empty), fx.clean_empty, "stale",
+                                 "an empty commit after a clean merge of main must read stale: only clean merges of main keep a record")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
+
+
+class ReviewFixAfterPriorRecord(ReviewEnv):
+    """A fix check on a conflicted merge of main, after an earlier fix check (decision pr-review-record). The
+    newest earlier record must read done on its own head: it holds a PASS fix check from sonnet, and its net value is not held. The fix check
+    starts at that record's head. The fix check takes a conflicted merge only: a merge with an extra edit is refused. An earlier record that reads open
+    or held refuses the fix check. Each refusal runs the same conflicted merge after a sonnet PASS record first, which must be admitted (exit 0)."""
+
+    def prior_text(self, fx, *, verdict="PASS", model=merge.REVIEW_FIX_GUARD_MODEL, net="not owed", rounds=REVIEW_PASS):
+        """The record text of the newest earlier record: its head is fx.fixed, and its fix check starts at fx.pre."""
+        return record_text(head=fx.fixed, rounds=rounds, net=net, fix=(fix_verifier_line(verdict=verdict, head=fx.pre, model=model),))
+
+    def run_fix_after_prior(self, fx, prior, head):
+        """-> (rc, out, err) of --review-record on `head`, with a fix check from the fixed head after the `prior` record."""
+        host = PullsHost([batch_pull(7, head)], {}, comments=[review_comment(1, 7, prior)], commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        return self.run_args("7", "--review-record", "--head", head, *REVIEW_FLAGS, "--fix-check", f"{fx.fixed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+
+    def assert_refused_after(self, fx, prior, state):
+        """The control, then the scope check (the prior reads `state`), then the refusal (exit 2, no record printed)."""
+        rc, out, err = self.run_fix_after_prior(fx, self.prior_text(fx), fx.conflicted)
+        self.assertEqual(rc, 0, "control: a fix check on a conflicted merge after a sonnet PASS fix check was refused:\n" + out + err)
+        self.assertEqual(record_state(self, prior, head=fx.fixed), state, "the fixture's earlier record does not read " + state + ", so the refusal is not the one under test")
+        rc, out, err = self.run_fix_after_prior(fx, prior, fx.conflicted)
+        self.assertEqual(rc, 2, f"a fix check after an earlier record that reads {state} was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+
+    def test_an_opus_pass_prior_refuses_the_fix_verifier(self):
+        fx = self.real_commits()
+        self.assert_refused_after(fx, self.prior_text(fx, model="opus"), "open")
+
+    def test_a_net_negative_pass_prior_refuses_the_fix_verifier(self):
+        fx = self.real_commits()
+        self.assert_refused_after(fx, self.prior_text(fx, net="negative"), "held")
+
+    def test_a_design_reviewer_fail_on_the_prior_refuses_the_fix_verifier(self):
+        fx = self.real_commits()
+        self.assert_refused_after(fx, self.prior_text(fx, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")), "open")
+
+    def test_a_fix_verifier_on_a_merge_with_an_extra_edit_after_a_pass_prior_is_refused(self):
+        # the fix check takes a conflicted merge only (decision pr-review-record): a merge that is neither clean nor conflicted keeps today's rules
+        fx = self.real_commits()
+        rc, out, err = self.run_fix_after_prior(fx, self.prior_text(fx), fx.conflicted)
+        self.assertEqual(rc, 0, "control: a fix check on a conflicted merge after a sonnet PASS fix check was refused:\n" + out + err)
+        self.assertEqual(record_state(self, self.prior_text(fx), head=fx.fixed), "done", "the fixture's sonnet PASS record does not read done, so the refusal below is not the one under test")
+        rc, out, err = self.run_fix_after_prior(fx, self.prior_text(fx), fx.edited)
+        self.assertEqual(rc, 2, "a fix check on a merge with an extra edit, after a sonnet PASS fix check, was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+
+    def test_a_fix_verifier_on_a_conflicted_merge_with_an_edit_outside_its_conflict_is_refused(self):
+        # Control: the conflicted merge, which resolves a.txt by hand and edits nothing else, is accepted. The case also edits p.txt, a file that
+        # git merges without a conflict. The scope check: the conflicted files stay a.txt alone, so only the extra edit can refuse the case.
+        fx = self.real_commits()
+        prior = self.prior_text(fx)
+        rc, out, err = self.run_fix_after_prior(fx, prior, fx.conflicted)
+        self.assertEqual(rc, 0, "control: a fix verifier on a conflicted merge after a sonnet PASS fix verifier was refused:\n" + out + err)
+        edited = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "b\n", "c.txt": "c\n", "p.txt": "edited\n"}, fx.main3)
+        self.facts(fx, [edited])
+        self.assertEqual(merge.conflicting_files(self.co, fx.fixed, fx.main3), ("conflict", ["a.txt"]), "fixture: fixed and main3 do not conflict on a.txt alone")
+        self.assertEqual(fx.parents[edited], [fx.fixed, fx.main3], "fixture: the edited merge is not a merge of the fixed head and main3")
+        rc, out, err = self.run_fix_after_prior(fx, prior, edited)
+        self.assertEqual(rc, 2, "a fix verifier on a conflicted merge with an edit outside its conflict, after a sonnet PASS fix verifier, was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
@@ -15228,16 +16112,52 @@ class ReleaseCheck(ReviewEnv):
         }
         for state, (comment, want) in bad.items():
             with self.subTest(state=state):
-                _, lines, err, _ = self.release([7], comments=[comment])
+                reads = self.one_commit_reads() if state == "stale" else {}  # a stale record's clean-merge walk reads the live head
+                _, lines, err, host = self.release([7], comments=[comment], **reads)
+                if state == "stale":
+                    self.assertIn(self.head("feat"), host.commit_reads, "the stale record's walk did not read the live head, so the case tests nothing")
                 self.assertEqual(lines, [want], err)
         _, lines, err, _ = self.release([7], comments=[self.review(7)])
         self.assertEqual(lines, ["#7 PASS"], err)
+
+    def one_commit_reads(self):
+        """-> the commit reads of `release` for a live head that is one commit on a parent with another tree. The clean-merge walk of a stale
+        record reads that head, finds no merge and stops there, so its line keeps the state alone, with no unknown suffix."""
+        live, parent = self.head("feat"), "ab" * 20
+        return {"commits": {live: [parent], parent: []}, "trees": {live: "cd" * 20, parent: "ef" * 20}}
+
+    def test_check_2_b_a_stale_record_whose_walk_cannot_read_the_head_names_the_unknown_walk(self):
+        # Control: the walk's commit read fails, so the stale line keeps its state and adds the unknown why, the one the walk gives.
+        rc, lines, err, _ = self.release([7], comments=[self.review(7, head=REVIEW_OLD_HEAD)])
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: the record is for head 0f0f0f0f0; "), line)
+        self.assertIn(f"; {merge.REVIEW_SURVIVAL_UNKNOWN} (", line, "the stale line lacks the unknown walk's why: " + line)
+        self.assertEqual(rc, 1, err)
 
     def test_check_2_a_record_that_names_another_pr_does_not_count_for_this_one(self):
         stray = review_comment(9, 7, record_text(n=8, head=self.head()))  # on #7's thread, but it names #8
         rc, lines, err, _ = self.release([7, 8], comments=[stray, self.review(8)])
         self.assert_fails_alone(self.line_of(lines, 7), 7, r"record")
         self.assertEqual(self.line_of(lines, 8), "#8 PASS", err)
+        self.assertEqual(rc, 1, err)
+
+    def test_check_2_a_stacked_pr_whose_head_merges_its_own_base_after_review_fails_stale(self):
+        # The review is done at fx.fixed. The head merges feat, the base of #8, which is no clean merge of main, so the record reads stale and #8 fails
+        # alone. Control: at its reviewed head #8 passes, with its base pull request #7 (head feat-base) in the call and passing.
+        fx = self.real_commits()
+        reads = dict(commits=fx.parents, trees=fx.trees, compares={**fx.on_main, **fx.on_stack})
+
+        def pulls(head8):
+            return [batch_pull(7, fx.feat, head_ref="feat-base"), batch_pull(8, head8, base="feat-base", head_ref="feat8")]
+
+        comments = [self.review(7, head=fx.feat), self.review(8, head=fx.fixed)]
+        rc, lines, err, _ = self.release([8, 7], pulls=pulls(fx.fixed), comments=comments, **reads)
+        self.assertEqual((rc, lines), (0, ["#8 PASS", "#7 PASS"]), "control: the stacked pull request at its reviewed head does not pass:\n" + err)
+        rc, lines, err, _ = self.release([8, 7], pulls=pulls(fx.stacked), comments=comments, **reads)
+        self.assertFalse(self.line_of(lines, 8).startswith("#8 PASS"),
+                         "a stacked pull request whose head merges its own base after review passed the release check:\n" + err)
+        self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the record is for head {fx.fixed[:9]}")
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
         self.assertEqual(rc, 1, err)
 
     # Check 3: the newest record is unedited
@@ -15411,11 +16331,80 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual(rc, 2, out + err)
         self.assertNotIn("unrecognized arguments", err, err)
 
+    # A clean merge of main after the reviewed head (decision pr-review-record). --release-check reads the record as --reviewed does.
+
+    def base_tip(self, sha):
+        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
+        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def release_at(self, fx, head, record_head):
+        """-> (rc, lines, err) of --release-check on pull request 7 at `head`, its one record for `record_head`, and the commits, trees and
+        compares of fx. The lint is PASS on `head`."""
+        rc, lines, err, _ = self.release([7], lint=self.lints([7], heads={7: head}), pulls=[self.live(7, head=head)],
+                                         comments=[self.review(7, head=record_head)], commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        return rc, lines, err
+
+    def test_a_clean_merge_of_main_after_the_reviewed_head_passes_the_release_check(self):
+        # Catches: --release-check reading the record by review_state alone, so the reviewed head plus a clean merge of main FAILs as stale, while
+        # --reviewed reads the same record as done.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.main2, fx.clean], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "fixture: git's merge of main2 and the clean merge is not clean:\n" + r.stdout + r.stderr)
+        rc, lines, err = self.release_at(fx, fx.clean, fx.fixed)
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_b_the_reviewed_head_passes_the_release_check_on_the_same_base(self):
+        # Control: the release check gives PASS for the record at its own head, on the base the case above uses, so that case's FAIL is the clean merge's alone.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        rc, lines, err = self.release_at(fx, fx.fixed, fx.fixed)
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_c_a_plain_commit_after_the_reviewed_head_still_fails_the_release_check(self):
+        # Control: a plain commit is no clean merge, so its record stays stale, and the line FAILs for that one reason.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        rc, lines, err = self.release_at(fx, fx.plain, fx.fixed)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, rf"the record is for head {fx.fixed[:9]}")
+
+    def two_bases(self, fx):
+        """Pull request 7 on main, at fx.clean with its record done at fx.fixed, and pull request 8 on feat-base, at fx.stacked. -> the two pull requests.
+        Call base_tip first: main must hold main2, or git's merge of fx.clean into main is not clean."""
+        return [batch_pull(7, fx.clean), batch_pull(8, fx.stacked, base="feat-base", head_ref="feat8")]
+
+    def test_d_a_pr_on_main_is_judged_on_main_whatever_base_the_other_pr_names(self):
+        # Control: read last, #7 is judged on main, its own base, and its clean merge of main reads PASS. The case reads #8 last, so release_check
+        # judges #7 on feat-base, the base #8 names, and the clean merge of main reads stale.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        pulls, comments = self.two_bases(fx), [self.review(7, head=fx.fixed)]
+        reads = dict(commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        _, lines, err, _ = self.release([8, 7], pulls=pulls, comments=comments, **reads)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "control: #7 does not pass when it is read last:\n" + err)
+        _, lines, err, _ = self.release([7, 8], pulls=pulls, comments=comments, **reads)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "release_check judges #7 on feat-base, the base of #8 read last, so the clean merge of main reads stale:\n" + err)
+
+    def test_e_reviewed_and_release_check_read_the_same_pr_the_same_way(self):
+        # Control: merge --reviewed reads #7 done at its clean merge of main. The case is release_check on the same two pull requests, with #7 first.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        self.reviewed_line(self.reviewed_host(fx, fx.clean, more=self.two_bases(fx)[1:]), fx.clean, "done",
+                           "control: merge --reviewed does not read #7 at its clean merge of main as done")
+        _, lines, err, _ = self.release([7, 8], pulls=self.two_bases(fx), comments=[self.review(7, head=fx.fixed)],
+                                        commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
 GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+# The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
+PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -15480,6 +16469,11 @@ class ReviewGuardHits(unittest.TestCase):
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
                          ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+    def test_pr_template_and_its_folder_form_are_both_guard_hits(self):
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(HERE), PR_TEMPLATE)), f"{PR_TEMPLATE} is not in the repo, so this case proves nothing")
+        self.assertEqual(review_fn(self, "guard_hits")([PR_TEMPLATE, PR_TEMPLATE_FORM]), [PR_TEMPLATE_FORM, PR_TEMPLATE],
+                         "guard_hits does not list the PR template and its folder form as guard paths")
 
 TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
 
@@ -15558,6 +16552,11 @@ class ReviewGuardRefusal(ReviewGuardEnv):
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_pr_template_alone_refuses_as_a_guard_change(self):
+        # The template is a guard path (ReviewGuardHits), so a PR that touches only it and says guard no is refused
+        self.host.changed = [(PR_TEMPLATE, "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), PR_TEMPLATE)
 
     def test_docs_only_on_a_guard_path_refuses(self):
         # hooks/README.md is no doc, but the guard refuses it before the kind is checked, so the Guard reason holds
@@ -16509,7 +17508,7 @@ class ReviewFixSonnet(ReviewEnv):
     MODEL_REFUSAL = f"must run on {merge.REVIEW_FIX_GUARD_MODEL}"  # the phrase review_state gives as the why of a model refusal
 
     def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
-        return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
+        return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_verifier_line(model=fix_model),)))
 
     def guard_flags(self, fix_model, guard="yes"):
         """The review flags for a normal change with `guard`, a failed first review, and a fix check PASS on `fix_model` from the earlier head."""
@@ -16545,14 +17544,14 @@ class ReviewFixSonnet(ReviewEnv):
         for model in self.REFUSED_MODELS:
             for rounds in (("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, REVIEW_FAILED_THREE):
                 with self.subTest(model=model, rounds=rounds):
-                    state, why = record_verdict(self, record_text(rounds=rounds, guard="no", fix=(fix_check_line(model=model),)))
+                    state, why = record_verdict(self, record_text(rounds=rounds, guard="no", fix=(fix_verifier_line(model=model),)))
                     self.assertEqual(state, "open", f"a {model} fix check PASS on a change with no guard or check must not read done: {why!r}")
                     self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a change with no guard or check is not refused on its model: {why!r}")
 
     def test_a_sonnet_fix_pass_on_a_change_with_no_guard_still_reads_done(self):
         # control: the same record on Sonnet reads done, so the open state above comes from the model and not the record
         state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
-                                                      fix=(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL),)))
+                                                      fix=(fix_verifier_line(model=merge.REVIEW_FIX_GUARD_MODEL),)))
         self.assertEqual(state, "done", f"a Sonnet fix check PASS on a change with no guard or check must read done: {why!r}")
 
     def remedy_names_sonnet(self, model, text):
@@ -16572,7 +17571,7 @@ class ReviewFixSonnet(ReviewEnv):
         # control: the same flags on Sonnet are written, with the fix line the record reads back
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL), host=self.earlier_host())
         self.assertEqual(rc, 0, "a Sonnet fix check on a guard or check change was refused:\n" + out + err)
-        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+        self.assertIn(fix_verifier_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
 
     def test_a_fix_check_on_another_model_on_a_change_with_no_guard_is_refused_and_names_sonnet(self):
         # owner item 444 a: the refusal does not turn on Guard or check, so the same flags with guard no are refused too
@@ -16588,7 +17587,7 @@ class ReviewFixSonnet(ReviewEnv):
         # control: the same flags on Sonnet are written on Guard or check no, with the fix line the record reads back
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL, guard="no"), host=self.earlier_host())
         self.assertEqual(rc, 0, "a Sonnet fix check on a change with no guard or check was refused:\n" + out + err)
-        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+        self.assertIn(fix_verifier_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
 
     # The model in the spelling a person may type. Built from the constant, so the cases follow the model name when it changes.
     MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
@@ -16604,16 +17603,16 @@ class ReviewFixSonnet(ReviewEnv):
     def test_a_mixed_case_sonnet_fix_check_on_a_guard_change_is_accepted_and_printed(self):
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL), host=self.earlier_host())
         self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a guard or check change:\n" + out + err)
-        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
+        self.assertIn(fix_verifier_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
 
     def test_a_mixed_case_sonnet_fix_check_on_a_change_with_no_guard_reads_done_and_is_printed(self):
         # control: the letter-case match holds on Guard or check no too, as it does on yes
         state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
-                                                      fix=(fix_check_line(model=self.MIXED_CASE_MODEL),)))
+                                                      fix=(fix_verifier_line(model=self.MIXED_CASE_MODEL),)))
         self.assertEqual(state, "done", f"a {self.MIXED_CASE_MODEL} fix check PASS on a change with no guard or check must read done: {why!r}")
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL, guard="no"), host=self.earlier_host())
         self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a change with no guard or check:\n" + out + err)
-        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
+        self.assertIn(fix_verifier_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is

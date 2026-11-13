@@ -12,3 +12,7 @@ select = ["F", "E9"]
 # deletes the import and this line together.
 "hooks/test_sendmessage_state.py" = ["F401"]  # contextlib, io
 "lint/test_check_skill_model_rows.py" = ["F401"]  # glob
+# Bandaid: the runner execs each section file in its own globals (names bind at exec time), so ruff reads every
+# name a section uses from the runner as undefined. The follow-up is a ruff step over the joined sections in order.
+"hooks/test_guard.py" = ["F821"]
+"tests/guard/*" = ["F821"]

@@ -407,8 +407,8 @@ class LintBase(Job):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def lane_adds_narration(self, origin=True):
-        for rel in ("lint/check_comment_narration.py", "lint/layout.py", "lint/layout.json", "hooks/_nowindow.py",
-                    "lint/code_check_standard.json"):
+        for rel in ("lint/check_comment_narration.py", "lint/layout.py", "lint/layout.json", "lint/diff_moves.py",
+                    "hooks/_nowindow.py", "lint/code_check_standard.json"):
             os.makedirs(os.path.join(self.root, os.path.dirname(rel)), exist_ok=True)
             shutil.copy(os.path.join(HERE, "..", rel), os.path.join(self.root, rel))
         self.git("add", ".")

@@ -13,7 +13,8 @@ cases import the module and swap its `gh`, `time`, `subprocess` and `shutil` for
 and no wait is real.
 
 Decision ci-wait-reads-run-status, section "The CI wake-up":
-- Only `gh pr ready <N>` starts a watch. A `git push` in any form starts none, and makes no gh call.
+- Only a ready call starts a watch: the shell `gh pr ready <N>`, or a GitHub MCP
+  update_pull_request call with draft false. A `git push` in any form starts none, and makes no gh call.
 - Each `gh pr ready` in one command gets its own watch, in one process. The hook prints one
   verdict line per PR, then exits 2 once.
 - Text inside quotes, inside a heredoc body, or after an unquoted `#` is no command. A lone quote
@@ -104,6 +105,10 @@ Repo rules, each pinned by a case below:
 - A repo with an active workflow and no run on the head still wakes "CI unknown on <sha7>: no run
   yet" at the deadline. That is the real alert.
 - A failed `gh workflow list` read is not "no workflows": the watch runs as it does today.
+
+Cloud route (ci-wake-mcp-ready): a GitHub MCP update_pull_request call with draft false marks a PR
+ready. It starts a watch on the PR's own repo, from the owner and repo of tool_input. A call with no
+draft field, or with draft true, starts none.
 
 Scratch files live in one temp directory, removed at exit.
 """
@@ -1874,6 +1879,47 @@ def case_read_pr_maps_rest_fields():
           got["state"] == "OPEN" and got["isDraft"] is False and got["headRefOid"] == SHA, repr(got))
 
 
+MCP_READY = "mcp__github__update_pull_request"   # the cloud's ready route: draft false marks a PR ready
+
+
+def mcp_update(pull, owner, repo, draft=None):
+    """The PostToolUse payload of the GitHub MCP update call. draft None: the call sets no draft field.
+    tool_input keys as hooks/guard.py reads them for this tool: owner, repo, pullNumber, draft."""
+    args = {"owner": owner, "repo": repo, "pullNumber": pull}
+    if draft is not None:
+        args["draft"] = draft
+    return {"tool_name": MCP_READY, "tool_input": args}
+
+
+def case_mcp_ready_call_starts_the_watch():
+    """The MCP update with draft false marks its PR ready. Its watch reads the PR's own repo (owner and
+    repo of tool_input), not the folder's (cwd_repo), and each gh call names that repo. The shell
+    `gh pr ready` on the same fixture is the green control: only the payload differs."""
+    owner, name = REPO_APP.split("/")
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    control = run_hook(bash("gh pr ready 214 --repo %s" % REPO_APP), fx,
+                       extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("control: shell gh pr ready 214 --repo, green", control, "green")
+    expect_watch("control: shell gh pr ready 214 --repo", control, ["901"])
+
+    res = run_hook(mcp_update(214, owner, name, draft=False), fx,
+                   extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("MCP update_pull_request, draft false, green", res, "green")
+    expect_watch("MCP update_pull_request, draft false", res, ["901"])
+    check("MCP update_pull_request, draft false: every gh call passes -R %s" % REPO_APP,
+          bool(res.calls) and all(GH.repo_of(c) == REPO_APP for c in res.calls), why(res))
+
+
+def case_mcp_update_that_does_not_mark_ready_starts_nothing():
+    """An MCP update with no draft field, or with draft true, is no ready call: the hook exits 0 with no
+    output and makes no gh call. The decision comes from tool_input alone."""
+    for label, draft in (("no draft field", None), ("draft true", True)):
+        res = run_hook(mcp_update(12, "shivinate7", "claude-settings", draft=draft), fixture(READY, [GREEN]))
+        expect_silent("MCP update_pull_request, %s: starts nothing" % label, res)
+        expect_no_gh("MCP update_pull_request, %s" % label, res)
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -1886,6 +1932,11 @@ def main():
     res = run_hook(powershell("gh pr ready 12"), fixture(READY, [GREEN]))
     expect_verdict("PowerShell tool, gh pr ready 12 (green)", res, "green")
     expect_watch("PowerShell tool, gh pr ready 12", res, ["901"])
+
+    # The cloud's ready route (ci-wake-mcp-ready): an MCP update with draft false starts a watch; one
+    # with no draft field, or draft true, starts none.
+    case_mcp_ready_call_starts_the_watch()
+    case_mcp_update_that_does_not_mark_ready_starts_nothing()
 
     # Two gh pr ready calls in one command: one process, one verdict line per PR, one wake.
     res = run_hook(bash("gh pr ready 12 && gh pr ready 13"), fixture(TWO_PRS, [GREEN, RED_B]))
