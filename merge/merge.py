@@ -5566,12 +5566,12 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+            earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
             earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
             new_top = max((r[0] for r in a.round), default=0)
-            # a new record may not lower the rounds an earlier record already holds, or repeat its top round after a fix check without one of its own
-            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and any(e["fix"] for e in earlier if e) and not a.fix_check)):
-                print("merge: rounds may not restart. An earlier review record on this pull request already holds rounds or a Fix check, so a record with fewer rounds is refused. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
+            # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
+            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
+                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
