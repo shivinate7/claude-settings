@@ -16906,8 +16906,8 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
 
     def test_batch_head_open_list_unreadable_is_unknown_never_pass(self):
-        # Catches: a failed read of the open pull list taken as no open batch, so #7 reads PASS on main alone while the list that names the batch
-        # is unread. The line is unknown, never PASS.
+        # Catches: a failed read of the open pull list taken as no open batch, which would let #7 read PASS against main alone while the batch that
+        # the list names goes unchecked. The line is unknown, never PASS.
         fx = self.real_commits()
         self.base_tip(fx.main2)
         calm = self.git_commit(fx.main2, {"z.txt": "z\n"})
