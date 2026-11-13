@@ -2078,6 +2078,9 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- lane-step-dup-untagged: A `create_session` with no `cs-step` tag, a carrier row with no `cs-repo` tag, and `list_sessions` filters other than `before_id`, `tags` and `mine` are not judged by rule lane-step-dup. Decision: session-tiers.
+- lane-step-dup-archived-after-read: A carrier archived after the whole `list_sessions` read still reads live until the session reads the list again, so the guard may refuse a step it could pass. Decision: session-tiers.
+- lane-step-dup-one-rule-id: Part two (open pull request) refuses under rule id `lane-step-dup`, the same as part one, so one override lifts both parts. Decision: session-tiers.
 - stamp-readme-wait-item: actions/stamp/README.md item 4 says "The wait leaves out a check". confirm has no wait under the lock now, so the word may be stale. Unverified.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR (`_guard_section_sources` returns no file on a parse error, or when `rule_audit._section_dir` finds no folder). Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. The owner rule (`scratchpad_owner_write` in `hooks/guard.py`) keys its records per file. Decision: scratchpad-owner (the pattern).
