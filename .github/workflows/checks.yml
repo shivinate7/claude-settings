@@ -757,6 +757,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_lane_lint.py
 
+      - name: Reviewed-cursor fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_reviewed_cursor.py
+
       - name: Idle-lanes reader fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py
@@ -1691,6 +1695,10 @@ jobs:
       - name: Merge launcher fixture suite (merge.cmd)
         if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
+
+      - name: Reviewed-cursor fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python merge/test_reviewed_cursor.py
 
   checks-windows-merge-2:
     runs-on: windows-latest
