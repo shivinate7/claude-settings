@@ -1,0 +1,10 @@
+{
+ "id": "carry-base-pr-needing-lane",
+ "at": "2026-11-12T07:35:00-06:00",
+ "title": "A base PR no live lane holds is carried by the lane that needs it",
+ "ruling": "process-only. Coordinator pick, 07:35 CST Nov 12, in plans/fanout-lanes-2026-11-12.md line 13: a base PR that no live lane holds is carried by the lane that needs it; that lane tells triage the step, and triage sets its lane field. Line 14, 07:33 CST: before carrying a base PR, a lane looks it up in plans/open-pr-owners-2026-11-12.md. Triage read: PR 2750 cites a 07:35 CST pick whose words are not in the PR, and this is the only 07:35 CST coordinator pick found on the record, so the match is by time and topic, not by PR 2750's own words.",
+ "quote": "A base PR that no live lane holds is carried by the lane that needs it; that lane tells triage the step, and triage sets its lane field (07:35 CST).",
+ "source": "plans/fanout-lanes-2026-11-12.md lines 13 and 14 on the roadmap branch. Filed by triage 13:20 CST Nov 13 at the coordinator's request (13:20 CST).",
+ "status": "closed",
+ "step": "backlog-drain"
+}

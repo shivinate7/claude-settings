@@ -1,0 +1,10 @@
+{
+ "id": "own-746-b-off-blamed-paths",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "While main is red, lanes that touch none of the blamed paths may merge",
+ "ruling": "Owner 13:20 CST Nov 13, page item 746 b (against the triage recommendation a): while main is red, a lane that touches none of the blamed paths may merge. The blame step (bisect) is not built; it lands in PR #3152 act 3. The merge tool and decision no-merge-onto-red-main change.",
+ "quote": "746 b",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "merge-red-main-latest-run"
+}

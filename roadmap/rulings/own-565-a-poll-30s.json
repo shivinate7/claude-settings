@@ -1,0 +1,10 @@
+{
+ "id": "own-565-a-poll-30s",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "Keep the page-data pick: poll about every 30 s, plus a guard on answers",
+ "ruling": "Owner 13:20 CST Nov 13, page item 565 a: keep the coordinator pick. The page polls about every 30 s and refreshes on load and focus; a guard refuses a session write to waiting/answers/**.",
+ "quote": "565 a",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "page-data-one-store"
+}

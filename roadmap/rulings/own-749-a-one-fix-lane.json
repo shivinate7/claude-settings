@@ -1,0 +1,10 @@
+{
+ "id": "own-749-a-one-fix-lane",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "One fix lane may repair held PR #3218, then a round-3 fix check",
+ "ruling": "Owner 13:20 CST Nov 13, page item 749 a: one fix lane for the k fix with red cases for [page], [repo] and grant [page] under the second copy, then a round-3 fix check.",
+ "quote": "749 a",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "inbox-dup-heading-merge"
+}

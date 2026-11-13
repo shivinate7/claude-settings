@@ -1,0 +1,10 @@
+{
+ "id": "own-732-b-keep-322",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "Keep mailaudit PR #322 open and rework it",
+ "ruling": "Owner 13:20 CST Nov 13, page item 732 b (against the coordinator pick a): keep mailaudit #322 (test shards and a doc-path push trim) open; a lane reworks the shards and the trim so the review passes. The push trim still waits on the item 729 ruling (push-skip-proven-tree).",
+ "quote": "732 b",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "backlog-drain"
+}

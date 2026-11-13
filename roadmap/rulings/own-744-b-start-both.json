@@ -1,0 +1,10 @@
+{
+ "id": "own-744-b-start-both",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "Start both cloud-snapshot-age-check and c107",
+ "ruling": "Owner 13:20 CST Nov 13, page item 744 b: a lane builds the snapshot check, and a second lane writes the Mac probe for c107 as one paste-ready prompt for him.",
+ "quote": "744 b",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "cloud-snapshot-age-check"
+}

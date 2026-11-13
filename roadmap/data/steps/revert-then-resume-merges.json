@@ -1,7 +1,7 @@
 {
  "id": "revert-then-resume-merges",
  "title": "Revert, then resume merges (express, from the unlanded ledger)",
- "status": "doing",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3es8X5NZo7QAAZD1M",
@@ -10,5 +10,5 @@
  "why": "Express lane from the unlanded ledger; detail is in the ledger row.",
  "source": "coordinator 12:44 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
  "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL3es8X5NZo7QAAZD1M. Lane question answered 12:47 CST Nov 13 (12:46 CST): item 622 (red-main-resume-on-green) b, picked by the retrospective on the owner's 14:13 CST Nov 12 instruction, per ruling ow-29-q-max-past-rates-a: merges resume when the revert MERGES (his 09:46 CST answer), not when the revert's run on main is green. Home: decision no-merge-onto-red-main. The page answer on item 622 itself is choice none with the owner note \"ask retrospective session to decide this since i spoke it on there though\". So the pick is the retrospective's on his word, not typed to the page. #3049 body Q3 i says \"until the revert's run on main is green\", the opposite of 622 b. Tell the coordinator; #3049's Q3 i needs a fix or a new owner word. CONFLICT, 12:49 CST Nov 13 (coordinator 12:49 and 12:50 CST): decision no-merge-onto-red-main on main (owner 2026-11-04 15:21 and 15:27 CST) says the merge tool refuses `merge --confirm` while main's newest completed run is red; only a newer completed green run clears it, so merges resume when the revert's own run on main is green (#3049 Q3 i). The coordinator's 12:50 view: ruling ow-29 (622 b, resume when the revert merges) must be rewritten to match. Triage held that rewrite: page item 622's own context quotes a NEWER owner answer, 09:46 CST Nov 12, \"a red main stops merges only until the revert merges\", and ow-29 records the retrospective's b pick on his 14:13 CST instruction. A newer owner word beats an older decision unless he says otherwise; changing the ruling needs his grant (outcomes-stale-decision-protocol). The lane builds what does not depend on it and builds to main's decision where it must (green run clears). Open for the coordinator. Coordinator 12:51 CST Nov 13 (12:51 CST): triage is right, his 09:46 CST Nov 12 words are newer than the Nov 4 decision. One owner item posted: item 745 (pick-red-main-resume-point), a green run (recommended) or b revert merges. Main keeps the green-run rule until he answers. The lane is archived; nothing to build until his answer. Ruling ow-29 stays as filed until then.",
- "updatedAt": "2026-11-13T12:51:39-06:00"
+ "updatedAt": "2026-11-13T13:21:28-06:00"
 }

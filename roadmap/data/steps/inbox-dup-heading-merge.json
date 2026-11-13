@@ -5,8 +5,8 @@
  "order": 1032,
  "owner": "triage",
  "why": "Retrospective session's mistake, 16:16 and 16:18 CST Nov 10 (rule building-mistake-names-its-guard); owner 16:20 CST: \"this osunds like an error btw is it not\".",
- "note": "The session appended a heading plus the owner's quote after hooks/feedback_guard.py had written the same; the item landed under the second copy, and the Stop hook refused twice. Fix: an item under either copy counts. Cost: none beyond the parse it already does. Not a ruling. Express lane started 12:45 CST Nov 13 (coordinator 12:45 CST): lane feedback-guard-findings, session_013NEJL3fTMNnVHbgiss5Vcp. Lane question 13:12 CST Nov 13: round 3 net-negative; page item 749 asks the owner whether one fix lane may run. PR #3218 stays parked.",
- "updatedAt": "2026-11-13T13:12:32-06:00",
+ "note": "The session appended a heading plus the owner's quote after hooks/feedback_guard.py had written the same; the item landed under the second copy, and the Stop hook refused twice. Fix: an item under either copy counts. Cost: none beyond the parse it already does. Not a ruling. Express lane started 12:45 CST Nov 13 (coordinator 12:45 CST): lane feedback-guard-findings, session_013NEJL3fTMNnVHbgiss5Vcp. Lane question 13:12 CST Nov 13: round 3 net-negative; page item 749 asks the owner whether one fix lane may run. PR #3218 stays parked. OWNER 13:20 CST Nov 13, item 749 a (ruling own-749-a-one-fix-lane): one fix lane may repair PR #3218 (k fix, red cases for [page], [repo], grant [page] under the second copy), then a round-3 fix check.",
+ "updatedAt": "2026-11-13T13:21:28-06:00",
  "lane": "session_013NEJL3fTMNnVHbgiss5Vcp",
  "blockedBy": []
 }

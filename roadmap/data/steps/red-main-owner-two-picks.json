@@ -1,0 +1,14 @@
+{
+ "id": "red-main-owner-two-picks",
+ "title": "Rewrite no-merge-onto-red-main and the merge tool to the owner's 13:20 CST Nov 13 picks (resume at the revert; lanes off the blamed paths)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner picked 745 b and 746 b on the page, both against the green-run rule on main.",
+ "source": "owner 13:20 CST Nov 13, items 745 b and 746 b",
+ "note": "Todo, needs a lane. (1) After a red main, merges resume when the revert merges (745 b). (2) While main is red, a lane that touches none of the blamed paths may merge (746 b); the blame step is #3152 act 3 and is not built, so (2) waits on it. A guard or check change: test-author red cases first, builder, reviewer. Decision no-merge-onto-red-main is rewritten in place. Related: revert-then-resume-merges, R42 part 2 (ow-03, ow-04, ow-05), ruling ow-29 (item 622 b).",
+ "updatedAt": "2026-11-13T13:21:28-06:00"
+}

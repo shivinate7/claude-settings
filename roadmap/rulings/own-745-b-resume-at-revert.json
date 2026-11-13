@@ -1,0 +1,10 @@
+{
+ "id": "own-745-b-resume-at-revert",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "Merges resume when the revert merges",
+ "ruling": "Owner 13:20 CST Nov 13, page item 745 b (against the triage recommendation a): after a red main, merges resume when the revert merges, with the revert's own run still going. The merge tool and decision no-merge-onto-red-main change. Ruling ow-29 (item 622 b) stands.",
+ "quote": "745 b",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "revert-then-resume-merges"
+}

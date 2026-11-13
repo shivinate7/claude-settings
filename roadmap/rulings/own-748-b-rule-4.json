@@ -1,0 +1,10 @@
+{
+ "id": "own-748-b-rule-4",
+ "at": "2026-11-13T13:20:00-06:00",
+ "title": "Land page_grant rule 4 for a closed routed answer, as in closed PR #1383",
+ "ruling": "Owner 13:20 CST Nov 13, page item 748 b (against the triage pick a): the lane lands page_grant rule 4 as in closed PR #1383, so a closed routed answer keeps a counted grant route. This widens a shared tool; he chose it knowing the label.",
+ "quote": "748 b",
+ "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:20 CST Nov 13). Filed by triage.",
+ "status": "open",
+ "step": "answered-leaves-page"
+}
