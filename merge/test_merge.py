@@ -1602,7 +1602,7 @@ class ScopedRepo:
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+                put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
@@ -1617,7 +1617,7 @@ class ScopedRepo:
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{start or branch}")
         for path, text in files.items():
-            put(os.path.join(o, path), text)
+            (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
 class SmallBaseMove(ScopedRepo, Env):
@@ -12977,18 +12977,31 @@ class ExpressPath(ScopedRepo, Env):
         script = os.path.join(o, ".github/scripts/ci-scope.sh")
         if base:
             script = os.path.join(self.t, "base-ci-scope.sh")
-            put(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
         out_file = os.path.join(self.t, "scope.out")
         if os.path.exists(out_file):
             os.remove(out_file)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
         env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
-        r = subprocess.run(["bash", script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
         flags = {}
         if os.path.exists(out_file):
             with open(out_file, encoding="utf-8") as f:
                 flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
         return r.returncode, flags
+
+    def test_scope_run_finds_bash_through_resolve_program(self):
+        """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
+        bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
+        argvs = []
+        def fake_run(argv, *a, **k):
+            argvs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with unittest.mock.patch.object(merge, "resolve_program", lambda name, env=None: "/resolved/" + name), \
+             unittest.mock.patch.object(subprocess, "run", fake_run):
+            self.scope_run()
+        self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
+        self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
 
     @staticmethod
     def turned_on(flags):
