@@ -1,0 +1,10 @@
+{
+ "id": "press-row-narrow-reflow",
+ "at": "2026-11-08T18:39:13-06:00",
+ "title": "A press row puts its button under the text, at the text start",
+ "ruling": "Owner 2026-11-08 18:39 CST, page item 448 (press-row-reflow), pick a: in a waiting-page row with a press button, the button sits under the text at its start at narrow widths, and row text moves from px to rem at the same sizes so browser text zoom works. Measured: at 280, 240 and 180 CSS px the text column shrank to 66, 26 and 3 px and \"Add to list\" overlapped \"Send ask\".",
+ "quote": "a",
+ "source": "Page copy answers/press-row-reflow.json (at 2026-11-09T00:39:13Z, choice a); item reply routed 18:40 CST Nov 8 to step notes-fix-page. Asked for by lane fan-prose-debts via the coordinator, 12:09 CST Nov 13. Filed by triage.",
+ "status": "open",
+ "step": "notes-fix-page"
+}

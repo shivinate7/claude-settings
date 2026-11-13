@@ -1,0 +1,14 @@
+{
+ "id": "batch-go-checks-open-items",
+ "title": "A batch go checks open owner items on its lanes",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident (coordinator 12:09 CST Nov 13): the 12:05 go on batch 136 (#3163) included #2829 while page item 730 was open; caught before merge.",
+ "source": "coordinator 12:09 CST Nov 13",
+ "note": "Todo. Before a batch go, read the open owner items that name any lane or PR in the batch and hold that lane. Also a past-ruling slip: item 730 should have cited decision waiting-data-in-repo (triage posted it from the retrospective without that check; gap on past-ruling-on-send).",
+ "updatedAt": "2026-11-13T12:09:27-06:00"
+}

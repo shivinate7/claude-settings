@@ -1,0 +1,10 @@
+{
+ "id": "reply-form-close-first",
+ "at": "2026-11-09T13:09:33-06:00",
+ "title": "On a narrow screen the reply form shows Close above Send reply",
+ "ruling": "Owner 2026-11-09 13:09 CST, page item 454 (reply-form-tab-order), pick a: at 520 px or narrower the reply form shows Close first, then Send reply, so Tab moves down the screen. Found in round 3 of #2347; a test pinned Send-first.",
+ "quote": "a",
+ "source": "Page copy answers/reply-form-tab-order.json (at 2026-11-09T19:09:33Z, choice a); item reply routed 13:11 CST Nov 9 to step notes-fix-page. Asked for by lane fan-prose-debts via the coordinator, 12:09 CST Nov 13. Filed by triage.",
+ "status": "open",
+ "step": "notes-fix-page"
+}
