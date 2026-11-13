@@ -22157,6 +22157,29 @@ class ClashRead(Env):
         self.assertEqual(out.splitlines(), [f"{TOUCH_GUARD}: #2390 {TOUCH_FIX}, #2402 wip-guard-tests"],
                          "a draft pull did not count as an open pull that touches the file:\n" + out)
 
+    def test_a_pull_listed_twice_by_the_pulls_read_is_counted_once_on_a_lone_file(self):
+        pull = touch_pull(2390, TOUCH_FIX)
+        pulls = [pull, pull]  # the pulls read lists the one pull twice, as offset paging can repeat an item
+        files = {2390: [touch_file("docs/a.md", "+a docs line")]}
+        self.assertEqual(self.touch_names([pull], files, "docs/a.md"), [touch_head(2390, TOUCH_FIX, "ready") + "file docs/a.md"],
+                         "setup: #2390 does not touch docs/a.md")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [CLASH_NONE_LINE],
+                         "a pull listed twice was counted as two pulls on its own file:\n" + out)
+
+    def test_a_pull_listed_twice_beside_another_on_one_file_is_named_once_each(self):
+        one, two = touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")
+        pulls = [one, one, two]  # #2390 is listed twice; #2401 once
+        files = {2390: [touch_file("docs/a.md", "+a docs line")], 2401: [touch_file("docs/a.md", "+a docs line")]}
+        self.assertEqual(self.touch_names([one, two], files, "docs/a.md"),
+                         [touch_head(2390, TOUCH_FIX, "ready") + "file docs/a.md", touch_head(2401, "docs-x", "ready") + "file docs/a.md"],
+                         "setup: the file is not shared by #2390 and #2401")
+        rc, out, err = self.run_clash(TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [f"docs/a.md: #2390 {TOUCH_FIX}, #2401 docs-x"],
+                         "a pull listed twice was named twice on the shared file:\n" + out)
+
     def test_the_empty_state_and_a_full_page_of_open_pulls_are_read_in_full(self):
         self.assertEqual(self.touch_names([], {}, TOUCH_GUARD), [TOUCH_NONE], "setup: --touches did not read the empty state")
         host = TouchesHost([])  # the empty state: no open pull, so no file is read
