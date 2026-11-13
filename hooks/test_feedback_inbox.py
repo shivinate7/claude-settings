@@ -177,6 +177,12 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     home must be a tracked file, `step:<slug>` where roadmap/data/steps/<slug>.json is a blob on some ref,
     or `page:<n>`. `[closed]` is a whole token after the home, and trailing text is allowed. Other kinds
     are as before.
+  - Question answers. A `[question] -> answered` item, open or closed, whose answer (the words after `->`)
+    names a defect needs a home on its line. The defect list is the five words gap, wrong, broken, missing
+    and stale, whole words in any case, and no other word: should, needs to and fix are not on it. The home
+    is `step:<slug>` on some ref, or a tracked debt or ruling file, and may be wrapped in ( ), ** or [ ]. The
+    home word is read leniently: `Answered`, `answered:`, `answered,`, `answered.` and a backticked `answered`
+    all count. An answer with no defect word passes, and so does a defect word in the owner's own message.
   - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
     page item.
   - Another session's inbox is never read.
@@ -4288,6 +4294,148 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+# Question answers. A `[question] -> answered` item whose answer names a defect or gap needs a home on its line.
+# The verbatim fb-1238-1 item (the owner feedback of Nov 11 12:40 CST that the size check counted the wrong
+# unit) is not on record. Its roadmap step, answer-finding-needs-step, says only that it was closed "answered in
+# chat" with no step. So each item line below is reconstructed, not measured, as
+# case_closed_note_without_a_home_blocks reconstructs F88.
+
+QUESTION_DEFECTS = (  # (the defect word, an answer that names it and no home)
+    ("wrong", "the size check counts the wrong thing"),
+    ("gap", "the size check has a gap for long files"),
+    ("broken", "the size check is broken"),
+    ("missing", "the size check is missing its count"),
+    ("stale", "the size check output is stale"),
+)
+QUESTION_OWNER = "is the size check right?"
+
+
+def case_question_answer_defect_without_home_blocks():
+    """A `[question] -> answered` item whose answer names a defect or gap, and names no step, debt or ruling home,
+    blocks. Each defect word is its own check name, closed and open, and the reason names the item id. Red today:
+    no check reads a question item's answer."""
+    for word, answer in QUESTION_DEFECTS:
+        for closed in (True, False):
+            line = "- fb-1238-1 [question] -> answered in chat: %s%s" % (answer, " [closed]" if closed else "")
+            state = "closed" if closed else "open"
+            expect_block("answer home: a %s question answered with '%s' and no home blocks" % (state, word),
+                         homed(new_cfg(), "q-defect", (line,), text=QUESTION_OWNER), named=("fb-1238-1",))
+
+
+def case_question_answer_home_that_resolves_nowhere_blocks():
+    """A defect answer whose named home is on no branch is no home: a step with no file on any ref, or a debt path
+    that no branch tracks, as the closed-note check reads a home. Red today, as the defect case is."""
+    p = homed(new_cfg(), "q-no-step", ("- fb-1238-1 [question] -> answered in chat: the size check counts the "
+                                      "wrong thing; step:no-such-step [closed]",),
+              cwd=step_repo(), text=QUESTION_OWNER)
+    expect_block("answer home: a defect answer naming a step with no file on any ref blocks", p,
+                 named=("fb-1238-1",))
+    p = homed(new_cfg(), "q-no-debt", ("- fb-1238-1 [question] -> answered in chat: the size check counts the "
+                                      "wrong thing; debts/none.md [closed]",), text=QUESTION_OWNER)
+    expect_block("answer home: a defect answer naming a debt that no branch tracks blocks", p,
+                 named=("fb-1238-1",))
+
+
+def case_question_answer_full_block_names_only_the_homeless_item():
+    """One message with three question items: a defect with no home, a defect with a tracked debt, and a plain
+    answer. Only the first blocks, and the reason names only its id. Red today: no question item's answer is read."""
+    items = (
+        "- fb-1238-1 [question] -> answered in chat: the size check counts the wrong thing [closed]",
+        "- fb-1238-2 [question] -> answered in chat: the size check counts the wrong thing; debts/a-task.md [closed]",
+        "- fb-1238-3 [question] -> answered in chat: yes, it counts lines [closed]",
+    )
+    p = homed(new_cfg(), "q-block", items, text=QUESTION_OWNER)
+    expect_block("answer home: a block with a homeless defect answer blocks, naming only that item", p,
+                 named=("fb-1238-1",), unnamed=("fb-1238-2", "fb-1238-3"))
+
+
+def case_question_answer_naming_a_home_passes():
+    """A defect answer passes when its line names a home: a step on a lane branch only (its scope read first, as the
+    step cases read it), a tracked debt, or a tracked ruling left open."""
+    repo = step_repo()
+    expect_step_on_lane_only("answer home step", repo)
+    p = homed(new_cfg(), "q-step", ("- fb-1238-1 [question] -> answered in chat: the size check counts the wrong "
+                                   "thing; step:%s [closed]" % STEP_SLUG,), cwd=repo, text=QUESTION_OWNER)
+    expect_silent("answer home: a defect answer naming a step on a lane branch passes", p)
+    p = homed(new_cfg(), "q-debt", ("- fb-1238-1 [question] -> answered in chat: the size check counts the wrong "
+                                   "thing; debts/a-task.md [closed]",), text=QUESTION_OWNER)
+    expect_silent("answer home: a defect answer naming a tracked debt passes", p)
+    p = homed(new_cfg(), "q-ruling", ("- fb-1238-1 [question] -> answered in chat: the size check counts the wrong "
+                                     "thing; decisions/a-ruling.md",), text=QUESTION_OWNER)
+    expect_silent("answer home: a defect answer naming a tracked ruling passes, open", p)
+
+
+def case_question_answer_plain_passes():
+    """An answer with no defect word passes: closed, open, or empty (`-> answered` alone). So does a plain answer to
+    an owner question that names a defect, since the check reads the answer and not the question."""
+    p = homed(new_cfg(), "q-plain", ("- fb-1238-2 [question] -> answered in chat: yes, it counts lines [closed]",),
+              text=QUESTION_OWNER)
+    expect_silent("answer plain: a closed plain answer passes", p)
+    p = homed(new_cfg(), "q-plain-open", ("- fb-1238-2 [question] -> answered in chat: yes, it counts lines",),
+              text=QUESTION_OWNER)
+    expect_silent("answer plain: an open plain answer passes", p)
+    p = homed(new_cfg(), "q-empty", ("- fb-1238-2 [question] -> answered",), text=QUESTION_OWNER)
+    expect_silent("answer plain: an empty answer passes", p)
+    p = homed(new_cfg(), "q-owner", ("- fb-1238-2 [question] -> answered in chat: no, it counts lines [closed]",),
+              text="is the size check wrong?")
+    expect_silent("answer plain: a plain answer to an owner question that names a defect passes", p)
+
+
+LENIENT_HOME_ITEMS = (  # (label, item line): the home word in five forms, each naming the defect "wrong"
+    ("Answered", "- fb-1238-1 [question] -> Answered: the check is wrong [closed]"),
+    ("answered:", "- fb-1238-1 [question] -> answered: the check is wrong [closed]"),
+    ("answered,", "- fb-1238-1 [question] -> answered, the check is wrong [closed]"),
+    ("answered.", "- fb-1238-1 [question] -> answered. the check is wrong [closed]"),
+    ("`answered`", "- fb-1238-1 [question] -> `answered` the check is wrong [closed]"),
+)
+
+
+def case_question_home_word_is_read_leniently_blocks():
+    """A `[question] -> answered` item whose home word is `Answered`, `answered:`, `answered,`, `answered.` or a
+    backticked `answered` still names a defect, so it blocks with no home. The home word is read leniently, so none of
+    these forms is a reason to skip the check."""
+    for label, line in LENIENT_HOME_ITEMS:
+        expect_block("answer home: home word %s with a defect and no home blocks" % label,
+                     homed(new_cfg(), "q-lenient", (line,), text=QUESTION_OWNER), named=("fb-1238-1",))
+
+
+def case_question_defect_word_in_upper_case_blocks():
+    """The defect words match in any case, so `WRONG` names a defect and blocks with no home. A defect list that
+    matches case-sensitively would let this answer through."""
+    p = homed(new_cfg(), "q-upper", ("- fb-1238-1 [question] -> answered in chat: The check is WRONG [closed]",),
+              text=QUESTION_OWNER)
+    expect_block("answer home: a defect word in upper case blocks with no home", p, named=("fb-1238-1",))
+
+
+def case_question_should_needs_to_and_fix_are_not_defect_words_passes():
+    """The defect list is the five words and no others. An answer with should, needs to or fix, and no defect word,
+    passes with no home: those words name a need or a fix, not a defect."""
+    for text in ("we should keep it as is", "no fix needed", "yes it needs to be run twice"):
+        p = homed(new_cfg(), "q-nondefect", ("- fb-1238-2 [question] -> answered in chat: %s [closed]" % text,),
+                  text=QUESTION_OWNER)
+        expect_silent("answer defect list: %r names no defect word, passes with no home" % text, p)
+
+
+def case_question_defect_word_needs_a_whole_word_passes():
+    """Control: a defect word inside a longer word is no defect word, so `wrong_unit` passes with no home. Matching
+    whole words is what keeps it out of the defect list."""
+    p = homed(new_cfg(), "q-unit", ("- fb-1238-2 [question] -> answered in chat: it counts the wrong_unit values "
+                                   "[closed]",), text=QUESTION_OWNER)
+    expect_silent("answer defect list: a defect word inside wrong_unit names no defect, passes", p)
+
+
+def case_question_wrapped_home_passes():
+    """A real step home wrapped in ( ), ** or [ ] passes. The step is a blob on a lane branch only, and its scope is
+    read first as the step cases read it. Each wrapper is stripped before the home is read, so the wrapped form names
+    the same home as the bare one."""
+    repo = step_repo()
+    expect_step_on_lane_only("answer home wrapped", repo)
+    for label, wrapped in (("parentheses", "(step:%s)"), ("bold", "**step:%s**"), ("square brackets", "[step:%s]")):
+        p = homed(new_cfg(), "q-wrap", ("- fb-1238-1 [question] -> answered in chat: the check is wrong, see %s "
+                                       "[closed]" % (wrapped % STEP_SLUG),), cwd=repo, text=QUESTION_OWNER)
+        expect_silent("answer home: a step home in %s passes" % label, p)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4482,6 +4630,16 @@ CASES = (
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
     case_page_form_undone_wake_passes,
+    case_question_answer_defect_without_home_blocks,
+    case_question_answer_home_that_resolves_nowhere_blocks,
+    case_question_answer_full_block_names_only_the_homeless_item,
+    case_question_answer_naming_a_home_passes,
+    case_question_answer_plain_passes,
+    case_question_home_word_is_read_leniently_blocks,
+    case_question_defect_word_in_upper_case_blocks,
+    case_question_should_needs_to_and_fix_are_not_defect_words_passes,
+    case_question_defect_word_needs_a_whole_word_passes,
+    case_question_wrapped_home_passes,
 )
 
 
