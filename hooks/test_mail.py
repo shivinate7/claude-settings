@@ -1077,10 +1077,34 @@ class SshBatchDefault(MailCase):
                          % command)
 
 
+class MacNotHeld(MailCase):
+    """The Mac round trip passed (roadmap e86503c2a, 20:30 CST Nov 12): no platform is held by default."""
+
+    def test_no_platform_is_held(self):
+        self.assertEqual(MAIL_MODULE.HELD_PLATFORMS, (), "a platform is held by default: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
+
+    def test_mac_turn_start_lists_the_message_with_no_hold_off(self):
+        store = self.store()
+        mid = "0a1b2c3d4ebb"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-open\n")
+        reader = self.machine("b", store, session="sess-b")
+        reader.env.pop("MAILBOX_HOLD_OFF")
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "a Mac turn start is still held: %r" % lines)
+
+
 class MacHold(MailCase):
-    """Step mail-mac-unhold: until its own round trip passes, a Mac gets nothing from the settings.json default.
-    The turn-start line and the `mail` command are both held there. MAILBOX_HOLD_OFF=1 lifts the hold, for the owner's
-    check card and for every other case in this file (fixture_env sets it)."""
+    """Step mail-mac-unhold: the hold mechanism for a platform in HELD_PLATFORMS. The cases below patch the tuple to
+    ("darwin",) and prove the turn-start line and the `mail` command are both held there, and that MAILBOX_HOLD_OFF=1 lifts
+    the hold. The default tuple is empty since the owner's Mac round trip passed; `MacNotHeld` pins that."""
+
+    def setUp(self):
+        super().setUp()
+        for module in (MAIL_MODULE, cli_module().mail):  # bin/mail holds its own copy of hooks/mail.py
+            patch = mock.patch.object(module, "HELD_PLATFORMS", ("darwin",))
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def seeded_reader(self, hold_off=False):
         store = self.store()
@@ -1092,9 +1116,6 @@ class MacHold(MailCase):
         else:
             reader.env.pop("MAILBOX_HOLD_OFF")
         return mid, store, reader
-
-    def test_the_hold_names_darwin(self):
-        self.assertIn("darwin", MAIL_MODULE.HELD_PLATFORMS, "HELD_PLATFORMS does not name darwin: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
 
     def test_linux_turn_start_lists_the_message(self):
         mid, _, reader = self.seeded_reader()

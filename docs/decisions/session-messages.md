@@ -5,13 +5,11 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: the Mac round trip (the owner's check card). A Windows round trip passed (request 8933ab505319 to the cloud, reply
+A Windows round trip passed (request 8933ab505319 to the cloud, reply
 7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
 `MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
 measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
-with no address, or a store with no mail ref, prints nothing. A Mac gets nothing from the default until its round trip passes
-(page item 556 a; batch runner 10 relaying the coordinator, 12:56 CST Nov 12: `HELD_PLATFORMS` in `hooks/mail.py`). Its turn start
-prints nothing and `mail` exits 2. The owner's check card must set `MAILBOX_HOLD_OFF=1` for the one command, so it still runs there. The refusal text names no variable. A local Linux session is not held and is unmeasured.
+with no address, or a store with no mail ref, prints nothing. A Mac is not held: its round trip passed 1 of 1 (mail 4d31137fd16c Mac to cloud, 71c5f84d64a8 cloud to Mac, 20:30 CST Nov 12; record: branch roadmap, commit e86503c2a). `HELD_PLATFORMS` in `hooks/mail.py` is empty; a platform listed there prints nothing at turn start and `mail` exits 2 unless `MAILBOX_HOLD_OFF=1`. The refusal text names no variable. A local Linux session is not held and is unmeasured.
 The 20-message trial (step 5) is still open.
 
 ## Ruling
