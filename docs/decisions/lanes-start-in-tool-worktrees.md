@@ -33,7 +33,7 @@ Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git wo
 
 The orchestrator starts each fix round as a fresh agent spawn with `isolation: 'worktree'`. The new worktree starts from the lane branch head.
 
-The orchestrator resumes an agent by name only when that agent died mid-round (`roles-resume-by-name`: resume a dead agent by name, never fresh). A resumed agent keeps its old worktree. `worktree-home` (an agent stays in its recorded home) keeps it there.
+The orchestrator never resumes a finished agent that ran in its own worktree, since its worktree is gone. An agent that died mid-round reads as finished. The orchestrator sends a fresh agent of the same role the prior report (`roles-resume-by-name`, resume by name only an agent with no worktree that is not a reviewer or design-reviewer). Guard rule `resume-finished-reviewer` refuses the resume.
 
 Why: a test-author worktree, resumed for a fix round, held staged copies of four files. The copies equal the old branch base, because the branch ref had moved under the index. Committing them would have undone a merged PR.
 
