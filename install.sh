@@ -1078,7 +1078,7 @@ if [ "$CLOUD" = 1 ]; then
   # install runs them itself once the hooks are copied (see "cloud startup entries" below).
   # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD='i=$(cat); '"$REFRESH_CURL"' | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
