@@ -1487,6 +1487,13 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
+    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
+    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+
+
 def _branch_repos(ccr, tag_repos):
     """The repos a lane's branches may live in: its cs-repo tags, the github repos of
     session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
@@ -1692,7 +1699,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
                     slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -1844,6 +1851,17 @@ STEP_DUP_UNKNOWN_REASON = (
 )
 
 
+STEP_PR_REASON = (
+    "open pull request #%s of this repo has the head of step %s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #N` or `replaces #N`, then retry." + STEP_DUP_TAIL
+)
+STEP_PR_READ_REASON = (
+    "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
+    "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
+)
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#\d+", re.IGNORECASE)  # a brief that names the pull request it takes over
+
+
 def _tag_values(tags, prefix: str):
     """The lower-cased, non-empty values of the tags that start with `prefix`, stripped."""
     return [v.lower() for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
@@ -1916,6 +1934,45 @@ def step_dup_hit(tool: str, tool_input, transcript: str):
             raise ValueError("no whole list read")
     except (Exception, SystemExit):
         return "lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0]
+    return None
+
+
+def step_pr_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
+    None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. A brief or prompt
+    that says `continues #N` or `replaces #N` passes, whatever N is, and so does a brief to a target that carries the
+    step. The read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that
+    is no owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, only for a step call with no `continues` or `replaces` line."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
+    if isinstance(text, str) and _STEP_CONTINUES.search(text):
+        return None
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
+            if not _REPO_NAME.fullmatch(repo):
+                raise ValueError("not an owner/name repo tag")
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                pulls = open_pull_rows(module, repo)
+            for row in pulls:
+                ref = str(row["head"]["ref"]).lower()
+                for step in steps:
+                    if ref in lane_head_refs(step):
+                        return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                                STEP_PR_REASON % (row.get("number", "?"), step))
+    except (Exception, SystemExit):
+        return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
     return None
 
 
