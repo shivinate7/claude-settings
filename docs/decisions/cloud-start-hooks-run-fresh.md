@@ -35,7 +35,7 @@ So `hooks/daily_note.py` ran the snapshot's stale `hooks/precompact_handoff.py` 
   A stale line can show beside the fresh one until the environment's snapshot is rebuilt.
 - The setup script (`cloud-setup.sh`) runs `install.sh --cloud` with no hook input, so the startup entries also run once at snapshot build. `daily_note.py` then stamps that Central day, and a session on the same day skips its guard.log note. Note: cloud-setup-runs-start-hooks.
 - An entry that fires on resume but not on startup (matcher `resume`) is neither dropped nor run, so it still runs stale. The repo has none. Note: cloud-resume-only-hook-stale.
-- Cost: no new process type. The startup hooks start once per session start, as before, from inside the refresh hook.
+- Cost: no new process type. The startup hooks start once per session start, as before, from inside the refresh hook (unmeasured).
 
 Kind: build
 Plan: docs/decisions/cloud-start-hooks-run-fresh.md#the-ruling (linux)
