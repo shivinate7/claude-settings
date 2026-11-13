@@ -46,6 +46,18 @@ replaces the folder of each transcript output path and keeps its file name), STA
 No posix check: this mode must run on Windows. These cases use no sh, ps or lsof. Every case that
 expects silence also runs a control that must list a stale job, so a mode that is absent or
 silent everywhere cannot pass it.
+
+The CI-wait check of the same mode (decision ci-wait-reads-run-status, "The fallback"). It reads the same
+transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or nothing:
+- A wait opens at the newest ready call: `gh pr ready <N>` in Bash or PowerShell, or a GitHub MCP
+  update_pull_request with draft false. Draft true or absent starts none. Quoted text, heredoc bodies and
+  `#` comments are no call.
+- A later user or queued message with a CI verdict line, or a later merge call, closes the wait. A red
+  verdict closes it and re-opens it until a later check-in.
+- A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. An open wait with
+  no check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
+  A bad or unreadable transcript prints nothing.
+- The check reads the transcript only: no process, no network, no file write (the cost case).
 """
 
 import atexit
@@ -53,10 +65,12 @@ import builtins
 import contextlib
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1438,44 +1452,58 @@ def agent_long_call():
     return [assistant_text("checking the build"), call("toolu_long", "sleep 900")]
 
 
-def stop_in_process(transcript_path):
+def stop_in_process(transcript_path, spies=None):
     """Run the Stop check in this process at NOW, with the default quiet age and no output base. Return
     (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
-    every path the check stats or opens, so a case counts the calls that name one agent."""
+    every path the check stats or opens, so a case counts the calls that name one agent.
+
+    spies, when given, is a list that collects each process start, network call and write the check makes.
+    Each such call raises, so none runs. A case reads the list after the run."""
     spec = importlib.util.spec_from_file_location("stall_watch_in_process", MODULE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     stats, opens = [], []
     real_stat, real_os_open, real_open, real_io_open = os.stat, os.open, builtins.open, io.open
+    write_flags = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 
     def counted_stat(path, *args, **kwargs):
         stats.append(str(path))
         return real_stat(path, *args, **kwargs)
 
-    def counted_open(file, *args, **kwargs):
+    def counted_open(file, mode="r", *args, **kwargs):
         opens.append(str(file))
-        return real_open(file, *args, **kwargs)
+        if spies is not None and any(c in mode for c in "wax+"):
+            spies.append(("write", str(file), mode))
+            raise PermissionError("write refused in this check")
+        return real_open(file, mode, *args, **kwargs)
 
-    def counted_os_open(path, *args, **kwargs):
+    def counted_os_open(path, flags, *args, **kwargs):
         opens.append(str(path))
-        return real_os_open(path, *args, **kwargs)
+        if spies is not None and flags & write_flags:
+            spies.append(("write", str(path), flags))
+            raise PermissionError("write refused in this check")
+        return real_os_open(path, flags, *args, **kwargs)
 
     keys = ("STALL_WATCH_NOW", "STALL_WATCH_OUTPUT_BASE", "STALL_WATCH_QUIET")
     saved = {k: os.environ.get(k) for k in keys}
     payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                "transcript_path": transcript_path, "stop_hook_active": False}
     old_stdin = sys.stdin
+    spied = []  # (owner, name, original) of each call the spies stand in for, restored in finally
     try:
         os.environ["STALL_WATCH_NOW"] = str(NOW)
         os.environ.pop("STALL_WATCH_OUTPUT_BASE", None)
         os.environ.pop("STALL_WATCH_QUIET", None)
         sys.stdin = io.StringIO(json.dumps(payload))
         os.stat, os.open, builtins.open, io.open = counted_stat, counted_os_open, counted_open, counted_open
+        if spies is not None:
+            spy_calls(spies, spied)
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             rc = mod.stop()
         return rc, buf.getvalue(), stats, opens
     finally:
         os.stat, os.open, builtins.open, io.open = real_stat, real_os_open, real_open, real_io_open
+        unspy_calls(spied)
         sys.stdin = old_stdin
         for k, v in saved.items():
             if v is None:
@@ -1729,6 +1757,510 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += listed_once(msg, aid, by_line=True)
+    return problems
+
+
+# ---- The CI-wait check of this mode (decision ci-wait-reads-run-status, "The fallback") ----
+# A wait opens at the newest ready call and closes at a verdict or a merge. A red verdict re-opens it. A
+# check-in after the anchor (the newest ready call or red verdict) passes it. The check reads the records in
+# file order, so no fixture carries a time.
+
+CI_PR = "4217"  # no sha, path or fixture id holds this number as a whole token, so \b4217\b names the PR alone
+CI_OTHER_PR = "1111"
+CI_SHA = "9f8e7d6"
+CI_OWNER, CI_REPO = "example-org", "example-repo"
+MCP_READY = "mcp__github__update_pull_request"
+MCP_MERGE = "mcp__github__merge_pull_request"
+SEND_LATER = "mcp__claude-code-remote__send_later"
+CREATE_TRIGGER = "mcp__claude-code-remote__create_trigger"
+CHECKIN_TOOLS = (SEND_LATER, CREATE_TRIGGER, "CronCreate", "ScheduleWakeup")
+GREEN = "CI green on %s: no failing jobs" % CI_SHA
+RED = "CI red on %s: lint, unit" % CI_SHA
+CANCELLED = "CI cancelled on %s: build" % CI_SHA
+UNKNOWN = "CI unknown on %s: still running" % CI_SHA
+CALL_IDS = itertools.count(1)
+# Each call that starts a process, opens a network socket or writes a file. The cost case stands each in for a
+# recorder, so a check that makes one is named.
+SPIED_CALLS = (
+    (subprocess, "Popen", "process"), (subprocess, "run", "process"), (subprocess, "call", "process"),
+    (subprocess, "check_call", "process"), (subprocess, "check_output", "process"),
+    (os, "system", "process"), (os, "popen", "process"),
+    (socket, "socket", "network"), (socket, "create_connection", "network"),
+    (os, "remove", "write"), (os, "unlink", "write"), (os, "rename", "write"), (os, "replace", "write"),
+    (os, "mkdir", "write"), (os, "makedirs", "write"), (os, "rmdir", "write"), (os, "utime", "write"),
+    (os, "chmod", "write"),
+)
+
+
+def spy_calls(spies, spied):
+    """Stand in for each SPIED_CALLS entry: it records itself in spies and raises. Each original goes in spied."""
+    def refuse(kind):
+        def fn(*args, **kwargs):
+            spies.append((kind, repr(args)[:120]))
+            raise PermissionError("%s refused in this check" % kind)
+        return fn
+    for owner, name, kind in SPIED_CALLS:
+        spied.append((owner, name, getattr(owner, name)))
+        setattr(owner, name, refuse(kind))
+
+
+def unspy_calls(spied):
+    """Put back each original that spy_calls stood in for."""
+    for owner, name, real in spied:
+        setattr(owner, name, real)
+
+
+def cid():
+    """A tool_use id no other call in the fixture has."""
+    return "toolu_ci%03d" % next(CALL_IDS)
+
+
+def ready(number=CI_PR, command=None):
+    """A Bash call of `gh pr ready <number>`, or of command when given."""
+    return call(cid(), command or "gh pr ready %s" % number, desc="Mark the PR ready")
+
+
+def tool_call(name, inp):
+    """An assistant call of any tool, with its input."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid(), "name": name, "input": inp}]}}
+
+
+def mcp_pr(name, number=CI_PR, **fields):
+    """A GitHub MCP call that names one PR. The fields add draft, or leave it out for an absent draft."""
+    return tool_call(name, dict({"owner": CI_OWNER, "repo": CI_REPO, "pullNumber": int(number)}, **fields))
+
+
+def checkin(name):
+    """A later call of one of the tools that set a check-in."""
+    return tool_call(name, {"message": "CI check on PR %s" % CI_PR})
+
+
+def merge_bin(number=CI_PR):
+    """A Bash call of the merge tool, bin/merge."""
+    return call(cid(), "bin/merge %s --confirm" % number, desc="Merge the PR")
+
+
+def queued(text):
+    """A verdict as a queued_command attachment record, the other form a notice takes."""
+    return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
+
+
+def text_blocks(text):
+    """A user message whose content is a list of text blocks."""
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}
+
+
+def ci_run(source, stop_hook_active=False, base=None):
+    """Run the Stop check on a transcript, given as a list of records or as a path. Return (problems, stdout)."""
+    path = source if isinstance(source, str) else transcript(source)
+    rc, out, err = run_stop(path, base, stop_hook_active=stop_hook_active)
+    return expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}"), out
+
+
+def block_reason(out, problems):
+    """The reason of the one JSON line a block prints. None, with a problem added, when the output is not
+    one block line."""
+    lines = out.strip().splitlines()
+    if len(lines) != 1:
+        problems.append(f"stop output is not one line: {out[:200]!r}")
+        return None
+    try:
+        body = json.loads(lines[0])
+    except ValueError:
+        problems.append(f"stop output is not JSON: {out[:200]!r}")
+        return None
+    if not isinstance(body, dict) or body.get("decision") != "block" or not isinstance(body.get("reason"), str):
+        problems.append(f"stop output is not a block with a reason: {out[:200]!r}")
+        return None
+    return body["reason"]
+
+
+def expect_block(source, pr=CI_PR, not_named=(), base=None, stop_hook_active=False):
+    """The check prints one block that tells the session to set a send_later check-in and names pr. No
+    number in not_named appears in the reason."""
+    problems, out = ci_run(source, stop_hook_active, base)
+    if out.strip() == "":
+        return problems + [f"no CI block printed, want one naming PR {pr}"]
+    reason = block_reason(out, problems)
+    if reason is None:
+        return problems
+    problems += expect("send_later" in reason, f"block reason does not say to set a send_later check-in: {reason!r}")
+    problems += expect(re.search(r"\b%s\b" % pr, reason) is not None, f"block reason does not name PR {pr}: {reason!r}")
+    for other in not_named:
+        problems += expect(re.search(r"\b%s\b" % other, reason) is None,
+                           f"block reason names PR {other}, which has a closed wait: {reason!r}")
+    return problems
+
+
+def expect_silent(source, stop_hook_active=False, base=None):
+    """The check prints nothing."""
+    problems, out = ci_run(source, stop_hook_active, base)
+    return problems + expect(out.strip() == "", f"the CI check printed where it should be silent: {out[:200]!r}")
+
+
+def silent_with_control(source, control, stop_hook_active=False):
+    """source prints nothing about the CI wait. control, the same session with the closer left out or a ready
+    call added, must block. The control shows the check is live, so a mode that is absent or silent everywhere
+    fails here too."""
+    return expect_silent(source, stop_hook_active) + ["control: " + p for p in expect_block(control)]
+
+
+@case
+def CI01_no_ready_call_prints_nothing():
+    """CI01. no ready call: plain Bash calls open no wait. Control: the same session with a ready call blocks"""
+    c = cid()
+    items = [prompt("check the tree"), call(c, "git status", desc="status"), bash_result(c, "clean")]
+    return silent_with_control(items, items + [ready()])
+
+
+@case
+def CI02_ready_without_checkin_blocks_and_names_the_pr():
+    """CI02. a ready call with no check-in after it blocks, and the reason names the PR"""
+    return expect_block([prompt("merge when green"), ready()])
+
+
+@case
+def CI03_ready_then_send_later_passes():
+    """CI03. ready, then a send_later check-in: passes. Control: ready with no check-in blocks"""
+    return silent_with_control([ready(), checkin(SEND_LATER)], [ready()])
+
+
+@case
+def CI04_ready_then_create_trigger_passes():
+    """CI04. ready, then a create_trigger check-in: passes. Control: ready with no check-in blocks"""
+    return silent_with_control([ready(), checkin(CREATE_TRIGGER)], [ready()])
+
+
+@case
+def CI05_ready_then_croncreate_passes():
+    """CI05. ready, then a CronCreate check-in: passes. Control: ready with no check-in blocks"""
+    return silent_with_control([ready(), checkin(CHECKIN_TOOLS[2])], [ready()])
+
+
+@case
+def CI06_ready_then_schedulewakeup_passes():
+    """CI06. ready, then a ScheduleWakeup check-in: passes. Control: ready with no check-in blocks"""
+    return silent_with_control([ready(), checkin(CHECKIN_TOOLS[3])], [ready()])
+
+
+@case
+def CI07_ready_then_green_verdict_passes():
+    """CI07. ready, then a user message with a green verdict line: passes. Control: ready with no verdict blocks"""
+    return silent_with_control([ready(), prompt(GREEN)], [ready()])
+
+
+@case
+def CI08_ready_then_red_verdict_without_checkin_blocks():
+    """CI08. ready, then a red verdict and no check-in: the red verdict re-opens the wait, so it blocks"""
+    return expect_block([ready(), prompt(RED)])
+
+
+@case
+def CI09_red_verdict_then_checkin_passes():
+    """CI09. ready, a red verdict, then a send_later check-in: passes. Control: the red verdict alone blocks"""
+    return silent_with_control([ready(), prompt(RED), checkin(SEND_LATER)], [ready(), prompt(RED)])
+
+
+@case
+def CI10_second_red_after_a_checkin_blocks():
+    """CI10. a second red verdict after the check-in re-opens the wait again, so it blocks. Control: the first
+    red and its check-in pass"""
+    items = [ready(), prompt(RED), checkin(SEND_LATER), prompt(RED)]
+    return expect_block(items) + ["control: " + p for p in expect_silent(items[:3])]
+
+
+@case
+def CI11_checkin_before_the_ready_call_does_not_count():
+    """CI11. a check-in made before the newest ready call does not cover it, so it blocks. Control: the same
+    two calls in the other order pass"""
+    return expect_block([checkin(SEND_LATER), ready()]) + [
+        "control: " + p for p in expect_silent([ready(), checkin(SEND_LATER)])]
+
+
+@case
+def CI12_checkin_for_an_older_ready_does_not_cover_a_newer_one():
+    """CI12. a check-in after an older ready call does not cover the newest one: it blocks, and the reason names
+    the newest PR only. Control: a check-in after the newest ready call passes"""
+    items = [ready(CI_OTHER_PR), checkin(SEND_LATER), ready(CI_PR)]
+    return expect_block(items, not_named=[CI_OTHER_PR]) + [
+        "control: " + p for p in expect_silent(items + [checkin(SEND_LATER)])]
+
+
+@case
+def CI13_green_verdict_closes_an_older_ready_only():
+    """CI13. a green verdict closes the older wait, and the newest ready call is still open: it blocks, and the
+    reason names the newest PR only. Control: the newest wait closed by its own green verdict passes"""
+    items = [ready(CI_OTHER_PR), prompt(GREEN), ready(CI_PR)]
+    return expect_block(items, not_named=[CI_OTHER_PR]) + [
+        "control: " + p for p in expect_silent(items + [prompt(GREEN)])]
+
+
+@case
+def CI14_cancelled_verdict_closes_the_wait():
+    """CI14. ready, then a cancelled verdict: passes. Control: ready with no verdict blocks"""
+    return silent_with_control([ready(), prompt(CANCELLED)], [ready()])
+
+
+@case
+def CI15_unknown_verdict_closes_the_wait():
+    """CI15. ready, then an unknown verdict: passes. Control: ready with no verdict blocks"""
+    return silent_with_control([ready(), prompt(UNKNOWN)], [ready()])
+
+
+@case
+def CI16_verdict_before_the_ready_call_does_not_close_it():
+    """CI16. a verdict made before the ready call closes nothing, so it blocks. Control: the verdict after the
+    ready call passes"""
+    return expect_block([prompt(GREEN), ready()]) + [
+        "control: " + p for p in expect_silent([ready(), prompt(GREEN)])]
+
+
+@case
+def CI17_verdict_in_a_queued_command_closes_the_wait():
+    """CI17. ready, then a verdict that arrives as a queued_command attachment: passes. Control: ready with no
+    verdict blocks"""
+    return silent_with_control([ready(), queued(GREEN)], [ready()])
+
+
+@case
+def CI18_verdict_in_a_text_block_list_closes_the_wait():
+    """CI18. ready, then a user message whose content is a list of text blocks holding a verdict: passes.
+    Control: ready with no verdict blocks"""
+    return silent_with_control([ready(), text_blocks(GREEN)], [ready()])
+
+
+@case
+def CI19_verdict_on_its_own_line_in_a_longer_message_closes_the_wait():
+    """CI19. ready, then a user message that holds a verdict on its own line: passes. Control: ready with no
+    verdict blocks"""
+    return silent_with_control([ready(), prompt("CI wake for the PR:\n%s\nsee the run" % GREEN)], [ready()])
+
+
+@case
+def CI20_assistant_text_quoting_a_verdict_closes_nothing():
+    """CI20. the assistant quotes a green verdict line in its own text, so it blocks: only a user or queued
+    message closes the wait. Control: the same line as a user message passes"""
+    return expect_block([ready(), assistant_text(GREEN)]) + [
+        "control: " + p for p in expect_silent([ready(), prompt(GREEN)])]
+
+
+@case
+def CI21_tool_result_printing_a_verdict_closes_nothing():
+    """CI21. a Bash result that prints a verdict line closes nothing, so it blocks. Control: the same line as a
+    user message passes"""
+    c = cid()
+    items = [ready(), call(c, "cat wake.log", desc="read the log"), bash_result(c, GREEN)]
+    return expect_block(items) + ["control: " + p for p in expect_silent([ready(), prompt(GREEN)])]
+
+
+@case
+def CI22_mcp_merge_closes_the_wait():
+    """CI22. ready, then a GitHub MCP merge_pull_request call: passes. Control: ready with no merge blocks"""
+    return silent_with_control([ready(), mcp_pr(MCP_MERGE)], [ready()])
+
+
+@case
+def CI23_bin_merge_closes_the_wait():
+    """CI23. ready, then a Bash call of bin/merge: passes. Control: ready with no merge blocks"""
+    return silent_with_control([ready(), merge_bin()], [ready()])
+
+
+@case
+def CI24_fresh_ready_after_red_then_green_passes():
+    """CI24. ready, a red verdict, a fresh ready call, then a green verdict: passes. Control: the fresh ready
+    call with no verdict blocks"""
+    return silent_with_control([ready(), prompt(RED), ready(), prompt(GREEN)], [ready(), prompt(RED), ready()])
+
+
+@case
+def CI25_mcp_ready_draft_false_blocks():
+    """CI25. a GitHub MCP update_pull_request with draft false is a ready call, so it blocks and names the PR"""
+    return expect_block([mcp_pr(MCP_READY, draft=False)])
+
+
+@case
+def CI26_mcp_ready_draft_true_starts_no_wait():
+    """CI26. an MCP update_pull_request with draft true starts no wait. Control: draft false blocks"""
+    return silent_with_control([mcp_pr(MCP_READY, draft=True)], [mcp_pr(MCP_READY, draft=False)])
+
+
+@case
+def CI27_mcp_ready_draft_absent_starts_no_wait():
+    """CI27. an MCP update_pull_request with no draft key starts no wait. Control: draft false blocks"""
+    return silent_with_control([mcp_pr(MCP_READY)], [mcp_pr(MCP_READY, draft=False)])
+
+
+@case
+def CI28_mcp_ready_then_checkin_passes():
+    """CI28. an MCP ready call, then a send_later check-in: passes. Control: the MCP ready call alone blocks"""
+    return silent_with_control([mcp_pr(MCP_READY, draft=False), checkin(SEND_LATER)],
+                               [mcp_pr(MCP_READY, draft=False)])
+
+
+@case
+def CI29_powershell_ready_blocks():
+    """CI29. a PowerShell call of gh pr ready is a ready call, so it blocks and names the PR"""
+    return expect_block([tool_call("PowerShell", {"command": "gh pr ready %s" % CI_PR,
+                                                  "description": "Mark the PR ready"})])
+
+
+@case
+def CI30_ready_with_undo_starts_no_wait():
+    """CI30. gh pr ready --undo turns a PR back to draft, so it starts no wait. Control: the plain ready call blocks"""
+    return silent_with_control([ready(command="gh pr ready %s --undo" % CI_PR)], [ready()])
+
+
+@case
+def CI31_ready_in_double_quotes_is_not_a_ready_call():
+    """CI31. gh pr ready inside double quotes is text, so it starts no wait. Control: the plain ready call blocks"""
+    return silent_with_control([ready(command='echo "gh pr ready %s"' % CI_PR)], [ready()])
+
+
+@case
+def CI32_ready_in_single_quotes_is_not_a_ready_call():
+    """CI32. gh pr ready inside single quotes is text, so it starts no wait. Control: the plain ready call blocks"""
+    return silent_with_control([ready(command="echo 'gh pr ready %s'" % CI_PR)], [ready()])
+
+
+@case
+def CI33_ready_in_a_heredoc_body_is_not_a_ready_call():
+    """CI33. gh pr ready in a heredoc body is text, so it starts no wait. Control: the plain ready call blocks"""
+    return silent_with_control([ready(command="cat > notes.md <<'EOF'\ngh pr ready %s\nEOF" % CI_PR)], [ready()])
+
+
+@case
+def CI34_ready_after_a_hash_comment_is_not_a_ready_call():
+    """CI34. gh pr ready after a # comment is a comment, so it starts no wait. Control: the plain ready call blocks"""
+    return silent_with_control([ready(command="ls -la  # gh pr ready %s" % CI_PR)], [ready()])
+
+
+@case
+def CI35_ready_in_multi_line_quoted_text_is_not_a_ready_call():
+    """CI35. gh pr ready on a middle line of a quoted string is text, so it starts no wait. Control: the plain
+    ready call blocks"""
+    return silent_with_control([ready(command='echo "first line\ngh pr ready %s\nlast line"' % CI_PR)], [ready()])
+
+
+@case
+def CI36_ready_in_assistant_prose_is_not_a_ready_call():
+    """CI36. the assistant names gh pr ready in its text, not as a call, so it starts no wait. Control: the same
+    session with a ready call blocks"""
+    return silent_with_control([assistant_text("Next I will run gh pr ready %s." % CI_PR)], [ready()])
+
+
+@case
+def CI37_hash_inside_quotes_does_not_hide_a_ready_call():
+    """CI37. a # inside quotes does not hide a real ready call after it: blocks"""
+    return expect_block([ready(command='echo "# not a comment" && gh pr ready %s' % CI_PR)])
+
+
+@case
+def CI38_lone_apostrophe_does_not_hide_a_ready_call():
+    """CI38. a lone apostrophe in an earlier word does not hide a real ready call after it: blocks"""
+    return expect_block([ready(command="echo don't; gh pr ready %s" % CI_PR)])
+
+
+@case
+def CI39_ready_after_git_push_in_one_command_blocks():
+    """CI39. a ready call chained after git push in one command is a real ready call: blocks"""
+    return expect_block([ready(command="git push origin HEAD && gh pr ready %s" % CI_PR)])
+
+
+@case
+def CI40_stop_hook_active_prints_nothing_for_an_open_wait():
+    """CI40. stop_hook_active true: the open wait prints nothing. Control: the same session with the flag false
+    blocks"""
+    items = [ready()]
+    return silent_with_control(items, items, stop_hook_active=True)
+
+
+@case
+def CI41_missing_transcript_prints_nothing():
+    """CI41. a transcript path with no file prints nothing. Control: a readable transcript with an open wait
+    blocks"""
+    return silent_with_control(os.path.join(new_dir(), "session.jsonl"), [ready()])
+
+
+@case
+def CI42_garbage_transcript_prints_nothing():
+    """CI42. a transcript of garbage bytes and a truncated record prints nothing. Control: a readable transcript
+    with an open wait blocks"""
+    garbage = [b"\x00\xff not a record\n", b"{{{\n", b'{"type": "assistant", "message": ']
+    return silent_with_control(garbage, [ready()])
+
+
+@case
+def CI43_empty_transcript_prints_nothing():
+    """CI43. an empty transcript file prints nothing. Control: a readable transcript with an open wait blocks"""
+    return silent_with_control([], [ready()])
+
+
+@case
+def CI44_transcript_path_that_is_a_folder_prints_nothing():
+    """CI44. a transcript path that names a folder is unreadable, so it prints nothing. Control: a readable
+    transcript with an open wait blocks"""
+    return silent_with_control(new_dir(), [ready()])
+
+
+@case
+def CI45_full_size_session_blocks_and_names_only_the_newest():
+    """CI45. full size: 2000 text records, then 30 PRs each closed by a green verdict, then one open ready call.
+    It blocks and names only the open PR. Control: the same session without the open ready call is silent"""
+    items = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    for i in range(30):
+        items += [ready(str(1000 + i)), prompt(GREEN)]
+    items.append(ready())
+    closed = [str(1000 + i) for i in range(30)]
+    return expect_block(items, not_named=closed) + ["control: " + p for p in expect_silent(items[:-1])]
+
+
+@case
+def CI46_open_wait_and_quiet_job_print_one_block_line():
+    """CI46. an open wait and a quiet background job: one line is printed, the block, and it names the PR.
+    Control: the quiet job alone is listed, so both results apply"""
+    base = new_dir()
+    output_file(base, "bci600", 600)
+    problems = expect_block(moved("bci600") + [ready()], base=base)
+    rc, out, err = run_stop(transcript(moved("bci600")), base)
+    ctl = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    ctl += listed_once(system_message(out, ctl), "bci600")
+    return problems + ["control: " + p for p in ctl]
+
+
+@case
+def CI47_closed_wait_and_quiet_job_print_the_system_message_only():
+    """CI47. a closed wait and a quiet background job: the systemMessage lists the job, and no block is printed.
+    This is the green control for CI46"""
+    base = new_dir()
+    output_file(base, "bci601", 600)
+    rc, out, err = run_stop(transcript(moved("bci601") + [ready(), prompt(GREEN)]), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bci601")
+    problems += expect("decision" not in out, f"a closed wait printed a block: {out[:200]!r}")
+    return problems
+
+
+@case
+def CI48_check_reads_only_the_transcript():
+    """CI48. cost: the CI check starts no process, opens no network and writes no file, and it reads no file but
+    the transcript. Scope first: the transcript was opened, and the check blocked, so the calls counted below
+    come from the check"""
+    folder = new_dir()
+    path = transcript([prompt("merge when green"), ready()], folder=folder)
+    spies = []
+    rc, out, stats, opens = stop_in_process(path, spies)
+    problems = expect(any(os.path.basename(p) == "session.jsonl" for p in opens),
+                      f"scope: stop() did not open the session transcript: opens {opens}")
+    problems += expect(rc == 0, f"exit {rc}, want 0")
+    if out.strip() == "":
+        problems.append("no CI block printed, so the cost is not measured on the check")
+    else:
+        block_reason(out, problems)
+    problems += expect(spies == [], f"the CI check made calls it must not make: {spies}")
+    stray = [p for p in opens if p.startswith(folder) and os.path.basename(p) != "session.jsonl"]
+    problems += expect(stray == [], f"the CI check read files other than the transcript: {stray}")
     return problems
 
 
