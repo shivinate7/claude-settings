@@ -14,7 +14,7 @@ The answered-source check, in the Stop hook `lint/report_guard.py` (rule `answer
 
 Risk kind: likely risk. The incident F188 (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`) is related: its real line never used the word, so the tests hold a synthetic replay. Landed 2026-11-02.
 
-Cost: a regex over the reply. No process. One bounded read of `hooks/guard.py` (the head of the file, not all 320 KB), once per run at load, to find the stamped copy (coordinator ruling, 2026-11-09 12:46 CST, option A; decision `install-hooks-whole`). No glossary or record. `AnsweredNeedsSourceTests` in `lint/test_report_guard.py` proves it by watching every file the check opens: exactly the transcript and `hooks/guard.py`.
+Cost: a regex over the reply. No process. One bounded read of `hooks/guard.py` (the head of the file, not all 320 KB), once per run at load, to find the stamped copy (coordinator ruling, 2026-11-09 12:46 CST, option A; decision `install-hooks-whole`) (unmeasured). No glossary or record. `AnsweredNeedsSourceTests` in `lint/test_report_guard.py` proves it by watching every file the check opens: exactly the transcript and `hooks/guard.py`.
 
 Known limit: a negator anywhere earlier in the clause exempts the word, so "Q2 was not skipped and Q1 was answered" passes. A line that cites a time or number for another reason passes. Code reads tokens, not what they cite. The word inside an inline code span passes even when the line claims an answer. The refusal names that route for a mention, so a rewrite can reach it.
 
