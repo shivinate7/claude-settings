@@ -1,0 +1,14 @@
+{
+ "id": "tag-writer-skips-archived",
+ "title": "The page-writer lookup skips archived sessions",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": "page-writer-key-follows-tag",
+ "why": "tag_writer ignores session_status. When triage rotates, the archived old triage session still carries its tags, so the lookup reads two writers and refuses every send-to-writer until the old row loses its tags. Triage rotation is normal work, so this is likely to bite.",
+ "source": "lane page-writer-key-follows-tag (session_013NEJL3DLEFY5vfbyG8CQ44) 07:24 CST Nov 13",
+ "note": "Fix: tag_writer counts only sessions whose session_status is not archived. Red first: a list_sessions fixture with one archived and one live triage row, and today's lookup refuses. Unmeasured: no real list_sessions result with two triage rows seen yet. Builds after #3124.",
+ "updatedAt": "2026-11-13T07:24:16-06:00"
+}

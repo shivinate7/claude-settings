@@ -1,16 +1,18 @@
 {
  "id": "page-writer-key-follows-tag",
  "title": "The page-writer check finds the writer by its triage tag, not by a fixed session id",
- "status": "blocked",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3DLEFY5vfbyG8CQ44",
  "owner": "triage",
  "blockedBy": [
   "#3093"
  ],
  "why": "The pick guard (#3093) keys the page writer to a fixed session id. A new triage session gets a new id, so the key goes stale and the guard refuses the real writer. hooks/feedback_guard.py is_writer ignores the key, so the two checks can disagree on who the writer is.",
  "source": "lane pick-guard-cloud-writer notes 2 and 3, via coordinator 00:13 CST Nov 13",
- "note": "One home for \"who writes the page\": read the session tagged cs-build:triage and cs-repo:<repo> (get_session or list_sessions), and have is_writer and the pick guard call it. Red tests first: (a) a new triage session id passes, (b) is_writer and the pick guard agree. Unmeasured: whether a container restart (same session id, new worker) also stales the key; triage restarted three times tonight with the same id.",
- "updatedAt": "2026-11-13T00:12:57-06:00"
+ "note": "One home for \"who writes the page\": read the session tagged cs-build:triage and cs-repo:<repo> (get_session or list_sessions), and have is_writer and the pick guard call it. Red tests first: (a) a new triage session id passes, (b) is_writer and the pick guard agree. Unmeasured: whether a container restart (same session id, new worker) also stales the key; triage restarted three times tonight with the same id. 07:24 CST Nov 13: lane session_013NEJL3DLEFY5vfbyG8CQ44 handed in PR #3124 (head 62c1d5d89). Follow-ups out of scope: step tag-writer-skips-archived; two triage sessions split across has_more pages read as one (low, note only); stale text in decision questions-go-to-owner line 22, debt layout-writer-key-stale, project-ops template operating-model lines 119-120; layout.page_writer_key has no reader; TRIAGE_TAG re-spells shared_names BUILD_TAG. Unmeasured: a container restart staling the old key.",
+ "updatedAt": "2026-11-13T07:24:16-06:00",
+ "blocked": null,
+ "pr": 3124
 }
