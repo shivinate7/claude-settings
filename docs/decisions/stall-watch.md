@@ -66,9 +66,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
   Each background job starts one watcher process. It is a named exception to rule `outcomes-mechanize-rules`
-  (owner ruling, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Status: open.
-  The watcher lives as long as its job, and the rule's no-long-lived-process term does not allow that. The
-  owner ruling on it is pending (step `watchers-plan-lanes`). Cost, per `outcomes-mechanize-rules`: the hook
+  (owner ruling, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Status: ruled (`stall-watch-exceptions-180a`).
+  The watcher lives as long as its job. Cost, per `outcomes-mechanize-rules`: the hook
   starts no child for a plain command (`hooks/test_stall_watch.py`, class `CostTests`). For a command that ends
   in an odd trailing backslash, it starts one `sh` child (`hooks/test_stall_watch.py`, class `CostTests`). Each
   background call starts one watcher, not pinned: no test counts watcher starts (note `stall-cost-proxies`).
