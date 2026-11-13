@@ -84,7 +84,7 @@
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
-                          commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
+                          commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A PR whose newest review record is missing or does not parse FAILs (post it with --review-record first). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
@@ -3148,7 +3148,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
-    A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
+    A PR number whose newest review record is missing, does not parse or names another PR also FAILs (a stale, open or held record does not); an unreadable comment list is a Stop.
+    A FAIL above (the base conflict, the review record, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
@@ -3181,6 +3182,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Stop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: {why}", "Run again. " + LANE_LINT_REMEDY]))
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
+        if target.isdigit() and not is_integration_pr(info):  # a batch's integration PR carries no record of its own; a failed read is a Stop, never a pass
+            bodies = [r[0] for r in host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[0].get(n, [])]
+            if newest_review_record(bodies, n) is None:
+                fails.append(f"#{n} has no review record that parses (the newest is missing, unreadable or names another pull request). Post it with `merge --review-record` at the reviewed head, then run `merge --lane-lint {n}` again.")
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
@@ -4266,6 +4271,12 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
+def newest_review_record(bodies, n):
+    """-> the parsed newest record of `bodies` (oldest first) when it parses and names pull request n, else None (no body counts as None). The one home of
+    how the newest record reads: `merge --reviewed` and the lane-lint record check both call it."""
+    rec = parse_review(bodies[-1]) if bodies else None
+    return rec if rec and rec["n"] == n else None
+
 def reviewed_read(h):
     """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
     each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
@@ -4286,8 +4297,7 @@ def reviewed_read(h):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = parse_review(bodies[-1])
-        rec = rec if rec and rec["n"] == n else None
+        rec = newest_review_record(bodies, n)
         state, why = live_review_state(h, rec, sha, main)
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
