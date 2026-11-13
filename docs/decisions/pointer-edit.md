@@ -41,8 +41,8 @@ machine runs its hooks, lint and agents out of it, so an edit there is live for 
 Risk kind: incident, per the `building-guard-needs-incident` rule (a guard is built against a mistake Claude
 has made): PR 2411, 2026-11-09 12:10 CST.
 
-Cost, per the `outcomes-mechanize-rules` rule (cost stated in the record): each Bash call that reaches the shell
-rules also reads the rules file once; the shell reader adds no process. Each Write, Edit, MultiEdit and
+Cost, per the `outcomes-mechanize-rules` rule (cost stated in the record): a Bash call that reaches the shell
+rules also reads the global rules file (at most 64 KiB, unmeasured). Each Write, Edit, MultiEdit and
 NotebookEdit call reads the global rules file once (at most 64 KiB) and resolves its target paths. It starts no
 process and runs no git. A refusal adds one line to `guard.log` (unmeasured).
 
