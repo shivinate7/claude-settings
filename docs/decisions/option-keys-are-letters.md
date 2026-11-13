@@ -72,7 +72,7 @@ A letter also names the same option in the chat and on the page. Guard rule `opt
   - Known limit: only an assistant text block counts. A question asked in the chat box (`AskUserQuestion`) is not read.
   - Known limit: a chat question that cites no item is not compared, and a write with no later chat to compare passes. The rule judges two copies only when the chat names the item.
   - Known limit: a chat question written after the page item is not checked until the item is written again.
-  - Known limit: after a `none` answer, ask the chat question again with the new options, then write them. The old question still cites the id, so a write made before the new question is compared to the old one.
+  - Known limit: after a `none` answer, ask the chat question again with the new options, then write them after the shown ones, or open a fresh item. The old question still cites the id, so a write made before the new question is compared to the old one.
   - Known limit: only the writing session's own transcript is read. A chat question asked in another session is not compared.
   - Known limit: the chat and the page must match in punctuation beyond the fold. A chat `-role` and a page `--role` differ and refuse.
   - Known limit: a reply that puts one cite above its options and another below is read by one side, so one of its items reads another item's lines. So is a reply that cites its items once before any option line and again below each question's options.

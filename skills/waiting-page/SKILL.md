@@ -169,7 +169,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
-    When the page is current, it saves `optionId` in an answer, and it draws an option's `note` and the item's `shown`. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
+    When the page is current, it saves `optionId` in an answer, and it draws an option's `note`. It lists `shown` in its item fields and draws nothing from it. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
@@ -479,7 +479,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    Do this before the write:
    the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new
    labels to the newest chat question's lines. Then write the new options and set `added` to now. Write `lastAnswer`
-   from the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
+   from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Then delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal that the item has new
    options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
