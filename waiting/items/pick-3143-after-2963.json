@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T16:59:00Z",
+  "context": "Goal: #3143 merges cleanly on the express lane.\nProblem (goal): #3143 is stacked on #2963; merging it first would pull #2963 in unreviewed.\nBased on (ruling): drain-first-hold part 4 (owner 10:56 CST Nov 13): #2963 and #3143 go express.\nDeparts from: main \u2014 adds a wait: #2963 merges, then #3143 is retargeted to main, merges main, and is re-linted.",
+  "home": "step ruling-challenge-passes",
+  "id": "pick-3143-after-2963",
+  "kind": "decision",
+  "n": 696,
+  "options": [
+    {
+      "gain": "Each PR is reviewed on its own diff.",
+      "how": "When #2963 merges, retarget #3143 to main, merge main into it, and run lane lint again.",
+      "id": "wait-retarget",
+      "key": "a",
+      "label": "Wait for #2963, then retarget (coordinator's pick)",
+      "lose": "#3143 waits on #2963."
+    },
+    {
+      "gain": "Both land in one run.",
+      "how": "Put #2963 and #3143 in the same express batch, stacked.",
+      "id": "batch-both",
+      "key": "b",
+      "label": "Batch both together now",
+      "lose": "A red on either drops both."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 10:43 CST Nov 13; sent to triage 10:56 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "#3143 waits for #2963",
+  "shown": [
+    {
+      "id": "wait-retarget",
+      "key": "a",
+      "label": "Wait for #2963, then retarget (coordinator's pick)"
+    },
+    {
+      "id": "batch-both",
+      "key": "b",
+      "label": "Batch both together now"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Hold #3143 until #2963 merges, then retarget it to main?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

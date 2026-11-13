@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T16:59:00Z",
+  "context": "Goal: every lost PR the sweep finds reaches a session that fixes it.\nProblem (goal): the sweep lists five row kinds; each needs one named owner or rows sit again.\nBased on (read): step lost-work-sweep note, row kinds (a) to (e).\nDeparts from: main \u2014 adds owners: (a) done, in no batch over 6 h: runner 10; (b) record open, lane not told: the lane, or the coordinator if archived; (c) no review record, lane idle over 12 h: coordinator; (d) lane archived, PR open: coordinator; (e) doing step, lane gone: triage.",
+  "home": "step lost-work-sweep",
+  "id": "pick-sweep-row-owners",
+  "kind": "decision",
+  "n": 697,
+  "options": [
+    {
+      "gain": "Each row goes to the session that can act on it.",
+      "how": "Runner 10 owns (a); the lane, or the coordinator if archived, owns (b); the coordinator owns (c) and (d); triage owns (e).",
+      "id": "split-owners",
+      "key": "a",
+      "label": "Split by row kind (coordinator's pick)",
+      "lose": "Three sessions read the sweep."
+    },
+    {
+      "gain": "One reader.",
+      "how": "Every row goes to the coordinator, which routes it.",
+      "id": "one-owner",
+      "key": "b",
+      "label": "The coordinator owns every row",
+      "lose": "The coordinator becomes the bottleneck for all lost work."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 10:50 CST Nov 13; sent to triage 10:56 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lost-work sweep: who fixes each row",
+  "shown": [
+    {
+      "id": "split-owners",
+      "key": "a",
+      "label": "Split by row kind (coordinator's pick)"
+    },
+    {
+      "id": "one-owner",
+      "key": "b",
+      "label": "The coordinator owns every row"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Who fixes each kind of row the lost-work sweep finds?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

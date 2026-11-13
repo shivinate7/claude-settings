@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T16:57:51.672Z",
+  "choice": "a",
+  "item": "repeat-judge-mark-split",
+  "label": "A: Check first, then mark (lane's pick)",
+  "n": 666,
+  "note": "accepted pick",
+  "optionId": "split-judge-mark"
+}

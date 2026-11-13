@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T16:59:00Z",
+  "context": "Goal: #2932 passes lane lint without rewriting its history.\nProblem (rule): the PR lacked the Drops-lines trailer; history rewrites on a shared branch are refused.\nBased on (notes): coordinator pick 10:24 CST Nov 13; the commit is not made to kick CI.\nDeparts from: main \u2014 adds one commit to #2932 whose message holds only the Drops-lines trailer.",
+  "home": "step pick-ack-past-ruling",
+  "id": "pick-2932-trailer-commit",
+  "kind": "decision",
+  "n": 695,
+  "options": [
+    {
+      "gain": "Lint passes and no history is rewritten.",
+      "how": "Push one commit with no file change whose message carries the Drops-lines trailer.",
+      "id": "trailer-commit",
+      "key": "a",
+      "label": "One trailer-only commit (coordinator's pick)",
+      "lose": "One extra commit with no file change sits in the PR."
+    },
+    {
+      "gain": "No extra commit.",
+      "how": "Rewrite the last commit message to add the trailer, then force-push.",
+      "id": "amend",
+      "key": "b",
+      "label": "Amend the last commit",
+      "lose": "A force-push on a shared branch, which the rules refuse."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 10:24 CST Nov 13; sent to triage 10:56 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2932 trailer-only commit",
+  "shown": [
+    {
+      "id": "trailer-commit",
+      "key": "a",
+      "label": "One trailer-only commit (coordinator's pick)"
+    },
+    {
+      "id": "amend",
+      "key": "b",
+      "label": "Amend the last commit"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Add one commit to #2932 that carries only the Drops-lines trailer?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

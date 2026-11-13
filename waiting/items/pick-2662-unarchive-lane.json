@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T16:59:00Z",
+  "context": "Goal: #2662 lands with its own lane's context.\nProblem (goal): #2662 needed a two-line prose fix and its lane was archived.\nBased on (notes): owner 10:39 CST Nov 13: archived lanes can be unarchived.\nDeparts from: main \u2014 adds a reuse: the archived lane fan-prose-unmapped-6 is unarchived for the fix instead of starting a new lane.",
+  "home": "PR #2662",
+  "id": "pick-2662-unarchive-lane",
+  "kind": "decision",
+  "n": 698,
+  "options": [
+    {
+      "gain": "The lane already knows the PR.",
+      "how": "Unarchive fan-prose-unmapped-6 and send it the two-line fix.",
+      "id": "unarchive",
+      "key": "a",
+      "label": "Unarchive the old lane (coordinator's pick)",
+      "lose": "An archived session restarts on a fresh container."
+    },
+    {
+      "gain": "A clean session.",
+      "how": "A fresh lane takes #2662 from its brief.",
+      "id": "new-lane",
+      "key": "b",
+      "label": "Start a new lane",
+      "lose": "The new lane must relearn the PR."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 10:15 CST Nov 13; sent to triage 10:56 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2662: reuse archived lane",
+  "shown": [
+    {
+      "id": "unarchive",
+      "key": "a",
+      "label": "Unarchive the old lane (coordinator's pick)"
+    },
+    {
+      "id": "new-lane",
+      "key": "b",
+      "label": "Start a new lane"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Unarchive lane fan-prose-unmapped-6 for the two-line prose fix on #2662?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}
