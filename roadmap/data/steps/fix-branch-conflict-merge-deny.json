@@ -1,0 +1,16 @@
+{
+ "id": "fix-branch-conflict-merge-deny",
+ "title": "The fix-branch deny lets a conflicted merge of main through, so it can get its one more fix verifier",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#3102"
+ ],
+ "why": "The owner ruled (2026-11-10 14:07 CST, decision pr-review-record) that a conflicted merge of main after a PASS fix verifier takes one more fix verifier. The fix-branch deny refuses the push that verifier needs (merge.py --fix-check accepts only the live head), and its remedy says \"new branch and new PR\". A conflict with main on a fixed PR is normal lane work.",
+ "source": "lane fix-branch-merge-main-deny, round-3 reviewer on PR #3102, 00:03 CST Nov 13",
+ "note": "Settled by the owner ruling above, so no owner item: the \"new-PR remedy stands\" option departs from it. Allow a two-parent merge whose first parent is the newest record's Head and whose second parent is on origin/main (the shape merge.py accepts); the conflicted merge then owes one fix verifier. Red test first: that push is refused on main today. Keep refusing any other push after a fix check. Stacks on #3102 and #2979.",
+ "updatedAt": "2026-11-13T00:04:37-06:00"
+}
