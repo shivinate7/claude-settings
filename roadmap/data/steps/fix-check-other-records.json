@@ -1,0 +1,16 @@
+{
+ "id": "fix-check-other-records",
+ "title": "merge --fix-check accepts a reviewed head on a PR that already has other records",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#2940"
+ ],
+ "why": "Degen sent six PRs back to a full round 1 on Nov 12 after a passed fix check (D25). #2940 accepts a fix check on a PR with no record at all, but a PR with other records still needs HEAD to be the newest record's Head, which is the Degen case.",
+ "source": "coordinator 23:31 CST Nov 12; retrospective 23:27 CST (Degen ledger D25); open gap on step review-record-fix-check-reads (#2940)",
+ "note": "After #2940 merges. Red test first: a PR whose newest record has another Head, and a fix check naming a reviewed head with a review record of its own, is accepted; a fix check naming a head with no record still refuses. Check decision pr-review-record (the --fix-check order) before changing the HEAD rule; if the change departs from an owner ruling there, it goes to the owner. Express: not on the R55 list, so normal queue unless the owner adds it.",
+ "updatedAt": "2026-11-12T23:31:11-06:00"
+}
