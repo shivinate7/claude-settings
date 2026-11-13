@@ -39,11 +39,12 @@ main}, from the home check it already ran on that line (feedback_guard.Homes), s
 A line missing from `known` is "unknown". Without `known` the test is "unknown" for every ruling and task: the runner reads no external store.
 
 Reuse: the home test resolves a home as hooks/ruling_home.py does (its whole-value read, `_unwrap`, the refusal of an
-absolute or leaving path) and a step home as hooks/feedback_guard.py does (STEP_HOME, STEP_PATH). It calls the
-resolver's two git reads itself, not value_resolves, because value_resolves lists the refs on each call and a run here
-lists them once. It repeats value_resolves's four path checks (absolute, ".", "..", leaving the tree) because
-value_resolves cannot take the listed refs; a change to those checks there needs the same change in _home_held. The [closed] token is feedback_guard.CLOSED_TOKEN. These modules are imported on first use, and
-importing them starts no process or thread.
+absolute or leaving path) and a step home as hooks/feedback_guard.py does (STEP_HOME, STEP_PATH). It lists the
+refs once per run and reads each home through ruling_home.value_refs with that list. It still checks the four paths
+value_refs refuses (absolute, ".", "..", leaving the tree) first, so a bad home is stale even when git cannot be
+read; a change to those checks there needs the same change in _home_held. The [closed] token is feedback_guard.CLOSED_TOKEN. feedback_guard is imported with this file,
+for SETTLING_KINDS, which is built from its SETTLING_PREFIXES (one home for the settling kinds); ruling_home is imported
+on first use. Importing either starts no process or thread.
 
 Cost: importing this file starts no process, thread or timer. A call point imports it in the process it already runs.
 A run reads the store files and builds one _Reads, which for home-held starts at most one for-each-ref and one
@@ -125,7 +126,7 @@ class _Reads:
             else:
                 home = _hook("ruling_home")
                 try:
-                    self._held[git_path] = home._resolve_value(self.root, refs, git_path)
+                    self._held[git_path] = bool(home.value_refs(git_path, self.root, {self.root: refs}))
                 except home._GitFailure:
                     self._held[git_path] = None
         return self._held[git_path]
@@ -220,7 +221,7 @@ def _copy_matches_live(line, reads):
     return TRUE if found.group(2) in [row.rstrip("\r") for row in live.split("\n")] else STALE
 
 
-SETTLING_KINDS = ("ruling", "task")  # the feedback-log kinds whose file home settles the item
+SETTLING_KINDS = tuple(prefix.strip("[]") for prefix in _hook("feedback_guard").SETTLING_PREFIXES)  # the feedback-log kinds whose file home settles the item: bare words of the Stop's own `[kind]` list
 
 
 def _open_until_home_on_main(line, reads):

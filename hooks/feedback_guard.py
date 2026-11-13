@@ -506,8 +506,16 @@ class Homes:
         refs = ruling_home.value_refs(rel, root, self.ref_lists)
         if not refs:
             return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
-        self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
+        if self._counts_for_close(root):
+            self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
         return None
+
+    def _counts_for_close(self, root):
+        """True when main's copy of a home in `root` may close an item: `root` is the session's own repo (the first of
+        `_repos`: where the session worked, else the Stop's cwd), or an absolute home's repo that `_repos` does not
+        hold. The Stop's cwd repo, when it is not the session's, may pass the home check but never proves the close."""
+        own = self._repos()
+        return not own or root == own[0] or root not in own
 
     def closed_problem(self, item_id, rest):
         """None when a closed note's home is a page, a not-a-grant or not-page-form verdict, a `step:<slug>` whose step file
