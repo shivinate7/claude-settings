@@ -1,14 +1,14 @@
 {
  "id": "record-before-next-push",
  "title": "A hook refuses a lane push to a PR whose live head has review rounds read but no posted review record",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL1JMo5JoUeT8C3QedR",
  "owner": "triage",
  "blockedBy": [],
  "why": "Rounds read a head that a later fix push moves, so no record can be posted for that head and the PR owes a fresh round 3 (decision pr-review-record, \"The review a changed head owes\"). Hit on #2696, #2684, #2756 and the pwsh stack.",
  "source": "coordinator 09:48 CST Nov 12, from lane fan-prose-handoffs' mistake (09:50 CST report)",
  "note": "Guard, code. Same harm as step reviewed-head-push-ask (doing on lane fan-code-handoffs-2); that lane may fold this in as a third trigger. Ready, no lane. Third hit (lane guard-tables-per-section via coordinator 11:03 CST Nov 12): review rounds read older heads, and no record was posted per head. Raised to phase now. Fourth hit (coordinator 23:33 CST Nov 12): lane consultant-role-placement (#3084) pushed two commits after round 1 before posting its record, so the honest record could not be posted (--fix-check needs an earlier record at the reviewed head); route given: a fresh round 1 at the live head. Triage 23:32 CST: step review-record-before-any-push folded in here (same harm, same guard). Near case #3073 (two fix checks in one record) is settled by decision pr-review-record, no tool gap.",
- "updatedAt": "2026-11-12T23:32:55-06:00"
+ "updatedAt": "2026-11-12T23:33:44-06:00"
 }
