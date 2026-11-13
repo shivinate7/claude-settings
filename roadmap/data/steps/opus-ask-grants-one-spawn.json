@@ -1,0 +1,14 @@
+{
+ "id": "opus-ask-grants-one-spawn",
+ "title": "A plain Opus ask in a prompt grants the one spawn it names; only `opus <time>` or `opus <role> <time>` stores a timed grant",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A one-agent ask became a 2-hour all-roles grant the owner never meant.",
+ "source": "Retrospective 14:13 CST Nov 13; owner 13:26 typed \"send a blind opus agent to understand what are all the roles...\" and 14:13 \"opus override for this session? what are you talking about\". Rule outcomes-grant-covers-named-act.",
+ "note": "Filed 14:15 CST Nov 13. Red case (retrospective's reading, unread by triage): the local_time hook stored ~/.claude/state/override/opus/45763cdd-....json, written 19:26:53Z, until 21:26:49Z, role null, from that one ask. Fix: a plain Opus ask grants the one spawn it names; only `opus <time>` or `opus <role> <time>` stores a timed grant. Home: decision agent-model-cap (the local_time row) and hooks/local_time.py. Past work: items opus-plain-ask-scope (b) and opus-plain-ask-held (a) landed #1244 (batch 10), a plain ask scoped from earlier prompts; this step may narrow that. The leftover grant file on the owner's computer is his to clear or leave; triage cannot read it.",
+ "updatedAt": "2026-11-13T14:15:05-06:00"
+}
