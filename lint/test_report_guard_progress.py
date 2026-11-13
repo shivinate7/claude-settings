@@ -228,8 +228,8 @@ class ProgressClaimTests(unittest.TestCase):
                 self.assert_allowed(with_cite(bare, read))
 
     def test_pc_red_a_bare_pr_ref_is_no_live_read(self):
-        # Catches: "(PR #2888)" counts as a live read, so a claim that names its PR and reads nothing passes.
-        self.assert_blocked(with_cite(BATCH_WAIT, "PR #2888"), BATCH_WAIT, RULE)
+        # Catches: a PR named in parentheses counts as a live read, so a claim that names its PR and reads nothing passes.
+        self.assert_blocked(with_cite(BATCH_WAIT, "PR #2888"), with_cite(BATCH_WAIT, "PR #2888"), RULE)
         self.assert_allowed(with_cite(BATCH_WAIT, "pull_request_read on PR #2888: open"))
 
     def test_pc_red_unmeasured_not_read_or_unknown_passes(self):
