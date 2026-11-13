@@ -1659,6 +1659,32 @@ class LiveHooks(unittest.TestCase):
                 self.assertEqual(code, 2, err or out)
                 self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
 
+    def test_a_clone_settings_json_that_is_not_utf8_is_unknown(self):
+        text = self.text(self.source())
+        at = text.index('"command": "') + len('"command": "')
+        raw = text[:at].encode("utf-8") + b"\xff" + text[at:].encode("utf-8")  # inside a string: only the decode refuses it
+        repo = Repo(self)
+        with open(os.path.join(repo.root, "settings.json"), "wb") as handle:
+            handle.write(raw)
+        code, out, err = self.probe(repo, self.live(text))
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn("UTF-8", head(out), err or out)  # the reason is the encoding, not a diff or a parse error
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_a_hooks_value_that_is_not_an_object_is_unknown(self):
+        for side in ("clone", "live"):
+            for value in ([], "none", None):
+                with self.subTest(side=side, value=value):
+                    doc = self.source()
+                    doc["hooks"] = value
+                    bad, good = self.text(doc), self.text(self.source())
+                    clone_text, live_text = (bad, good) if side == "clone" else (good, bad)
+                    code, out, err = self.check(clone_text, live_text)
+                    self.assertEqual(code, 2, err or out)
+                    self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                    self.assertIn("%s settings.json has no `hooks` object" % side, head(out), err or out)
+
     def test_a_clone_without_settings_json_is_na(self):
         code, out, err = self.probe(self.clone(None), self.live(self.text(self.source())))
         self.assertEqual(code, 0, err or out)
