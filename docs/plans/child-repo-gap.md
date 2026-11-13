@@ -8,14 +8,19 @@ Measured on 2026-11-12 from shallow clones, git and file reads only, against cla
 36807ad19. Heads read: q_max 32d4373, home 85fbf7e, joyous f510db0, banchi 70c6bc6, degen 959bf79,
 mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit, sonnet).
 
+Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this revision: recount, stable branch status, arbiter dropped, protection prose moved to the ruleset sweep, one list run through compliance-check, order measure stated, grant question named as unknown)
+
 ## Read this first
 
 - **Unmeasured everywhere:** the live branch protection or ruleset of every repo. Files only describe
   it. No API read ran. Nothing here claims a live state.
-- **Commit counts are unreliable.** The clones are shallow and the local `main` ref in the
-  claude-settings checkout was stale for some agents. q_max's pin shows 2124 commits behind here and 2758 in the R44 scan of
-  Nov 11 (restart-plan R44), so the counts disagree. Read them as "far behind". Dates and folder-scoped counts are given
-  where an agent used them.
+- **Commit counts in the per-repo tables are superseded.** The agents counted in shallow clones, so their numbers differ.
+  The refuter recounted in the full claude-settings checkout (not shallow) with `git rev-list --count <pin>..origin/main`:
+  all commits, not only changes under the action folders. Main moves, so these rise by the hour (count at 21:20 CST
+  Nov 12). Pins by repo: q_max 2ac382cc6 3298. banchi 919106e7 5020. ios-adblock da8d8073 6267. mailaudit 380a24b 4839,
+  ste-lint e0b9696 2965, ios-ship eaaf66e 3293. joyous 59bff08 5305, a781a86 5004, d70ebd1 4349, 2deb827 228. degen
+  635b37b 5736, 422cbbd 3791, ios-ship ddaa393 2013. home all-jobs-passed 7b49661 5996, ste-lint 8bc2898 2392, lint raw URL
+  1cc47f0 8621. A pin that is not an ancestor of main inflates its count; ancestry was not checked.
 - **Main today, not ruled.** Main's ruleset (main-branch-protection ruling r) is ruled but not built, and main still runs CI
   on push to main (checks.yml:4-5). R61-R63 (once per batch) are rulings on the roadmap branch, not yet built. The Gold column
   names the ruled form.
@@ -24,14 +29,14 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 - All seven repos have the `all-jobs-passed` check (each repo's CI form row below). No repo is missing it.
 - All seven repos pin claude-settings actions by commit, not by a stable branch (R44 part 1). None of
   the seven runs the child-CI check for contradicting lines (R44 part 2). Only home and joyous run
-  `claude-md-cites`, both pinned at 2deb827 (home: 0 commits behind on its folder; joyous: 217 behind).
+  `claude-md-cites`, both pinned at 2deb827 (counts above).
 
 ## Cross-repo table
 
 | Area | Gold (main) | q_max | home | joyous | banchi | degen | mailaudit | ios-adblock |
 |---|---|---|---|---|---|---|---|---|
-| Action pin age | Stable branch | 9 pins at 2ac382cc6 (Nov 8), far behind (2124 and 2758 both reported) | Mixed: 0 to 410 behind by folder | 217 to 2650 behind | 8 pins at 919106e7, 2652 behind | 4 to 8 days behind by date | 2029 to 2578 behind | 262 to 272 behind |
-| `claude-md-cites` in CI | Yes | No | Yes | Yes, 217 behind | No | No | No | No |
+| Action pin age | Stable branch | 9 pins at 2ac382cc6 (Nov 8), far behind (counts above) | Mixed (counts above) | Mixed (counts above) | 8 pins at 919106e7, behind (counts above) | 4 to 8 days behind by date | Mixed (counts above) | 262 to behind (counts above) |
+| `claude-md-cites` in CI | Yes | No | Yes | Yes, behind (counts above) | No | No | No | No |
 | project-ops roles | Roster, record branch, briefs, handoffs | Roadmap branch scaffold, no steps, no roster | Roadmap branch, roster on claude.ai | None | Roadmap branch, contents unread | Roadmap branch, contents unread | Roadmap branch, roster on claude.ai | None |
 | Push to main re-runs CI | No (ruled in R61-R63, not built) | Yes (R64: when runners are free) | Yes except ios job (R64: when runners are free) | Yes (R64: when runners are free) | Yes (R64: when runners are free) | Yes (R64: when runners are free) | Yes (R64: when runners are free) | Yes (R64: when runners are free) |
 | Protection form in files | Ruleset (ruled, not built) | Claims gold form, unmeasured | stamp.json only, unmeasured | stamp.json only, unmeasured | Old form in prose, unmeasured | Unknown: only a plan line (docs/specs/plan.md:2549) | Old form in prose, unmeasured | Old form in CLAUDE.md line 6, unmeasured |
@@ -45,7 +50,7 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 | CLAUDE.md | Cites records, copies none | 180 lines, cites by name, no verbatim copy found. 14 of 16 ids exist as rules, the other two are decision slugs that exist. The `restates` probe was not run. | Small. A copy would pass unseen because CI never calls `claude-md-cites`. |
 | Contradiction with no exemption | A child contradicts a parent line only by citing it, with the owner's grant | D-705 (CLAUDE.md:55) lets the batch runner merge over a failing `browser.yml` run on main (owner 2026-11-07 13:13 CST). It does not name the parent rule `git-never-merge-failing-ci`. D-705:19 uses a role, "primary orchestrator", that session-tiers does not define. D-499 and D-833 (CLAUDE.md:17-19) lock the lint to a pinned commit with no R44 exemption. | One exemption line, one role rename, one exemption or retirement for the pinned-lint lock. |
 | project-ops | Roster, record branch, briefs, handoffs | A `roadmap` branch (3804a024b) with empty data folders, briefs, handoffs, an outbox and its own CLAUDE.md. `tiers.yml` is a probes workflow. | Scaffold only: no steps recorded, no roster found. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:670 and browser.yml:181. 9 pins at 2ac382cc6 (Nov 8), 36 first-parent merges and 2124 commits behind. 7 commits since touch the pinned action folders. | All 9 pins move to a stable branch. |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:670 and browser.yml:181. 9 pins at 2ac382cc6 (Nov 8), behind (counts above). | All 9 pins move to a stable branch. |
 | Once per batch | PR only for the batch, no push re-run | PR trigger only for `claude/int-batch-*` (checks.yml:14, :123), but push to main still runs checks (:85-86). Browser checks run on dispatch only. | R64: when runners are free. |
 | Shared hooks, skills, lint | Come from claude-settings | No copies. ste-lint and the map skill come through the pin. Three q_max-only hooks. | None beyond the pin. Moving the pin fixes it. |
 
@@ -54,8 +59,8 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 | Area | Main has | home has | Gap |
 |---|---|---|---|
 | CLAUDE.md | Cites records | 57 lines, zero `rule:` anchors, no stale ids, no contradiction found. Lines 29 and 31 restate the batch-runner and coordinator split. | Possible copy, unconfirmed. |
-| project-ops | Roster, record branch, briefs, handoffs | Roles named (CLAUDE.md:27-29). `origin/roadmap` exists (61687fe). The roster is on claude.ai, not in the repo. No arbiter named. | Roster, briefs and handoffs unmeasured. Arbiter missing. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:170-176. All refs are commit pins. all-jobs-passed at 7b49661 is 1 behind by folder, mutation-report at a781a86 is 4 behind, ste-lint and claude-md-cites are current. The shared-resources lint comes from a raw URL at 1cc47f0 (checks.yml:68-71), 410 commits behind on `lint/`. testflight.yml:135 fetches `bin/ios-ship` at eaaf66e, age unmeasured. | Pins are not a branch. Raw URL stale (410 behind on `lint/`); ios-ship age unmeasured. |
+| project-ops | Roster, record branch, briefs, handoffs | Roles named (CLAUDE.md:27-29). `origin/roadmap` exists (61687fe). The roster is on claude.ai, not in the repo. | Roster, briefs and handoffs unmeasured.  |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:170-176. All refs are commit pins. all-jobs-passed at 7b49661 is 1 behind by folder, mutation-report at a781a86 is 4 behind, ste-lint and claude-md-cites are current. The shared-resources lint comes from a raw URL at 1cc47f0 (checks.yml:68-71), behind (counts above) on `lint/`. testflight.yml:135 fetches `bin/ios-ship` at eaaf66e, age unmeasured. | Pins are not a branch. Raw URL stale (behind (counts above) on `lint/`); ios-ship age unmeasured. |
 | Once per batch | PR only for the batch | Push to main skips only the ios job (decision ci-push-skips-macos). Push, nightly and PR synchronize still run the rest. | R64: when runners are free. |
 | Hooks and skills | Come from claude-settings | Only its own tailscale and green-ssh hooks. | None found. |
 
@@ -65,7 +70,7 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 |---|---|---|---|
 | CLAUDE.md | Cites records | 51 lines, repo-only rules with their own ids, cites `standing-merge-grant`. No copies, no stale ids, no contradiction. | Small: lines 21-24 point at paths, not record ids. |
 | project-ops | Roster, record branch, briefs, handoffs | Nothing found. No roadmap branch. | Absent. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:21-29. Pins: 59bff08 (five actions) 2642 behind, a781a86 2650, d70ebd1 2301, 2deb827 217. | Pin lines to move: four distinct commits in checks.yml and one in links.yml. |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:21-29. Pins: 59bff08 (five actions) behind (counts above), a781a86, d70ebd1, 2deb827 (counts above). | Pin lines to move: four distinct commits in checks.yml and one in links.yml. |
 | Once per batch | PR only for the batch | checks.yml:2-8 runs on PR, push to main and dispatch. | R64: when runners are free. |
 | Shared parts | Come from claude-settings | No hooks or lint. Skills are vendored third-party only. | A record naming the shared pieces it uses is missing. |
 
@@ -74,9 +79,9 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 | Area | Main has | banchi has | Gap |
 |---|---|---|---|
 | CLAUDE.md | Cites records | 169 lines, cites existing records, no `rule:` ids, none stale. By reading, not by the probe: probable copies of the decision-is-an-argument rule (~line 88), the main-by-pull-request block, the screen-before-verdict rule, one-home-per-capability and the stash rule. | Copies to cut to cites. |
-| Contradiction with no exemption | Cited exception with grant | A "never --admin" line and D42 (`enforce_admins` true) differ from main's rule that the admin may bypass on pull requests. No exemption line. Live state unmeasured. | One exemption line, or a rewrite to the ruleset form. |
+| Contradiction with no exemption | Cited exception with grant | A "never --admin" line and D42 (`enforce_admins` true) match the classic protection main runs today. They are no contradiction now, and go into the ruleset sweep. | Rewrite to the ruleset form in the sweep. |
 | project-ops | Roster, record branch, briefs, handoffs | `origin/roadmap` (bb560f6), `records/*` and `seed/banchi-roadmap` exist. Contents unread. No roster or handoff file in the tree. | Contents unmeasured. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:362-368. Eight actions at 919106e7 (Nov 5), 2652 commits behind. Not used: claude-md-cites, ste-lint, silent-undo, ruling-kind. Zizmor is a local job. | Pins and four missing actions. |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:362-368. Eight actions at 919106e7 (Nov 5), behind (counts above). Not used: claude-md-cites, ste-lint, silent-undo, ruling-kind. Zizmor is a local job. | Pins and four missing actions. |
 | Once per batch | PR only for the batch | Draft pull requests skip, mutation-report is batch-only, but push to main and a nightly run still run the full suite. | R64: when runners are free. |
 | Guards | Shared guards | Own guard-shell, guard-opsec, githooks and decision-context scripts. Overlap with shared guards unmeasured. | Unmeasured. |
 
@@ -96,8 +101,8 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 | Area | Main has | mailaudit has | Gap |
 |---|---|---|---|
 | CLAUDE.md | Cites records | 94-line slug index, no `rule:` markers, no copies. AGENTS.md is also 94 lines and carries the same head (diff not run). One mislabel: `guard-guards-mistakes-only` is cited as a rule at docs/decisions/milestone-runs-full-suite.md:67, but it is a decision. | Duplicate file is a drift risk. One mislabel. |
-| project-ops | Roster, record branch, briefs, handoffs | Adopted by record (session-tiers-adopted.md:3, 2026-10-28 02:31 CDT). `roadmap` branch (40d07f9). The roster is in claude.ai project instructions, not the repo. No arbiter. | Briefs and handoffs unmeasured. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:351, `ci-done` at :364. Pins: 380a24b (five uses) 2578 behind, ste-lint e0b9696 2029 behind, ios-ship raw URL eaaf66e (testflight.yml:71) 2119 behind. Not used: claude-md-cites, code-check, silent-undo, ruling-kind, stamp, readme-links, playwright-setup. Zizmor is a local job. | Pins and missing actions. |
+| project-ops | Roster, record branch, briefs, handoffs | Adopted by record (session-tiers-adopted.md:3, 2026-10-28 02:31 CDT). `roadmap` branch (40d07f9). The roster is in claude.ai project instructions, not the repo. | Briefs and handoffs unmeasured. |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:351, `ci-done` at :364. Pins: 380a24b (five uses) behind (counts above), ste-lint e0b9696 behind (counts above), ios-ship raw URL eaaf66e (testflight.yml:71) behind (counts above). Not used: claude-md-cites, code-check, silent-undo, ruling-kind, stamp, readme-links, playwright-setup. Zizmor is a local job. | Pins and missing actions. |
 | Once per batch | PR only for the batch | checks.yml:14-16 still runs on push to main, plus a nightly (:46). | R64: when runners are free. |
 | Protection | Ruleset (ruled, not built) | Records describe the old `enforce_admins` form (main-moves-only-by-pr.md:3,5; orchestrator-may-merge.md). | Records need a rewrite once the ruleset is confirmed. |
 
@@ -107,44 +112,55 @@ mailaudit b56997a, ios-adblock f0ace6e. One Explore agent read each repo (audit,
 |---|---|---|---|
 | CLAUDE.md | Cites records | 8 lines. AGENTS.md is an identical copy. Cites `standing-merge-grant`. Line 6 says protection enforces `all-jobs-passed` for admins too (owner 2026-10-10). | Line 6 restates a protection fact and contradicts main's admin bypass on pull requests, with no exemption. |
 | project-ops | Roster, record branch, briefs, handoffs | None. 49 heads, no roadmap branch. | Absent. |
-| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:204. Pins: da8d8073 (checks.yml:108, :173, :204; doc-links.yml:17) 272 behind, mutation-report a48189d0 (:195) 262 behind, ci-alarm 59bff081 (:213) 272 behind. Sparse pin of `bin/verdict` and `hooks/_nowindow.py` at da8d8073. Not wired: claude-md-cites, ste-lint, silent-undo, ruling-kind, ci-done-comment. | Pins, and five unused shared actions. |
+| CI form | One `all-jobs-passed` check, stable-branch actions | `all-jobs-passed` at checks.yml:204. Pins: da8d8073 (checks.yml:108, :173, :204; doc-links.yml:17) behind (counts above), mutation-report a48189d0 (:195) behind (counts above), ci-alarm 59bff081 (:213) behind (counts above). Sparse pin of `bin/verdict` and `hooks/_nowindow.py` at da8d8073. Not wired: claude-md-cites, ste-lint, silent-undo, ruling-kind, ci-done-comment. | Pins, and five unused shared actions. |
 | Once per batch | PR only for the batch | checks.yml:4-6 runs on PR and push to main, nightly at :9. | R64: when runners are free. |
 
 ## Scope of the lanes (coordinator, 21:14 CST Nov 12, relaying the owner at 21:12 CST)
 
 The owner is already working in degen and home. The coordinator starts fix lanes for the other five repos (joyous,
 ios-adblock, mailaudit, banchi, q_max). For degen and home, the lists below are what each needs to get on board, and the
-coordinator passes them to the owner. No lane starts in either repo.
+coordinator passes them to the owner. No lane starts in either repo. The lanes are the R44 one-time sweep, so each runs
+through skill compliance-check. Whether R44 is the owner's plan for moving child pins that decision
+action-pins-follow-sessions clause (c) waits on (step c76) is unknown; the coordinator or the owner rules on it.
+
+## What waits on the stable branch
+
+No stable branch for child CI exists on origin today. Branch `lane-stable-mover` (tip dc5021cc6, Nov 12) is the lane
+building it, unmerged, with three open gaps in its own notes. Every pin move below waits on it. The acts that can start now
+are the ones that are not pin moves.
 
 ## What feeds the shared R44 builds
 
-- **Stable branch for child CI (R44 pins):** every repo. Pin lines to move are named per repo above. Every repo has
-  commit pins, so this build reaches all seven at once.
+- **Stable branch for child CI (R44 pins):** every repo. Pins are named per repo above. This build reaches all seven at once.
 - **Contradiction check in child CI (R44 contradiction check):** the cases it must catch, found by reading: q_max D-705 and
-  D-499/D-833 (no parent rule named), banchi's "never --admin" and `enforce_admins` wording, degen line 7 (wrong parent
-  rule named), ios-adblock CLAUDE.md line 6, mailaudit's mislabeled rule id. The case it must not flag: joyous and home, where
-  none was found.
+  D-499/D-833 (no parent rule named), degen line 7 (names a different parent rule than the one it departs from),
+  mailaudit's mislabeled rule id. The cases that are no contradiction today: ios-adblock CLAUDE.md line 6 and banchi's
+  "never --admin" and `enforce_admins` wording, which match the classic protection main runs now. The check must not flag
+  them until the ruleset is built. Joyous and home show none. A test that no `@<sha>` pin remains belongs to this build.
 
-## Fix lanes, smallest first
+## Fix lanes
 
-One lane per repo. The coordinator starts the five outside degen and home. Each lane lands in its own repo through that repo's batch runner.
+Ordered by the count of acts that can start now (not pin moves, not R64 items), fewest first; a tie keeps the order shown.
+Each lane lands in its own repo through that repo's batch runner. Every lane also moves its pins when the stable branch lands.
 
-1. **joyous.** Move the claude-settings pins to a stable branch. Add a record naming the shared pieces joyous uses. Add project-ops (roster, roadmap branch). R64: when runners are free: drop the push-to-main re-run.
-2. **ios-adblock.** Move the pins. Rewrite CLAUDE.md line 6 to cite `main-branch-protection`. Add `claude-md-cites`, `ste-lint` and `silent-undo` under `all-jobs-passed`. Add project-ops. Collapse AGENTS.md to a pointer. R64: when runners are free: once-per-batch trim.
-3. **home.** Move the action pins and the raw-URL lint and `bin/ios-ship` refs to one stable branch. Cite instead of restate CLAUDE.md lines 29 and 31. Add an arbiter and roster pointer. R64: when runners are free: once-per-batch trim.
-4. **mailaudit.** Move the pins and the ios-ship URL. Add `claude-md-cites`, `code-check`, `ruling-kind` and `silent-undo`. Fix the mislabel. Cut AGENTS.md to a pointer. Rewrite the protection records once the ruleset is confirmed. R64: when runners are free: drop the push-to-main trigger.
-5. **degen.** Add `claude-md-cites` under `all-jobs-passed`. Move the pins and add `native-record` to the `ci-done` list. Name the parent rule on line 7 and split lines 7, 35 and 39. Read the live ruleset (item 78). R64: when runners are free: drop the push-to-main trigger.
-6. **banchi.** Move the pin and add `claude-md-cites` and `ste-lint`. Cut the restated rules in CLAUDE.md to cites and add one exemption line for the admin wording. Read the roadmap branch and add roster and handoff pointers. Move protection prose to the ruleset form once the merge tool reads rulesets. R64: when runners are free: once-per-batch trim.
-7. **q_max.** Move the 9 pins and add a test that no `@<sha>` pin remains. Rewrite D-705 to name `git-never-merge-failing-ci` and replace "primary orchestrator". Add an R44 exemption for D-499 and D-833, or retire them after the pins move. Add `claude-md-cites`. Fill the roadmap data and roster. R64: when runners are free: drop the push-to-main re-run.
+1. **joyous** (2 acts). Add a record naming the shared pieces joyous uses. Add project-ops (roster, roadmap branch). R64: when runners are free: drop the push-to-main re-run.
+2. **ios-adblock** (3 acts). Add `claude-md-cites`, `ste-lint` and `silent-undo` under `all-jobs-passed`. Add project-ops. Collapse AGENTS.md to a pointer. R64: when runners are free: once-per-batch trim.
+3. **mailaudit** (3 acts). Add `claude-md-cites`, `code-check`, `ruling-kind` and `silent-undo`. Fix the mislabel. Cut AGENTS.md to a pointer. R64: when runners are free: drop the push-to-main trigger.
+4. **banchi** (3 acts). Add `claude-md-cites` and `ste-lint`. Cut the restated rules in CLAUDE.md to cites. Read the roadmap branch and add roster and handoff pointers. R64: when runners are free: once-per-batch trim.
+5. **q_max** (4 acts). Rewrite D-705 to name `git-never-merge-failing-ci` and replace "primary orchestrator". Add an R44 exemption for D-499 and D-833, or retire them after the pins move. Add `claude-md-cites`. Fill the roadmap data and roster. R64: when runners are free: drop the push-to-main re-run.
 
-Order is by size of the gap as measured above, smallest first. Every lane begins by moving pins, which
-needs the stable branch of R42 part 2 to exist first (unmeasured whether it does).
+For the owner (degen and home, no lane started):
+
+- **home** (2 acts). Cite instead of restate CLAUDE.md lines 29 and 31, after reading project-ops. Point CLAUDE.md at the roster on claude.ai. Pins: all-jobs-passed, mutation-report, the raw-URL lint and `bin/ios-ship`. R64: when runners are free: once-per-batch trim.
+- **degen** (4 acts). Add `claude-md-cites` under `all-jobs-passed`. Add `native-record` to the `ci-done` list. Name the parent rule on line 7. Split lines 7, 35 and 39. Pins as listed above. R64: when runners are free: drop the push-to-main trigger.
 
 ## Source items not carried into a lane
 
-- **Live ruleset reads** (all seven repos, degen's item 78 among them): no API read runs in a cloud session, so one read lane on
-  a session on the owner's computer reads the seven rulesets together. It is not one of the seven repo lanes.
+- **Ruleset reads and the move to the ruleset form** (all seven repos, degen's item 78 among them): no API read runs in a cloud
+  session. One read lane on a session on the owner's computer reads the seven rulesets together. The protection prose in
+  ios-adblock line 6, banchi D42 and mailaudit's records is rewritten in the ruleset sweep, not in a repo lane here.
 - **degen roadmap compare** is folded into its project-ops step, once a lane can fetch `origin/roadmap`.
-- **Unused shared actions** the agents listed that a lane above does not name (`ruling-kind` and `ci-done-comment` for
+- **Arbiter:** an arbiter starts only when the owner says so (session-tiers), so its absence is no gap. No lane adds one.
+- **Unused shared actions** the agents listed that no lane above names (`ruling-kind` and `ci-done-comment` for
   ios-adblock, `zizmor` for banchi, mailaudit and degen, `silent-undo` and `ruling-kind` for degen, joyous and home): each
   lane decides when it starts whether the repo needs the action. None is dropped as unwanted here.
