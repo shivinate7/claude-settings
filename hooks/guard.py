@@ -4723,15 +4723,15 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 PAGE_TOOL = "Artifact"
 # Rule `page-thread-reply` (decision questions-go-to-owner, "Answer on the page, not in a comment thread"). A reply into a
 # comment thread on this repo's waiting page is refused; reads, watches, resolves and other artifacts pass.
-PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread: rewrite the item the comment is about, "
+PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread. Remedy: rewrite the item the comment is about, "
                             "and say in one line in the session what changed. "
                             "(decision questions-go-to-owner, the answer goes on the page)")
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
-                     "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
+                     "waiting page. Remedy: Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
                      "(decision page-stale-publish, a waiting page behind main is not published)")
 PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
-                     "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
+                     "data. Remedy: Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
                      "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
                      "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Cockpit\" "
                      "and publish it to the same url. "
@@ -4816,7 +4816,7 @@ def page_stale_hit(tool_input, cwd):
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
-PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Remedy: Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
 def _page_check_module():
@@ -4849,7 +4849,8 @@ def _run_check_designs(page_file, item):
 # a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
 # node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
 # has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
-MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
+MOCKUP_HOME_FIX = (" Remedy: write the item again with each design's `file` set to a mockup committed in that folder. "
+                   "(decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)")
 
 
 def mockup_home_hit(writes, tool_input, cwd):

@@ -350,6 +350,12 @@ def refuse(payload, tool, args, rule, reason):
     return 0
 
 
+# The way out of a question the judge refuses. The judge's own reason names the item that missed; these name the act.
+QUESTION_REMEDY = ("Remedy: change the question to meet the item named above, then send it again; "
+                   "a page item is written again with its `context`, `options` or `pick` changed.")
+PAST_RULING_REMEDY = ("Remedy: do not ask; act on the cited ruling. A re-ask that ruling allows passes when a "
+                      "`Based on (ruling): <the id above>` line names it.")
+
 UNVETTED_REMEDY = (
     "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Add the line "
     "`Unvetted: <why it could not be checked>` to the question (a page item: to `context`) and send it again. "
@@ -437,7 +443,10 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
-        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
+        if rule == SPAWN_RULE:
+            return refuse(payload, tool, args, SPAWN_RULE, reason)
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else QUESTION_RULE,
+                      reason + " " + (PAST_RULING_REMEDY if cite else QUESTION_REMEDY))
     return 0
 
 
