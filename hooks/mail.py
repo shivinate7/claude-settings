@@ -27,10 +27,9 @@ TRANSFER_BOUND = 30  # bin/mail's own git calls, which no prompt waits on
 LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
-# Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. A Mac's settings.json
-# is a symlink a pull updates, so the hold lives here. MAILBOX_HOLD_OFF=1 lifts it for one command, for the owner's check
-# card. Remove "darwin" when the Mac round trip passes (step mail-mac-unhold).
-HELD_PLATFORMS = ("darwin",)
+# Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. MAILBOX_HOLD_OFF=1
+# lifts it for one command. Empty since the owner's Mac round trip passed (step mail-mac-unhold, 20:30 CST Nov 12).
+HELD_PLATFORMS = ()
 HOLD_OFF = "MAILBOX_HOLD_OFF"
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
 
