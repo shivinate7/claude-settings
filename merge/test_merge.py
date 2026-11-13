@@ -14534,6 +14534,8 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=No
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
+COLLABORATOR = {"login": "carol", "association": "COLLABORATOR"}  # a collaborator is not the owner: its marker must not suppress a send
+MEMBER = {"login": "mina", "association": "MEMBER"}  # an org member is not the owner either
 
 def lint_body(head, verdict="PASS", n=7):
     """The one literal of a lane-lint comment: the marker, the pull request, the head the lint read, and its verdict."""
@@ -16301,9 +16303,10 @@ class ReviewedList(CloudSession, ReviewEnv):
 
     def test_a_stranger_mail_marker_does_not_suppress_the_message(self):
         # The lint marker counts only from the repo's owner, and the mail marker is held to the same test. The owner's marker is the control: it
-        # suppresses the message for its state at its head. A stranger's marker for the same state and head does not.
+        # suppresses the message for its state at its head. A stranger's marker for the same state and head does not, and neither does a
+        # collaborator's or a member's: only the owner's does.
         records = [review_comment(1, 7, record_text(rounds=OPEN_ROUNDS))]
-        for by, want in ((OWNER, 0), (NOT_OWNER, 1)):
+        for by, want in ((OWNER, 0), (NOT_OWNER, 1), (COLLABORATOR, 1), (MEMBER, 1)):
             with self.subTest(author=by["association"]):
                 host, rc, out, err = self.listing([self.footed(pr_body(LANE_ID))], records + [self.mail_marker(2, 7, "open", REVIEW_HEAD, by)])
                 self.assertEqual(rc, 0, out + err)
@@ -17633,6 +17636,40 @@ class HoldsHeadVerdicts(ReviewEnv):
                 host.holds_head(nowhere, self.B)
         finally:
             os.chdir(prior)
+
+    def outcome(self, head, other):
+        """-> ("stop", message) when Host.holds_head(head, other) raises Stop, else ("verdict", its bool). Run from the clone, as merge runs."""
+        host = PullsHost([], {})
+        prior = os.getcwd()
+        os.chdir(self.co)
+        try:
+            return "verdict", host.holds_head(head, other)
+        except merge.Stop as e:
+            return "stop", str(e)
+        finally:
+            os.chdir(prior)
+
+    def test_a_failed_fetch_of_the_base_stops_and_never_reads_not_held(self):
+        # origin's main moves to B after the clone's last fetch, so the clone's origin/main is the stale A, which does not hold B. origin then
+        # hides refs/heads/main from every fetch, so the clone's fetch of the base fails. A read that went on from the stale A would say that
+        # main does not hold B: a clear answer that a failed read must never give.
+        sh(self.other, "git", "push", "-q", "origin", f"{self.B}:refs/heads/main")
+        self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/main").strip(), self.B, "setup: origin's main is not B")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main").strip(), self.A, "setup: the clone's origin/main is not the stale A")
+        sh(self.bare, "git", "config", "uploadpack.hideRefs", "refs/heads/main")
+        kind, got = self.outcome(self.B, "main")
+        self.assertEqual(kind, "stop", "a failed fetch of main read as a verdict (%r), not as a Stop, though the stale origin/main does not hold B" % (got,))
+        self.assertIn("git fetch of main failed", got, "the Stop does not name the failed fetch of main: %s" % got)
+
+    def test_a_failed_fetch_of_a_pull_ref_stops(self):
+        # The clone's refs/remotes/origin/pull is a ref, so git cannot create refs/remotes/origin/pull/9 for the fetch of refs/pull/9/head, and
+        # that fetch fails. B is in the clone and main is current, so a read that went on would answer a verdict.
+        sh(self.co, "git", "update-ref", "refs/remotes/origin/pull", self.A)
+        fetch = subprocess.run(["git", "fetch", "-q", "origin", "+refs/pull/*/head:refs/remotes/origin/pull/*"], cwd=self.co, capture_output=True)
+        self.assertNotEqual(fetch.returncode, 0, "setup: the fetch of the pull request heads succeeds, so no pull ref read fails")
+        kind, got = self.outcome(self.B, "main")
+        self.assertEqual(kind, "stop", "a failed fetch of a pull ref read as a verdict (%r), not as a Stop" % (got,))
+        self.assertIn("git fetch of the pull request heads failed", got, "the Stop does not name the failed fetch of the pull request heads: %s" % got)
 
 
 class ReviewedRoots(ReviewEnv):
