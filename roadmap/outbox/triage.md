@@ -1045,3 +1045,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - cloud-branch-delete 20:58 CST Nov 12: Retro 48 h audit, 20:56 CST Nov 12: R45's home is "a new decision for the delete route", but no slug existed. Triage names it decision `cloud-branch-delete`, one record for the delete route, written by this lane. (The R45 store entry's step field reads merge-reads-ruleset; this step carries the delete-route half.)
 - agent-output-terse-line 20:58 CST Nov 12: Store fix 20:58 CST Nov 12: the r36.json quote was garbled ("; ." fragments). Triage restored it from plan R36 (retro 48 h audit).
 - fixed-number-limits-census 20:58 CST Nov 12: Store fix 20:58 CST Nov 12: the r37.json quote was garbled. Triage restored it from plan R37 (retro 48 h audit).
+- refusal-names-way-out 20:59 CST Nov 12: Lane set by coordinator 20:58 CST Nov 12 (source: retrospective 48 h audit 20:56 CST).
+- child-repo-gap 20:59 CST Nov 12: Held, coordinator 20:58 CST Nov 12: R64 says "only if there's free time on the runners"; asked via the retrospective.
