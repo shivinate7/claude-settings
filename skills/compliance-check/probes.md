@@ -65,7 +65,7 @@ Each probe prints its group line first, then its item lines, the order the score
 | --- | --- |
 | `folder <path>/: neither a layout kind nor an extra` | a folder no kind and no extra names. A legacy record folder says where it moves |
 | `missing core kind <kind>: <path>` | a core kind of the layout that the child lacks |
-| `layout: not rolled out` | the child has no extras file, or its file lacks `"rolled-out": true`. Not a fail. Each line carries `preview`, for the roll-out lane |
+| `layout: not rolled out` | the child has no extras file, or its mark is absent or `false`. Not a fail. A mark present and not JSON `true` or `false` raises, and the group reads unknown; the keys that do not depend on the mark (the waiting page) still read. Each line carries `preview`, for the roll-out lane |
 
 Exit 0: in shape or not rolled out. Exit 1: out. Exit 2: unknown. Each top-level dot folder, and
 Claude Code's own folders in `.claude/`, count as tool folders, not repo choices, so they pass.

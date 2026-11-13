@@ -19,7 +19,7 @@ cannot run, so the group is unknown.
 
 layout: lint/layout.json through lint/layout.py, plus the child's extras file. It names each
   folder that is neither a layout kind nor an extra, and each core kind the child lacks. A child
-  with no extras file, or none marked "rolled-out": true, is "not rolled out": it exits 0, and
+  with no extras file, or none marked "rolled-out": true (a mark that is not true or false raises, and the group exits 2), is "not rolled out": it exits 0, and
   lists the same findings as a preview.
 design: screen readiness against docs/design/. The shoot config names the screens, sizes and themes. The
   shared `bin/shoot` is the screenshot command, and a config it would refuse is a gap. One token
@@ -196,7 +196,7 @@ def waiting_copy(root):
     try:
         if layout.waiting_page(root) == "unknown":
             return None
-        branch, home = layout.record_branch(root), layout.path(root, "waiting-data")
+        branch, home = layout.record_branch(root), layout.folder_any_mark(root, "waiting-data")
     except layout.LayoutError as err:
         return "unknown - waiting copy: %s" % err
     seen = False

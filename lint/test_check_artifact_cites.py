@@ -191,6 +191,19 @@ class CiteTests(unittest.TestCase):
         self.assertEqual(code, 1, "an unreadable registry passed. Output:\n" + out)
         self.assertTrue(self.flagged(out), "an unreadable registry printed no FAIL line. Output:\n" + out)
 
+    def test_a_bad_mark_does_not_say_a_readable_registry_cannot_be_read(self):
+        """A "rolled-out" that is not JSON true or false, with a registry whose ids read: the cites check does not report the
+        registry unreadable, because its id read (check_artifact_cites.py:144) takes no export folder. The check still refuses
+        under the mark, since it reads record folders. The valid mark is the control."""
+        self.decision("# Record\n\nSee artifact:" + REGISTERED + ".\n")
+        self.put(EXTRAS, json.dumps(dict(REGISTRY, **{"rolled-out": True})))
+        self.assertGreen("the control (a valid mark) refused a registered artifact cite")
+        self.put(EXTRAS, json.dumps(dict(REGISTRY, **{"rolled-out": "yes"})))
+        code, out = self.run_check()
+        self.assertNotIn("the artifacts registry cannot be read", out, "a registry whose ids read was reported unreadable under a bad mark. Output:\n" + out)
+        self.assertNotEqual(code, 0, "a bad rolled-out mark passed the cites check. Output:\n" + out)
+        self.assertTrue(any("rolled-out" in line for line in self.flagged(out)), "the refusal under a bad mark does not name the mark. Output:\n" + out)
+
 
 if __name__ == "__main__":
     unittest.main()

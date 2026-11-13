@@ -2309,9 +2309,11 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True, writer=NO_KEY):
+    def make_repo(self, name, page=True, writer=NO_KEY, extras=None):
         """A repo whose extras file names the waiting page (when page is true). `writer` sets its
-        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
+        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out.
+        `extras`, when given, is the whole extras file instead: a page that names no artifact, say. A str is the
+        file's raw text, so "{" makes a file that is not JSON."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
@@ -2319,8 +2321,11 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             keys = {"kinds": {}, "waiting-page": self.PAGE}
             if writer is not self.NO_KEY:
                 keys["page-writer"] = writer
+            if extras is not None:
+                keys = extras
+            text = keys if isinstance(keys, str) else json.dumps(keys)
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
-                json.dump(keys, f)
+                f.write(text)
         return repo
 
     def extras_key(self, repo):
@@ -2389,6 +2394,40 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         # Catches: an Input Needed sentence ending in "?" read as no question, so it never reaches the page.
         out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
         self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_an_unreadable_layout_refuses_as_cannot_run(self):
+        # Catches: the owner-question check passing a question when the layout raises LayoutError. waiting_page() raises
+        # for a waiting-page URL that is no artifact link, and the check's own except passes the reply unchecked. It must
+        # refuse as cannot-run, as the past-ruling check does. The control is the same reply with a readable page.
+        import layout  # the scope first: the fixture makes the layout raise
+        broken = self.make_repo("broken", extras={"kinds": {}, "waiting-page": "https://example.com/x"})
+        with self.assertRaises(layout.LayoutError, msg="the fixture does not make the layout raise"):
+            layout.waiting_page(broken)
+        out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))], repo=broken)
+        self.assertIsNotNone(out, "the question passed with an unreadable layout: the check swallowed the LayoutError")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn("could not run", out.get("reason", ""), "the refusal does not say the check could not run: %s" % out)
+        readable = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(readable, "Pick guard")
+        self.assertNotIn("could not run", readable.get("reason", ""), "the readable-page control named a cannot-run refusal")
+
+    def test_qm_red_an_extras_file_that_is_not_json_refuses_as_cannot_run(self):
+        # Catches: the owner-question check passing a question when the extras file is not JSON. page_writer_key() reads
+        # that file before the check's own try, so its LayoutError escaped, the caller swallowed it and the reply passed
+        # unchecked. It must refuse as cannot-run. The control is the same reply with a readable file.
+        import layout  # the scope first: the fixture makes the layout raise
+        broken = self.make_repo("broken-json", extras="{")
+        with self.assertRaises(layout.LayoutError, msg="the fixture does not make page_writer_key raise"):
+            layout.page_writer_key(broken)
+        out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))], repo=broken)
+        self.assertIsNotNone(out, "the question passed with an unreadable extras file: the LayoutError was swallowed")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn("could not run", out.get("reason", ""),
+                      "the refusal does not say the check could not run: %s" % out)
+        readable = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(readable, "Pick guard")
+        self.assertNotIn("could not run", readable.get("reason", ""),
+                         "the readable-file control named a cannot-run refusal")
 
     def test_qm_red_question_mark_rows_block(self):
         # Catches: a plain "X or Y?" ask with no box or send passing as a non-pick (spec v2.1).
@@ -3478,19 +3517,26 @@ def write_file(path, text):
         f.write(text)
 
 
+NO_MARK = object()  # DecisionRepo's default: the extras file holds no "rolled-out" key
+
+
 class DecisionRepo:
     """A git repo whose default branch is `main`. Records sit where the layout puts the decisions kind:
-    docs/decisions in a rolled-out repo (its extras file says so), else the legacy decisions/ folder."""
+    docs/decisions in a rolled-out repo (its extras file says so), else the legacy decisions/ folder.
+    `mark`, when given, is the extras file's "rolled-out" value whatever the folder: a legacy repo with a bad
+    mark keeps its records in decisions/."""
 
-    def __init__(self, folder, rolled_out=True):
+    def __init__(self, folder, rolled_out=True, mark=NO_MARK):
         self.path = folder
         self.records = "docs/decisions" if rolled_out else "decisions"
         self._git("init", "-q", "-b", "main")
         self._git("config", "user.email", "t@example.com")
         self._git("config", "user.name", "t")
-        if rolled_out:
+        if mark is NO_MARK and rolled_out:
+            mark = True
+        if mark is not NO_MARK:
             write_file(os.path.join(folder, ".claude", "layout-extras.json"),
-                       json.dumps({"kinds": {}, "rolled-out": True}))
+                       json.dumps({"kinds": {}, "rolled-out": mark}))
         self.touch("2026-10-01T10:00:00Z")
 
     def _git(self, *args, when=None):
@@ -3624,6 +3670,24 @@ class RewriteStampTests(unittest.TestCase):
                 repo.touch("2026-11-02T09:00:00Z")
                 self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
                                   "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_bad_mark_in_a_legacy_repo_still_checks_decisions(self):
+        """Case 1, bad mark. A legacy repo, its records in decisions/, whose "rolled-out" is not JSON true or false.
+        Only the rolled-out answer is unknown: the stamp check still reads decisions/ and blocks the stale rewrite.
+        The valid mark false is the control, in the same legacy repo."""
+        for mark in ("false", None, "true", 0):
+            with self.subTest(bad_mark=mark):
+                repo = DecisionRepo(tempfile.mkdtemp(dir=self.tmp), rolled_out=False, mark=mark)
+                repo.commit(D_LAST_COMMIT, "ci-job-caps")
+                repo.touch("2026-11-02T09:00:00Z")
+                self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
+                                  "ci-job-caps", "2026-10-28", "18:44")
+        with self.subTest(valid_mark=False):
+            repo = DecisionRepo(tempfile.mkdtemp(dir=self.tmp), rolled_out=False, mark=False)
+            repo.commit(D_LAST_COMMIT, "ci-job-caps")
+            repo.touch("2026-11-02T09:00:00Z")
+            self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
+                              "ci-job-caps", "2026-10-28", "18:44")
 
     def test_under_or_by_R_without_a_stamp_passes(self):
         """Case 3, flipped to green. With no stamp there is no ruling time. R's later commit is no fallback:

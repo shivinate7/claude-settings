@@ -196,6 +196,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+import layout  # noqa: E402  the one home of where the decisions folder is (lint/layout.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -5444,6 +5445,13 @@ def kind_misfits(kind, files):
         return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
     return []
 
+def decision_paths(root, files):
+    """-> the sorted paths of the markdown records under the decisions folder of `root` that (path, status) pairs add, modify, rename or copy.
+    A removed path is skipped; any other status counts, so a status the diff reads as new cannot pass. layout.LayoutError when the folder
+    cannot be read: the caller stops, never passes."""
+    folder = layout.path(root, "decisions")
+    return sorted(p for p, st in files if st != "removed" and layout.md_under(p, folder))
+
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live, repo_dir=None):
@@ -5727,6 +5735,13 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
+            if a.kind == "docs-only":  # a decision record is a ruling, so the docs-only skip does not cover it (decision docs-only-prs-skip-review)
+                try:
+                    rulings = decision_paths(root, [(p, st) for p, st, _ in files])
+                except layout.LayoutError as e:
+                    raise Stop(f"Kind: cannot tell whether the diff files a decision record, because {e}. " + REVIEW_CITE)
+                if rulings:
+                    raise Stop("Kind: the diff files a decision record at " + ", ".join(rulings) + ", so --kind docs-only is false. Post Kind normal with one round (decision docs-only-prs-skip-review). " + REVIEW_CITE)
             earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
             earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
             new_top = max((r[0] for r in a.round), default=0)

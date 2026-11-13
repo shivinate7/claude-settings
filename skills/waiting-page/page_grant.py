@@ -273,7 +273,7 @@ def judge(args):
     prove_fresh(folder, made, args.item)
     layout = load_layout()
     try:
-        entries = layout.artifacts(args.root)
+        entries = layout.artifacts(args.root, exports=False)
     except layout.LayoutError as err:
         raise unknown("the artifacts registry cannot be read: %s" % err)
     pages = [e for e in entries if e["role"] == layout.WAITING_ROLE]
