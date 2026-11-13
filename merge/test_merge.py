@@ -489,20 +489,38 @@ class Env(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
-        """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
-        Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
-        `cwd` is the clone merge runs in; self.co when not given."""
-        out, err = stdout or io.StringIO(), stderr or io.StringIO()
-        self.claim_fired[0] = False  # this run's claim push may fire the hook once
+    def run_once(self, args, out, err, host, lock, hosts, cwd, keep_claim):
+        """One merge.main run, its output written to out and err. keep_claim: the run is the second step of a two-step confirm, so the
+        claim this confirm pushed still counts as fired: a fault set after the claim fires in the run that makes those reads."""
+        if not keep_claim:
+            self.claim_fired[0] = False  # this run's claim push may fire the hook once
         prior = os.getcwd()
         os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
+                return merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
         finally:
             os.chdir(prior)
+
+    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
+        """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
+        Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
+        `cwd` is the clone merge runs in; self.co when not given.
+        A `--confirm` runs the two-step protocol (decision: the claim stays a commit): a run that pushes its claim commit and stops is
+        followed by the same confirm on the new head, which merges it. A draft's confirm and a run that merges in one step stay one run.
+        run_merge_once is the single run, for the cases that pin the first step."""
+        out, err = stdout or io.StringIO(), stderr or io.StringIO()
+        two_step = "--confirm" in args and not getattr(host or self.host, "draft", False)  # read before the run: a ready step clears the draft flag
+        rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
+        if two_step and rc == 0 and self.claim_fired[0] and not getattr(host or self.host, "merged", False):
+            rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=True)
+        return rc, out.getvalue() + err.getvalue()
+
+    def run_merge_once(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
+        """-> (rc, stdout + stderr) of one run of merge: no second step. A confirm that pushes a claim stops here."""
+        out, err = stdout or io.StringIO(), stderr or io.StringIO()
+        rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
         return rc, out.getvalue() + err.getvalue()
 
     def refs(self):
