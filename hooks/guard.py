@@ -4689,9 +4689,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 7d. A read-only agent's shell write (rule readonly-shell-write): a redirect, `tee`, `touch` or `mktemp` to a
     # file outside its own session's scratchpad, here or in an ssh remote command.
     if readonly_agent(payload):
-        for text in [raw, *substitution_commands(raw, stripped)]:
-            if text.startswith("(") and text.endswith(")"):   # the inside of `$(( ))`: arithmetic, no command
-                continue
+        # `$(( ))` arithmetic runs no command, so its text is left out; its `>` is a comparison.
+        for text in [raw, *substitution_commands(raw, stripped, arithmetic=False)]:
             matched = readonly_write_hit(text, cwd, session_id)
             if matched:
                 refuse(tool, "deny", "readonly-shell-write", READONLY_SHELL_WRITE_REASON, matched)
@@ -6048,47 +6047,74 @@ def _null_device(path: str) -> bool:
     return POWERSHELL_CALL[0] or path.strip("'\"").lower() != "nul"
 
 
-def _comparison_spans(segment: str):
-    """The (start, end) of each unquoted `[[ ... ]]` test and `(( ... ))` or `$(( ... ))` arithmetic in one segment.
-    A `>` inside one is a comparison, not a redirect. An opener left open runs to the end."""
+READONLY_TEST_LEADS = guard_core.LOOP_KEYWORDS | {"!", "time"}   # words after which a `[[` or `((` still starts a command
+
+
+def _command_start(text: str, at: int) -> bool:
+    """True when `text[at]` starts a command: it opens the text or follows a command separator, an opening
+    paren or backquote, or a keyword such as `if` or `!` that itself starts a command. Elsewhere `[[` and `((`
+    are ordinary words, as `echo [[ x` shows."""
+    before = text[:at].rstrip(" \t")
+    if not before or before[-1] in ";&|\n(`":
+        return True
+    word = re.split(r"[\s;&|(`]", before)[-1]
+    return word in READONLY_TEST_LEADS and _command_start(text, len(before) - len(word))
+
+
+def _comparison_spans(text: str):
+    """The (start, end) of each unquoted, closed `[[ ... ]]` test and `(( ... ))` or `$(( ... ))` arithmetic.
+    A `>` inside one is a comparison, not a redirect. `[[` and `((` open one only at a command start; `$((` opens
+    one anywhere. Bash reads `((` as arithmetic only when the paren after it closes right before the last `)`,
+    so `((a) && b)` is two subshells. An opener never closed is no span: its `>` stays a redirect."""
     spans, open_at, depth = [], None, 0
-    steps = [(at, bool(quote)) for at, _, quote in walk_quotes(segment)]
+    steps = [(at, bool(quote)) for at, _, quote in walk_quotes(text)]
     # walk_quotes skips the second char of an escape or `$'`: that char keeps the state of the one before it
-    quoted = {at + gap for (at, inside), (after, _) in zip(steps, steps[1:] + [(len(segment), False)])
+    quoted = {at + gap for (at, inside), (after, _) in zip(steps, steps[1:] + [(len(text), False)])
               if inside for gap in range(after - at)}
-    for at, char in enumerate(segment):
+    for at, char in enumerate(text):
         if at in quoted:
             continue
         if open_at is None:
-            word_start = at == 0 or segment[at - 1] in " \t!("
-            if segment.startswith("[[", at) and word_start and segment[at + 2:at + 3] in (" ", "\t"):
+            if text.startswith("[[", at) and text[at + 2:at + 3] in (" ", "\t") and _command_start(text, at):
                 open_at, depth = at, -1
-            elif segment.startswith("((", at):
+            elif text.startswith("((", at) and (text[at - 1:at] == "$" or _command_start(text, at)):
                 open_at, depth = at, 1
         elif depth < 0:      # inside [[ ]]
-            if segment.startswith("]]", at) and segment[at - 1] in " \t":
+            if text.startswith("]]", at) and text[at - 1] in " \t":
                 spans.append((open_at, at + 2))
                 open_at = None
         elif char == "(":
             depth += 1
         elif char == ")":
             depth -= 1
-            if depth == 0:
+            if depth == 1 and text[at + 1:at + 2] != ")":
+                open_at = None   # the inner paren closed before the end: subshells, not arithmetic
+            elif depth == 0:
                 spans.append((open_at, at + 1))
                 open_at = None
-    if open_at is not None:
-        spans.append((open_at, len(segment)))
     return spans
 
 
+def _mask_comparisons(text: str) -> str:
+    """The text with each unquoted `>` inside a comparison span (`_comparison_spans`) made a space. The spans are
+    found on the whole command, because `split_segments` cuts a test such as `[[ a > b || c ]]` at its `||`."""
+    if "[[" not in text and "((" not in text:
+        return text
+    chars = list(text)
+    for start, end in _comparison_spans(text):
+        for at in range(start, end):
+            if chars[at] == ">" and unquoted_at(text, at):
+                chars[at] = " "
+    return "".join(chars)
+
+
 def _redirect_targets(segment: str):
-    """The target of each unquoted output redirect in one segment that writes no file (`_null_device`), is no
-    comparison (`_comparison_spans`) and no descriptor duplicate (`2>&1`). An input redirect and a heredoc header
-    (`<<`) write nothing."""
-    spans = _comparison_spans(segment) if "[[" in segment or "((" in segment else []
+    """The target of each unquoted output redirect in one segment that writes no file (`_null_device`) and is no
+    descriptor duplicate (`2>&1`). An input redirect and a heredoc header (`<<`) write nothing. A comparison's `>`
+    is already masked (`_mask_comparisons`)."""
     for found in REDIRECTION.finditer(segment):
         word = found.group()
-        if word[0] == "<" or not unquoted_at(segment, found.start()) or any(a <= found.start() < b for a, b in spans):
+        if word[0] == "<" or not unquoted_at(segment, found.start()):
             continue
         operator = _REDIRECT_OPERATOR.match(word).end()
         if SILENT_WRITE_REDIRECT.match(word) and _null_device(word[operator:].lstrip("&")):
@@ -6161,7 +6187,8 @@ def readonly_write_hit(command: str, cwd: str, session: str, remote: bool = Fals
     if depth > READONLY_WRITE_DEPTH:
         return ""
     ends = []
-    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command, shells_only=True, per_body=True)), ends)
+    masked = _mask_comparisons(_resolve_vars(strip_heredoc_bodies(command, shells_only=True, per_body=True)))
+    segments = split_segments(masked, ends)
 
     def outside(path: str, where: str) -> bool:
         if remote or not path:
