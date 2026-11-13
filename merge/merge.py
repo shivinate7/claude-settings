@@ -44,8 +44,9 @@
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
-                          new process, file or timer.
+                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base. The comment
+                          read starts at a cursor kept in merge-role.json (one write of that file per run), with a full re-read after 30 minutes;
+                          no new process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -1173,21 +1174,30 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
+    def comment_rows(self, since, seen=None):
+        """-> [{id, issue, kind, body, created, updated}] of the repo's review record and lane-lint comments updated since `since`, in the list's order
+        (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is "record" when the review record marker is the whole
+        first line, or "lint" when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
+        gets the updated_at of every comment the read returned, rows or not: the newest of them is a safe cursor. A failed read is a Stop.
+        The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it."""
+        rows = []
+        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
+            if seen is not None:
+                seen.append(c.get("updated_at"))
+            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+            first = body.splitlines()[:1]
+            kind = "record" if first == [REVIEW_MARKER] else "lint" if first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR else None
+            if m and kind:
+                rows.append({"id": c.get("id"), "issue": int(m.group(1)), "kind": kind, "body": body, "created": c.get("created_at"), "updated": c.get("updated_at")})
+        return rows
+
     def issue_comments(self, since):
-        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        """-> (records, lints): one list read of the repo's issue comments updated since `since` (comment_rows, grouped by comment_groups).
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
-        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            first = body.splitlines()[:1]
-            if m and first == [REVIEW_MARKER]:
-                records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
-            elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
-                lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+        return comment_groups(Host.comment_rows(self, since))  # unbound: a test fake borrows this method, and needs only its `pages`
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -4374,11 +4384,107 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
+REVIEWED_FULL_REREAD_SECS = 1800  # a cache older than this is read in full again: an incremental read never sees a deleted comment
+REVIEWED_OVERLAP_SECS = 300  # an incremental read starts this long before the cursor, so a comment GitHub listed late is not skipped
+
+def iso_secs(text):
+    """-> the epoch seconds of an ISO 8601 UTC time as GitHub writes it, or None when `text` is not one."""
+    try:
+        when = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    return when.timestamp() if when.tzinfo else None
+
+def iso_stamp(secs):
+    return datetime.datetime.fromtimestamp(secs, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def comment_groups(rows):
+    """-> (records, lints) of comment_rows `rows`, in their order: records is {PR number: [(body, created, updated)]}, lints is {PR number: [body]}."""
+    records, lints = {}, {}
+    for r in rows:
+        if r["kind"] == "record":
+            records.setdefault(r["issue"], []).append((r["body"], r["created"], r["updated"]))
+        else:
+            lints.setdefault(r["issue"], []).append(r["body"])
+    return records, lints
+
+def is_whole(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+def valid_cache_row(r):
+    return (isinstance(r, dict) and is_whole(r.get("id")) and is_whole(r.get("issue")) and r.get("kind") in ("record", "lint") and isinstance(r.get("body"), str)
+            and all(r.get(k) is None or isinstance(r.get(k), str) for k in ("created", "updated")))
+
+def valid_reviewed_cache(c):
+    """True when `c` is a whole reviewed cache: every field of its type. One bad row makes it invalid, and an invalid cache is read in full instead."""
+    return (isinstance(c, dict) and all(isinstance(c.get(k), str) and iso_secs(c[k]) is not None for k in ("floor", "cursor"))
+            and isinstance(c.get("full_at"), (int, float)) and not isinstance(c.get("full_at"), bool)
+            and isinstance(c.get("rows"), list) and all(valid_cache_row(r) for r in c["rows"]))
+
+def read_state():
+    """-> (state dict, readable): the merge state file's content. A missing, unparseable or non-object file is ({}, True): nothing to keep.
+    Any other failure to read it (a folder, a denied read) is ({}, False): the caller leaves the file alone."""
+    try:
+        data = json.loads(role_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, True
+    except OSError:
+        return {}, False
+    except ValueError:  # UnicodeDecodeError and JSONDecodeError
+        return {}, True
+    return (data, True) if isinstance(data, dict) else ({}, True)
+
+def write_state(data):
+    """Replace the merge state file with `data`, so a reader never sees half a file. Raises OSError."""
+    path = role_path()
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+def reviewed_rows(h, floor):
+    """-> the comment rows of the repo for `merge --reviewed`, `floor` being the oldest open pull request's created_at. The cursor cache of this repo
+    (merge-role.json, key reviewed_cursor) is read first: a valid cache whose floor is no newer than `floor`, taken within REVIEWED_FULL_REREAD_SECS, gives
+    its rows plus the comments updated since its cursor less REVIEWED_OVERLAP_SECS, merged by comment id (an edit replaces its row), oldest first.
+    Anything else (no or invalid cache, an older pull request reopened, a stale cache) is a full read from `floor`, as before the cursor. The cursor is the
+    newest updated_at read, never a wall clock. One write of the file follows; a failed write never fails the read."""
+    key = getattr(h, "repo", None) or str(getattr(h, "cwd", None) or ".")  # OWNER/NAME, else the checkout the host runs in: one repo's rows never serve another's
+    now = getattr(h, "now", time.time)()  # a test fake has no repo name or clock
+    state, readable = read_state()
+    cache = state.get("reviewed_cursor")
+    cache = cache.get(key) if isinstance(cache, dict) else None
+    floor_s, seen = iso_secs(floor), []
+    warm = valid_reviewed_cache(cache) and floor_s is not None and iso_secs(cache["floor"]) <= floor_s and 0 <= now - cache["full_at"] <= REVIEWED_FULL_REREAD_SECS
+    if warm:
+        merged = {r["id"]: r for r in cache["rows"]}
+        merged.update({r["id"]: r for r in Host.comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)})
+        rows = sorted(merged.values(), key=lambda r: (r["created"] or "", r["id"]))
+        entry, newest = {"floor": cache["floor"], "full_at": cache["full_at"], "rows": rows}, [iso_secs(cache["cursor"])]
+    else:
+        rows = Host.comment_rows(h, floor, seen)
+        entry, newest = {"floor": floor, "full_at": now, "rows": rows}, [floor_s]
+    newest += [iso_secs(u) for u in seen]
+    top = max((t for t in newest if t is not None), default=None)
+    if top is not None and readable:
+        entry["cursor"] = iso_stamp(top)
+        if valid_reviewed_cache(entry) and entry != cache:
+            with contextlib.suppress(OSError):
+                state = read_state()[0]  # read again: the role may have been written since the first read
+                caches = state.get("reviewed_cursor")
+                write_state({**state, "reviewed_cursor": {**(caches if isinstance(caches, dict) else {}), key: entry}})
+    return rows
+
 def reviewed_read(h):
     """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
     for each pull request whose newest record reads done (kind is the record's Kind); and the open pull request rows. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    repo's comments updated since a cursor kept in merge-role.json; the first read of a repo, a reopened older pull request or a cache older than
+    REVIEWED_FULL_REREAD_SECS pages every comment since the oldest open pull request, see reviewed_rows) and, for each ready pull request that has a record, three `gh` calls: the check runs,
+    the commit statuses and the branch protection (decision pr-review-record, the cost). One write of that file per run.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base."""
@@ -4386,7 +4492,7 @@ def reviewed_read(h):
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+    rows, lints = comment_groups(reviewed_rows(h, min(d["created_at"] for d in pulls)))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
@@ -4409,7 +4515,7 @@ def reviewed_read(h):
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
+    gh calls scale with the number of roots; no new process or timer, and one write of the state file per root."""
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
@@ -5406,14 +5512,10 @@ def write_merge_role(tier):
     if tier not in MERGE_ROLES:
         raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
+    kept = read_state()[0].get("reviewed_cursor")  # the reviewed cursor's cache is not the role's to drop
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps({"session": sid, "role": tier}), encoding="utf-8")
-        os.replace(tmp, path)
+        write_state({"session": sid, "role": tier, **({"reviewed_cursor": kept} if kept is not None else {})})
     except OSError as e:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
