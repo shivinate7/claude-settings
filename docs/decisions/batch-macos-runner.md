@@ -21,7 +21,7 @@ Limits:
 Why: restart-plan R58 holds the owner's reasons.
 
 - Check: `lint/test_windows_split.py` (the `runs-on` string, `mac-runner.py`'s pick, and `batch-macos-skip.py`).
-- Cost: one runners-list read per checks run, and two `gh api` reads per lane-touched-tests run. No process starts, no file written, no timer.
+- Cost: one runners-list read per checks run, and two `gh api` reads per lane-touched-tests run (unmeasured). No process starts, no file written, no timer.
 
 Kind: process
 Home: .github/scripts/mac-runner.py
