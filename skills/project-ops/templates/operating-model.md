@@ -1,7 +1,7 @@
 # Operating model
 
-Paste this into the project instructions. Replace each `<placeholder>`. The roster goes with it,
-from `roster.md`.
+Paste this into the project instructions. Replace each `<placeholder>`. The roster is not pasted: it lives on the record branch
+(`roster.md` is its form; ruling R22).
 
 ## Session tiers
 
@@ -14,6 +14,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
+  It archives each other finished session it started at its next wake, once it has read the report (ruling R46). It sends each lane that triage flags one line: reply if you are stuck and nobody picked it up (ruling R56 point 3).
+  The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
@@ -43,12 +45,20 @@ A spawner is a session that starts its own agents. Each session role is a set of
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
+  Triage also writes the roster on the record branch (ruling R22, a respawn rewrites every session id at once)
+  and the rulings store, one file per owner ruling, from the owner's quoted words with their time (ruling R59,
+  a ruling governs at once; `lint/ruled_store.py` checks the store). It sends the coordinator the ready list.
+  It closes the build's stale drafts once, then at each batch (decision `stalled-steps`; step
+  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts.
+  It flags to the coordinator each lane whose step another step waits on, or that is on the express list (R55).
+  It flags it only when the lane has sent no report or message since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step.
   It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the closes and the page itself (rule `roles-orchestrator-never-builds`).
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
-  opens or builds each batch the output names in that wake. It runs each `--confirm` as a background command,
-  so one repo's CI wait never holds another repo's hand-offs.
+  opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground (see below). A foreground wait on one repo's CI held another repo's
+  hand-offs for 1 h 16 min once (decision `session-tiers`, incident 2026-11-07). Batch steps are in skill `ci-hygiene`, step 8. The left-out list
+  and `--confirm --express` are in the merge tool's usage.
   It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head
   its CI ran on. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
@@ -66,7 +76,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   terminal, never to a log only. A runner that merges a second checkout runs `~/.claude/bin/merge -C <checkout> <pr> --confirm`,
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
-  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step.
+  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
   The runner keeps only the merge itself, which the merge lock serializes. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds nothing (rule `roles-orchestrator-never-builds`):
   - Each close comes from the proof that triage reads for a close (the evidence ledger), with its comment: one agent per close.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
@@ -75,6 +85,11 @@ A spawner is a session that starts its own agents. Each session role is a set of
   - The per-PR fix verifiers and the records start at once, in parallel, never one after another.
   - A build it started in the background is never waited on in the foreground. It ends its turn and sets a one-time check-in, so the next hand-off gets a turn. This holds for builds and CI waits, not for `--confirm`, which stays foreground (record `merge-confirm-repo`).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
+  It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
+  posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the
+  four-point check, commits its handoff to `roadmap/outbox/<slug>-handoff.md` and tags itself archive-ready
+  (ruling R46). The owner never reads a lane: it sends each owner act and question to its parent with the
+  exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 
@@ -115,9 +130,9 @@ parent, or miss a message while busy.
      the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
-  4. The coordinator archives the old session, then the coordinator starts the successor from
-     the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
-     the roster.
+  4. The coordinator archives the old session, then the coordinator starts the successor from the hand-off file
+     and sends triage the new id in the same turn. Triage rewrites the roster line on the record
+     branch (ruling R22). The coordinator sends no broadcast. Sessions read the roster.
   5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
      before any other act. It reads each page's comments since the time in the hand-off file.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
@@ -138,7 +153,7 @@ parent, or miss a message while busy.
 - A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
-  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
 - Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
@@ -171,9 +186,11 @@ parent, or miss a message while busy.
 
 - Send a message at once in two cases: work is blocked (a PR held, a lane stopped), or the owner
   asked for something to be passed on.
+- The git mailbox carries a message: `mail send`, with `mail wait` as the doorbell (skill `waiting-page`,
+  `reference/routing-and-sessions.md`; decision `session-messages`).
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
   on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
-- Triage reads the outbox at each wake, files each item, and removes what it filed.
+- Triage reads the outbox at each wake, files each item, and removes what it filed. A `*-handoff.md` file is the exception: it stays as the reference for an archived session (ruling R46).
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
 - A session re-reads the roster right before it sends to a standing session.
