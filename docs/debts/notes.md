@@ -2274,3 +2274,6 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- batch-label-no-allow-entry: `merge --batch-label` has no allow entry in settings.json, so a cloud session may be asked before it runs; the owner picks the entry (item 618). Found in review round 3 of lane batch-label-write. Decision: pr-ledger.
+- batch-label-hold-ordering: the ledger reads a hold label before it reads `Waits`, so a batch PR with a hold label and the `batch` label reads by the hold first. Found in review round 3 of lane batch-label-write. Decision: pr-ledger.
+- batch-label-rest-post-unmeasured: the label write is proven against the gh shim only; a real REST POST to issues/N/labels is unmeasured. Found in review round 3 of lane batch-label-write. Decision: pr-ledger.
