@@ -360,6 +360,7 @@ It runs on the Duo by default, or on the iPhone 18 Pro with `--device pro`. It r
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
 It never shuts down a simulator it did not boot. Before its own boot it deletes that device's PosterBoard store (`PRBPosterExtensionDataStore`), which iOS 27.1 never frees. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
 On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro [--udid]`, `give` and `status`. After the grant it checks the booted list again before it boots. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
+After its own boot it tries to disable the Siri, intelligence, Mail and Spotlight daemons that crash on every iOS 27.1 boot; the list lives in `bin/sim-noise-services`.
 
 ## Session tiers and a roadmap record for a repo
 
