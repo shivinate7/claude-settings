@@ -103,8 +103,25 @@ not a list), an unreadable `woke`, an answer with no readable `at`
 or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
 own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
+A listed answer on an item with a non-empty `lane` ends its parentheses with `, lane <slug>`, so the wake can message that lane.
+Two more lines, after the answer lines and before any unknown line:
+`answer-needs-reply <id> (item <n>, owner <owner>, answered <at>)` for an item answer of `choice` `none` whose `note` is not blank, when
+the item has no `reply` with text and a `replied` later than the answer's `at` (read or unread, whatever the wake). A `replied` that is
+not an ISO time, with a `reply` text, is unknown.
+`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holds` text, no `lane` text and no `waits` (a CI or PR wait is no lane block).
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
+
+Close-batch mode, run by the item's owner at step 1 and 2 of "Route and close" (SKILL.md):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]
+
+Each file is a doc `ArtifactData get` saved ({id, data, version}) or bare data. It prints one `ArtifactData batch` payload, {"writes": [...]}:
+a `set` of receipts/<id> with `read` and `filed` at --now (default: the clock, ISO UTC with a Z), an `update` of items/<id> that closes it
+(`status`, `closed`, `lastAnswer` from the answer's `choice`, `done`, `note`, `at`; with --reply text also `reply` and `replied`), and a `delete` of
+answers/<id>. A write carries `if_version` when its doc's version is known, else none (--receipt names the receipt already stored). Exit 0.
+Exit 2 with one `unknown:` line and no payload when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
+`none` that asks a question and --reply has no text. Cost: one python process, reads up to 3 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
@@ -778,24 +795,128 @@ def unread_mode(argv):
         if at is None:  # an unreadable time is never counted read or unread
             unknown.append("unknown: the answer %s has no readable at" % key)
             continue
-        if woke is not None and at >= woke:
-            continue
-        times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
-        if any(t is not None and t >= at for t in times):
-            continue
-        if any(t is None for t in times):
-            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
-            continue
         item = item_data[key]
-        lines.append("answer-unread %s (item %s, owner %s, answered %s, %s)" % (
-            key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
-            "before wake %s" % woke_text if woke is not None else "before wake: none recorded"))
+        if woke is None or at < woke:
+            times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
+            if any(t is not None and t >= at for t in times):
+                pass
+            elif any(t is None for t in times):
+                unknown.append("unknown: the receipt of answer %s has no readable read" % key)
+            else:
+                lane = item.get("lane")
+                lines.append("answer-unread %s (item %s, owner %s, answered %s, %s%s)" % (
+                    key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
+                    "before wake %s" % woke_text if woke is not None else "before wake: none recorded",
+                    ", lane %s" % lane if isinstance(lane, str) and lane else ""))
+        if asks_question(data(r)):
+            reply_at = parse_utc(item.get("replied")) if item.get("replied") is not None else None
+            if item.get("replied") is not None and reply_at is None and has_text(item.get("reply")):
+                unknown.append("unknown: the reply on item %s has no readable replied" % key)
+            elif not (has_text(item.get("reply")) and reply_at is not None and reply_at > at):
+                lines.append("answer-needs-reply %s (item %s, owner %s, answered %s)" % (
+                    key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"]))
+    # An open item that holds something up (`holds`) names its lane. A CI or PR wait (`waits`) is no lane block.
+    for r in entries(items):
+        item = data(r)
+        if (item.get("status") != "closed" and has_text(item.get("holds")) and not has_text(item.get("lane"))
+                and "waits" not in item):
+            lines.append("lane-missing %s (item %s, owner %s)" % (r.get("id"), item.get("n", "?"), item.get("owner", "?")))
     out = lines + unknown
     print("\n".join(out) if out else "unread: clean")
     return 2 if unknown else 1 if lines else 0
 
 
+def has_text(value):
+    """True for a string with a non-blank character."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def asks_question(answer):
+    """True for a `none` answer whose note says something: it needs a written reply on the item (SKILL.md, "Route and close")."""
+    return answer.get("choice") == "none" and has_text(answer.get("note"))
+
+
+def read_doc(path):
+    """(id, data, version) of one fetched document: {id, data, version} as ArtifactData get saves it, or bare data. The id and
+    version are None when the file does not say. ValueError with the cause when the file cannot be read as an object."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as err:
+        raise ValueError("cannot read %s (%s)" % (path, getattr(err, "strerror", None) or err))
+    if not isinstance(doc, dict):
+        raise ValueError("%s is not a JSON object" % path)
+    if isinstance(doc.get("data"), dict) and ("id" in doc or "version" in doc):
+        doc_id, version, doc = doc.get("id"), doc.get("version"), doc["data"]
+    else:
+        doc_id, version = doc.get("id"), None
+    if version is not None and not (isinstance(version, int) and not isinstance(version, bool) and version >= 1):
+        raise ValueError("%s has a version that is not a whole number above zero" % path)
+    return (doc_id if isinstance(doc_id, str) and doc_id else None), doc, version
+
+
+def close_batch_mode(argv):
+    """`--close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]`: print the one ArtifactData batch
+    payload, {"writes": [...]}, that closes the item: the receipt set (read and filed), the item update (closed, lastAnswer, and reply with
+    replied) and the answer delete. Each fetched doc's version pins its write; a doc with no version gets no pin."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--close-batch", action="store_true")
+    ap.add_argument("--item", required=True)
+    ap.add_argument("--answer", required=True)
+    ap.add_argument("--receipt")
+    ap.add_argument("--reply")
+    ap.add_argument("--now")
+    args = ap.parse_args(argv)
+    docs, ids, errors = {}, set(), []
+    for name in ("item", "answer", "receipt"):
+        path = getattr(args, name)
+        if path is None:
+            continue
+        try:
+            doc_id, body, version = read_doc(path)
+        except ValueError as err:
+            errors.append("the %s: %s" % (name, err))
+            continue
+        docs[name] = (body, version)
+        ids.add(doc_id or (body.get("item") if name == "answer" else None))
+    ids = {i for i in ids if isinstance(i, str) and i}
+    if errors:  # name the id when any readable doc gives it, so the refusal says which close failed
+        print("unknown: close of %s refused: %s" % (", ".join(sorted(ids)) or "the item", "; ".join(errors)))
+        return 2
+    if len(ids) != 1:
+        print("unknown: the item, answer and receipt do not name one id (%s)" % (", ".join(sorted(ids)) or "none named"))
+        return 2
+    doc_id = next(iter(ids))
+    answer, answer_version = docs["answer"]
+    item, item_version = docs["item"]
+    if parse_utc(answer.get("at")) is None:
+        print("unknown: the answer of %s has no readable at" % doc_id)
+        return 2
+    now = args.now if args.now else datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if parse_utc(now) is None:
+        print("unknown: --now is not an ISO time (%s)" % now)
+        return 2
+    reply = args.reply
+    if asks_question(answer) and not has_text(reply):
+        print("unknown: the answer of %s is a none that asks a question: it needs a written reply (--reply <text>)" % doc_id)
+        return 2
+    last = {k: answer[k] for k in ("choice", "done", "note", "at") if k in answer}
+    closed = {"status": "closed", "closed": now, "lastAnswer": last}
+    if has_text(reply):
+        closed.update(reply=reply, replied=now)
+    receipt = {"op": "set", "collection": "receipts", "doc_id": doc_id, "data": {"read": now, "filed": now}}
+    update = {"op": "update", "collection": "items", "doc_id": doc_id, "data": closed}
+    delete = {"op": "delete", "collection": "answers", "doc_id": doc_id}
+    for write, version in ((receipt, docs["receipt"][1] if "receipt" in docs else None), (update, item_version), (delete, answer_version)):
+        if version is not None:
+            write["if_version"] = version
+    print(json.dumps({"writes": [receipt, update, delete]}, indent=1))
+    return 0
+
+
 def main(argv):
+    if "--close-batch" in argv:
+        return close_batch_mode(argv)
     if "--unread" in argv:
         return unread_mode(argv)
     if "--parked" in argv:
@@ -808,7 +929,8 @@ def main(argv):
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
                  "       stale_pages.py --parked <dir> [--now <iso>]\n"
-                 "       stale_pages.py --unread <dir>")
+                 "       stale_pages.py --unread <dir>\n"
+                 "       stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
