@@ -3400,6 +3400,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
         under = None if claim_sha or base != cfg["defaultBranch"] else claim_under_head(wt, base_ref)  # a rerun over a merge commit on its claim: the claim is kept, never reverted
+        if under and under == info["head"]:  # the head is the claim itself, and own_claim found a number taken: no merge commit sits on it, so a failure reverts it
+            claim_sha, under = under, None
         kept = claim_sha or under
 
         def fail(why):
@@ -3414,7 +3416,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, claim_sha)
                     if c:
                         raise Stop(f"{why}\nmerge: the worktree is gone and cannot be rebuilt ({out}). The claim {claim_sha[:9]} stays on {branch}. Run again to resume, or revert it by hand.")
-                revert_claim(root, wt, branch, claim_sha)
+                if revert_claim(root, wt, branch, claim_sha):  # the stamp's remedy asks for a new claim, which the next confirm makes on the reverted head
+                    why += f"\nmerge: the claim is reverted, so its records are pending again. Run `merge {n} --confirm` when the new head is green: it claims free numbers."
             raise Stop(why)
 
         def unproven(what, detail):  # a read after the claim push could not run: the result is unknown, so the claim stays
@@ -3465,7 +3468,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     except Stop as e:
                         stop(str(e))
                 if proof == "stale":
-                    stop(stale_merge_text(n, base_ref, pushed=pushed) + f" {RECORDS_CITE}")
+                    text = stale_merge_text(n, base_ref, pushed=pushed) + f" {RECORDS_CITE}"
+                    if not pushed:  # a claim this run did not push stays: the lane rebuilds the page on top of it, and the stop says nothing was pushed
+                        raise Stop(text)
+                    stop(text)
                 try:  # the base may have moved since the read before the claim: the merge-tree of the head against the tip fetched now
                     stale, stands = holds_base(wt, base_ref, sha, raise_unread=True)
                 except Unread as e:
