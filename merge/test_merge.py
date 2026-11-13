@@ -15385,6 +15385,120 @@ class ReviewRecordWrite(ReviewEnv):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
 
+class ReviewRecordPastHead(ReviewEnv):
+    """`--review-record` may name a past head: a commit of the pull request that the live head holds. Only a record whose every line in its last
+    round is FAIL, with no fix check, may name one. The ancestry read is compare(head, live), ahead with no behind. The head must also be a commit
+    of the pull request, not of its base: compare(base, head) must not read behind or identical, and it is read once, after the ancestry read. A PASS,
+    PARTIAL or mixed last round, a diverged head and the live head keep the equal-head rule and read no base compare. A past head prints one stderr
+    line and no body line, and `merge --reviewed` lists its record stale. Each refusal sits beside the accepted record, so it cannot pass for another cause."""
+
+    LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
+    PAST = REVIEW_OLD_HEAD  # a commit of the pull request that the live head holds: compare(PAST, LIVE) and compare(main, PAST) read ahead
+    DIVERGED = "4e" * 20  # neither holds the live head nor is held by it: compare(DIVERGED, LIVE) reads diverged
+    MERGE_BASE = "ba5e" * 10  # a commit of main that the live head holds: compare(main, MERGE_BASE) reads behind
+    BASE_TIP = "7a1e" * 10  # main's tip, which the live head holds: compare(main, BASE_TIP) reads identical
+    BASE = "main"  # the pull request's base branch, as batch_pull names it
+    FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
+    PASS_ONE = ("1:reviewer:sonnet:PASS",)
+    PAST_LABEL = "merge: past round: head {past} is one of the PR's commits, not the live head {live}; merge --reviewed reads this record stale."
+
+    def past_record(self, head, rounds=FAIL_ONE, status="ahead", base_status="ahead", extra=(), kind="normal", **reads):
+        """The `--review-record` run for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), then `extra`. The compare of head and the live head
+        answers `status`, the compare of the base and head answers `base_status`, and `reads` go to record_host. -> (rc, out, err, host)."""
+        host = self.record_host(compares={(head, self.LIVE): status, (self.BASE, head): base_status}, **reads)
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
+        for rnd in rounds:
+            argv += ["--round", rnd]
+        rc, out, err = self.run_args(*argv, *extra, host=host)
+        return rc, out, err, host
+
+    def assert_printed_head(self, rc, out, err, head, label):
+        """A record printed for `head`: exit 0, and the printed record names that head."""
+        self.assertEqual(rc, 0, f"{label} was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], head, f"{label} does not print the head the review read")
+
+    def assert_refused(self, rc, out, err, label):
+        """A refused head: exit 1, no record printed, no traceback, and a reason on stderr."""
+        self.assertEqual(rc, 1, f"{label} was not refused with exit 1:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, f"{label} still printed a record")
+        self.assertNotIn("Traceback", err)
+        self.assertTrue(err.strip(), f"{label} was refused with no reason on stderr")
+
+    def test_a_fail_record_on_a_pr_commit_prints_that_head(self):
+        rc, out, err, _ = self.past_record(self.PAST)
+        self.assert_printed_head(rc, out, err, self.PAST, "a FAIL record on a commit of the pull request that the live head holds")
+
+    def test_only_the_last_round_has_to_be_all_fail(self):
+        rc, out, err, _ = self.past_record(self.PAST, rounds=("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"))
+        self.assert_printed_head(rc, out, err, self.PAST, "a record whose round 1 passed and whose last round 2 is all FAIL")
+
+    def test_a_past_head_adds_one_stderr_line_and_no_body_line(self):
+        label = self.PAST_LABEL.format(past=self.PAST[:9], live=self.LIVE[:9])
+        rc, out, err, _ = self.past_record(self.PAST)
+        self.assert_printed_head(rc, out, err, self.PAST, "the past-head record")
+        self.assertEqual(err.splitlines().count(label), 1, "the past head did not print the one stderr line that names both heads:\n" + err)
+        self.assertNotIn("past round:", out, "the past-head line went to stdout:\n" + out)
+        body = posted_body(self, out)
+        self.assertEqual(review_fn(self, "review_body")(**parse_text(self, body)).splitlines(), body.splitlines(),
+                         "the printed record body holds a line that the record form does not")
+        with self.subTest("control: a FAIL record on the live head prints no past-round line"):
+            rc, out, err, _ = self.past_record(self.LIVE)
+            self.assert_printed_head(rc, out, err, self.LIVE, "a FAIL record on the live head")
+            self.assertNotIn("past round:", out + err, "a record on the live head printed the past-round line:\n" + out + err)
+
+    def test_a_head_on_the_base_branch_is_refused_and_a_pr_commit_is_not(self):
+        with self.subTest("control: a commit of the pull request, its base compare reads ahead"):
+            rc, out, err, _ = self.past_record(self.PAST, base_status="ahead")
+            self.assert_printed_head(rc, out, err, self.PAST, "a FAIL record on a commit of the pull request")
+        with self.subTest("a commit of the pull request that the base has moved past: its base compare reads diverged"):
+            rc, out, err, _ = self.past_record(self.PAST, base_status="diverged")
+            self.assert_printed_head(rc, out, err, self.PAST, "a FAIL record on a commit that the base does not hold")
+        for head, status in ((self.MERGE_BASE, "behind"), (self.BASE_TIP, "identical")):
+            with self.subTest(base_compare=status):
+                rc, out, err, host = self.past_record(head, base_status=status)
+                self.assert_refused(rc, out, err, f"a FAIL record on a commit of the base, which the base compare reads {status}")
+                self.assertIn((self.BASE, head), host.compare_reads,
+                              "the base branch was not compared with the past head, so the refusal came from another read")
+
+    def test_the_base_compare_is_read_once_after_the_ancestry_read(self):
+        rc, out, err, host = self.past_record(self.PAST)
+        with self.subTest("accepted"):
+            self.assert_printed_head(rc, out, err, self.PAST, "a FAIL record on a commit of the pull request")
+        self.assertEqual(host.compare_reads, [(self.PAST, self.LIVE), (self.BASE, self.PAST)],
+                         "a past head does not read its ancestry compare, then one base compare")
+
+    def test_a_record_whose_last_round_is_not_all_fail_keeps_the_equal_head_rule(self):
+        for label, rounds in (("a PASS round", self.PASS_ONE), ("a PARTIAL round", ("1:reviewer:sonnet:PARTIAL",)),
+                              ("a round with a FAIL and a PASS line", ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS")),
+                              ("no round", ())):
+            with self.subTest(round=label):
+                rc, out, err, host = self.past_record(self.PAST, rounds=rounds)
+                self.assert_refused(rc, out, err, f"a record whose last round is {label}, on a past head")
+                self.assertEqual(host.compare_reads, [], f"a record whose last round is {label} read a compare")
+        with self.subTest("a diverged head"):
+            rc, out, err, host = self.past_record(self.DIVERGED, status="diverged")
+            self.assertIn((self.DIVERGED, self.LIVE), host.compare_reads, "the diverged head was not compared with the live head")
+            self.assert_refused(rc, out, err, "a FAIL record on a diverged head")
+            self.assertNotIn((self.BASE, self.DIVERGED), host.compare_reads, "a diverged head read the base compare")
+
+    def test_a_failed_base_compare_refuses_the_past_head_with_no_record(self):
+        with self.subTest("control: the base compare answers"):
+            rc, out, err, _ = self.past_record(self.PAST)
+            self.assert_printed_head(rc, out, err, self.PAST, "a FAIL record on a commit of the pull request")
+        rc, out, err, host = self.past_record(self.PAST, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
+        self.assertIn((self.BASE, self.PAST), host.compare_reads, "the base branch was not compared with the past head")
+        self.assert_refused(rc, out, err, "a past head whose base compare failed")
+
+    def test_a_fail_record_naming_an_ancestor_of_the_live_head_lists_stale_on_reviewed(self):
+        fx = self.real_commits()
+        self.assertTrue(self.is_ancestor(fx.fixed, fx.plain), "fixture: the reviewed head is not an ancestor of the live head")
+        fail = [review_comment(1, 7, record_text(head=fx.fixed, rounds=("Round 1: reviewer, sonnet, FAIL",)))]
+        with self.subTest("control: the record on its own head reads open"):
+            self.reviewed_line(self.reviewed_host(fx, fx.fixed, comments=fail), fx.fixed, "open", "a FAIL record on the live head must read open")
+        with self.subTest("a commit after the past head"):
+            host = self.reviewed_host(fx, fx.plain, comments=fail, compares={**fx.on_main, (fx.fixed, fx.plain): "ahead"})
+            self.reviewed_line(host, fx.plain, "stale", "a FAIL record naming an ancestor of the live head must list stale")
+
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
