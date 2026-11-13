@@ -4,6 +4,6 @@
 
 **Where.** `hooks/feedback_guard.py` (`Homes`, `close_settled`) and `lint/tending.py` (the `open-until-home-on-main` test).
 
-**Decision.** `owner-feedback-inbox` (owner feedback goes to a log before the turn ends); `prose-tending-contract` (one shared tending contract).
+**Decision.** owner-feedback-inbox (owner feedback goes to a log before the turn ends); `prose-tending-contract` (one shared tending contract).
 
 **Retire.** The test reads the home's content for the item's id or a cite of it, or a ruling item names a section; closes only then. `lint/test_tending.py` shows it closed.
