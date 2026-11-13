@@ -1,0 +1,14 @@
+{
+ "id": "mail-send-cloud-auth",
+ "title": "`mail send` fails in a cloud session with \"not sent: auth\", so the 20-message mailbox trial cannot start",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 13:43 CST Nov 13, from lane mail-guards-read-send-message.",
+ "source": "coordinator 13:43 CST Nov 13",
+ "note": "Todo. Cause not read yet; a cloud session has no login the mailbox tool accepts. The cutover trial (20 messages) waits on this. A lane reads the mail tool's auth path and says what a cloud session needs (a token, a different route, or a Mac-only send). Past rulings not checked; mailbox rulings (mailbox-default, mailbox-store-place) may govern where the store lives.",
+ "updatedAt": "2026-11-13T13:43:23-06:00"
+}
