@@ -25,7 +25,7 @@ scope flag off. That run concludes `success` and must not hide an older red run 
 group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it concluded
 `success` except the bookkeeping jobs `scope` and `push-skip`. An empty run is a verdict only when it carries evidence: its `push-skip`
 job is `success` and its `scope` job is `skipped`, which is the path where push-skip.py found the push tree equal to the head tree of a
-pull request whose full run passed (decision push-skip-on-proven-tree; checks.yml, jobs push-skip and scope). Only a `push` run carries evidence: a dispatch runs no
+pull request whose run passed (decision push-skip-on-proven-tree; checks.yml, jobs push-skip and scope). Only a `push` run carries evidence: a dispatch runs no
 push-skip job. `empty_without_evidence` is that test; a caller walks past such a run to the group's newest run that is not, and when the
 group has none keeps the newest run. A schedule run is left as it is.
 
