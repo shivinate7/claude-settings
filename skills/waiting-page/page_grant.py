@@ -20,6 +20,8 @@ Verdict, one line on stdout, then exit:
                                                  L is the picked option's label as one JSON string, a JSON list of
                                                  labels for a multi item, or null for an overturn. It names the act.
   not counted: REASON                            exit 1. REASON names the failed rule.
+  held: REASON                                   exit 3. The answer names an option the item no longer holds at that key;
+                                                 the owner confirms in words. It is never a grant.
   unknown: REASON                                exit 2. No readable registry or waiting-page entry, a fetched file that is
                                                  not one JSON object, or a crash.
 Counted only when all hold:
@@ -39,6 +41,13 @@ Counted only when all hold:
      is true. `none` never counts: it asks for new options, and the routing session judges a direction. A `multi` item
      takes a non-empty list of distinct keys; a list on a pick-one item or a string on a multi item does not count.
   7. --pick is given and the choice equals it.
+Held, not counted (ruling R60, decision option-keys-are-letters): an answer that names an option the item no longer holds
+at that key. The line is `held: REASON`, exit 3, and the REASON says the owner confirms in words. It is judged after
+rule 7, so a pick that differs from the choice stays `not counted`. It applies when:
+  8. The answer carries `optionId` and it is not the id of the item's option at the choice key. With no `optionId`, a
+     `label` ("A: Red") whose letter is not that option's position letter, or whose text is not that option's label.
+     An answer with neither field is judged by its choice alone, as before.
+  9. The choice is a key the item does not hold, and equals --pick (a letter that moved, or an option that was removed).
 A task (`kind: task`) is never counted, with or without `done`: a task answer grants no act.
 
 Cost: one python process per call. `--new-fetch` makes one folder and writes one stamp file. A check reads the extras
@@ -47,13 +56,14 @@ file, the stamp and two fetched files, and renames the stamp once. No git, no ne
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
-COUNTED, NOT_COUNTED, UNKNOWN = 0, 1, 2
+COUNTED, NOT_COUNTED, UNKNOWN, HELD = 0, 1, 2, 3
 
 # The check's flags, the command and the counted line. settings.json's "Relayed Grant" auto-mode entry quotes
 # COMMAND and COUNTED_LINE; hooks/test_auto_mode_allow.py pins the entry to them. The parser and the printed line
@@ -81,6 +91,10 @@ def not_counted(reason):
 
 def unknown(reason):
     return Verdict("unknown: " + reason, UNKNOWN)
+
+
+def held(reason):
+    return Verdict("held: %s: the owner confirms in words which option he meant" % reason, HELD)
 
 
 def load_layout():
@@ -161,6 +175,9 @@ def prove_fresh(folder, made, item_id):
                 raise not_counted("%s is older than the fetch folder: it came from an earlier fetch" % rel)
 
 
+NO_KEY = ("none", "overturn")  # the choices that name no option
+
+
 def option_keys(item):
     options = item.get("options")
     if not isinstance(options, list):
@@ -168,7 +185,7 @@ def option_keys(item):
     return [opt["key"] for opt in options if isinstance(opt, dict) and isinstance(opt.get("key"), str)]
 
 
-def choice_of(item, answer):
+def choice_of(item, answer, pick=None):
     """The counted choice text of a decision or a task answer; not counted when the answer is no clear one."""
     kind = item.get("kind", "decision")
     if kind == "task":
@@ -185,6 +202,8 @@ def choice_of(item, answer):
         if len(set(map(str, choice))) != len(choice):
             raise not_counted("choice repeats a key")
         bad = [c for c in choice if not (isinstance(c, str) and c in keys)]
+        if bad and pick == "+".join(map(str, choice)) and all(isinstance(c, str) and c not in NO_KEY for c in choice):
+            raise held("choice holds %s, a key the item no longer holds" % json.dumps(bad[0]))
         if bad:
             raise not_counted("choice holds %s, not an option key" % json.dumps(bad[0]))
         return "+".join(choice)
@@ -192,6 +211,8 @@ def choice_of(item, answer):
         raise not_counted("item takes one option and the choice is a list")
     if isinstance(choice, str) and choice in keys:
         return choice
+    if isinstance(choice, str) and choice not in NO_KEY and choice == pick:
+        raise held("choice %s is a key the item no longer holds" % json.dumps(choice))
     if choice == "none":
         raise not_counted("choice is none: it asks for new options, and the routing session judges that")
     if choice == "overturn":
@@ -199,6 +220,37 @@ def choice_of(item, answer):
             return "overturn"
         raise not_counted("choice is overturn and the item is not an arbiter ruling")
     raise not_counted("choice %s is not an option key" % json.dumps(choice))
+
+
+LABEL_PARTS = re.compile(r"^([A-Za-z]): (.*)$", re.S)
+
+
+def moved_reason(item, answer, choice):
+    """Why the answer names an option the item no longer holds at its choice key, or "" when it matches or says nothing.
+    The page saves `optionId` (the id of the option picked) and `label` ("A: Red"). With `optionId` the id decides; with
+    none, the label's letter must be the option's position letter and its text the option's label. An overturn names no
+    option. A field of the wrong shape for the item (a list on a pick-one answer) is not read, as before."""
+    if choice == "overturn":
+        return ""
+    options = [o for o in item.get("options") or [] if isinstance(o, dict) and isinstance(o.get("key"), str)]
+    keys = choice.split("+") if item.get("multi") is True else [choice]
+    ids, labels = answer.get("optionId"), answer.get("label")
+    multi = item.get("multi") is True
+    for at, key in enumerate(keys):
+        position = next(i for i, o in enumerate(options) if o["key"] == key)
+        stored = options[position]
+        if "optionId" in answer:
+            got = ids[at] if multi and isinstance(ids, list) and at < len(ids) else None if multi else ids
+            if got != stored.get("id"):
+                return "answer option id %s is not option %s's id" % (json.dumps(got), key)
+            continue
+        text = labels[at] if multi and isinstance(labels, list) and at < len(labels) else None if multi else labels
+        if not isinstance(text, str):
+            continue
+        parts = LABEL_PARTS.match(text)
+        if not parts or parts.group(1).lower() != chr(97 + position % 26) or parts.group(2).strip() != str(stored.get("label") or "").strip():
+            return "answer label %s is not option %s's label" % (json.dumps(text), key)
+    return ""
 
 
 def label_of(item, answer, choice):
@@ -250,11 +302,14 @@ def judge(args):
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):
         raise not_counted("answer is not later than the item's added time: it predates the ask")
 
-    choice = choice_of(item, answer)
+    choice = choice_of(item, answer, args.pick)
     if args.pick is None:
         raise not_counted("no --pick: a decision is counted only against the pick the peer relayed")
     if choice != args.pick:
         raise not_counted("page pick is %s, not %s" % (choice, args.pick))
+    moved = moved_reason(item, answer, choice)
+    if moved:
+        raise held(moved)
     line = (COUNTED_LINE.replace("<id>", args.item).replace("<n>", str(n)).replace("<key>", choice)
             .replace("<time>", answer["at"]).replace("<label>", json.dumps(label_of(item, answer, choice))))
     note = answer.get("note")

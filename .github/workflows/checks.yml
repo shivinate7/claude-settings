@@ -183,6 +183,12 @@ jobs:
       - name: Question form option-key gap suite
         run: python3 hooks/test_question_form_option_gap.py
 
+      - name: Question form option-label suite
+        run: python3 hooks/test_question_form_option_labels.py
+
+      - name: Question form letters-frozen suite
+        run: python3 hooks/test_question_form_letters_frozen.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -463,6 +469,12 @@ jobs:
 
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
+      - name: Waiting page grant answer-label suite
+        run: python3 skills/waiting-page/test_page_grant_label.py
+      - name: Waiting page grant held suite
+        run: python3 skills/waiting-page/test_page_grant_held.py
+      - name: Waiting page question source suite
+        run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
 

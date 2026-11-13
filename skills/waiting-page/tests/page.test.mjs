@@ -199,6 +199,81 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", ""]);
 });
 
+// Two options with ids, as the page holds them when the owner picks: Red (a) and Blue (b). The one home of this list.
+const IDED = [
+  { key: "a", id: "red", label: "Red", how: "h", gain: "g", lose: "l" },
+  { key: "b", id: "blue", label: "Blue", how: "h", gain: "g", lose: "l" },
+];
+// The saved answer names the option picked by its id as well as by its letter (ruling R60): a stored pick records the id,
+// so a later move of the letters cannot change which option the owner meant.
+test("a pick saves the id of the option picked, beside its letter", async (t) => {
+  const WITH_IDS = mk("ids-decision", 40, { pick: "a", options: IDED });
+  const page = await open(t, { items: [WITH_IDS] }); if (!page) return;
+  await takePick(page, WITH_IDS);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], WITH_IDS.id);
+  const a = (await answers(page))[WITH_IDS.id];
+  assert.equal(a.optionId, "red", "the saved answer does not carry the id of the option picked");
+});
+
+// The item as triage leaves it after a reorder: letters follow position, so Blue takes a and Red takes b. Each key stays a
+// letter, so the page's letter checks read the item as valid.
+const LETTERS_MOVED = [{ ...IDED[1], key: "a" }, { ...IDED[0], key: "b" }];
+
+// A pick keeps the id and the label the option had when the owner picked it. The item re-snapshots with the letters moved
+// after the pick, and Send still saves the option picked: Red, with id red and label "A: Red" as it read at pick time.
+test("a pick keeps the id and label it had when picked, after the letters move", async (t) => {
+  const it = mk("moved-pick", 41, { pick: "a", options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.equal(a.choice, "a", "the answer does not hold the letter the owner picked");
+  assert.equal(a.optionId, "red", "the saved id is not the id of the option picked, Red");
+  assert.equal(a.label, "A: Red", "the saved label is not the label the option had when it was picked");
+});
+
+// The same for a multi item: the ids of the options ticked, from before the letters moved, in the order ticked.
+test("a multi pick keeps the ids it had when ticked, after the letters move", async (t) => {
+  const it = mk("moved-multi", 42, { multi: true, pick: [], options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await choose(page, it, "b");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "b"], "the answer does not hold the letters the owner ticked");
+  assert.deepEqual(a.optionId, ["red", "blue"], "the saved ids are not the ids of the options ticked, from before the move");
+});
+
+// Control, green on the current head: a decision whose options carry no id saves no optionId.
+test("a decision whose options carry no id saves no optionId", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the answer does not hold the pick the owner made");
+  assert.equal("optionId" in a, false, "a saved answer names an optionId for an option with no id");
+});
+
+// Control, green on the current head: an option's note is drawn on its card, in that option's label.
+test("an option's note is drawn on its card", async (t) => {
+  const it = mk("noted-option", 43, { options: [
+    { key: "a", label: "Red", how: "h", gain: "g", lose: "l", note: "Now means the red that shipped." },
+    { key: "b", label: "Blue", how: "h", gain: "g", lose: "l" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-a"]`).count(), 1, "option a is not drawn on the card");
+  const noted = card(page, it).locator(`label[for="o-${it.id}-a"] .optnote`);
+  assert.equal(await noted.count(), 1, "the option's note is not drawn on its card");
+  assert.equal((await noted.textContent()).trim(), "Now means the red that shipped.", "the card draws another note than the option's");
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-b"] .optnote`).count(), 0, "a note is drawn on an option with none");
+});
+
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
   const items = [
     mk("calm-dec", 1), { ...TASK, id: "calm-task", n: 2 },
@@ -8979,7 +9054,7 @@ test("a sent Park shows the receipt Parked. with Change, and Change then a pick 
   await send(page);
   await page.waitForFunction((k) => !!window.__answers()[k] && window.__answers()[k].choice === "a", DECISION.id);
   const rec = (await answers(page))[DECISION.id];
-  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "label", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
   assert.equal(rec.choice, "a", "the changed answer lost the picked option");
 });
 
@@ -9655,3 +9730,78 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// ---------------------------------------------------------------- the recommended option, and the answer's label
+// `recommended` is a key, or a list of keys on a multi item, that the page stars. The star falls back to `pick` for an
+// old item. The star and the stood line say "Recommended". Each saved decision answer carries `label` beside `choice`:
+// "A: <option label>" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key.
+
+test("the star sits on the recommended option, not on the pick", async (t) => {
+  const it = mk("rec-star", 40, { recommended: "b", pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the recommended option b");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star still sits on the pick a");
+});
+
+test("an old item with no recommended stars its pick", async (t) => {
+  const it = mk("old-pick", 41, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the pick b of an old item");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star sits on a with no recommended");
+});
+
+test("the star is named Recommended in its label and its tooltip", async (t) => {
+  const page = await open(t); if (!page) return;
+  const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick .spark`);
+  assert.equal(await star.getAttribute("aria-label"), "Recommended", "the star's label is not Recommended");
+  assert.equal(await star.getAttribute("title"), "Recommended", "the star's tooltip is not Recommended");
+});
+
+test("a stood pick says The recommended option goes with your next Send.", async (t) => {
+  const it = mk("stood-rec", 42, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(".ready").textContent(), "The recommended option goes with your next Send.");
+});
+
+test("an item that names recommended draws no field warning", async (t) => {
+  const it = mk("rec-field", 43, { recommended: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal((await card(page, it).textContent()).includes("Which field"), false, "the card warns a field the page does not draw");
+});
+
+test("a pick-one answer carries its label, A: Red, beside its choice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the choice is no longer the key");
+  assert.ok(typeof a.label === "string", "the answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^a: Red$/i);
+});
+
+test("a none answer carries the label none of these, and its choice stays none", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "Green please");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "none");
+  assert.ok(typeof a.label === "string", "the none answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^none of these$/i);
+});
+
+test("a multi answer carries a list of labels, one per tick, beside its list of keys", async (t) => {
+  const it = multi("label-multi", 44);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await takePick(page, it);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "c"], "the multi choice is no longer the list of keys");
+  assert.ok(Array.isArray(a.label), "the multi answer has no list of labels: " + JSON.stringify(a));
+  assert.equal(a.label.length, 2);
+  assert.match(a.label[0], /^a: Red$/i);
+  assert.match(a.label[1], /^c: Green$/i);
+});
