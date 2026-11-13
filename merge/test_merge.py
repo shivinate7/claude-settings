@@ -15399,14 +15399,17 @@ class ReviewLogPastHead(ReviewEnv):
     BASE_TIP = "7a1e" * 10  # main's tip, which the live head holds: compare(main, BASE_TIP) reads identical
     BASE = "main"  # the pull request's base branch, as batch_pull names it
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
+    FAIL_THREE = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # round 3 is the final round, so its net value sets the state
+    FIX_START = "5e" * 20  # the head a fix verifier starts from: an earlier review log's head. It must differ from --head, so it is neither PAST nor LIVE
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
-    PAST_LABEL = "merge: past round: head {past} is one of the PR's commits, not the live head {live}; merge --reviewed reads this record stale."
+    PAST_LABEL ="merge: past round: head {past} is one of the PR's commits, not the live head {live}; merge --reviewed reads this record stale."
 
-    def past_record(self, head, rounds=FAIL_ONE, status="ahead", base_status="ahead", extra=(), kind="normal", **reads):
+    def past_record(self, head, rounds=FAIL_ONE, status="ahead", base_status="ahead", extra=(), kind="normal", guard="no", comments=(), **reads):
         """The `--review-record` run for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), then `extra`. The compare of head and the live head
-        answers `status`, the compare of the base and head answers `base_status`, and `reads` go to record_host. -> (rc, out, err, host)."""
-        host = self.record_host(compares={(head, self.LIVE): status, (self.BASE, head): base_status}, **reads)
-        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
+        answers `status`, the compare of the base and head answers `base_status`, `comments` are the review log comments already on the pull request,
+        oldest first, and `reads` go to record_host. -> (rc, out, err, host)."""
+        host = self.record_host(*comments, compares={(head, self.LIVE): status, (self.BASE, head): base_status}, **reads)
+        argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", head]
         for rnd in rounds:
             argv += ["--round", rnd]
         rc, out, err = self.run_args(*argv, *extra, host=host)
@@ -15498,6 +15501,34 @@ class ReviewLogPastHead(ReviewEnv):
         with self.subTest("a commit after the past head"):
             host = self.reviewed_host(fx, fx.plain, comments=fail, compares={**fx.on_main, (fx.fixed, fx.plain): "ahead"})
             self.reviewed_line(host, fx.plain, "stale", "a FAIL record naming an ancestor of the live head must list stale")
+
+    def test_an_all_fail_review_log_with_a_fix_verifier_on_a_past_head_is_refused(self):
+        earlier = review_comment(1, 7, record_text(head=self.FIX_START, rounds=("Round 1: reviewer, sonnet, FAIL",)))  # the earlier review log: no Fix check line
+        for verdict in ("FAIL", "PASS"):
+            fix = f"{self.FIX_START}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:{verdict}"
+            with self.subTest(f"control: a {verdict} fix verifier on the live head prints, with its fix line"):
+                rc, out, err, _ = self.past_record(self.LIVE, extra=("--fix-check", fix), comments=(earlier,))
+                self.assert_printed_head(rc, out, err, self.LIVE, f"an all-FAIL review log with a {verdict} fix verifier on the live head")
+                self.assertIn(fix_verifier_line(verdict=verdict, head=self.FIX_START), posted_body(self, out).splitlines())
+            with self.subTest(f"an all-FAIL review log on a past head with a {verdict} fix verifier"):
+                rc, out, err, host = self.past_record(self.PAST, extra=("--fix-check", fix), comments=(earlier,))
+                self.assertEqual(host.compare_reads, [], f"a past head with a {verdict} fix verifier read a compare before it was refused")
+                self.assert_refused(rc, out, err, f"an all-FAIL review log on a past head with a {verdict} fix verifier")
+
+    def test_an_all_fail_review_log_that_reads_done_or_held_on_a_past_head_is_refused(self):
+        with self.subTest("control: round 3 all FAIL, guard yes, net value owed: reads open, and the past head prints"):
+            rc, out, err, _ = self.past_record(self.PAST, rounds=self.FAIL_THREE, guard="yes", extra=("--net-value", "not owed"))
+            self.assert_printed_head(rc, out, err, self.PAST, "an all-FAIL review log on a past head that reads open")
+        for label, guard, net, state in (("done", "no", "not owed", "done"), ("held", "yes", "negative", "held")):
+            extra = ("--net-value", net)
+            with self.subTest(label):
+                rc, out, err, _ = self.past_record(self.LIVE, rounds=self.FAIL_THREE, guard=guard, extra=extra)
+                self.assert_printed_head(rc, out, err, self.LIVE, f"the round 3 all-FAIL review log that reads {label}, on the live head")
+                self.assertEqual(record_state(self, posted_body(self, out), head=self.LIVE), state,
+                                 f"the review log on the live head does not read {label}, so the past-head case tests another state")
+                rc, out, err, host = self.past_record(self.PAST, rounds=self.FAIL_THREE, guard=guard, extra=extra)
+                self.assertEqual(host.compare_reads, [], f"an all-FAIL review log that reads {label} read a compare before it was refused")
+                self.assert_refused(rc, out, err, f"an all-FAIL review log on a past head that reads {label}")
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
