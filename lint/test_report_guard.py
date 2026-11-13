@@ -4655,15 +4655,16 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
-    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+    # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
+    def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
-    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+    def test_a_prose_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
