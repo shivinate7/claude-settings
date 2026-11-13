@@ -2062,6 +2062,8 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- silent-undo-span-regex-quadratic: the backtick branch of `_SPAN_OR_COMMENT` in lint/check_silent_undo.py backtracks quadratically; a 65 KB single paragraph of backtick runs of growing length took 58.8 s in `last_paragraph`, and real bodies are far smaller.
+- silent-undo-span-regex-crlf: the blank-line guard `\n[ \t]*\n` of `_SPAN_OR_COMMENT` never matches a CRLF body (GitHub's web editor writes CRLF). With an odd backtick, the comment text reads as the last paragraph, so the excuse before it is not last and is refused. An LF body reads it. Rare.
 - stamp-readme-wait-item: actions/stamp/README.md item 4 says "The wait leaves out a check". confirm has no wait under the lock now, so the word may be stale. Unverified.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR (`_guard_section_sources` returns no file on a parse error, or when `rule_audit._section_dir` finds no folder). Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. The owner rule (`scratchpad_owner_write` in `hooks/guard.py`) keys its records per file. Decision: scratchpad-owner (the pattern).

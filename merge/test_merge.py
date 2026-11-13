@@ -22,6 +22,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from event_body import EVENT_BODY_DEF, NO_BODY  # noqa: E402  the one home of the test event-body reader (testing/event_body.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
@@ -1699,6 +1700,92 @@ class ScopedRepo:
         for path, text in files.items():
             (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+# A step reads the PR body from the event file that GITHUB_EVENT_PATH names, as CI gives it: no step env carries the body.
+# With no event file the step reads a sentinel, never a body, so a missing source is seen as missing (testing/event_body.py).
+BODY_READ_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "      - name: Read the body\n        run: python3 lint/body_read.py\n")
+BODY_READ = EVENT_BODY_DEF + ("with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+                              "    f.write(event_body())\n")
+STUB_CI_JOB = ("import os, sys\nsys.stdout.write(open(os.environ['STUB_TEXT'], encoding='utf-8', newline='').read())\n"
+               "sys.exit(int(os.environ['STUB_RC']))\n")
+
+
+def seen_text(path):
+    """What a lint step wrote to `path`, or None when the step never ran."""
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+class CiJobRunBody(unittest.TestCase):
+    """ci_job_run lifts ci-job's exit 2 only for an unknown it can name without the body: an unknown line that names the PR body,
+    or exit 2 with no unknown line, is never lifted."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(dir=_test_temp.run_folder())
+        sh(self.repo, "git", "init", "-q")
+        put(os.path.join(self.repo, ".github", "workflows", "checks.yml"), BODY_READ_YML)
+        put(os.path.join(self.repo, "lint", "body_read.py"), BODY_READ)
+        sh(self.repo, "git", "add", "-A"); sh(self.repo, "git", "commit", "-qm", "fixture")
+        sh(self.repo, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.folder = tempfile.mkdtemp(dir=_test_temp.run_folder())
+        self.seen = os.path.join(self.folder, "seen.txt")
+
+    def exit_2(self, text):
+        """-> ci_job_run's answer when ci-job is a stub that prints `text` and exits 2."""
+        printed = os.path.join(self.folder, "printed.txt")
+        put(printed, text)
+        stub = os.path.join(self.folder, "ci_job_stub.py")
+        put(stub, STUB_CI_JOB)
+        env = {"STUB_TEXT": printed, "STUB_RC": "2", "VERDICT_LOG": os.path.join(self.folder, "verdict.log")}
+        with unittest.mock.patch.object(merge, "CI_JOB", stub), unittest.mock.patch.dict(os.environ, env):
+            return merge.ci_job_run(self.repo, "checks", "--lint", "--base", "origin/main")
+
+    def test_exit_2_with_no_unknown_line_is_not_lifted(self):
+        state, lines, _log, liftable = self.exit_2("summary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertFalse(liftable, "ci-job's exit 2 with no unknown line was lifted: %s" % lines)
+
+    def test_exit_2_with_an_unknown_line_naming_the_body_is_not_lifted(self):
+        state, lines, _log, liftable = self.exit_2(
+            "unknown         Read the body: run: holds an expression this runner cannot read: github.event.pull_request.body\n"
+            "summary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertFalse(liftable, "an unknown line that names the PR body was lifted: %s" % lines)
+
+    def test_exit_2_with_an_unknown_tool_line_is_lifted(self):  # control: a missing tool is the flag's to lift
+        state, lines, _log, liftable = self.exit_2("unknown         Lint: tool missing: foo\nsummary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertTrue(liftable, "a missing tool's exit 2 was not lifted: %s" % lines)
+
+    def read_body(self, body):
+        """-> (state, what the lint step wrote, ci_job_run's lines) for a run whose PR body is `body`, passed to ci_job_run directly."""
+        env = {"SEEN_OUT": self.seen, "VERDICT_LOG": os.path.join(self.folder, "verdict.log")}
+        with unittest.mock.patch.dict(os.environ, env):
+            state, lines, _log, _liftable = merge.ci_job_run(self.repo, "checks", "--lint", "--base", "origin/main", pr_body=body)
+        return state, seen_text(self.seen), lines
+
+    def assert_body_reaches_the_check(self, body):
+        state, seen, lines = self.read_body(body)
+        self.assertIsNotNone(seen, "the check step did not run: %s" % lines)
+        self.assertEqual(seen, body, "the check step read a different body")
+        self.assertEqual(state, "pass", lines)
+
+    def test_an_empty_body_reaches_the_check_as_empty(self):  # control: an empty body is known, so the step reads ""
+        self.assert_body_reaches_the_check("")
+
+    def test_a_body_of_65536_e_acute_characters_reaches_the_check(self):
+        self.assert_body_reaches_the_check("é" * 65536)
+
+    def test_a_lone_surrogate_in_the_body_reads_the_sentinel_not_a_body(self):
+        """A body that cannot be encoded as UTF-8 is unreadable: ci-job gives the step no body, so the step reads the sentinel, never the
+        body's text and never "" (which a body check would pass)."""
+        state, seen, lines = self.read_body("before \ud800 after")
+        self.assertIsNotNone(seen, "the check step did not run: %s" % lines)
+        self.assertEqual(seen, NO_BODY, "a body with a lone surrogate reached the step as %r, want the sentinel" % (seen,))
+
 
 class SmallBaseMove(ScopedRepo, Env):
     """The base-move cases under the per-lane merge (act 4, owner 09:48 CST Nov 12): a conflicting base is refused, a merge-tree read that
@@ -6090,7 +6177,7 @@ class ReadyChecksRun(unittest.TestCase):
                 return 0, ""
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", stub):
-            merge.run_ready_checks(wt, 7, "main", checks)
+            merge.run_ready_checks(wt, 7, "main", checks, pr_body="")
         return calls
 
     def test_the_ready_checks_run_ci_job_with_pinned(self):
