@@ -21765,6 +21765,24 @@ class LeftOutBatch(CloudSession):
         self.assertIn("#104", outside, "the body outside the freeze markers names no #104 after the rerun: %r" % body)
         self.assertIn("waits for the schema change", outside, "the same-set rerun dropped the reason of its --leave: %r" % body)
 
+    def test_a_same_set_rerun_with_a_changed_leave_reason_replaces_the_earlier_reason(self):
+        # The first build leaves 103 with one reason. The same set again leaves 103 with another, so the body lists 103 once, with the newest reason.
+        self.lane(102)
+        self.done(102)
+        self.lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "--leave", "103", "waits for the schema change")
+        self.assertEqual(rc, 0, "the first build with a --leave was refused: %s" % out)
+        pr = self.host.created[-1]["n"]
+        rc, out = self.build("--batch-build", "nightly", "--leave", "103", "waits for the vendor")
+        self.assertEqual(rc, 0, "the same set again with a changed --leave reason was refused: %s" % out)
+        self.assertEqual(self.lane_lines(pr), [f"Lane: #102 {self.heads[102]}"], "the same set again changed the frozen block: %s" % out)
+        body = self.body(pr)
+        outside = body.split(BATCH_BEGIN)[0] + body.split(BATCH_END)[-1]
+        listed = [x for x in outside.split("\n") if x.startswith("- #103:")]
+        self.assertEqual(listed, ["- #103: waits for the vendor"],
+                         "the body does not list #103 once, with the newest --leave reason: %r" % body)
+
     def test_a_done_record_on_the_batch_pull_request_is_not_a_candidate_and_is_no_crash(self):
         # The batch's own pull request, on the batch branch, reads done once its record lands. No build takes it, and a rerun must not raise
         # KeyError on its head: a crash is named as the failed assert here, not as an error.
