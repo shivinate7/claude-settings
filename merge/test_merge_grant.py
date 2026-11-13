@@ -248,7 +248,7 @@ class ReviewGrantFlag(tm.ReviewEnv):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))  # the sibling: the same rounds with the grant pass
         self.assertEqual(rc, 0, "merge refused --round 4 with --grant:\n" + out + err)
         out, err = self.assert_usage_error(*self.granted())
-        self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 2", err)
+        self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 3", err)
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
     def test_round_five_with_a_grant_refuses(self):
