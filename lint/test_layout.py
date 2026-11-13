@@ -798,14 +798,14 @@ class GithubGuardRead(GitTree):
         self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin/main blob read): %s"
                          % (len(starts), starts))
 
-    def test_github_repo_guard_read_starts_exactly_one_git_process_when_it_reads_the_origin_url(self):
+    def test_github_repo_guard_read_starts_exactly_two_git_processes_when_it_reads_the_origin_url(self):
         self.git("remote", "add", "origin", self.ORIGIN)
         self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds an extras file")
         self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
         self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
         value, starts = self.git_starts(self.git_reads.github_repo, self.tree)
         self.assertEqual(value, self.NEW, "the guard read did not name the repo of the origin URL")
-        self.assertEqual(len(starts), 1, "the guard read started %d git processes, expected exactly one (the origin URL read is no process): %s"
+        self.assertEqual(len(starts), 2, "the guard read started %d git processes, expected exactly two (the blob read, then remote get-url): %s"
                          % (len(starts), starts))
 
     def test_github_repo_of_a_fork_starts_no_git_process_and_names_its_own_repo(self):
