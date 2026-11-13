@@ -20965,9 +20965,9 @@ class BatchFreeze(CloudSession):
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
 
-    # The measure block (MEASURE_BEGIN, MEASURE_END): a build writes it, the merge of an integration pull request refreshes it, and a freeze
-    # rewrite keeps it outside the frozen block. Nothing writes it on main, so a case that asserts it is red there. The controls pass on main
-    # for a part the feature must keep: text outside the markers already survives, and a lane pull request is never written.
+    # The measure block (MEASURE_BEGIN, MEASURE_END): a build writes it, the merge of an integration PR refreshes it, and a freeze rewrite
+    # keeps it outside the frozen block. The controls pin a part the feature must keep: text outside the markers survives, and a lane PR
+    # is never written.
 
     def measure_merge(self, tail="", runs=(), crlf=False):
         """Lanes #101 and #102 in batch-nightly, with #103 dropped (its Dropped line): one ready batch pull request whose body is the frozen
