@@ -1004,6 +1004,11 @@ _relesc_add("worktree-home relative escape: cd <scratch> && cd lnk && mkdir ../x
 _relesc_add("worktree-home relative escape: cd <scratch> && cd <nogit> && cd - && mkdir ../x, a cd back with cd - after a "
             "cd to a folder in no checkout, then a climb out of the home, is refused", "deny",
             "cd %(abs_scratch)s && cd %(nogit)s && cd - && mkdir ../x", "home", rule="worktree-home")
+# The skip's (a) clause alone: the last absolute cd landed INSIDE the home, and the run folder is outside it. The
+# relative cd climbs out of the clone, so no other rule sees the write, and the `..` in the target keeps it a climb.
+_relesc_add("worktree-home relative escape: cd <home> && cd ../../../.. && mkdir ../x, a relative climb out of the clone "
+            "after an absolute cd into the home, is refused", "deny",
+            "cd %(home)s && cd ../../../.. && mkdir ../x", "home", rule="worktree-home")
 # Allowed: the last absolute cd lands outside the home, and the write runs in a folder outside it.
 _relesc_add("worktree-home relative escape: cd <scratch> && mkdir probe, a relative write after an absolute cd to a "
             "folder outside the clone, is allowed", "allow", "cd %(abs_scratch)s && mkdir probe", "home")

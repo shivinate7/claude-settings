@@ -1765,6 +1765,16 @@ MUTATIONS = [
      r'        if (".." not in re.split(r"[\\/]", word)',
      r'        if (False and ".." not in re.split(r"[\\/]", word)',
      "guard", "worktree-home relative escape: cd <session scratchpad> && mkdir probe"),
+    # The skip after an absolute cd (`skip_after_cd` in relative_write_escape) has two clauses: (a) the folder the
+    # last absolute cd landed in is outside the home, (b) the folder the segment runs in is outside the home.
+    ("worktree-home: the skip after an absolute cd ignores where that cd landed, so a climb out of the home after a cd into it is allowed",
+     "skip_after_cd=lambda anchor, at: (path_is_inside(anchor, own) is False",
+     "skip_after_cd=lambda anchor, at: (True",
+     "guard", "cd ../../../.. && mkdir ../x"),
+    ("worktree-home: the skip after an absolute cd ignores the folder the segment runs in, so a relative cd back into the home then a climb out is allowed",
+     "and path_is_inside(at, own) is False))",
+     "and True))",
+     "guard", "cd <home, relative from the scratch folder> && mkdir ../x"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
