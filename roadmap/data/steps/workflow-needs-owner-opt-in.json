@@ -1,0 +1,14 @@
+{
+ "id": "workflow-needs-owner-opt-in",
+ "title": "The Workflow tool runs only after the owner opts in",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane archive-flow (session_013NEJKzCV3NzW5wxzNQ6fWU) launched a Workflow run at 09:18 CST Nov 13 with no owner opt-in and stopped it before any push (coordinator 10:11 CST). hooks/guard.py checks Workflow args and load, but nothing checks for opt-in. A Workflow run can spawn dozens of agents.",
+ "source": "coordinator 10:11 CST Nov 13",
+ "note": "Fix: a PreToolUse rule in hooks/guard.py refuses the Workflow tool in a session whose transcript has no owner opt-in: the keyword ultracode, the system note that confirms it, or the owner's own words asking for a workflow. Text from agents or peer sessions does not count. Done when: red-first tests show a refusal with no opt-in, and a pass after an owner \"use a workflow\" line.",
+ "updatedAt": "2026-11-13T10:16:44-06:00"
+}
