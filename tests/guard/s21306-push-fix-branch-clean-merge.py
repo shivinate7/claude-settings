@@ -68,6 +68,13 @@ def _pfm_clone(where, source, sha, main_at):
     _pfr_step("branch", "-f", "main", main_at, where=where)
 
 
+def _pfm_record_file(path, number, branch, head, fix):
+    """A transcript that opens PR `number` from `branch`, then posts its fix check record, at `head` with Fix check `fix`."""
+    lines = (pfr_pr_open("toolu_pr1", number, branch)
+             + pfr_post("toolu_c1", pfr_record(fix=fix, n=number, head=head), n=number))
+    write(path, "".join(line + "\n" for line in lines))
+
+
 def _build_pfm():
     """The clean-merge fixtures, built with git itself. The source holds the record's Head H on `feat`, where its fix
     diff starts at F. Main moves on from the root M0 to M1, M2, then M3, which conflicts with H. Each case's checkout
@@ -151,9 +158,7 @@ def _build_pfm():
     # commit). Its PR's head branch is PFR_MERGE_BRANCH, opened by a create_pull_request call.
     fix = (f, "reviewer", PFR_MODEL, "PASS")
     for path, head in ((PFR_MERGE_GOOD, h), (PFR_MERGE_MISSING, PFR_MERGE_ABSENT)):
-        lines = (pfr_pr_open("toolu_pr1", PFR_MERGE_PR, PFR_MERGE_BRANCH)
-                 + pfr_post("toolu_c1", pfr_record(fix=fix, n=PFR_MERGE_PR, head=head), n=PFR_MERGE_PR))
-        write(path, "".join(line + "\n" for line in lines))
+        _pfm_record_file(path, PFR_MERGE_PR, PFR_MERGE_BRANCH, head, fix)
 
 
 lazy_fixture([PFR_MERGE_SRC, PFR_MERGE_SHALLOW, PFR_MERGE_GOOD, PFR_MERGE_MISSING] + list(PFR_MERGE_CLONE.values()),
@@ -196,3 +201,170 @@ pfr_fix_refuse("clean-merge: git cannot answer (a blind git on PATH), a read tha
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_CLONE["c1"], env_path=GITBLIND)
 pfr_fix_refuse("clean-merge: a parent the checkout lacks (a depth-1 clone), a read that cannot run, then the push",
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_SHALLOW)
+
+
+# The default base and the named source, judged by the walk (merge.clean_merges_pushed). The one default base is
+# origin/main. A second parent held only by origin/master, by the branch a stale origin/HEAD names, or by a local
+# branch named origin/main (which shadows the short name the walk reads) is refused. The walk reads the source the
+# refspec names for the fix branch, not the checkout's HEAD, so the cases pair a clean merge with a plain commit.
+PFB_DIR = os.path.join(ROOT, "pfbase")
+PFB_SRC = os.path.join(PFB_DIR, "src")      # main: M0, M1, M2; feat: F, then H; master: S, a commit off M0
+PFB_PR = 1483                               # the PR whose head branch is PFB_BRANCH
+PFB_BRANCH = "notes-base-fix"               # that PR's head branch, the push's destination
+PFB_OTHER = "notes-base-other"              # a second branch that one push names beside the fix branch
+PFB_PUSH = VCS + " push origin HEAD:" + PFB_BRANCH
+PFB_NAMES = ("a-master", "a-main", "b-master", "c-shadow", "d-plain", "d-merge", "e-octopus", "e-fix-clean",
+             "e-fix-plain")
+PFB_CLONE = {name: os.path.join(PFB_DIR, "cl-" + name) for name in PFB_NAMES}
+PFB_TRANSCRIPT = pfr_path("merge-base-fix")  # the record: PR PFB_PR, Head H, Fix check F
+PFC_DIR = os.path.join(ROOT, "pfcap")
+PFC_SRC = os.path.join(PFC_DIR, "src")      # main: PFC_MAINS commits, one file each; chain: H, then a merge of each
+PFC_PR = 1484
+PFC_BRANCH = "notes-cap-fix"
+PFC_PUSH = VCS + " push origin HEAD:" + PFC_BRANCH
+PFC_CLONE = {"50": os.path.join(PFC_DIR, "cl-50"), "51": os.path.join(PFC_DIR, "cl-51")}
+PFC_TRANSCRIPT = pfr_path("merge-cap-fix")  # the record: PR PFC_PR, Head H
+PFC_MAINS = 51                              # the walk's cap is merge.REVIEW_MERGE_WALK, 50: 50 pass, 51 do not
+
+
+def _build_pfb():
+    """The default-base and named-source fixtures. Each clone checks out the commit its case pushes, with local main
+    set back to M0. The shapes below are read back from git, so a case cannot pass for another's shape."""
+    make_repo(PFB_SRC, {"notes.txt": "a\n"})
+    src = PFB_SRC
+    m0 = _pfr_step("rev-parse", "HEAD", where=src)
+    _pfr_step("checkout", "-q", "-b", "feat", where=src)
+    f = _pfm_commit(src, "feat.txt", "f1\n", "feat 1")
+    h = _pfm_commit(src, "feat.txt", "f2\n", "feat 2")
+    _pfr_step("checkout", "-q", "main", where=src)
+    m1 = _pfm_commit(src, "other.txt", "o1\n", "main 1")
+    m2 = _pfm_commit(src, "more.txt", "m2\n", "main 2")
+    _pfr_step("checkout", "-q", "-b", "side", m0, where=src)
+    s = _pfm_commit(src, "side.txt", "s\n", "side")
+    _pfr_step("branch", "master", s, where=src)
+    _pfr_step("checkout", "-q", "-b", "mrg-master", h, where=src)
+    xa = _pfm_merge(src, s, "merge of the commit that only master holds")
+    _pfr_step("checkout", "-q", "-b", "mrg-main", h, where=src)
+    c1 = _pfm_merge(src, m1, "clean merge of main 1")
+    _pfr_step("checkout", "-q", "-b", "plain", h, where=src)
+    p = _pfm_commit(src, "extra.txt", "x\n", "plain commit")
+    _pfr_step("checkout", "-q", "-b", "octo", h, where=src)
+    # Main 2 descends from main 1, so an octopus of the two would fold to two parents. The side commit is independent.
+    _pfr_step(*IDENT, "merge", "-q", "--no-ff", "-m", "octopus of main 2 and the side commit", m2, s, where=src)
+    octo = _pfr_step("rev-parse", "HEAD", where=src)
+    _pfr_step("checkout", "-q", "main", where=src)
+
+    shapes = [
+        (_pfm_clean(src, xa) and _pfm_parents(src, xa) == [h, s], "xa is not a clean merge of H and the master-only commit"),
+        (_pfm_clean(src, c1) and _pfm_parents(src, c1) == [h, m1], "c1 is not a clean merge of H and main 1"),
+        (len(_pfm_parents(src, p)) == 1, "the plain commit has other than one parent"),
+        (len(_pfm_parents(src, octo)) == 3, "the octopus merge does not have three parents"),
+        (_pfr_step("rev-parse", "master", where=src) == s and not _pfm_is_ancestor(src, s, m2),
+         "master is not the commit S, or S is on main"),
+    ]
+    for ok, why in shapes:
+        if not ok:
+            sys.exit("fixture setup failed: " + why)
+
+    for name, sha in (("a-master", xa), ("a-main", c1), ("b-master", xa), ("c-shadow", xa), ("d-plain", c1),
+                      ("d-merge", p), ("e-octopus", octo), ("e-fix-clean", c1), ("e-fix-plain", p)):
+        _pfm_clone(PFB_CLONE[name], src, sha, m0)
+    # The default base each case reads: origin/HEAD unset (a-*), naming origin/master (b), a local branch named
+    # origin/main (c). In d and e, one refspec's source is the plain commit and the other the clean merge.
+    _pfr_step("symbolic-ref", "-d", "refs/remotes/origin/HEAD", where=PFB_CLONE["a-master"])
+    _pfr_step("symbolic-ref", "-d", "refs/remotes/origin/HEAD", where=PFB_CLONE["a-main"])
+    _pfr_step("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master", where=PFB_CLONE["b-master"])
+    _pfr_step("branch", "origin/main", s, where=PFB_CLONE["c-shadow"])
+    _pfr_step("branch", "plain-x", p, where=PFB_CLONE["d-plain"])
+    _pfr_step("branch", "merge-x", c1, where=PFB_CLONE["d-merge"])
+    _pfr_step("branch", "plain-y", p, where=PFB_CLONE["e-fix-clean"])
+    _pfr_step("branch", "merge-y", c1, where=PFB_CLONE["e-fix-plain"])
+
+    # Scope before subject: the default-base state each case reads, read back from each checkout.
+    scope = [
+        (run_vcs(PFB_CLONE["a-master"], "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode != 0,
+         "origin/HEAD still resolves in the a-master checkout"),
+        (run_vcs(PFB_CLONE["a-main"], "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode != 0,
+         "origin/HEAD still resolves in the a-main checkout"),
+        (_pfm_is_ancestor(PFB_CLONE["a-master"], s, "refs/remotes/origin/master")
+         and not _pfm_is_ancestor(PFB_CLONE["a-master"], s, "refs/remotes/origin/main"),
+         "S is not on origin/master alone in the a-master checkout"),
+        (_pfr_step("symbolic-ref", "refs/remotes/origin/HEAD", where=PFB_CLONE["b-master"]) == "refs/remotes/origin/master",
+         "origin/HEAD does not name origin/master in the b-master checkout"),
+        (_pfr_step("rev-parse", "origin/main", where=PFB_CLONE["c-shadow"]) == s
+         and _pfr_step("rev-parse", "refs/remotes/origin/main", where=PFB_CLONE["c-shadow"]) != s,
+         "the short origin/main does not name the shadow branch in the c-shadow checkout"),
+    ]
+    for ok, why in scope:
+        if not ok:
+            sys.exit("fixture setup failed: " + why)
+    _pfm_record_file(PFB_TRANSCRIPT, PFB_PR, PFB_BRANCH, h, (f, "reviewer", PFR_MODEL, "PASS"))
+
+
+def _build_pfc():
+    """The cap fixture. Main's commits each add one file, so no two conflict. The chain is H with a clean merge of
+    each main commit in turn: its 50th tip is 50 clean merges above H, and its 51st is 51."""
+    make_repo(PFC_SRC, {"notes.txt": "a\n"})
+    src = PFC_SRC
+    m0 = _pfr_step("rev-parse", "HEAD", where=src)
+    _pfr_step("checkout", "-q", "-b", "feat", where=src)
+    f = _pfm_commit(src, "feat.txt", "f1\n", "feat 1")
+    h = _pfm_commit(src, "feat.txt", "f2\n", "feat 2")
+    _pfr_step("checkout", "-q", "main", where=src)
+    mains = [_pfm_commit(src, "cap%d.txt" % k, "%d\n" % k, "main %d" % k) for k in range(1, PFC_MAINS + 1)]
+    _pfr_step("checkout", "-q", "-b", "chain", h, where=src)
+    tips = [_pfm_merge(src, m, "clean merge of main %d" % k) for k, m in enumerate(mains, 1)]
+    _pfr_step("checkout", "-q", "main", where=src)
+
+    shapes = [
+        (all(_pfm_clean(src, t) for t in tips), "a chain tip is not a clean merge of main"),
+        (_pfr_step("rev-list", "--count", "--first-parent", h + ".." + tips[49], where=src) == "50",
+         "the 50th tip is not 50 first-parent commits above H"),
+        (_pfr_step("rev-list", "--count", "--first-parent", h + ".." + tips[50], where=src) == "51",
+         "the 51st tip is not 51 first-parent commits above H"),
+    ]
+    for ok, why in shapes:
+        if not ok:
+            sys.exit("fixture setup failed: " + why)
+    _pfm_clone(PFC_CLONE["50"], src, tips[49], m0)
+    _pfm_clone(PFC_CLONE["51"], src, tips[50], m0)
+    _pfm_record_file(PFC_TRANSCRIPT, PFC_PR, PFC_BRANCH, h, (f, "reviewer", PFR_MODEL, "PASS"))
+
+
+lazy_fixture([PFB_SRC, PFB_TRANSCRIPT] + list(PFB_CLONE.values()), _build_pfb)
+lazy_fixture([PFC_SRC, PFC_TRANSCRIPT] + list(PFC_CLONE.values()), _build_pfc)
+
+# The refusals and allows that pin the default base. The first case of each pair is red on the current code: the
+# walk reads origin/master, a stale origin/HEAD, or the shadowing local branch as the default base, and allows it.
+pfr_fix_refuse("clean-merge: a merge whose second parent only origin/master holds, with origin/HEAD unset, then the push",
+               PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["a-master"])
+pfr_allow("clean-merge: a merge of origin/main, with origin/HEAD unset, then the push (the control)",
+          PFB_PUSH, PFB_TRANSCRIPT, cwd=PFB_CLONE["a-main"])
+pfr_fix_refuse("clean-merge: a merge whose second parent only origin/master holds, with a stale origin/HEAD naming "
+               "origin/master, then the push", PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["b-master"])
+pfr_fix_refuse("clean-merge: a merge whose second parent only a local branch named origin/main holds, then the push",
+               PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["c-shadow"])
+
+# The named source is the refspec's: the clean merge is read at its own refspec, not at HEAD.
+pfr_fix_refuse("clean-merge: HEAD is a clean merge, but the refspec names a plain commit, then the push",
+               VCS + " push origin plain-x:" + PFB_BRANCH, PFB_TRANSCRIPT, lacks=PFB_BRANCH,
+               cwd=PFB_CLONE["d-plain"])
+pfr_allow("clean-merge: HEAD is a plain commit, but the refspec names a clean merge, then the push",
+          VCS + " push origin merge-x:" + PFB_BRANCH, PFB_TRANSCRIPT, cwd=PFB_CLONE["d-merge"])
+
+# An octopus merge has three parents, so the walk refuses it. A push that names a second branch beside the fix branch
+# judges the fix branch's own source, and the other branch is unaffected.
+pfr_fix_refuse("clean-merge: an octopus merge of main 2 and a side commit, then the push", PFB_PUSH, PFB_TRANSCRIPT,
+               lacks=PFB_BRANCH, cwd=PFB_CLONE["e-octopus"])
+pfr_allow("clean-merge: a clean merge to the fix branch and a plain commit to another branch, in one push",
+          VCS + " push origin HEAD:" + PFB_BRANCH + " plain-y:" + PFB_OTHER, PFB_TRANSCRIPT,
+          cwd=PFB_CLONE["e-fix-clean"])
+pfr_fix_refuse("clean-merge: a plain commit to the fix branch and a clean merge to another branch, in one push",
+               VCS + " push origin HEAD:" + PFB_BRANCH + " merge-y:" + PFB_OTHER, PFB_TRANSCRIPT,
+               lacks=PFB_BRANCH, cwd=PFB_CLONE["e-fix-plain"])
+
+# The cap. 50 clean merges between the record's Head and the source are read to the Head; 51 are not.
+pfr_allow("clean-merge: 50 clean merges of main above the record's Head, then the push", PFC_PUSH, PFC_TRANSCRIPT,
+          cwd=PFC_CLONE["50"])
+pfr_fix_refuse("clean-merge: 51 clean merges of main above the record's Head, then the push", PFC_PUSH, PFC_TRANSCRIPT,
+               lacks=PFC_BRANCH, cwd=PFC_CLONE["51"])
