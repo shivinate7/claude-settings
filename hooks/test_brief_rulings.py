@@ -10,7 +10,9 @@ stub: judge(brief, repo_dir, invoke=...) takes the call_judge seam's answer, a (
 fails each case with one named assertion, never an import error. BRIEF_RULINGS_UNDER_TEST overrides the module path,
 as a mutant run needs.
 """
+import contextlib
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
@@ -323,6 +325,121 @@ class JudgeTests(unittest.TestCase):
         self.assertTrue(all(os.path.basename(str(argv[0])) == "git" for argv in starts),
                         "subprocess starts: each is a git read")
         self.assertEqual(listing(os.path.dirname(repo)), before, "files: judging writes no file")
+
+
+class MarkdownLeadStepTests(unittest.TestCase):
+    """A brief may open with markdown (a heading, a bold label, a quote), as guard_merge reads it. Each form is read
+    first, and after a leading Grant line."""
+    GRANT = "Grant: owner 2026-11-09 21:27 CST, this lane.\n"
+
+    def check_form(self, form, name):
+        step_of = member(self, brief_module(self), "step_of")
+        for label, text in (("first line", form + "\nbody"), ("after a Grant line", self.GRANT + form + "\nbody")):
+            with self.subTest(label=label):
+                self.assertEqual(step_of(text), STEP, "step_of: a %s Lane brief line gives no slug" % name)
+
+    def test_a_heading_led_lane_brief_gives_its_slug(self):
+        self.check_form("# Lane brief: %s. Topic: lane-topic." % STEP, "heading-led")
+
+    def test_a_bold_label_lane_brief_gives_its_slug(self):
+        self.check_form("**Lane brief:** %s. Topic: lane-topic." % STEP, "bold-label")
+
+    def test_a_quoted_lane_brief_gives_its_slug(self):
+        self.check_form("> Lane brief: %s. Topic: lane-topic." % STEP, "quoted")
+
+
+class MarkdownLeadJudgeTests(unittest.TestCase):
+    def test_a_markdown_led_brief_that_drops_a_ruling_reaches_the_model(self):
+        repo = store_repo(self, store_entries())
+        assert_store_reads(self, repo, ALL_IDS)
+        brief = ("# Lane brief: %s. Topic: lane-topic.\n\nReplaced PRs close after the merge. "
+                 "Guard reads go to every lane.\n" % STEP)
+        answer = ({"ok": False, "reason": "ruled:r-replace-close is dropped: the brief closes after the merge."}, None)
+        verdict, _why, stub = run_judge(self, brief, repo, answer)
+        self.assertEqual(len(stub.prompts), 1, "model calls: a markdown-led brief with a governing ruling is judged once")
+        self.assertEqual(verdict, "flag", "verdict: a markdown-led brief that drops a shown ruling is flagged")
+
+
+def run_cli(testcase, argv):
+    """The module run as a script, the way a session runs it: the real exit code, stdout and stderr."""
+    if not os.path.isfile(MODULE):
+        testcase.fail("hooks/brief_rulings.py is missing: no module judges the brief")
+    return subprocess.run([sys.executable, MODULE] + argv, capture_output=True, text=True, timeout=60)
+
+
+def run_main(testcase, argv, answer=OK_ANSWER):
+    """main(argv) in this process, with the model seam (call_judge.invoke_model, which judge() calls by name) replaced
+    by a stub. Returns (exit code, stdout, stub)."""
+    main = member(testcase, brief_module(testcase), "main")
+    import call_judge
+    stub = Stub(answer)
+    out = io.StringIO()
+    with mock.patch.object(call_judge, "invoke_model", stub), contextlib.redirect_stdout(out):
+        try:
+            code = main(argv)
+        except BaseException as exc:
+            testcase.fail("main raised %s: it must return an exit code and a verdict line" % type(exc).__name__)
+    return code, out.getvalue(), stub
+
+
+def brief_file(repo, text):
+    path = os.path.join(os.path.dirname(repo), "brief.md")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+class MainTests(unittest.TestCase):
+    def assert_one_unvetted_line(self, done):
+        self.assertNotIn("Traceback", done.stderr, "traceback: an unreadable brief is a verdict, not a crash")
+        lines = done.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "stdout: one verdict line")
+        self.assertTrue(lines[0].startswith("unvetted: "), "stdout: the verdict line is unvetted")
+
+    def test_a_missing_brief_file_exits_2_with_one_unvetted_line(self):
+        repo = store_repo(self, store_entries())
+        missing = os.path.join(os.path.dirname(repo), "no-such-brief.md")
+        done = run_cli(self, [missing, "--repo", repo])
+        self.assertEqual(done.returncode, 2, "exit code: a missing BRIEF_FILE exits 2")
+        self.assert_one_unvetted_line(done)
+
+    def test_an_unreadable_brief_file_exits_2_with_one_unvetted_line(self):
+        repo = store_repo(self, store_entries())
+        folder = os.path.join(os.path.dirname(repo), "a-folder")
+        os.mkdir(folder)
+        not_utf8 = os.path.join(os.path.dirname(repo), "not-utf8.md")
+        with open(not_utf8, "wb") as handle:
+            handle.write(b"\xff\xfe\x00 Lane brief: x.\n")
+        for label, path in (("a folder", folder), ("bytes that are not UTF-8", not_utf8)):
+            with self.subTest(label=label):
+                done = run_cli(self, [path, "--repo", repo])
+                self.assertEqual(done.returncode, 2, "exit code: an unreadable BRIEF_FILE exits 2")
+                self.assert_one_unvetted_line(done)
+
+    def test_a_flag_exits_1_and_prints_the_reason(self):
+        repo = store_repo(self, store_entries())
+        assert_store_reads(self, repo, ALL_IDS)
+        path = brief_file(repo, DROP_BRIEF)
+        answer = ({"ok": False, "reason": "ruled:r-replace-close is dropped: the brief closes after the merge."}, None)
+        code, out, _stub = run_main(self, [path, "--repo", repo], answer)
+        self.assertEqual(code, 1, "exit code: a flag exits 1")
+        self.assertTrue(out.startswith("flag: "), "stdout: the verdict line is flag")
+        self.assertIn("ruled:r-replace-close", out, "stdout: the reason names the shown id")
+
+    def test_an_ok_exits_0(self):
+        repo = store_repo(self, store_entries())
+        assert_store_reads(self, repo, ALL_IDS)
+        code, out, _stub = run_main(self, [brief_file(repo, CLEAN_BRIEF), "--repo", repo], OK_ANSWER)
+        self.assertEqual(code, 0, "exit code: ok exits 0")
+        self.assertTrue(out.startswith("ok: "), "stdout: the verdict line is ok")
+
+    def test_a_skipped_brief_exits_0_with_no_model_call(self):
+        repo = store_repo(self, store_entries())
+        assert_store_reads(self, repo, ALL_IDS)
+        code, out, stub = run_main(self, [brief_file(repo, "Just a brief, no step named.\n"), "--repo", repo])
+        self.assertEqual(code, 0, "exit code: skipped exits 0")
+        self.assertTrue(out.startswith("skipped: "), "stdout: the verdict line is skipped")
+        self.assertEqual(stub.prompts, [], "model calls: none for a brief with no step")
 
 
 def tearDownModule():
