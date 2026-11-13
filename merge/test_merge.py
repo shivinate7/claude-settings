@@ -11988,6 +11988,12 @@ class SkippedPushRun(unittest.TestCase):
         verdict, detail = self.read(runs, jobs)
         self.assertEqual(verdict, "unknown", f"no run on the page ran its suites, so main is unknown, never green: got {verdict}: {detail}")
 
+    def test_a_lone_skipped_push_run_with_nothing_earlier_is_unknown_not_green(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH)]  # the page holds this one run
+        jobs = {2002: skipped_suites_jobs()}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "unknown", f"a skipped push run with nothing earlier on main ran no suites, so main is unknown, never green: got {verdict}: {detail}")
+
     def test_a_push_run_that_ran_its_suites_and_passed_reads_green_as_before(self):
         runs = [main_run(2001, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2000, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
         jobs = {2001: ran_suites_jobs(), 2000: ran_suites_jobs("failure")}
