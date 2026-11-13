@@ -2271,3 +2271,6 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- lane-step-dup-untagged: A `create_session` with no `cs-step` tag, a carrier row with no `cs-repo` tag, and `list_sessions` filters other than `before_id`, `tags` and `mine` are not judged by rule lane-step-dup. Decision: session-tiers.
+- lane-step-dup-archived-after-read: A carrier archived after the whole `list_sessions` read still reads live until the session reads the list again, so the guard may refuse a step it could pass. Decision: session-tiers.
+- lane-step-dup-one-rule-id: Part two (open pull request) refuses under rule id `lane-step-dup`, the same as part one, so one override lifts both parts. Decision: session-tiers.
