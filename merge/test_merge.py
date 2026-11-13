@@ -1817,6 +1817,7 @@ class SmallBaseMove(ScopedRepo, Env):
 
     def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
+        # HEAD, not origin/main: a batch that edits CLAUDE.md would otherwise plan test_sendmessage_state.py as a lint step, and hit_suites would skip it.
         lints = merge.lint_steps(root, "HEAD")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
