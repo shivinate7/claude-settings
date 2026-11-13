@@ -4,7 +4,7 @@
 
 Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right. It keeps a table of variable assignments: POSIX `VAR=value` (also after `export`, `declare`, `typeset`, `readonly` or `local`) and PowerShell `$VAR = value`.
 
-- The last assignment wins. `unset` clears. A value it cannot resolve (`D=$(mktemp -d)`) clears the older one, and the name then stays as written: a default-word form over it is not read, and the environment is not asked.
+- The last assignment wins. `unset` clears. A value it cannot resolve (`D=$(mktemp -d)`) clears the older one, and the name then stays as written: a default-word form over it is not read, and the environment is not asked (inside `_resolve_into` only; the cd walk's `_variable_text` path reads the word, see note `forgotten-name-default-cd`).
 - `$HOME` reads as `~`, also where the guard runs with no `HOME` set.
 
 Each `$VAR` or `${VAR}` reads as its value at that point. Inside single quotes nothing expands. A write whose resolved target is frozen is refused. A variable with no known value at its use stays unresolved, and rule 7 allows it.
