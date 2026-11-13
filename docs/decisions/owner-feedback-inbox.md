@@ -146,11 +146,11 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   through a temp file) and the block reason names it, or systemMessage does when `stop_hook_active`.
   A line that cannot be found is reported as not marked. The session merges the work or drops the
   mark. A dropped mark is not judged again. An item with no usable verdict this Stop stays out
-  of `judged`, so the next Stop sends it again (a lane choice pending the owner: no ruling found in the repo). No usable verdict: a model error, an off-shape answer, a raise while judging, or an
+  of `judged`, so the next Stop sends it again (ruling: owner, 10:57 CST Nov 13, Cockpit items 664, 665, 666 (answers repeat-judge-retry, repeat-judge-batch-cap, repeat-judge-mark-split), pick a each). No usable verdict: a model error, an off-shape answer, a raise while judging, or an
   answer entry that is not an object or names an unknown id or ref. A hit item is judged. When an
   answer holds a bad entry, every sent item without a hit stays unjudged and one systemMessage
   line says so. One Stop sends at most 20 new items (REPEAT_BATCH), oldest first. The rest wait
-  for the next Stop. An exception while marking, after a verdict, keeps the sent items judged.
+  for the next Stop (same ruling). An exception while marking, after a verdict, keeps the sent items judged. A failure while judging keeps them unjudged (same ruling).
   Cost: a Stop with no new item or no candidate makes no call. Otherwise it makes one call, one
   `git grep` and one rev-parse (unmeasured), and the prompt holds at most 20 new items. While items wait or the
   model keeps failing, each Stop makes at most that one call again.
