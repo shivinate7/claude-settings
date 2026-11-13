@@ -1,11 +1,11 @@
 {
   "title": "The waiting page emits a settle signal, so its 24 test sleeps can wait on a condition",
   "why": "Lane timing-tests, 10:14 CST Nov 8: 24 sleeps in skills/waiting-page/tests/page.test.mjs wait out a settle after layout, scroll or a gesture, or a window in which nothing should happen.",
-  "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go. Lane: timing-tests ([ended:lane:-timing-tests]), coordinator 10:18 CST. R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci). Coordinator 16:19 CST Nov 12: #2986 new head c609a5561, round 3 sonnet PASS; runner 10 hold released once its lane lint passes.",
+  "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go. Lane: timing-tests ([ended:lane:-timing-tests]), coordinator 10:18 CST. R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci). Coordinator 16:19 CST Nov 12: #2986 new head c609a5561, round 3 sonnet PASS; runner 10 hold released once its lane lint passes. Merged in batch 113 (#3041, 36807ad19, 19:52 CST Nov 12) as lane PR #2986. Closed by triage batch-merge review.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJKzPBydNwYKzUY8qGxB",
-  "status": "doing",
+  "lane": "",
+  "status": "done",
   "order": 726,
-  "updatedAt": "2026-11-12T16:18:52-06:00"
+  "updatedAt": "2026-11-12T19:57:20-06:00"
 }

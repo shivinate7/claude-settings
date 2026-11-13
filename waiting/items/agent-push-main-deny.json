@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T01:55:00Z",
+  "context": "Goal: an agent that pushes somewhere its brief did not name is stopped, and you are not asked.\nProblem (rule): your Nov 3 ruling makes a plain push to main ask; inside an agent the lane says that ask has no one to answer it, so the lane made it a refusal.\nBased on (ruling): decision plain-push-asks: two kinds of plain push ask (owner, 2026-11-03 22:23 CST).\nBased on (ruling): your ruling of 2026-11-10 16:08 CST: \"I either want it approved or declined whichever is correct. I know for a fact I dont want to be asked.\" It covers pushes of every branch only.\nBased on (read): no ruling covers a push by an agent whose brief names another branch (roadmap/rulings and docs/decisions searched 19:55 CST).\nDeparts from: main asks on a plain push to main \u2014 the push is refused when an agent's brief names another branch.",
+  "home": "decision plain-push-asks",
+  "id": "agent-push-main-deny",
+  "kind": "decision",
+  "n": 672,
+  "options": [
+    {
+      "gain": "A mistaken agent push to main is stopped and you are never asked about it.",
+      "how": "The lane's new guard refuses the push and names the branch the brief gave; your typed override still lets it through.",
+      "id": "keep-deny",
+      "key": "a",
+      "label": "Refuse it (recommended)",
+      "lose": "An agent you meant to push to main must have a brief that names main."
+    },
+    {
+      "gain": "Main's behaviour stays as you ruled it on Nov 3.",
+      "how": "The lane restores the ask for this case, as main does now.",
+      "id": "restore-ask",
+      "key": "b",
+      "label": "Keep the ask",
+      "lose": "You may be asked about a push you never meant, or the ask goes unanswered inside the agent."
+    }
+  ],
+  "owner": "lane brief-names-push-target (session_013NEJL371TsKz9QxefdQQgz), PR #3044",
+  "pick": "a",
+  "ref": "lane message 19:53 CST Nov 12; draft PR #3044",
+  "repo": "shivinate7/claude-settings",
+  "short": "Agent push to main: refuse, not ask",
+  "status": "open",
+  "title": "When an agent pushes to main but its brief names another branch, refuse it instead of asking?",
+  "why": "It changes what you ruled a plain push does, which only you can change."
+}

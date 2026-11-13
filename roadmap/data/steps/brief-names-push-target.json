@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Incident: a builder pushed the lane branch before the review records were posted (lane writer-lists-awaiting-threads).",
  "source": "coordinator 12:51 CST Nov 12, from lane writer-lists-awaiting-threads hand-in to runner 10",
- "note": "Mistake: a builder agent pushes when its brief did not mean it to. Harm: a branch moves before review records post. Fix: a brief carries \"Push to: <branch> or none\"; a builder agent's push is refused when its brief says none. Red first on the incident. Coordinator follow-up (undoable), start when ready.",
- "updatedAt": "2026-11-12T12:58:46-06:00"
+ "note": "Mistake: a builder agent pushes when its brief did not mean it to. Harm: a branch moves before review records post. Fix: a brief carries \"Push to: <branch> or none\"; a builder agent's push is refused when its brief says none. Red first on the incident. Coordinator follow-up (undoable), start when ready. Lane 19:53 CST Nov 12 (#3044): owner items 672 agent-push-main-deny (refuse an agent push to main whose brief names another branch, departs from plain-push-asks; triage recommends a) and 673 brief-rule-push-line (add the push line to rule roles-brief-contents; a yes goes to the Windows session by mail; triage recommends a). Answers go to this lane. Not blocking. Hung-mutant point filed as step mutate-timeout-crashed.",
+ "updatedAt": "2026-11-12T19:57:20-06:00"
 }

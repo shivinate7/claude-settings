@@ -1,0 +1,14 @@
+{
+ "id": "mutate-timeout-crashed",
+ "title": "One hung mutant aborts the whole mutation run",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "hooks/mutate_guard.py run_suite lets subprocess.TimeoutExpired escape, so one hung mutant ends the run and every other mutant goes unscored.",
+ "source": "lane brief-names-push-target (session_013NEJL371TsKz9QxefdQQgz) 19:53 CST Nov 12, #3044",
+ "note": "Settled, no owner item: decision mutation-report-scores-suites says a timeout counts as crashed, not a kill and not a survivor. Fix: run_suite catches TimeoutExpired and records that mutant as crashed; the run goes on. Test red on main first with a mutant whose suite sleeps past the timeout.",
+ "updatedAt": "2026-11-12T19:57:20-06:00"
+}
