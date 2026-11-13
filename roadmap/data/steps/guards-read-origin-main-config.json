@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Session checkouts go stale, and guards read repo config from the stale checkout.",
  "source": "Degen report on claude-settings (owner pasted 20:51 CST Nov 12), relayed by the retrospective 21:04 CST; ledger plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849, row D14 b",
- "note": "Guards read repo config (git_reads.py:305, question_form.py:1062-1077) from the origin/main blob. Part (a) is an owner choice that reverses step grants-read-from-main; the retrospective brings it. Ledger row D14. Started by coordinator 21:07 CST Nov 12.",
- "updatedAt": "2026-11-12T21:07:27-06:00"
+ "note": "Guards read repo config (git_reads.py:305, question_form.py:1062-1077) from the origin/main blob. Part (a) is an owner choice that reverses step grants-read-from-main; the retrospective brings it. Ledger row D14. Started by coordinator 21:07 CST Nov 12. Triage 21:52 CST Nov 12, lane questions (session_013NEJL3e5VxTvDHtfBupKfs), settled with no owner item: (1) fork keys: blob wins except a fork (file sets record-branch or its own waiting-page) keeps its own file, per decision session-tiers lines 51-52; add a fork test red first; a stale fork staying stale is a note. 4 of 6 ForkRecord cases in skills/roadmap/test_build.py failed before. (2) test_repo_colour's cost test re-points from zero git starts to at most one (rule outcomes-tests-are-statements), with the cost stated in its record. Part (a) still waits on the owner via the retrospective.",
+ "updatedAt": "2026-11-12T21:53:12-06:00"
 }
