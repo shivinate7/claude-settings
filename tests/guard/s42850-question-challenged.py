@@ -9,7 +9,7 @@ FAMILY = "question-challenged"
 # the same ArtifactData call. A closed item, a task, a note, an item with no pick, one with stands: true, a port
 # item, an update with no context or no pick, another artifact's page and another collection are not judged. A
 # str_replace on context that removes the line, or writes one that is not well formed, is refused. The line sits
-# in `context` only.
+# in `context` only. The pick is the `recommended` key, or its old name `pick`; either one makes a decision judged.
 #
 # The form lines, the Departs from line and OJ_AGAINST come from the sections before this one: the Against the
 # pick line has one home beside QD_LINE, and oj_ctx and with_stake both take it from there.
@@ -36,7 +36,8 @@ def qc_item(**over):
 
 
 def qc(name, expected, item, action="set", **extra):
-    kw = dict(action=action, collection="items", doc_id=QC_DOC, data=item)
+    # The options carry `shown`, as a session's write does (with_shown), or option-letters-frozen refuses each allow.
+    kw = dict(action=action, collection="items", doc_id=QC_DOC, data=with_shown(item))
     kw.update(extra)
     add("question challenged: " + name, expected, "question-challenged" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
@@ -86,6 +87,24 @@ qc("an update that carries kind decision and a context, with no pick, is allowed
    {"kind": "decision", "context": oj_ctx(against=None)}, action="update")
 qc("an update that carries a pick and a context, with no kind, is allowed", "allow",
    {"pick": "a", "context": oj_ctx(against=None)}, action="update")
+# A decision names its pick in `recommended` now, and `pick` is its old name. Each case below holds for `recommended`.
+qc("a decision with a recommended key and no Against the pick line is denied", "deny",
+   qc_item(pick=None, recommended="a", context=oj_ctx(against=None)))
+qc("a decision with a recommended key and a sonnet line is allowed", "allow", qc_item(pick=None, recommended="a"))
+qc("an update that carries kind decision, a recommended key and a context with no line is denied", "deny",
+   {"kind": "decision", "recommended": "a", "context": oj_ctx(against=None)}, action="update")
+qc("an update that carries kind decision, a recommended key and a context with the line is allowed", "allow",
+   {"kind": "decision", "recommended": "a", "context": oj_ctx()}, action="update")
+qc("an update that carries kind decision and a recommended key, with no context, is allowed", "allow",
+   {"kind": "decision", "recommended": "a"}, action="update")
+qc("a recommended key with stands true and no Against the pick line is allowed", "allow",
+   qc_item(pick=None, recommended="a", stands=True, context=oj_ctx(against=None)))
+qc("a recommended key on a port item with no Against the pick line is allowed", "allow",
+   qc_item(pick=None, recommended="a", port=True, context=oj_ctx(against=None)))
+qc("a decision with a recommended list of two keys and no Against the pick line is denied", "deny",
+   qc_item(pick=None, recommended=["a", "b"], context=oj_ctx(against=None)))
+qc("a decision with a recommended list of two keys and a sonnet line is allowed", "allow",
+   qc_item(pick=None, recommended=["a", "b"]))
 qc("an item set to another artifact is allowed", "allow", qc_item(context=oj_ctx(against=None)),
    url="https://claude.ai/artifact/other")
 qc("a set to another collection is allowed", "allow", qc_item(context=oj_ctx(against=None)), collection="answers")
@@ -117,12 +136,13 @@ qc_replace("a str_replace on the title is not judged", "allow", OJ_AGAINST, "", 
 
 add("question challenged: a batch with a decision that has no Against the pick line is denied", "deny",
     "question-challenged", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "items", "doc_id": QC_DOC, "data": qc_item(context=oj_ctx(against=None))}])
+    writes=[{"op": "set", "collection": "items", "doc_id": QC_DOC,
+             "data": with_shown(qc_item(context=oj_ctx(against=None)))}])
 add("question challenged: a batch of decisions that each carry the line is allowed", "allow", tool="ArtifactData",
     cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "items", "doc_id": QC_DOC, "data": qc_item()},
+    writes=[{"op": "set", "collection": "items", "doc_id": QC_DOC, "data": with_shown(qc_item())},
             {"op": "set", "collection": "items", "doc_id": "challenged-second",
-             "data": qc_item(id="challenged-second")}])
+             "data": with_shown(qc_item(id="challenged-second"))}])
 
 # A str_replace that empties the text of the line, and placeholder text that reads as a word: none, TBD,
 # todo, n/a, an ellipsis and a lone em dash. Real text that holds one of those words is not a placeholder.
