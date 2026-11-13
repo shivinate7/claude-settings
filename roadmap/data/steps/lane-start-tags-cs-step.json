@@ -1,0 +1,14 @@
+{
+ "id": "lane-start-tags-cs-step",
+ "title": "Every lane the coordinator starts carries a cs-step tag, so the archive pass can see it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A lane with no cs-step tag never passes the idle-lanes archive tests: the build cannot tie it to a step. Example: #3052's lane session_013NEJKzMndrATd5V4pyEZoB. The same gap hid lanes from the stale-draft row on Nov 12 (plans/stale-drafts-2026-11-13.md).",
+ "source": "retrospective 00:44 CST Nov 13",
+ "note": "The coordinator's lane start sets cs-step:<slug> with set_session_tags in the same turn as create_session. Guard: a check at lane start (or in the coordinator brief template) that refuses a create_session for a lane with no cs-step tag. Red test first. Until then, runner 10 archives merged lanes by the session named in each PR footer.",
+ "updatedAt": "2026-11-13T00:45:11-06:00"
+}
