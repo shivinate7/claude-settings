@@ -393,9 +393,36 @@ PAGE_MARK, PAGE_MARK_B = "PAGEMARK-3f9c", "PAGEMARK-8d21"
 PAGE_OLD, PAGE_NEW = "PAGEOLD-5a0e", "PAGENEW-7c3d"
 
 
+def shown_of(options):
+    """The `shown` list a page write carries: each option's key, id and label, in order. A non-dict entry is skipped."""
+    return [{"key": o.get("key"), "id": o.get("id"), "label": o.get("label")} for o in options if isinstance(o, dict)]
+
+
+def with_frozen_fields(data, ids=True):
+    """A copy of a page write's data with the fields a session's write carries when it writes options: `shown`, the
+    options as first shown, and with `ids` an id on each option that has none (opt-<n>, n its 1-based position, never
+    a lone letter). An id the option already has, even "" or a repeat, is kept, so a case can write a bad id. Data with
+    no options list is copied unchanged. question_form.frozen_letters_hit (rule option-letters-frozen) reads both."""
+    found = dict(data)
+    options = data.get("options")
+    if not isinstance(options, list):
+        return found
+    filled = []
+    for i, option in enumerate(options):
+        if isinstance(option, dict):
+            option = dict(option)
+            if ids:
+                option.setdefault("id", "opt-%d" % (i + 1))
+        filled.append(option)
+    found["options"] = filled
+    found["shown"] = shown_of(filled)
+    return found
+
+
 def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
-    in the prompt. `over` replaces fields, for a case that changes one."""
+    in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
+    with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
     context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
     item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
@@ -403,7 +430,7 @@ def good_page_item(mark=PAGE_MARK, **over):
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
                          "lose": "The change lands a day later."}]}
     item.update(over)
-    return item
+    return with_frozen_fields(item)
 
 
 # A task item (kind task) is judged like a decision (coordinator follow-up after the Nov 1 11:51 CST ruling). Its
@@ -724,7 +751,7 @@ def case_page_batch_one_call():
     second = good_page_item(PAGE_MARK_B)
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"kind": "decision", "context": second["context"], "options": second["options"]}}]
+               "data": with_frozen_fields({"kind": "decision", "context": second["context"], "options": second["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("page batch: two qualifying item writes make exactly one model call, claude-opus-5-5",
@@ -1033,7 +1060,7 @@ def last_answer(note, choice="none", done=None):
 
 def reask_item(mark, note=REASK_NOTE, choice="none", done=None):
     """Data for an update of an answered decision: its options and the owner's note, no context."""
-    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)}
+    return with_frozen_fields({"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)})
 
 
 def rule_detail(rule, r):
@@ -1073,7 +1100,7 @@ def case_options_without_note_lacks_rule():
     # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one model call, so an early exit
     # cannot pass this check.
     rule = none_direction_rule()
-    r = run_hook(page_input("update", {"options": good_page_item()["options"]}), answer=ALLOW)
+    r = run_hook(page_input("update", with_frozen_fields({"options": good_page_item()["options"]})), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, options only: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
@@ -1084,7 +1111,7 @@ def case_options_without_note_lacks_rule():
 def case_blank_note_lacks_rule():
     # Case 4: a note that is blank after strip is not a direction, so the write is not a re-ask.
     rule = none_direction_rule()
-    data = {"options": good_page_item()["options"], "lastAnswer": last_answer("  ")}
+    data = with_frozen_fields({"options": good_page_item()["options"], "lastAnswer": last_answer("  ")})
     r = run_hook(page_input("update", data), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, blank note: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
@@ -1263,7 +1290,7 @@ def case_widening_batch_holds_rule_once():
     rule = widening_rule()
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
+               "data": with_frozen_fields({"options": good_page_item(PAGE_MARK_B)["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
@@ -1280,7 +1307,7 @@ def case_widening_absent_without_options():
     context = good_page_item()["context"]
     for label, inp, template in (
         ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
-        ("an update with context and empty options", page_input("update", {"context": context, "options": []}),
+        ("an update with context and empty options", page_input("update", with_frozen_fields({"context": context, "options": []})),
          "PAGE_PROMPT"),
         ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
         ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
@@ -1300,6 +1327,7 @@ def case_widening_refusal_names_the_option():
     rule = widening_rule()
     item = good_page_item(PAGE_MARK)
     item["options"][1]["label"] = "Accept a second accepted form"
+    item = with_frozen_fields(item)  # the relabelled option is the item's first write, so its shown is the new label
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
     check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
           got == ("", ""), got)
@@ -1546,15 +1574,16 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
+    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question runs one git process, the roadmap read",
-          len(r.calls) == 1 and r.git == 1, detail(r))
+    check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
+          len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
-          len(q.calls) == 1 and q.git <= 1, detail(q))
+    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
+          len(q.calls) == 1 and q.git <= 2, detail(q))
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
