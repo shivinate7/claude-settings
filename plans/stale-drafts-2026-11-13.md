@@ -324,3 +324,10 @@ List: main's build row "draft PRs over 12 h with no live lane", from live file r
 - Held, #3038 (the relayed-grant PR; the R18 point 5 settings edit waits on it) and #3040 (its review debts).
 - Held, branch starts with open step notes-fix-reverify-small: #3039.
 - Closed: none.
+
+## Sixth pass, after batch 129 (#3128, merged 8d7d36bd9 08:20 CST Nov 13)
+
+List: main's build row "draft PRs over 12 h with no live lane", from live file readAt 2026-11-13T08:22:30-06:00 (401 open PRs, 1948 sessions): 352 listed. 3 were not on an earlier pass's list and not on runner 10's hold list.
+- Held, guard-cull family of step guard-false-alarm-cull (live lane session_013NEJL1zDA7EF7cqDccCwhe): #3043.
+- Held, open step and live session: #3044 (brief-names-push-target), #3047 (mutate-timeout-crashed).
+- Closed: none.
