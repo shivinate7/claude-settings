@@ -78,7 +78,10 @@ GUARD_MERGE_SOURCE = os.path.join(HOOKS, "guard_merge.py")
 # too: no PreToolUse entry runs decision_watch.py, and its mod reads the tool calls from the transcript after a turn.
 GUARD_NAMES = ("SPAWN_TOOLS", "START_TOOLS", "SESSION_TOOL", "CREATE_SESSION_TOOL", "SIM_MCP", "PAGE_TOOL",
                "DATA_TOOL", "REMOTE_OUTWARD_TOOLS", "SHELL_TOOLS", "WRITE_TOOLS")
-MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
+# guard_merge's comment and file-write tools: the review-record judge reads the comment post and its edit, and the push-main
+# judge reads the host's file-write tools. Each name is read here, never written out, so a renamed tool is one edit.
+MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL", "REVIEW_COMMENT_TOOL", "UPDATE_COMMENT_TOOL",
+               "FILE_WRITE_TOOLS")
 # The six GitHub MCP write tools the owner named. Each one must be matched, whether or not a guard judges it yet.
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
