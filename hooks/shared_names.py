@@ -14,15 +14,21 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 # The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"
-# The claude-code-remote tools that start, message, tag or archive sessions, set scheduled tasks or attach repos
-# and computers. An agent never calls one; the session that spawned it does. settings.json's guard matcher
-# must name each (lint/test_settings_matcher.py reads this tuple).
+# The session server's start_session, the one outward tool outside claude-code-remote (its own server prefix). The one
+# home of the name; the guard's start-tool checks import it. Its input has no `tags` field (source: step
+# both-session-starts-judged; not checked against the live tool schema), so the lane-tag guards (lane-effort-pin,
+# lane-repo-tag, lane-start-settings, all through is_lane_create_session, which accepts only create_session) do not
+# judge it. Only agent-no-remote-tools, through REMOTE_OUTWARD_TOOLS, stops an agent's call.
+START_SESSION_TOOL = "mcp__ccd_session__start_session"
+# The tools that start, message, tag or archive sessions, set scheduled tasks or attach repos and computers: the
+# twenty claude-code-remote tools, and START_SESSION_TOOL. An agent never calls one; the session that spawned it does.
+# settings.json's guard matcher must name each (lint/test_settings_matcher.py reads this tuple).
 REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
     "create_session", "send_message", "archive_session", "unarchive_session", "interrupt_session",
     "set_session_tags", "set_session_title", "create_trigger", "update_trigger", "delete_trigger",
     "fire_trigger", "send_later", "watch_url", "unwatch_url", "subscribe_pr_activity",
     "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
-    "request_computer_folder"))
+    "request_computer_folder")) + (START_SESSION_TOOL,)
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"

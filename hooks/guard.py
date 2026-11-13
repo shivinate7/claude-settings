@@ -206,9 +206,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
                        a judged value is present. An override lifts it.
   agent-no-remote-tools
-                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
-                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
-                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a tool in
+                       shared_names.REMOTE_OUTWARD_TOOLS: a claude-code-remote tool, or the session server's
+                       start_session. They start, message, tag or archive sessions, set scheduled tasks, repos and
+                       computers. The session's own call, and the read tools, pass.
                        An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
@@ -2905,10 +2906,10 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
-SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, START_SESSION_TOOL, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
 )
+SESSION_TOOL = START_SESSION_TOOL
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (

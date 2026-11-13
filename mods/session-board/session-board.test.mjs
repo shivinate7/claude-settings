@@ -1458,9 +1458,12 @@ for (const tool of ['mcp__ccd_session__start_session', 'mcp__claude-code-remote_
 
 await test("question box: the desktop start tool is the guard's own SESSION_TOOL", async () => {
   const { readFileSync } = await import('node:fs')
-  const guard = readFileSync(fileURLToPath(new URL('../../hooks/guard.py', import.meta.url)), 'utf8')
-  const m = /^SESSION_TOOL = "([^"]+)"$/m.exec(guard)
-  assert.ok(m && lib.startsSession(m[1]), `guard.py SESSION_TOOL ${m && m[1]} is not a start`)
+  const hooks = name => readFileSync(fileURLToPath(new URL(`../../hooks/${name}`, import.meta.url)), 'utf8')
+  // The name has one home, hooks/shared_names.py; guard.py takes it from there.
+  assert.match(hooks('guard.py'), /^SESSION_TOOL = START_SESSION_TOOL$/m, 'guard.py SESSION_TOOL is not the shared START_SESSION_TOOL')
+  const m = /^START_SESSION_TOOL = "([^"]+)"$/m.exec(hooks('shared_names.py'))
+  assert.ok(m, 'shared_names.py does not name START_SESSION_TOOL as a string')
+  assert.ok(lib.startsSession(m[1]), `lib.mjs does not count START_SESSION_TOOL ${m[1]} as a session start`)
 })
 
 await test('question box: a failed or refused session start leaves it open', async () => {

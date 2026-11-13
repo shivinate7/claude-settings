@@ -19,12 +19,26 @@ AGENT_SHAPES = (
     ("a general-purpose agent", AGENT_ID_VALUE, "general-purpose"),
     ("an agent with no agent_type", AGENT_ID_VALUE, None),
 )
+# The session server's start_session. It is the one outward tool outside claude-code-remote: it has its own prefix, so
+# it is named whole here (full_name), never built from REMOTE_PREFIX. An agent's call starts a session through it.
+START_SESSION_CALL = "mcp__ccd_session__start_session"
+START_SESSION_INPUT = {"initiation": "user_asked", "prompt": "x", "model": "sonnet"}
+
+
+def full_name(tool):
+    """The full tool name: a short claude-code-remote name gets REMOTE_PREFIX, and a full name is kept."""
+    return tool if tool.startswith("mcp__") else REMOTE_PREFIX + tool
+
+
+def short_name(tool):
+    """The name a refusal must not carry: a claude-code-remote tool's short form, else the full name."""
+    return tool[len(REMOTE_PREFIX):] if tool.startswith(REMOTE_PREFIX) else tool
 
 
 def remote_call(tool, tool_input, agent_id=None, agent_type=None, transcript=None):
-    """The PreToolUse payload of one claude-code-remote call as the hook receives it. An agent's payload carries
+    """The PreToolUse payload of one outward tool call as the hook receives it. An agent's payload carries
     agent_id and agent_type beside tool_name and tool_input. The session's own payload carries neither."""
-    body = {"tool_name": REMOTE_PREFIX + tool, "tool_input": tool_input, "cwd": NOGIT}
+    body = {"tool_name": full_name(tool), "tool_input": tool_input, "cwd": NOGIT}
     if agent_id:
         body["agent_id"] = agent_id
     if agent_type:
@@ -35,9 +49,10 @@ def remote_call(tool, tool_input, agent_id=None, agent_type=None, transcript=Non
 
 
 def outward_case(name, expected, tool, tool_input, transcript, agent_id=None, agent_type=None, **kw):
-    """One case on a claude-code-remote payload. A transcript-reading call runs in ROLE_ENV, as archive_allow does."""
+    """One case on an outward tool's payload. A transcript-reading call runs in ROLE_ENV, as archive_allow does. The case
+    names the full tool, so the load brake's probe reads a start call as a start call."""
     add(name, expected, raw=remote_call(tool, tool_input, agent_id, agent_type, transcript),
-        env=ROLE_ENV if transcript else None, **kw)
+        tool=full_name(tool), env=ROLE_ENV if transcript else None, **kw)
 
 
 for _tool, _input, _transcript in OUTWARD_CALLS:
@@ -58,8 +73,21 @@ for _tool, _input in READ_CALLS:
     for _shape, _id, _type in AGENT_SHAPES:
         add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
             raw=remote_call(_tool, _input, _id, _type))
-# The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
-# REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
+# start_session: an agent's call is refused in both agent shapes, and the session's own call and an agent_type with no
+# agent_id keep their verdict. A call that carries a lane tag is no lane start: the lane gate reads tags on create_session
+# only (is_lane_create_session), so no lane rule judges this call, and it keeps its verdict too.
+for _shape, _id, _type in AGENT_SHAPES:
+    outward_case("agent-no-remote-tools: start_session from %s is refused" % _shape, "deny", START_SESSION_CALL,
+                 START_SESSION_INPUT, None, _id, _type, rule=AGENT_NO_REMOTE, lacks=START_SESSION_CALL)
+outward_case("agent-no-remote-tools: start_session from the session itself keeps today's verdict", "allow",
+             START_SESSION_CALL, START_SESSION_INPUT, None)
+outward_case("agent-no-remote-tools: start_session from an agent_type with no agent_id keeps today's verdict", "allow",
+             START_SESSION_CALL, START_SESSION_INPUT, None, None, "general-purpose")
+outward_case("agent-no-remote-tools: start_session carrying a lane tag from the session is not a lane start", "allow",
+             START_SESSION_CALL, dict(START_SESSION_INPUT, tags=["cs-build:lane"]), None)
+# The twenty-one outward tools, pinned by full name: the twenty claude-code-remote names, and start_session, which has its
+# own prefix. Each name gets its own deny case from a general-purpose agent, so a REMOTE_OUTWARD_TOOLS that drops one name
+# goes red on that name. The equality check holds the constant to this set.
 PINNED_OUTWARD_TOOLS = (
     "mcp__claude-code-remote__create_session",
     "mcp__claude-code-remote__send_message",
@@ -81,6 +109,7 @@ PINNED_OUTWARD_TOOLS = (
     "mcp__claude-code-remote__register_repo_root",
     "mcp__claude-code-remote__confirm_repository_trust",
     "mcp__claude-code-remote__request_computer_folder",
+    START_SESSION_CALL,
 )
 # Three pinned names have a main rule that answers first (judge() in guard.py: rules 8a before 8b). Each name's case on
 # the bare call expects that owner rule. A second case, on a shape the owner lets through, expects agent-no-remote-tools,
@@ -100,7 +129,7 @@ OWNER_PASSES = {
                                                          role_path("untagged")),
 }
 for _full in PINNED_OUTWARD_TOOLS:
-    _short = _full[len(REMOTE_PREFIX):]
+    _short = short_name(_full)
     if _full in OWNED_PINNED:
         _owner, _bare_input = OWNED_PINNED[_full]
         outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused by %s first" % (_short, _owner),
@@ -111,8 +140,9 @@ for _full in PINNED_OUTWARD_TOOLS:
                      "deny", _short, _pass_input, _pass_transcript, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE,
                      lacks=_short)
         continue
+    _input = START_SESSION_INPUT if _full == START_SESSION_CALL else {}
     outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
-                 _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
+                 _short, _input, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
 
 
 def pinned_outward_check():
@@ -133,7 +163,7 @@ def pinned_outward_check():
             return False, "REMOTE_OUTWARD_TOOLS holds %s, which is not pinned" % name
     if len(set(constant)) != len(constant):
         return False, "REMOTE_OUTWARD_TOOLS repeats a name"
-    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 20 pinned names"
+    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 21 pinned names"
 
 
 FIXTURELESS_CHECKS.add(pinned_outward_check)
