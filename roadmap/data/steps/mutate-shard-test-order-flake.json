@@ -1,0 +1,14 @@
+{
+ "id": "mutate-shard-test-order-flake",
+ "title": "ShardTests.test_no_shard_runs_all fails on a thread-order race; make the order fixed",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Real incident: lane stood-pick-closes-on-answer (PR 3171): `merge --lane-lint` failed twice at 618378bdc on hooks/test_mutate_shared.py ShardTests.test_no_shard_runs_all (got [a,c,b], expected [a,b,c]); on main fccff95e6 it failed 2 of 30 runs on 4 CPUs.",
+ "source": "lane session_013NEJL3cksv5ZcjkCvVdYFU, 12:33 CST Nov 13",
+ "note": "Todo, new lane (build; test-author, builder, reviewer). Cause (lane read): run_mutants runs mutants in a pool sized job_count() (MUTATE_JOBS, else CPU count), so the `ran` order is a thread race and the test expects abc. Fix choices: the test compares sorted, or run_shard sets MUTATE_JOBS=1, or run_mutants orders its result. Pick the one that keeps the production order meaningful; do not weaken the test. The flake blocks lane lint on unrelated PRs, so a real debt: a lane hits it in normal work.",
+ "updatedAt": "2026-11-13T12:33:57-06:00"
+}
