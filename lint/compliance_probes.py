@@ -927,11 +927,21 @@ def runs_ui_tests(text, specs):
         TEST_ACTIONS & set(run) and runs_ui_bundle(run, specs) for run in xcodebuild_runs(text))
 
 
-def ci_exemption(root):
-    """The CI exemption form of an iOS repo, as (sdk, problem). (None, None): no form. (sdk, None): valid. (None, text): broken."""
-    raw = read(root, IOS_CI_EXEMPTION)
-    if raw is None:
+def ci_exemption(root, files):
+    """The CI exemption form of an iOS repo, as (sdk, problem). (None, None): no form. (sdk, None): valid. (None, text): broken.
+    `files`: the tracked paths. A form counts only when tracked. A directory or a file that is not UTF-8 JSON is a problem."""
+    full = os.path.join(root, *IOS_CI_EXEMPTION.split("/"))
+    if not os.path.lexists(full):
         return None, None
+    if os.path.isdir(full):
+        return None, "%s is a directory, not a form" % IOS_CI_EXEMPTION
+    if IOS_CI_EXEMPTION not in files:
+        return None, "%s is untracked; add it to git" % IOS_CI_EXEMPTION
+    try:
+        with open(full, "rb") as handle:
+            raw = handle.read().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None, "%s cannot be read as UTF-8 text" % IOS_CI_EXEMPTION
     try:
         form = json.loads(raw)
     except ValueError:
@@ -993,26 +1003,32 @@ def probe_ios(root):
     floating = ["%s: %s" % (f, r) for f in flows for r in sorted(set(MACOS_IMAGE.findall(text[f])))
                 if r != IOS_RUNNER and not r.startswith(IOS_RUNNER + "-")]
     pinned = any(RUNS_ON.search(text[f]) and MACOS_IMAGE.search(text[f]) for f in flows)
-    exempt_sdk, exempt_problem = ci_exemption(root)
+    exempt_sdk, exempt_problem = ci_exemption(root, files)
     if exempt_problem:
         item("ci runner", "gap", exempt_problem)
     elif floating:
         item("ci runner", "gap", "; ".join(floating) + " (want %s)" % IOS_RUNNER)
-    elif exempt_sdk:
-        item("ci runner", "pass", "exempt: %s" % exempt_sdk)
     else:
         item("ci runner", "pass" if pinned else "gap", IOS_RUNNER if pinned else "no workflow runs on macOS")
-    wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages) + (("compiles the app", compiles_app),)
     on_pr = [f for f in flows if PULL_REQUEST.search(text[f])]
-    lacks = ([] if on_pr else ["no pull_request workflow"]) + [
-        "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
+    package_wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages)
+    compile_wants = (("compiles the app", compiles_app),)
+
+    def missing(wants):
+        return ([] if on_pr else ["no pull_request workflow"]) + [
+            "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
+
+    # A valid form waives the app compile only; the package tests and the pull_request workflow stay required.
+    lacks = missing(package_wants + (() if exempt_sdk else compile_wants))
+    app_compile_missing = bool(exempt_sdk) and not lacks and missing(compile_wants)
     if exempt_problem:
         item("ci checks", "gap", exempt_problem)
-    elif exempt_sdk:
-        item("ci checks", "pass", "exempt: %s" % exempt_sdk)
+    elif lacks:
+        item("ci checks", "gap", "; ".join(lacks))
+    elif app_compile_missing:
+        item("ci checks", "pass", "exempt: %s (app compile waived)" % exempt_sdk)
     else:
-        item("ci checks", "gap" if lacks else "pass",
-             "; ".join(lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
+        item("ci checks", "pass", "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
     projects = [xcodegen_tests(text[f]) for f in specs]
     slow = [f for f in flows if runs_ui_tests(text[f], projects)]
     item("slow tests", "gap" if slow else "pass",
