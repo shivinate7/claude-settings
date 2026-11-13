@@ -5442,7 +5442,11 @@ def kind_misfits(kind, files):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live, repo_dir=None):
-    """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
+    """merge --idle-lanes: print lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
+    HOLD and counts only in the summary's "M held", not in "N lanes to archive") and `hold (` lines (a lane not to archive
+    now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
+    the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not
+    done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
@@ -5467,12 +5471,19 @@ def idle_lanes(live, repo_dir=None):
         return 1
     holds = [x for x in entries if x.startswith("hold (")]
     lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
+    handoff_held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
     # An unknown entry with no lane or hold beside it is the whole list unread: no summary, so it never reads as an empty list.
     unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        held = f", {len(holds)} held" if holds else ""
-        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
+        held = len(holds) + len(handoff_held)
+        count = f"{len(lanes) - len(handoff_held)} lanes to archive" + (f", {held} held" if held else "")
+        if holds:
+            tail = "Run get_session on each lane line alone, then archive it; never archive a hold line."
+        elif handoff_held:
+            tail = "Run get_session on each alone, then archive it."
+        else:
+            tail = "Run get_session on each lane in one message, then archive them in the next message."
+        entries = [*entries, f"merge: {count}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
