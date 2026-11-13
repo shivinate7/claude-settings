@@ -12788,7 +12788,7 @@ class RedMainBrake(Env):
         self.assertIn("run 1601", out)
         self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
 
-    # The revert clear (owner, 2026-11-13 13:20 CST, item 745 b): a red run clears once a revert of its head is on main. The revert is a commit
+    # The revert clear: a red run clears once a revert of its head is on main. The revert is a commit
     # reachable from origin/main, other than the red run's head, with a line `This reverts commit <head>.`, and it is not net-reverted. Each red run
     # needs its own revert. A red run whose revert has not merged still refuses. The revert's own run may be in progress, queued or absent.
     # The seam: each revert is a real commit on origin's main, made by the other clone and fetched into self.co. base_state reads it with git on
@@ -12861,7 +12861,7 @@ class RedMainBrake(Env):
         self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
 
     def test_a_revert_whose_own_completed_run_is_red_refuses_naming_that_run(self):
-        # a revert whose completed run is red is a new red run on main: it needs its own revert (owner ruling, 2026-11-12 09:46 CST, relayed by the coordinator)
+        # a revert whose completed run is red is a new red run on main, so it needs its own revert
         rc, out, before, _ = self.revert_case("completed", "failure")
         self.refused(rc, out, before)
         self.assertIn(f"run {self.REVERT_RUN} of checks", out, "the refusal does not name the revert's red run")
