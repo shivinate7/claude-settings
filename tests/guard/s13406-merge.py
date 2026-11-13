@@ -1041,6 +1041,9 @@ record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd i
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
               VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
+# With a pid echoed after the job, detached-launch reads no bare job, so only roadmap-one-writer refuses this push.
+record_refuse("a lane's push to roadmap with a trailing background & and a pid echoed after it is refused",
+              VCS + " push origin roadmap& echo $!", LANE_TRANSCRIPT)
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.

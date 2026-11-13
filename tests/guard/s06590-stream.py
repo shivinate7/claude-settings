@@ -575,6 +575,9 @@ sh("check-tail: ci-job checks piped to grep, a & at a line's end inside a multi-
 sh("check-tail: ci-job checks piped to grep, a & inside a multi-line quote, is allowed",
    'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
 sh("check-tail: grep of a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
+# The quoted & is no job, but it must not hide the job after it: the piece before the job then tokenizes whole.
+sh("check-tail: ci-job checks --lint piped to grep 'a&b' FAIL & echo $!, a quoted & before the job, is refused",
+   "~/.claude/bin/ci-job checks --lint | grep 'a&b' FAIL & echo $!", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: cut of a quoted lone & piped to head, is allowed",
    "cut -d '&' -f1 q | head -3", "allow", cwd=NOGIT)
 sh("check-tail: ci-job checks piped to grep -c of a quoted lone &, is allowed",

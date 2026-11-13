@@ -1197,6 +1197,13 @@ sh("detached: the incident's exact command orphans to pid 1",
    "detached-launch", cwd=NOGIT)
 sh("detached: the same shape, spaced",
    "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
+# A pid echoed after the subshell names the subshell, which has already exited, so the bare-job clause
+# (no pid captured) never reads this call. Only the subshell clause refuses it.
+sh("detached: a subshell job is refused when a pid is echoed after it, the subshell already exited",
+   "(python3 -m http.server 8000 & ); echo $!", "deny", "detached-launch", cwd=NOGIT)
+# A backslash-newline is a line continuation, so `&\` then a newline then `&` is the && list bash runs, no job.
+sh("detached: an & continued onto the next line is an && list, not a background job",
+   "echo a &\\\n& echo b", "allow", cwd=NOGIT)
 sh("detached: nohup survives a session close, with a background job",
    "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
 # Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup with no trailing `&`
