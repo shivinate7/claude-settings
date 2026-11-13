@@ -5045,7 +5045,7 @@ def left_out_lines(root, h, name, numbers, base):
         else:
             reason = merge_reason(root, n, base, heads[n], fetched)
             if reason and is_unknown_reason(reason):
-                raise Stop(f"cannot tell whether #{n} merges onto {base}: {reason}")
+                raise ValueError(f"cannot tell whether #{n} merges onto {base}: {reason}")
             why = "conflict" if reason else "none"
         out.append(f"merge: #{n} left out of batch {name}: {why}")
     return out
