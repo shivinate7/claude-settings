@@ -1504,6 +1504,123 @@ class Words(unittest.TestCase):
         self.assertIn("words", probes.GROUPS)
         self.assertIs(probes.GROUPS["words"], probes.probe_words)
 
+    # A change is read on what it adds, against the merge base with origin/main: the paths and the lines that its
+    # commits, its work tree and its untracked files add. A file already on origin/main is not read again.
+
+    @staticmethod
+    def anchored(word):
+        """A Python file whose line 2 names `word` in a rule anchor."""
+        return "VALUE = 1\n# Keep to rule:%s-cap.\n" % word.replace(" ", "-")
+
+    def based(self, *files):
+        """A child repo whose origin/main holds `files`, (path, text) pairs: the base that a change is read against."""
+        repo = Repo(self, origin=True)
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.publish()
+
+    def changed(self, repo, *files):
+        """`repo` with one commit that adds or edits `files`, so HEAD is ahead of origin/main."""
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.commit("change")
+
+    def test_a_retired_word_on_origin_main_and_untouched_is_not_read(self):
+        word = planted()
+        repo = self.based(("docs/%s_old.md" % word.replace(" ", "_"), "x\n"), ("src/cap.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_a_retired_word_added_after_the_base_is_read_on_its_path_and_line_only(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_notes.md" % under, "x\n"), ("src/app.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(sorted(hits(out)), sorted([(word, "docs/%s_notes.md" % under, "-"), (word, "src/app.py", "2")]),
+                         out)
+
+    def test_an_old_line_with_a_retired_word_is_not_read_when_its_file_gets_a_clean_line(self):
+        word = planted()
+        repo = self.based(("src/cap.py", self.anchored(word)))
+        self.changed(repo, ("src/cap.py", self.anchored(word) + "NEW = 2\n"))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_added_line_that_carries_glossary_ok_is_not_reported(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("src/app.py", "VALUE = 1\n%s_total = 2  # glossary-ok: the platform spells it so\n"
+                                          "%s_count = 3\n" % (under, under)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(word, "src/app.py", "3")]), out)
+
+    def test_without_origin_main_or_a_merge_base_the_whole_tree_is_read(self):
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        for origin in (False, True):  # no origin at all, and an origin that holds no main
+            with self.subTest(origin=origin):
+                code, out = Repo(self, origin=origin).write(path).run("words")
+                self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        repo.git("checkout", "-q", "--orphan", "lone")  # HEAD now shares no history with origin/main
+        code, out = repo.write(path).commit("lone").run("words")
+        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+
+    def test_a_subfolder_root_reads_the_change_from_the_repo_top(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("sub/keep.md", "x\n"), ("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_new.md" % under, "x\n"))
+        with open(os.path.join(repo.root, "src", "app.py"), "w", encoding="utf-8") as handle:  # uncommitted, outside sub/
+            handle.write(self.anchored(word))
+        code, out = in_process(os.path.join(repo.root, "sub"))
+        self.assertNotIn("unread", out)
+        self.assertEqual((code, sorted(hits(out))),
+                         (1, sorted([(word, "docs/%s_new.md" % under, "-"), (word, "src/app.py", "2")])), out)
+
+    def test_untracked_non_utf8_text_is_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:  # untracked, no NUL: text it cannot read
+            handle.write(b"caf\xe9\n")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out).startswith("words: unknown")), (2, True), out)
+
+    def test_untracked_binary_is_an_unread_note_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "pic.bin"), "wb") as handle:  # untracked, a NUL in its first bytes
+            handle.write(b"\x00\x01\xff")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/pic.bin", out)
+
+    def test_committed_non_utf8_text_is_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:
+            handle.write(b"caf\xe9\n")
+        repo.git("add", "docs/latin.txt").commit("latin")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/latin.txt", out)
+
+    def test_the_deadline_counts_the_files_of_the_whole_tree(self):
+        probes = load_probes()
+        repo = Repo(self).write("a.md").write("b.md").write("c.md")
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at a.md, 0 of 3 read" in out), (2, True), out)
+
+    def test_the_deadline_counts_a_changed_file_once_though_it_has_a_path_unit_and_a_code_unit(self):
+        probes = load_probes()
+        under = planted().replace(" ", "_")
+        repo = self.based(("docs/a.md", "x\n"))
+        self.changed(repo, ("docs/%s_n.py" % under, "x = 1\n"))
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at docs/%s_n.py, 0 of 1 read" % under in out), (2, True), out)
+
 
 def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
     """One line of JSON, the shape of a minified data bundle: many small entries, a few long hex blobs, and `word` as
