@@ -15049,7 +15049,7 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_is_done_whatever_the_net_value(self):
-        # owner, page item 741: a passing fix check reads done after a failed round 3, with no net value owed (no round 3 is owed after a pass)
+        # owner, page item 741: a passing fix verifier reads done after a failed final round, with no net value owed, since no final round is owed after a pass
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
         self.assertEqual(state, "done", f"a passing fix check after round 3 must read done whatever the net value (item 741): {why!r}")
 
@@ -15107,12 +15107,12 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
 class ReviewPassEndsGuardChange(unittest.TestCase):
-    """review_state for a guard or check change whose passing round or passing fix check ends the review (owner, page item 741, 2026-11-13 13:22 CST:
-    "all skip after the round that passes them"). Each case is Guard or check yes. A negative net value still holds, a fix check FAIL stays open, and a
+    """review_state for a guard or check change whose passing round or passing fix verifier ends the review, so the rounds after it are skipped
+    (owner, page item 741). Each case is Guard or check yes. A negative net value still holds, a fix verifier FAIL stays open, and a
     design-reviewer FAIL or PARTIAL keeps a PASS open."""
 
     def test_a_round_one_pass_with_a_fix_pass_reads_done_with_net_not_owed(self):
-        # the PR #3023 shape: Round 1 PASS and a Fix check PASS on Guard or check yes, with the net value not owed
+        # A first-round PASS and a fix verifier PASS on Guard or check yes, with the net value not owed, read done
         state, why = record_verdict(self, record_text(rounds=REVIEW_PASS, guard="yes", net="not owed", fix=(fix_verifier_line(),)))
         self.assertEqual(state, "done", f"a guard change whose round 1 and fix check pass must read done (item 741): {why!r}")
 
@@ -15567,8 +15567,8 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
 class ReviewRoundOneCompletes(ReviewEnv):
-    """--review-record accepts a record that ends at a passing round 1, alone or with a fix check, on a guard or check change, and its printed body
-    parses. parse_review still reads a round 3 in a record posted before the rule."""
+    """--review-record accepts a record that ends at a passing first round, alone or with a fix verifier, on a guard or check change, and its printed body
+    parses. parse_review still reads a final round in a record posted before the rule."""
 
     def yes_argv(self, *rounds, fix=None):
         """The argv of --review-record for a normal change with Guard or check yes at the live head, with the --round values given in order."""
@@ -15578,8 +15578,8 @@ class ReviewRoundOneCompletes(ReviewEnv):
             argv += ["--fix-check", fix]
         return argv
 
-    def test_a_guard_change_whose_round_one_passes_is_accepted_alone_and_with_a_fix_check(self):
-        # control: the record ends at round 1, with and without a fix check, and the printed body parses back
+    def test_a_guard_change_whose_round_one_passes_is_accepted_alone_and_with_a_fix_verifier(self):
+        # control: the record ends at the first round, with and without a fix verifier, and the printed body parses back
         earlier = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)), head=self.head())
         cases = ((self.yes_argv("1:reviewer:sonnet:PASS"), None, "alone"),
                  (self.yes_argv("1:reviewer:sonnet:PASS", fix=f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"), earlier, "with a fix check"))
@@ -15590,7 +15590,7 @@ class ReviewRoundOneCompletes(ReviewEnv):
                 parse_text(self, posted_body(self, out))
 
     def test_parse_review_still_accepts_a_posted_round_three_record(self):
-        # back-compat control: a record posted before the rule holds round 3; it still parses and reads its state
+        # back-compat control: a record posted before the rule holds a final round; it still parses and reads its state
         text = record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="zero")
         self.assertEqual(parse_text(self, text)["rounds"][-1], (3, "reviewer", "opus", "FAIL"))
         self.assertEqual(record_state(self, text), "done")
@@ -15650,7 +15650,7 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assert_listed_done(self.newest_record(head=fx.fixed, pre=fx.pre), body, live=fx.conflicted)
 
     def test_b_a_fix_verifier_after_a_plain_commit_on_a_passing_fix_is_accepted_and_reads_done(self):
-        # owner, page item 741 (the PR #3185 shape): the newest record's fix check passed, so a fix check over a plain commit on its head is accepted
+        # owner, page item 741: the newest record's fix verifier passed, so a fix verifier over a plain commit on its head is accepted
         host = self.fixed_host([REVIEW_OLD_HEAD], {})
         self.assertEqual(host.commits[REVIEW_HEAD], [REVIEW_OLD_HEAD], "the fixture's head is not one plain commit on the fixed head")
         rc, out, err = self.fix_from_fixed_head(host)
