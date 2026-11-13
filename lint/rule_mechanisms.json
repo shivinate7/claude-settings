@@ -58,9 +58,11 @@
     },
     "roles-orchestrator-never-builds": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. hooks/decision_watch.py, a Stop command hook, reads the transcript and this turn's git diff and judges the act, escalating to a model only for the residual judgment a diff cannot make, which is this rule's check."
-      }
+        "kind": "guard",
+        "ref": "coordinator-scope",
+        "reason": "Scope: the guard binds a cloud coordinator only. It refuses that session's own writes to a repository path outside the record homes, through an Edit tool, a shell write, a python or node script or the GitHub MCP file tools, its spawns of any agent but Plan, Explore, claude-code-guide and the refuter, and its merges. A local coordinator, a solo or lane session, and a triage or batch-runner session that spawns agents are not judged. A change that cannot move a verdict is not told from one that can: only the record homes decide."
+      },
+      "test": "hooks/test_guard.py::coordinator-scope: a cloud coordinator's Edit of a repository path that is no record home is refused"
     },
     "roles-one-role-per-agent": {
       "mechanism": {
