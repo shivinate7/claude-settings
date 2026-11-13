@@ -737,8 +737,18 @@ if [ -f "$TARGET_MD" ] && ! grep -qx -- "$POINTER" "$TARGET_MD"; then
   cp "$TARGET_MD" "$BAK"
   log "existing $TARGET_MD backed up to $BAK; fold anything you want to keep into ${OWN_CHECKOUT:-$SRC}/CLAUDE.md"
 fi
-printf '%s\n' "$POINTER" > "$TARGET_MD"
-log "wrote $TARGET_MD -> $POINTER"
+# A cloud harness that loads CLAUDE.md from every attached source folder already loads the session checkout's copy. When the
+# source is the mirror and that copy is byte-equal to the mirror's, the import would load the same rules twice (step
+# claude-md-load-once). Only then is the import left out; any unset, unequal or unreadable state writes it as before.
+if [ "$CLOUD" = 1 ] && [ -n "${OWN_CHECKOUT:-}" ] && [ "$OWN_CHECKOUT" != "$SRC" ] \
+   && [ "${CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD:-}" = 1 ] \
+   && [ -f "$OWN_CHECKOUT/CLAUDE.md" ] && [ -f "$SRC/CLAUDE.md" ] && cmp -s "$OWN_CHECKOUT/CLAUDE.md" "$SRC/CLAUDE.md"; then
+  printf '%s\n' "# The global rules load from $OWN_CHECKOUT/CLAUDE.md, an attached source folder; no import here (it would load them twice)." > "$TARGET_MD"
+  log "wrote $TARGET_MD with no import: the harness loads $OWN_CHECKOUT/CLAUDE.md, equal to $SRC/CLAUDE.md"
+else
+  printf '%s\n' "$POINTER" > "$TARGET_MD"
+  log "wrote $TARGET_MD -> $POINTER"
+fi
 
 # land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
 # A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
