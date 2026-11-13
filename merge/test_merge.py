@@ -126,6 +126,15 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+def lane_tips_of(root, base_ref, head):
+    """-> the lane tips of `head` over `base_ref`: the second and later parents of each merge in base..head that are themselves in that range, so a
+    merge of the base is no tip. One rev-list through subprocess, not merge.sh: a case that breaks merge's git log read for the lane tips breaks
+    only its own read, and the default records add none."""
+    out = subprocess.run(["git", "-C", root, "rev-list", "--parents", head, f"^{base_ref}"], capture_output=True, text=True, check=True).stdout
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    inside = {r[0] for r in rows}
+    return [p for r in rows for p in r[2:] if p in inside]
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
@@ -162,8 +171,21 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
-    def review_comments(self, since):  # the round-3 check's comment read: no record unless a case scripts one (LanePulls, PullsHost)
-        return {}
+    records_default = True  # owner pick a: the own head and each lane tip get a done record unless a case sets this False
+
+    def review_comments(self, since):  # the round-3 check's comment read: the defaults, and the records a case scripts (LanePulls, PullsHost)
+        return self.with_default_records({})
+
+    def with_default_records(self, found):
+        """-> `found` with a done record for the own head and each lane tip, oldest, under PR 7. Without one, a lane tip or a lone head with no
+        record is refused (owner pick a, page item 382). A case that tests the absence of a record sets `records_default` False. Each
+        lane tip is read with read_lanes, as the round-3 check reads it."""
+        if not self.records_default:
+            return found
+        head = self.head_override or merge.origin_head(self.root, self.branch)
+        tips = lane_tips_of(self.root, f"origin/{self.base}", head)
+        defaults = [record_text(n=7, head=h) for h in dict.fromkeys([*tips, head])]
+        return {**found, 7: [*defaults, *found.get(7, [])]}
 
     def open_heads(self):  # the round-3 check's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
         return merge.OpenHeads()
@@ -647,26 +669,28 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": True, "ancestor_rc": 1}, "the clone is not the bug shape")
         return clone
 
-    def stale_record_host(self, p):
-        """The round-3 check's comment read: one record on pull request 20, which is no lane of the batch, for head `p`. Guard or check yes, first round PASS."""
-        return types.SimpleNamespace(review_comments=lambda since: {20: [record_text(n=20, head=p, guard="yes")]})
+    def stale_record_host(self, p, f):
+        """The round-3 check's comment read: pull request 7's done record for its own head `f`, and one record on pull request 20, which is no lane of
+        the batch, for head `p`. Guard or check yes, with a first review that passed."""
+        return types.SimpleNamespace(review_comments=lambda since: {7: [record_text(n=7, head=f)], 20: [record_text(n=20, head=p, guard="yes")]})
 
     def test_a_record_for_a_head_the_shallow_clone_cuts_off_is_unknown_and_refuses(self):
         p, f = self.cut_pr_branch()
         clone = self.shallow_pr_clone(p, f)
         try:
-            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=clone)
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), root=clone)
         except merge.Liftable as e:
             self.assertIn("--undo-check-unknown-ok", str(e), "the refusal does not name the reason flag:\n" + str(e))
             return
         self.fail(f"the round-3 check read the cut history as not in it, and let the record through (it returned {got!r})")
 
     def test_the_reason_flag_lifts_the_unknown_read_and_logs_its_reason(self):
+        # f's done record leaves the own head nothing owed, so the cut history read is the only unknown read the flag can lift
         p, f = self.cut_pr_branch()
         clone = self.shallow_pr_clone(p, f)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), "octopus read it", root=clone)
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), "octopus read it", root=clone)
         self.assertEqual(got, "octopus read it", "the round-3 check read the cut history as not in it, so there was no unknown read for the reason flag to lift:\n" + out.getvalue())
         self.assertIn("--undo-check-unknown-ok, reason: octopus read it", out.getvalue(), "the lift is not logged with its reason:\n" + out.getvalue())
 
@@ -676,7 +700,7 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, f], cwd=self.other).returncode, 0, "P is not in the history of F")
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, "origin/main"], cwd=self.other).returncode, 1, "P is on origin/main")
         with self.assertRaises(merge.RoundOwed) as cm:
-            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=self.other)
+            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), root=self.other)
         self.assertIn("#20", str(cm.exception), "the refusal does not name pull request #20:\n" + str(cm.exception))
 
 
@@ -1879,11 +1903,12 @@ def cut_branch(o, name, older=False, older_at=None):
     commits.append(sh(o, "git", "rev-parse", "HEAD"))
     return commits
 
-def lane_batch(env, *names, older=(), older_at=None):
+def lane_batch(env, *names, older=(), older_at=None, from_main=False):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
     -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line. A lane named in
     `older` gets an earlier commit first: env.older_heads[lane] is that commit, an ancestor of the lane's tip. `older_at` dates each such
-    earlier commit (cut_branch)."""
+    earlier commit (cut_branch). `from_main`: feat is cut from origin/main, so its history holds the lanes' merges and no commit of its own
+    (origin/feat has one, feat: second), and the push replaces origin/feat."""
     o, tips = env.other, {}
     env.older_heads = {}
     for n in names:
@@ -1891,10 +1916,13 @@ def lane_batch(env, *names, older=(), older_at=None):
         tips[n] = commits[-1]
         if len(commits) > 1:
             env.older_heads[n] = commits[0]
-    sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+    sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main" if from_main else "origin/feat")
     for n in names:
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into feat", tips[n])
-    sh(o, "git", "push", "-q", "origin", "feat")
+    if from_main:
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+    else:
+        sh(o, "git", "push", "-q", "origin", "feat")
     env.tips = tips
     return tips
 
@@ -3706,6 +3734,18 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/feat")
+def lane_tips():  # the lane tips of feat, as merge.read_lanes gives them: parents 2+ of each merge in main..feat that are in that range, so a merge of main is no tip
+    import subprocess
+    out = subprocess.run(["git", "--git-dir", S["bare"], "rev-list", "--parents", feat_head(), "^" + ref("refs/heads/main")], capture_output=True, text=True).stdout
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    inside = {r[0] for r in rows}
+    return [p for r in rows for p in r[2:] if p in inside]
+def default_records():  # owner pick a: the own head and each lane tip get a done record under PR 7, oldest first; a case sets records_default false for none
+    if not S.get("records_default", True):
+        return []
+    heads = list(dict.fromkeys([*lane_tips(), feat_head()]))
+    return [{"id": -1 - i, "created_at": "2026-10-02T00:00:00Z", "issue_url": "https://api.github.com/repos/o/r/issues/7",
+             "body": S["done_record"].replace("@HEAD@", h)} for i, h in enumerate(heads)]
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
@@ -3920,8 +3960,8 @@ try:
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
-    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the round-3 check reads for review records: none in this fake
-        finish(listing([], None, params, flags, jq, cap), 0, include)
+    elif method == "GET" and rel == "issues/comments":  # the repo's comments: the round-3 check's review records, the defaults of default_records
+        finish(listing(default_records(), None, params, flags, jq, cap), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -4095,7 +4135,8 @@ class GhHalf(Env):
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
         f = pathlib.Path(p)
-        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0}
+        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0,
+                                                          "done_record": record_text(n=7, head="@HEAD@")}  # the default record the shim serves, its head filled in per read
         s.update(kw)
         f.write_text(json.dumps(s))
 
@@ -13632,7 +13673,7 @@ class LanePulls(LaneHost):
         return merge.Host.open_heads(self)
 
     def review_comments(self, since):
-        return merge.Host.review_comments(self, since)
+        return self.with_default_records(merge.Host.review_comments(self, since))
 
 def lane_pull(number, branch, sha):
     """An open pull request whose head is `branch` at `sha`, as `pages("pulls")` lists it."""
@@ -13646,12 +13687,43 @@ class ReviewRoundCheckEnv(Env):
     """The round-3 check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
     The assertions every case shares sit here too. No test lives here."""
 
+    UNREVIEWED = "its head has no done review record"  # the cause a refusal names for a lane tip or lone head with no done record (owner pick a)
+
     def batch_host(self, tips, comments=(), others=(), windowed=False):
         """Pull request 7 is feat at its live head. Each lane in `tips` ({branch: tip}) is an open pull request, numbered 8, 9, ... in the order given.
-        `others` are open pull requests that are no lane of the batch, as lane_pull rows. `windowed`: the comment list honours its `since` (LanePulls)."""
+        `others` are open pull requests that are no lane of the batch, as lane_pull rows. `windowed`: the comment list honours its `since` (LanePulls).
+        The host gives each head its default done record (FakeHost.with_default_records); a case that tests a missing record sets records_default False."""
         pulls = [lane_pull(7, "feat", self.head("feat"))]
         pulls += [lane_pull(8 + i, b, tip) for i, (b, tip) in enumerate(tips.items())]
         return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments), windowed=windowed)
+
+    def stacked_pr_on_lane1(self, lane1, main_tip, start=None, reviewed_tip=None, own=True):
+        """Pull request 7 is stacked on agent/lane1, not main: agent/stack is cut from `start` (default `lane1`), merges `reviewed_tip` when given (a
+        lane tip whose done record is on pull request 8), merges origin/main at `main_tip` and, when `own`, adds one own commit. When `start` is given,
+        the base joins the stack by a merge, so the stack holds the base's tip. The caller cuts lane1 before it pushes main_tip to main, so lane1 does
+        not hold main_tip. With `own` the own head has a done record, the only one. Without it the own head has no record and no commit of its own:
+        an integration head. -> (the stack's head, the host)."""
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "agent/stack", start or lane1)
+        if start:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/agent/lane1 into agent/stack", lane1)
+        comments = []
+        if reviewed_tip:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge a reviewed lane into agent/stack", reviewed_tip)
+            comments.append(round_check_comment(2, 8, reviewed_tip, guard="no", rounds=REVIEW_PASS))
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/main into agent/stack", main_tip)
+        if own:
+            put(os.path.join(o, "agent-stack.txt"), "stack\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "agent/stack: own commit")
+        sh(o, "git", "push", "-q", "origin", "agent/stack")
+        stack = sh(o, "git", "rev-parse", "HEAD")
+        if own:
+            comments.append(round_check_comment(1, 7, stack, guard="no", rounds=REVIEW_PASS))
+        host = self.batch_host({}, comments)
+        host.records_default = False  # the records scripted here are the only ones
+        host.branch, host.base = "agent/stack", "agent/lane1"
+        host.pulls = [{**batch_pull(7, stack, base="agent/lane1"), "head": {"ref": "agent/stack", "sha": stack}}]
+        return stack, host
 
     def push_feat_commit(self):
         """Push one commit to feat on origin. -> the head it replaced, an older head of feat that is an ancestor of the new one."""
@@ -13740,6 +13812,7 @@ class ReviewRoundCheckEnv(Env):
         self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
         record = record_text(n=7, head=older, **{"guard": "yes", **kw})
         host = self.batch_host({}, [review_comment(1, 7, record)])
+        host.records_default = False  # the live head has no record: the default would give it a done one
         return host, older, record
 
     def remedy_line(self, out):
@@ -13760,10 +13833,10 @@ class ReviewRoundCheckEnv(Env):
         self.assertEqual(self.claims(), 0, "a record number was claimed")
         self.assertFalse(getattr(host, "merged", False), "the pull request was merged")
 
-    def assert_refused(self, rc, out, host, before, pr_no):
+    def assert_refused(self, rc, out, host, before, pr_no, owed="a lane owes round 3"):
         """A refusal: exit 1, the lane's pull request named, a cite to a decision or rule, no net value named as the remedy (rule
-        git-remedy-never-names-target), and no claim or push."""
-        self.assertEqual(rc, 1, "the round-3 check let the batch through, though a lane owes round 3:\n" + out)
+        git-remedy-never-names-target), and no claim or push. `owed` is the cause the failure message names when the run goes through."""
+        self.assertEqual(rc, 1, f"the round-3 check let the batch through, though {owed}:\n" + out)
         self.assertIn(f"#{pr_no}", out, f"the refusal does not name pull request #{pr_no}:\n" + out)
         self.assertNotIn("Net value: zero", out, "the refusal names `Net value: zero` as a remedy")
         self.assertNotIn("Net value: positive", out, "the refusal names `Net value: positive` as a remedy")
@@ -13777,7 +13850,8 @@ class ReviewRoundCheckEnv(Env):
 
 class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too."""
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (page item 382):
+    a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
         # the integration pull request has no record of its own, so only the lane's record can owe the third round
@@ -13826,13 +13900,14 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
-    def test_a_lane_with_no_record_is_not_refused_by_this_check(self):
-        # decision pr-review-record, Q1: no record is no refusal here
+    def test_a_lane_with_no_record_is_refused_by_this_check(self):
+        # owner pick a: a lane tip with no done record for its head is refused, whatever its Guard or check
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [])
+        host.records_default = False  # the tip has no record at all
         self.scope(tips, host)
-        rc, out, _before = self.run_round_check(host, "--confirm")
-        self.assert_allowed(rc, out, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
     def test_a_guard_record_for_an_older_head_of_the_lane_still_refuses(self):
         # a push after review must not shed the guard owing: the newest record names an older head of the lane, an ancestor of its tip, and says guard yes,
@@ -13847,13 +13922,14 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
         self.assertIn("owed", out, "the refusal does not say round 3 is owed:\n" + out)
 
-    def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_still_passes(self):
-        # the control beside the refusal above, on the same older head: a record with guard no owes nothing, even for an old head
+    def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_is_refused(self):
+        # owner pick a, case 3: the lane's only record is done, but for an older head, so the tip has no done record for its head
         tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
         host = self.batch_host(tips, [round_check_comment(1, 8, self.older_heads["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False
         self.scope(tips, host)
-        rc, out, _before = self.run_round_check(host, "--confirm")
-        self.assert_allowed(rc, out, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
     def test_an_unrelated_pr_guard_record_for_a_head_outside_the_batch_is_not_refused(self):
         # the defect: pull request 20 is no lane of the batch and pushed a fix after its review. Its record names the reviewed head, which neither feat
@@ -13874,6 +13950,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         # replaced, which is in its history: the stale record owes the third round on the new head
         older = self.push_feat_commit()
         host = self.batch_host({}, [round_check_comment(1, 7, older, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # the stale record is the only one: the new head has none, so the default would hide the stale refusal
         self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
@@ -14170,50 +14247,73 @@ class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
 class ReviewRoundCheckCost(ReviewRoundCheckEnv):
     """What the round-3 check reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
     runs the check alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
-    confirm case keeps its branches, so no open-PR read runs at all."""
+    confirm case keeps its branches, so no open-PR read runs at all. A refusal that names unnamed lane tips reads the open pull list once for all
+    of them, through open_heads, never once per tip."""
 
     def counted(self, host):
-        """Counts the check's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
-        comments, opens = [], []
-        real_comments, real_opens = host.review_comments, host.open_heads
+        """Counts the check's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads, pulls-list reads): each gains one
+        entry a call. A pulls-list read is any pages("pulls") call, so an open-PR read that a host method makes is counted too."""
+        comments, opens, pulls = [], [], []
+        real_comments, real_opens, real_pages = host.review_comments, host.open_heads, host.pages
         def review_comments(since):
             comments.append(since)
             return real_comments(since)
         def open_heads():
             opens.append(True)
             return real_opens()
-        host.review_comments, host.open_heads = review_comments, open_heads
-        return comments, opens
+        def pages(rel, key=None, fields=None):
+            if rel == "pulls":
+                pulls.append(fields)
+            return real_pages(rel, key=key, fields=fields)
+        host.review_comments, host.open_heads, host.pages = review_comments, open_heads, pages
+        return comments, opens, pulls
 
     def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0:\n" + out)
 
     def test_a_pull_request_with_no_lane_tips_reads_the_comment_list_once_and_no_open_prs(self):
         host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0 with no lane tips:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0 with no lane tips:\n" + out)
 
     def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(host, "merged", False), "the confirm did not reach the merge:\n" + out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0:\n" + out)
+
+    def test_three_unnamed_lane_tips_read_the_open_prs_once_for_the_refusal_not_once_per_tip(self):
+        # no tip has a record, so each is unnamed and the refusal names each one by its open pull request: one read of the open list serves all three
+        tips = lane_batch(self, "agent/lane1", "agent/lane2", "agent/lane3", from_main=True)
+        host = self.batch_host(tips, [])
+        host.records_default = False  # no tip has a record
+        self.scope(tips, host)
+        comments, opens, pulls = self.counted(host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+        for n in (9, 10):
+            self.assertIn(f"#{n} (tip ", out, f"the refusal does not name pull request #{n}:\n" + out)
+        self.assertEqual(len(pulls), 1, f"the open pull requests were listed {len(pulls)} times for three unnamed lane tips, want 1:\n" + out)
+        self.assertEqual(len(opens), 1, f"the open pull requests were read through open_heads {len(opens)} times, want 1:\n" + out)
 
 LANE_OLD_AT = "2026-10-01T00:00:00+0000"  # an older lane head's author and committer date, epoch LANE_OLD_EPOCH
 LANE_OLD_EPOCH = 1790812800
@@ -14224,7 +14324,8 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
+    batch still refuses. Owner pick a (page item 382): a lane tip with no done record for its head is refused, so the
+    one stale-only case here expects the refusal; the other cases keep their records and their points. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
         _tips, host, _g = self.landed_guard_batch("yes", REVIEW_PASS, "not owed")
@@ -14270,8 +14371,107 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         self.assertEqual(host.since_reads, [LANE_OLD_WINDOW],
                          "the comment read's since is not the oldest commit new to the batch less a day:\n" + out)
 
-    def test_a_guard_no_record_for_the_same_older_head_is_not_refused(self):
+    def test_a_guard_no_record_for_the_same_older_head_is_refused(self):
+        # owner pick a, case 3: the lane's only record is a done guard-no record for its older head, so the tip has no done record for its head
         _tips, host, _a = self.backdated_lane_batch("no")
+        host.records_default = False
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+class ReviewUnreviewedHead(ReviewRoundCheckEnv):
+    """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
+    Guard or check value (owner pick a, page item 382). An integration pull request's own head is never refused for having
+    no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too.
+    Case 5's integration head holds only its lanes' merges. Case 8 adds an own commit beyond a lane tip and is refused. Case 9 is an integration head with
+    a FAIL on its own head, which passes. Cases 8, 9 and 11 are red on the old code. Cases 10 and 12 are green controls: the newest record across pull
+    requests decides, and a merged main tip in a stacked branch's history is no lane tip. Case 13 is the green control for case 14, which is red
+    on the default-branch cut: main's revert of a lane's merge, read through a stacked pull request on a lane branch, must refuse as a dropped lane.
+    Case 15 is green on the old code and kills the `h not in on_default` clause of read_lanes' own_out: a stacked pull request that starts at a main
+    commit, merges a reviewed lane tip and main, and adds no commit of its own is an integration head. Case 16 is red on the old code: confirm must
+    fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip.
+    Case 17: an integration head with no commit of its own still owes the third review for its own Guard or check yes record. Case 5 is its green control.
+    Cases 18, 19 and 20 are red on the old code: the merge tool's own commits, a records rebuild and a claim, are no lane work, so a head that
+    ends on one is read through the commits under it. Case 21 is the green control that keeps the guard: a real commit under a generated one still refuses.
+    Two more red cases, each with a green control. Owing is read per pull request: a done record on another pull request for the same tip does not clear
+    a record that owes the third round, and the same record alone refuses. The merge tool's own commit is one whose message and changed paths both match
+    what the tool writes: a commit that also changes a product file is lane work, and cases 18 to 20 stay green."""
+
+    ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
+    PRODUCT = "src/product.py"  # a path no tool commit writes
+
+    def lone_scope(self, host):
+        """Scope before subject: feat holds no lane tip, and pull request 7 is the open pull request at feat's live head."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lanes, _dropped = merge.read_lanes(self.co, "origin/main", self.head("feat"))
+        self.assertEqual(lanes, [], "feat holds a lane tip, so the case is not a lone lane")
+        self.assertEqual(host.open_heads().get("feat"), (self.head("feat"), "main"), "pull request 7 is not open at feat's live head")
+
+    def test_unreviewed_head_lane_tip_without_record_is_refused(self):  # case 1
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [])
+        host.records_default = False  # no record at all: the defaults would give the tip one
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_newest_fail_guard_no_is_refused(self):  # case 2
+        # a done record for the lane tip, then a newer round-1 FAIL for it with Guard or check no: the newest record for the head decides
+        tips = lane_batch(self, "agent/lane1")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 8, tips["agent/lane1"], guard="no", rounds=self.ROUND_ONE_FAIL)]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_older_head_record_is_refused(self):  # case 3
+        # the only record is done, but it names an older head of the lane, so the tip itself has no record
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
+        older = self.older_heads["agent/lane1"]
+        self.assertEqual(record_state(self, record_text(n=8, head=older, guard="no", rounds=REVIEW_PASS), head=older), "done",
+                         "the older head's record is not done, so a refusal would not be about the head")
+        host = self.batch_host(tips, [round_check_comment(1, 8, older, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the only record names the older head, so the tip has none
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(older, tips["agent/lane1"]), 0, "the older head is not an ancestor of the lane tip")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_done_record_guard_no_passes(self):  # case 4, green control for cases 1 to 3
+        # the integration head holds only the lane's merge, so the done tip is the only record the check reads
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the tip's record is the one scripted here
+        self.scope(tips, host)
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_integration_pr_reads_through_lanes_and_passes(self):  # case 5, green control
+        # the integration head's own commits are only the merges of its two lane tips, so it is an integration pull request and owes no record
+        tips = lane_batch(self, "agent/lane1", "agent/lane2", from_main=True)
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS)]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # the integration head must have no record of its own
+        self.scope(tips, host)
+        self.assertNotIn(self.head("feat"), "".join(c["body"] for c in comments), "a record names the integration head, so the case does not test a head with no record")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_lone_lane_without_record_is_refused(self):  # case 6
+        host = self.batch_host({}, [])
+        host.records_default = False  # the lone head has no record at all
+        self.lone_scope(host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_docs_only_record_no_round_passes(self):  # case 7, green control
+        text = record_text(n=7, head=self.head("feat"), kind="docs-only", guard="no", rounds=())
+        self.assertEqual(record_state(self, text, head=self.head("feat")), "done", "a docs-only record with no round is not done")
+        host = self.batch_host({}, [review_comment(1, 7, text)])
+        host.records_default = False  # only the scripted docs-only record names the head
+        self.lone_scope(host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
@@ -14280,12 +14480,261 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         # history of feat. A record on the pull request's own number is its own whatever its history, and it owes the third round. No record names the live head
         reviewed = cut_branch(self.other, "agent/amended")[-1]
         host = self.batch_host({}, [round_check_comment(1, 7, reviewed, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # no record names the live head: the defaults would give it a done one
         self.assertEqual(self.history_exit(reviewed, self.head("feat")), 1, "the reviewed head is in the history of feat, so it is not outside it")
         self.assertEqual(self.history_exit(reviewed, "origin/main"), 1, "the reviewed head is on origin/main")
         self.assertNotEqual(reviewed, self.head("feat"), "the reviewed head is the live head of feat")
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("round 3", out, "the refusal does not say the third round is owed:\n" + out)
+
+    def test_unreviewed_head_own_commit_beyond_a_lane_tip_is_refused(self):  # case 8
+        # the integration head merged lane1, then added its own commit: it is a lane, so its own head owes a done record it does not have
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.push_feat_commit()
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the sibling tip has its done record; the own head has none
+        self.scope(tips, host)
+        own = sh(self.co, "git", "rev-list", "--no-merges", f"{tips['agent/lane1']}..{self.head('feat')}").split()
+        self.assertEqual(len(own), 1, "the own head does not add one non-merge commit beyond its lane tip:\n" + "\n".join(own))
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_integration_pr_with_a_guard_no_fail_on_its_own_head_passes(self):  # case 9
+        # the integration head holds only the merge of a done lane tip, so it is no lane: its own round-1 FAIL with Guard or check no is no row
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        feat = self.head("feat")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 7, feat, guard="no", rounds=self.ROUND_ONE_FAIL)]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # the two scripted records are the only ones
+        self.scope(tips, host)
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"#7 (head {feat[:9]})", out,
+                         "the round-3 check names the integration pull request's own head, which holds no commit of its own:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_fail_on_pr_8_newer_than_a_done_record_on_pr_9_refuses(self):  # case 10, green control
+        # one tip, a done record on #9 and a newer round-1 FAIL on #8: the newest record for the tip across pull requests decides
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        comments = [review_comment(1, 9, record_text(n=9, head=tip, guard="no", rounds=REVIEW_PASS), created="2026-10-02T01:00:00Z"),
+                    review_comment(2, 8, record_text(n=8, head=tip, guard="no", rounds=self.ROUND_ONE_FAIL), created="2026-10-02T02:00:00Z")]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_done_record_on_pr_9_newer_than_a_fail_on_pr_8_passes(self):  # case 11, mirror of case 10
+        # the mirror: a round-1 FAIL on #8, then a newer done record for the same tip on #9, so the newest record decides and the tip passes
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        comments = [review_comment(1, 8, record_text(n=8, head=tip, guard="no", rounds=self.ROUND_ONE_FAIL), created="2026-10-02T01:00:00Z"),
+                    review_comment(2, 9, record_text(n=9, head=tip, guard="no", rounds=REVIEW_PASS), created="2026-10-02T02:00:00Z")]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
+        self.scope(tips, host)
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_stacked_branch_with_a_merged_main_tip_owes_no_record_for_that_tip(self):  # case 12, green control
+        # the stacked branch is cut from lane1 and merges origin/main's tip m into its history: m is on the base, so it is no lane tip
+        o = self.other
+        t1 = cut_branch(o, "agent/lane1")[-1]
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "agent/stack", t1)
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/main into agent/stack", m)
+        put(os.path.join(o, "agent-stack.txt"), "stack\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "agent/stack: own commit"); sh(o, "git", "push", "-q", "origin", "agent/stack")
+        stack = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge remote-tracking branch 'origin/agent/stack' into feat", stack)
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        tips = {"agent/stack": stack}
+        host = self.batch_host(tips, [round_check_comment(1, 8, stack, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip has its done record; the merged main tip has none and owes none
+        self.assertEqual(self.history_exit(m, "origin/main"), 0, "the main tip is not on origin/main")
+        self.assertEqual(self.history_exit(m, self.head("feat")), 0, "the main tip is not in the history of feat")
+        self.scope(tips, host)
+        own = sh(self.co, "git", "rev-list", "--no-merges", f"{stack}..{self.head('feat')}").split()
+        self.assertEqual(own, [], "the integration head adds a non-merge commit beyond its lane tip, so it is not an integration head")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_stacked_pr_on_a_lane_branch_owes_no_record_for_a_new_main_commit(self):  # case 13
+        # the stacked pull request is based on lane1, not main, and merged main's new commit m into itself: m is on main and in no lane's history,
+        # so it is not a lane tip of the stack. Its own head has a done record, and no lane tip is merged into it
+        o = self.other
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        sh(o, "git", "fetch", "-q", "origin")
+        stack, host = self.stacked_pr_on_lane1(lane1, m)
+        self.assertEqual(self.history_exit(m, "origin/main"), 0, "the new main commit is not on origin/main")
+        self.assertEqual(self.history_exit(m, "origin/agent/lane1"), 1, "the new main commit is in the history of the stacked base, so it is not new to it")
+        self.assertEqual(self.history_exit(m, stack), 0, "the new main commit is not in the history of the stacked head")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"tip {m[:9]}", out, "the round-3 check counts main's new commit as a lane tip of the stacked pull request:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_stacked_pr_on_a_lane_branch_refuses_a_lane_that_main_reverted(self):  # case 14
+        # main merged lane2 and then reverted that merge, and the stacked pull request on lane1 merged main after the revert. lane2's tip is a
+        # lane of the stack, so the default-branch cut must not hide the revert: the dropped-lane check refuses the stack
+        o = self.other
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        t = cut_branch(o, "agent/lane2")[-1]
+        sh(o, "git", "checkout", "-q", "-B", "main-batch", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge remote-tracking branch 'origin/agent/lane2' into main", t)
+        merged = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "revert", "-m", "1", "--no-edit", merged)
+        revert = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "push", "-q", "origin", f"{revert}:refs/heads/main")
+        sh(o, "git", "fetch", "-q", "origin")
+        stack, host = self.stacked_pr_on_lane1(lane1, revert)
+        self.assertEqual(self.history_exit(t, "origin/agent/lane1"), 1, "lane2's tip is in the history of the stacked base, so it is no lane of the stack")
+        self.assertEqual(self.history_exit(merged, "origin/main"), 0, "lane2's merge is not on origin/main")
+        self.assertEqual(self.history_exit(revert, "origin/main"), 0, "main's revert is not on origin/main")
+        self.assertIn(f"This reverts commit {merged}", sh(o, "git", "log", "-1", "--format=%B", revert), "the revert does not name lane2's merge")
+        self.assertEqual(self.history_exit(t, stack), 0, "lane2's tip is not in the history of the stacked head")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assertEqual(rc, 1, "the dropped-lane check let the stacked pull request through, though main reverted lane2's merge:\n" + out)
+        self.assertIn(f"(lane tip {t[:9]})", out, "the refusal does not name lane2's tip as the dropped lane:\n" + out)
+        self.assertIn("rebuild the integration branch from main without the lane", out, "the refusal is not the dropped-lane one:\n" + out)
+        self.assert_nothing_pushed(host, before)
+
+    def test_unreviewed_head_stacked_pr_with_a_main_commit_on_its_first_parent_owes_no_record(self):  # case 15
+        # agent/stack starts at main's commit c, merges the base, the reviewed lane tip t and then main's newer tip m, and adds no commit of its own. c
+        # is on main and on the stack's first-parent chain, so it is an own commit unless the default-branch cut takes it out of own_out
+        o = self.other
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        t = cut_branch(o, "agent/lane2")[-1]  # cut before main moves, so no main commit is in its history
+        c = cut_branch(o, "agent/main-first")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{c}:refs/heads/main")
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        stack, host = self.stacked_pr_on_lane1(lane1, m, start=c, reviewed_tip=t, own=False)
+        self.assertEqual(self.history_exit(c, "origin/main"), 0, "main's commit is not on origin/main")
+        self.assertEqual(self.history_exit(c, "origin/agent/lane1"), 1, "main's commit is in the history of the stacked base, so it is not new to the stack")
+        self.assertEqual(self.history_exit(c, t), 1, "main's commit is in the history of the lane tip, so a lane tip holds it")
+        self.assertEqual(self.history_exit(m, t), 1, "main's newer commit is in the history of the lane tip, so a lane tip holds it")
+        self.assertEqual(self.history_exit(t, "origin/agent/lane1"), 1, "the lane tip is in the history of the stacked base, so it is no lane of the stack")
+        self.assertEqual(self.history_exit(t, stack), 0, "the stacked head does not merge the lane tip")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--first-parent", "--no-merges", f"origin/agent/lane1..{stack}").split(), [c],
+                         "the first-parent chain of the stack does not hold main's commit as its one non-merge commit")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--no-merges", f"origin/agent/lane1..{stack}", "^origin/main").split(), [t],
+                         "the stack holds a non-merge commit of its own, so it is not an integration head")
+        self.assertFalse(any(stack in cm["body"] for cm in host.comments), "a record names the stacked head, so its own head has one")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"#7 (head {stack[:9]})", out, "the round-3 check names the stacked head, which adds no commit of its own:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_stacked_pr_reads_a_fresh_default_branch_before_the_cut(self):  # case 16
+        # the clone's origin/main is older than main: the stacked pull request merged main's newer commit m, which the clone has not fetched. confirm must
+        # fetch origin/<default> before the read, or m reads as an unreviewed lane tip. Nothing in this case fetches the clone before the run
+        o = self.other
+        stale = sh(self.co, "git", "rev-parse", "refs/remotes/origin/main")
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        stack, host = self.stacked_pr_on_lane1(lane1, m)
+        self.assertEqual(self.head("main"), m, "the remote's main is not the newer commit")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "refs/remotes/origin/main"), stale, "the clone's origin/main is not older than main, so the case is not stale")
+        self.assertIn(m, sh(o, "git", "rev-list", f"{lane1}..{stack}").split(), "the stacked head does not merge main's newer commit")
+        self.assertNotIn(m, sh(o, "git", "rev-list", lane1).split(), "the stacked base holds main's newer commit, so it is not new to the stack")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"tip {m[:9]}", out, "the round-3 check reads main's newer commit as an unreviewed lane tip, because the clone's origin/main is older:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_integration_pr_own_guard_yes_owes_round_three_is_refused(self):  # case 17
+        # the integration head holds only the merges of two done lane tips, so it adds no commit of its own and is read through its tips. Its own record
+        # is Guard or check yes with a first review that passed, and no lane tip names its head. The own head still owes the third review, since a guard or check change always does
+        tips = lane_batch(self, "agent/lane1", "agent/lane2", from_main=True)
+        feat = self.head("feat")
+        own_text = record_text(n=7, head=feat, guard="yes", rounds=REVIEW_PASS)
+        self.assertNotEqual(record_state(self, own_text, head=feat), "done", "the own head's record is done, so it owes nothing")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS),
+                    review_comment(3, 7, own_text)]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # the scripted records are the only ones: the own head's is Guard or check yes, with a first review that passed
+        self.scope(tips, host)
+        own = sh(self.co, "git", "rev-list", "--no-merges", feat, "^origin/main", f"^{tips['agent/lane1']}", f"^{tips['agent/lane2']}").split()
+        self.assertEqual(own, [], "the integration head adds a commit of its own, so it is not the case:\n" + "\n".join(own))
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed="the integration pull request's own head owes round 3")
+        self.assertIn(f"#7 (head {feat[:9]})", out, "the refusal does not name the own head:\n" + out)
+
+    def tool_commit(self, ref, trailer=None, also=()):
+        """Push the merge tool's own commit on top of origin/`ref`, made by merge.commit_claim, the tool's own function: its subject and Drops-lines
+        come from the tool. No trailer: the records rebuild. With `trailer` (a Record-claim line): the claim, a decision record it claims. A test repo
+        has no page the generator writes (rebuild_records is False there), so the rebuild commits a stand-in page at the tool's page path. `also`: paths
+        the test writes too, so the commit changes them as well (commit_claim stages every change). -> the new head of `ref`."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", ref, f"origin/{ref}")
+        if trailer:
+            put(os.path.join(o, "docs", "decisions", "claimed.md"), record("D-002", "claimed"))
+        else:
+            put(os.path.join(o, *merge.RECORDS_PAGE.split("/")), "# Records\n\nrebuilt\n")
+        for rel in also:
+            put(os.path.join(o, *rel.split("/")), "value = 1\n")
+        merge.commit_claim(o, trailer)
+        sh(o, "git", "push", "-q", "origin", ref)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def own_subjects(self, lo, ref="feat"):
+        """The subjects of the non-merge commits from `lo` to origin's `ref`, newest first."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "log", "--no-merges", "--format=%s", f"{lo}..origin/{ref}").splitlines()
+
+    def test_integration_head_ending_on_the_records_rebuild_passes(self):  # case 18
+        # the integration head holds only the merge of a done lane tip. The records rebuild is its one commit, and the tool's own: no lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.tool_commit("feat")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Rebuild the records page"], "the head's commits are not the one rebuild")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_integration_head_ending_on_a_claim_commit_passes(self):  # case 19
+        # the same head, with the tool's claim commit on top instead: a claim is the tool's own commit, and no lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.tool_commit("feat", trailer="Record-claim: D-002")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Claim record numbers"], "the head's commits are not the one claim")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_lone_lane_whose_reviewed_head_has_a_records_rebuild_on_top_passes(self):  # case 20
+        # the lone pull request's record names its head before the tool's records rebuild, which is the head's one commit of its own
+        reviewed = self.head("feat")
+        self.tool_commit("feat")
+        host = self.batch_host({}, [round_check_comment(1, 7, reviewed, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the one record names the head before the rebuild
+        self.lone_scope(host)
+        self.assertEqual(self.own_subjects(reviewed), ["Rebuild the records page"], "the head's commits are not the one rebuild")
+        self.assertEqual(self.history_exit(reviewed, self.head("feat")), 0, "the reviewed head is not in the history of feat")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_a_real_lane_commit_under_a_records_rebuild_still_refuses(self):  # case 21, green control
+        # the generated commit is on top, and a real commit of the integration head sits under it. The real commit is the lane's head: no tip reaches it
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.push_feat_commit()
+        self.tool_commit("feat")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Rebuild the records page", "feat: next"], "the head's commits are not the case")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
 
     def test_a_done_record_for_a_replaced_head_of_the_pr_itself_refuses_when_no_record_covers_the_new_head(self):
         # the bypass: pull request 7's own newest record is done, its third round passed with net value positive, but for the head a push replaced.
@@ -14341,6 +14790,68 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("Get round 3 done", self.remedy_line(out), "the remedy does not ask for the third round on an open record:\n" + out)
         self.assertNotIn("held for the owner", out, "the remedy says an open record is held for the owner:\n" + out)
+
+    def assert_owes_round_three(self, rc, out, host, before, tip):
+        """The round-1 record on pull request 8 for `tip` owes the third round: the refusal names #8 and its tip, and it is refused with nothing pushed."""
+        self.assert_refused(rc, out, host, before, 8, owed="pull request 8's record for the tip owes round 3")
+        self.assertIn(f"#8 (tip {tip[:9]}) changes a guard or check and round 3 is owed", out,
+                      "the refusal does not say #8's record owes round 3 for the tip:\n" + out)
+
+    def test_a_round_one_guard_yes_record_on_pr_8_owes_round_three_though_pr_9_has_a_later_done_record_for_the_tip(self):
+        # owing is read per pull request: #8's record owes the third round, and a later done record for the same tip on #9 does not clear it
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        comments = [round_check_comment(1, 8, tip, guard="yes", rounds=REVIEW_PASS),
+                    review_comment(2, 9, record_text(n=9, head=tip, guard="no", rounds=REVIEW_PASS), created="2026-10-02T02:00:00Z")]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_owes_round_three(rc, out, host, before, tip)
+
+    def test_a_round_one_guard_yes_record_on_pr_8_alone_owes_round_three(self):
+        # the control beside the case above: the same record with no record on #9 is refused for the same reason
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        host = self.batch_host(tips, [round_check_comment(1, 8, tip, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # only the scripted record names the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_owes_round_three(rc, out, host, before, tip)
+
+    def assert_tool_commit_with_product(self, head, subject):
+        """Scope before subject: the head is the tool's commit by its subject, and the same commit also changes the product file."""
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", head), subject, "the head does not carry the tool's subject")
+        changed = sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", head).split()
+        self.assertIn(self.PRODUCT, changed, "the head does not change the product file:\n" + "\n".join(changed))
+
+    def assert_own_head_unreviewed(self, rc, out, host, before, head):
+        """The own head is a lane: no record names it, so the refusal names #7 at that head as unreviewed, and nothing is pushed."""
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
+        self.assertIn(f"#7 (head {head[:9]}) has no done review record for its head", out,
+                      "the refusal does not name the own head as unreviewed:\n" + out)
+
+    def test_integration_head_ending_on_a_records_rebuild_that_also_changes_a_product_file_is_refused(self):
+        # the rebuild's subject and Drops-lines trailer are the tool's, but the commit also changes a product file: it is lane work, so the head owes a record
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        head = self.tool_commit("feat", also=(self.PRODUCT,))
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assert_tool_commit_with_product(head, merge.REBUILD_SUBJECT)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_own_head_unreviewed(rc, out, host, before, head)
+
+    def test_integration_head_ending_on_a_claim_that_also_changes_a_product_file_is_refused(self):
+        # the same, for the claim: its subject and Record-claim trailer are the tool's, and the product file beside the claim makes it lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        head = self.tool_commit("feat", trailer="Record-claim: D-002", also=(self.PRODUCT,))
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assert_tool_commit_with_product(head, merge.CLAIM_SUBJECT)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_own_head_unreviewed(rc, out, host, before, head)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
