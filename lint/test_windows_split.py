@@ -207,6 +207,12 @@ MACOS_SPLIT = ("checks-macos", "checks-macos-b")
 MACOS_GUARD = "python3 hooks/test_guard.py"
 MACOS_SLICE_JOB = "checks-macos"
 MACOS_SLICE_ENV = {"GUARD_TESTS": "macos-slice"}
+# The runner pick (PR #2970): a macOS job's runs-on is an expression that reads the scope job's mac_runner output, a list of
+# macOS labels from mac-runner.py. is_macos counts that job as macOS, so the macOS checks still see it.
+# MAC_PICK_RUNS_ON copies PR #2970's RUNS_ON, which is not on this base; point it at RUNS_ON once #2970 lands.
+MAC_PICK ="needs.scope.outputs.mac_runner"
+MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) "
+                    f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
 # R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
 MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 # R61 part 3: the 03:17 nightly's gate job, and the one scope output it reads (the gate's skip).
@@ -832,10 +838,16 @@ def macos_split_problems(text):
     return problems + macos_slice_problems(text)
 
 
+def is_macos(job):
+    """A macOS job: a literal macos-* runs-on, or the runner pick that reads needs.scope.outputs.mac_runner (MAC_PICK)."""
+    runs_on = job["os"] or ""
+    return runs_on.startswith("macos") or MAC_PICK in runs_on
+
+
 def macos_slice_problems(text):
     """R61 part 2: the guard suite runs once on macOS, as the mac-tagged slice (GUARD_TESTS=macos-slice) in MACOS_SLICE_JOB,
     with no GUARD_SHARD and on the MAC_CODE condition. No other macOS job runs a guard step, so checks-macos-b runs none."""
-    macos = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("macos")]
+    macos = [n for n, j in all_jobs(text).items() if is_macos(j)]
     homes = split_homes(text, macos, MACOS_GUARD)
     problems = []
     if [j for j, _ in homes] != [MACOS_SLICE_JOB]:
@@ -1361,26 +1373,36 @@ class SplitJobs(unittest.TestCase):
         half = len(rows) // 2
         slice_step = (MACOS_GUARD, MAC_CODE, None, MACOS_SLICE_ENV)
 
-        def doc(a=None, b=None, extra=None):
-            a = rows[:half] + [slice_step] if a is None else a
-            b = rows[half:] if b is None else b
-            return split_doc({"checks-macos": ("macos-latest", a), "checks-macos-b": ("macos-latest", b), **(extra or {})})
+        def doc_on(runs_on):
+            def doc(a=None, b=None, extra=None):
+                a = rows[:half] + [slice_step] if a is None else a
+                b = rows[half:] if b is None else b
+                return split_doc({"checks-macos": (runs_on, a), "checks-macos-b": (runs_on, b), **(extra or {})})
+            return doc
 
-        self.assertEqual(macos_split_problems(doc()), [])
-        c0, i0, s0, _ = rows[0]
-        bad = {
-            "a suite dropped": doc(a=rows[1:half] + [slice_step]),
-            "a suite run in both jobs": doc(b=rows[half:] + [rows[0]]),
-            "a suite's if changed": doc(a=[(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:half] + [slice_step]),
-            "a suite's env set": doc(a=[(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:half] + [slice_step]),
-            "the slice dropped from checks-macos": doc(a=rows[:half]),
-            "the slice in checks-macos-b too": doc(b=rows[half:] + [slice_step]),
-            "a shard value on the slice": doc(a=rows[:half] + [(MACOS_GUARD, MAC_CODE, None, {**MACOS_SLICE_ENV, "GUARD_SHARD": "1/2"})]),
-            "the slice in a third macOS job": doc(extra={"checks-macos-c": ("macos-latest", [slice_step])}),
-        }
-        for label, text in bad.items():
-            with self.subTest(defect=label):
-                self.assertTrue(macos_split_problems(text), label)
+        # Each case runs on a literal macos-* runs-on and on the runner pick (PR 2970): the checker must see both as macOS.
+        for runs_on in ("macos-latest", MAC_PICK_RUNS_ON):
+            with self.subTest(runs_on=runs_on):
+                doc = doc_on(runs_on)
+                with self.subTest(case="the good split passes"):
+                    self.assertEqual(macos_split_problems(doc()), [])
+                # Named failure: on the pick, a slice in checks-macos-b is reported as in no job, so the problem names no job.
+                with self.subTest(case="a slice in checks-macos-b names that job"):
+                    self.assertIn("['checks-macos-b']", "\n".join(macos_slice_problems(doc(a=rows[:half], b=rows[half:] + [slice_step]))))
+                c0, i0, s0, _ = rows[0]
+                bad = {
+                    "a suite dropped": doc(a=rows[1:half] + [slice_step]),
+                    "a suite run in both jobs": doc(b=rows[half:] + [rows[0]]),
+                    "a suite's if changed": doc(a=[(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:half] + [slice_step]),
+                    "a suite's env set": doc(a=[(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:half] + [slice_step]),
+                    "the slice dropped from checks-macos": doc(a=rows[:half]),
+                    "the slice in checks-macos-b too": doc(b=rows[half:] + [slice_step]),
+                    "a shard value on the slice": doc(a=rows[:half] + [(MACOS_GUARD, MAC_CODE, None, {**MACOS_SLICE_ENV, "GUARD_SHARD": "1/2"})]),
+                    "the slice in a third macOS job": doc(extra={"checks-macos-c": (runs_on, [slice_step])}),
+                }
+                for label, text in bad.items():
+                    with self.subTest(defect=label):
+                        self.assertTrue(macos_split_problems(text), label)
 
     def test_the_unknown_reads_check_runs_once_in_each_split(self):
         # Named failure: check_unknown_reads_contract.py runs twice, or not at all, in a split, and no case notices.
