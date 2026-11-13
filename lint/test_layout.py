@@ -819,10 +819,11 @@ class Registry(Tree):
         super().setUp()
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
 
-    def registry(self, entries, key=None):
+    def registry(self, entries, key=None, extra=None):
         data = {"kinds": {}, "artifacts": entries}
         if key is not None:
             data["waiting-page"] = key
+        data.update(extra or {})
         self.put(EXTRAS, json.dumps(data))
 
     def page_entry(self, **changes):
@@ -843,6 +844,26 @@ class Registry(Tree):
             return self.artifacts()
         except self.layout.LayoutError as err:
             self.fail("%s was refused: %s" % (what, err))
+
+    def read_reader(self, name, *args):
+        """A layout reader of the fixture repo, by name. A refusal fails the case with the reader's name and its cause, never as a crash."""
+        try:
+            return self.fn(name)(self.tree, *args)
+        except self.layout.LayoutError as err:
+            self.fail("%s was refused: %s" % (name, err))
+
+    def waiting_readings(self, mark):
+        """The waiting page, the page-URL checks and the mockup home of the fixture repo, with its waiting-page entry and
+        "rolled-out" set to `mark`. The mark is read back first, so a case that reads a mark it did not write fails by name."""
+        self.registry([self.page_entry()], extra={"rolled-out": mark})
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            held = json.load(handle)
+        self.assertEqual(held.get("rolled-out", "absent"), mark, "the fixture does not hold the mark")  # the scope first
+        self.assertNotIn("export", held["artifacts"][0], "the waiting-page entry has an export key, so the mark is not read through it")
+        return {"page": self.read_reader("waiting_page"),
+                "own_url": self.read_reader("is_waiting_page_url", self.PAGE),
+                "other_url": self.read_reader("is_waiting_page_url", "https://claude.ai/artifact/zzz999"),
+                "homes": [str(h) for h in self.read_reader("mockup_homes")]}
 
     def artifacts(self):
         self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
@@ -879,6 +900,24 @@ class Registry(Tree):
     def test_a_queue_page_entry_is_not_the_waiting_page(self):
         self.registry([self.queue_entry()])
         self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a queue-page entry was read as the waiting page")
+
+    def test_the_waiting_keys_read_whatever_the_rolled_out_mark_is(self):
+        """A "rolled-out" that is not JSON true or false does not stop the waiting keys: waiting_page(), is_waiting_page_url()
+        and mockup_homes() give what a valid mark gives. The waiting-page entry has no export key, so its export folder is
+        read through the mark, the path that raises. The valid marks are the controls."""
+        control = self.waiting_readings(True)
+        self.assertEqual(control["page"], self.PAGE, "the control (a valid mark) did not read the waiting page")
+        self.assertIs(control["own_url"], True, "the control (a valid mark) did not name the page by its url")
+        self.assertIs(control["other_url"], False, "the control (a valid mark) named another artifact as the page")
+        self.assertEqual(control["homes"], [os.path.join(self.tree, "docs", "design")], "the control (a valid mark) gave another mockup home")
+        self.assertEqual(self.waiting_readings(False), control, "a valid false mark reads the waiting keys differently")
+        for mark in ("true", "false", 1, None):
+            with self.subTest(mark=mark):
+                got = self.waiting_readings(mark)
+                self.assertEqual(got["page"], control["page"], "waiting_page() reads another page under the mark")
+                self.assertEqual(got["own_url"], control["own_url"], "is_waiting_page_url() does not name the page under the mark")
+                self.assertEqual(got["other_url"], control["other_url"], "is_waiting_page_url() names another artifact under the mark")
+                self.assertEqual(got["homes"], control["homes"], "mockup_homes() reads another folder under the mark")
 
     def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
         self.registry([self.page_entry(url="https://example.com/x")])
