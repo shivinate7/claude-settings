@@ -191,7 +191,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
 - `answers/park.<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
   `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
   counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
-- `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
+- `receipts/<id>`: written by the owning session. The page deletes one on Undo of a Send that had no earlier answer (`undoSend`, `skills/waiting-page/page.html`). Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). Write both as ISO UTC with a
   trailing `Z`: the `--unread` check reads a time with no zone in the host's zone. The page shows
   them on the answered card. In a tier (an item answered on the open page), with no record the card says
@@ -284,7 +284,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   `n` in every items write, set or update, so the guard can match it.
   - Not written yet: the writer writes the item closed (`status: "closed"` and `closed` set to now), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
-    close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
+    close" step 1) and writes `receipts/<id>`. The writer writes one only for an item it owns, as step 1 says. Such a write holds the writer's Stop until a copy export prints `same` (`export_check`, `hooks/feedback_guard.py`). The write itself is not refused.
   - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
