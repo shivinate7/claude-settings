@@ -1,7 +1,7 @@
 {
  "id": "ruled-entry-open-too-long",
  "title": "A check flags a ruling-store entry that main has not absorbed for too long",
- "status": "blocked",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -11,6 +11,7 @@
  ],
  "why": "R59 part 4: an entry closes when main absorbs it, and a check flags an entry left open too long. No step held it (triage, 22:05 CST Nov 12).",
  "source": "R59 (owner 14:28 and 15:05 CST Nov 12); retrospective 22:05 CST",
- "note": "Read on demand (rule outcomes-mechanize-rules): at each roadmap review, list open entries in roadmap/rulings/ whose step is done or has no lane while main still lacks the ruling (no fixed age: the owner rejects static numeric limits, R37). Blocked on ruled-store-one-home (#2992).",
- "updatedAt": "2026-11-12T22:05:22-06:00"
+ "note": "Read on demand (rule outcomes-mechanize-rules): at each roadmap review, list open entries in roadmap/rulings/ whose step is done or has no lane while main still lacks the ruling (no fixed age: the owner rejects static numeric limits, R37). Blocked on ruled-store-one-home (#2992). 06:38 CST Nov 13: unblocked. ruled-store-one-home (#2992) merged in batch 122 (3125c65e8). Ready for a lane.",
+ "updatedAt": "2026-11-13T06:38:04-06:00",
+ "blocked": null
 }
