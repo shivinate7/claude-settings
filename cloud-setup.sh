@@ -7,7 +7,8 @@
 set -u
 
 REPO="shivinate7/claude-settings"
-RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/${REPO}/main}"
+REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
+RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/${REPO}/${REF}}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CAP="${CLAUDE_SETTINGS_SETUP_CAP:-240}"
 
@@ -81,7 +82,15 @@ main() {
   tmp="$dir/install.sh"
 
   have=0
+  main_raw="https://raw.githubusercontent.com/${REPO}/main"
   if curl -fsS --max-time 20 "$RAW/install.sh" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    have=1
+  elif [ -z "${CLAUDE_SETTINGS_RAW:-}" ] && [ "$REF" != main ] \
+       && curl -fsS --max-time 20 "$main_raw/install.sh" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    # No stable branch (a 404 or a failed fetch): install from main, and tell install.sh to follow main so it
+    # does not say the same thing again.
+    verdict "WARN: could not fetch $REF's install.sh, so this install takes main"
+    CLAUDE_SETTINGS_REF=main; export CLAUDE_SETTINGS_REF
     have=1
   else
     src=$(local_install_sh) && cp "$src" "$tmp" 2>/dev/null && [ -s "$tmp" ] && have=1
