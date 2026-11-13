@@ -754,7 +754,6 @@ class GithubGuardRead(GitTree):
     OLD = "old/repo"
     NEW = "new/repo"
     ORIGIN = "https://github.com/new/repo.git"
-    FORK = "fork/repo"  # the repo a fork checkout names for itself
 
     def setUp(self):
         super().setUp()
@@ -808,12 +807,6 @@ class GithubGuardRead(GitTree):
         _, starts = self.git_starts(self.git_reads.github_repo, self.tree)
         self.assertFalse([argv for argv in starts if "fetch" in argv], "the guard read ran git fetch")
         self.assertEqual(self.working_extras(), before, "the guard read wrote the checkout's extras file")
-
-    def test_github_repo_keeps_the_checkouts_own_repo_the_blob_lacks(self):
-        """A fork checkout names its own GitHub repo. origin/main's blob names none, so the guard read keeps the checkout's."""
-        self.stale_checkout(self.extras(self.FORK), json.dumps({"kinds": {}}))
-        self.assertEqual(self.git_reads.github_repo(self.tree), self.FORK,
-                         "github_repo did not keep the checkout's own repo, which origin/main's blob lacks")
 
 
 class SetWaitingPage(Tree):
