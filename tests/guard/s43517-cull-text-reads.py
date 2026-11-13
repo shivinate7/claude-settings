@@ -1,6 +1,9 @@
 # section 43517
-# gh-write-cloud false alarm, measured by lane fan-prose-unmapped-1 (relayed 2026-11-12 11:50 CST): a heredoc whose
-# body only names a gh write was refused as if it ran the write.
+# gh-write-cloud cases for a heredoc body that names a gh write. A program that reads the body as input, such as
+# `python3 -c` or a python script file, runs no gh write, so the body is data and is allowed. A body that bash runs,
+# through a bash heredoc, `bash -c`, a python that runs its stdin through the shell, or an unquoted delimiter with a
+# `$(...)` or backtick, is a real run and stays refused. The allowed cases stop a note that quotes a gh command from
+# being refused as a write; the refused cases stop that allowance from opening a real write.
 FAMILY = "merge"
 
 # A heredoc body is data when the program it feeds reads it as input. `python3 -c` and a python script file take the
