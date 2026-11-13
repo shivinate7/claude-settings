@@ -30,11 +30,15 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+sys.path.insert(0, os.path.join(HERE, "test_support"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
@@ -1756,11 +1760,78 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# The cost of one Stop (decision reply-judge). The first Stop of a session is judged: one model call, no child of
+# its own. A Stop sampled out makes no call and writes only its counter. A finding is a note, and adds one guard line.
+REPLY = "Done. The change is in place."
+JUDGED_REASON = "output-start-with-point: start with the point."
+
+
+def stop_hook(reply=REPLY, session="cost-reply", active=False):
+    return json.dumps({"session_id": session, "stop_hook_active": active, "last_assistant_message": reply})
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+        spec = importlib.util.spec_from_file_location("reply_judge_cost", MODULE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.model_timeout = module.MODEL_TIMEOUT
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def folder(self):
+        return tempfile.mkdtemp(dir=self.base)
+
+    def stop(self, folder, stdin, answers=None):
+        return cost_probe.run_hook(MODULE_PATH, stdin, folder, answers)
+
+    def test_a_stop_hook_active_stop_starts_nothing(self):
+        run = self.stop(self.folder(), stop_hook(active=True), [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_an_empty_reply_starts_nothing(self):
+        run = self.stop(self.folder(), stop_hook(reply="   "), [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_a_judged_stop_costs_one_model_call_and_no_child(self):
+        run = self.stop(self.folder(), stop_hook(), [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "Stop 1 is judged: one model call, got %r" % run["models"])
+        self.assertEqual(run["models"][0]["timeout"], self.model_timeout)
+        self.assertEqual(run["children"], [], "the judge starts no child of its own")
+        self.assertEqual(run["out"].strip(), "", "an allow prints nothing")
+        self.assertEqual(len(run["files"]), 1, "a judged allow writes the counter only; got %r" % run["files"])
+        self.assertTrue(run["files"][0].startswith("state/reply-judge/"), run["files"])
+
+    def test_a_sampled_out_stop_costs_no_model_call_and_writes_only_the_counter(self):
+        folder = self.folder()
+        first = self.stop(folder, stop_hook(), [[{"ok": True}, None]])
+        second = self.stop(folder, stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
+        self.assertEqual(len(first["models"]), 1, "Stop 1 is judged")
+        self.assertEqual(second["models"], [], "Stop 2 is sampled out: no model call")
+        self.assertEqual(second["children"], [])
+        self.assertEqual(len(second["files"]), 1, "a sampled-out Stop writes the counter only; got %r" % second["files"])
+        self.assertTrue(second["files"][0].startswith("state/reply-judge/"), second["files"])
+
+    def test_a_judged_stop_with_a_finding_adds_the_guard_log_line(self):
+        run = self.stop(self.folder(), stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertIn("additionalContext", run["out"], "a finding is a note, not a block")
+        self.assertIn("guard.log", run["files"], "a finding writes its guard log line; got %r" % run["files"])
+        self.assertEqual(run["children"], [])
+
+
 def main():
     _write_stub()
     try:
         for case in CASES:
             run_case(case)
+        if not cost_probe.run_class(CostTests):
+            RED_CASES.append("CostTests")
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if RED_CASES:
