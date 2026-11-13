@@ -2735,6 +2735,18 @@ def after_merge(root, cmds):
         ok = ok and not c
     return ok
 
+def refresh_mail(root, sha):
+    """Mail the new main sha to every cloud session (decision session-messages, "Refresh mail"). Never fails the merge."""
+    if os.environ.get("MAILBOX_REPO"):
+        try:
+            import mail  # hooks/mail.py, on sys.path from the top of this file
+            slug = mail.repo_slug(root)
+            if not slug:
+                raise mail.MailError("no origin url")
+            mail.send_refresh(dict(os.environ), slug, sha)
+        except Exception as e:
+            say("merge: refresh mail was not sent: " + " ".join(str(e).split())[:160])
+
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
@@ -4035,6 +4047,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: the merge landed. The local {base} did not move: {e}")
             ok = False
         ok = after_merge(root, m.get("afterMerge", [])) and ok
+        if base == cfg["defaultBranch"]:
+            refresh_mail(root, commit)
         if m.get("deleteBranch"):
             cut_branch(root, branch, sha)
             if lanes:
