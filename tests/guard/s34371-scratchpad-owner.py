@@ -706,18 +706,37 @@ def spo_mv_unrecorded_case():
     return spo_result(problems, "an mv of a file no record names gets no record: A's run and B's rm are allowed")
 
 
+def spo_guard_crashes(log):
+    """The messages of the `guard-crash` lines in a guard log. A guard crash fails open to allow, so the decision
+    alone does not show it."""
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    return [line.split("\t")[4] for line in lines if line.split("\t")[2:4] == ["crash", "guard-crash"]]
+
+
 def spo_mv_chain_case():
     """Agent A writes src.py, and agent B copies it to c.py. B's one call moves c.py to d.py and back to c.py. The call
-    is allowed and returns, since the cycle between the two moves ends. What later runs of c.py read is not asserted."""
+    is allowed, and the guard does not crash on it: the cycle between the two moves ends. What later runs of c.py read
+    is not asserted."""
     fx = spo_fixture("cp-mv-chain")
     src = os.path.join(fx["scratch"], "src.py")
     mid = os.path.join(fx["scratch"], "c.py")
     dest = os.path.join(fx["scratch"], "d.py")
+    cfg = os.path.join(os.path.dirname(fx["work"]), "cfg")   # this case's config folder, so its guard.log is its own
+    os.makedirs(cfg, exist_ok=True)
     problems = [spo_scope(fx, "cp-mv 16", src)] + spo_wrote(fx, "cp-mv 16", SPO_WRITER, src, PY_TEXT)
     problems += spo_wrote(fx, "cp-mv 16", SPO_OTHER, mid, PY_TEXT, tool="Bash", command="cp %s %s" % (src, mid))
-    got, reason = spo_run(fx, SPO_OTHER, "mv %s %s && mv %s %s" % (mid, dest, dest, mid))
+    chain = "mv %s %s && mv %s %s" % (mid, dest, dest, mid)
+    got, reason = decide({"raw": None, "tool": "Bash", "cwd": fx["work"], "session": fx["sid"], "env_path": None,
+                          "config": cfg, "agent_id": SPO_OTHER, "process_cwd": None, "temp": fx["tmp"],
+                          "tool_input": {"command": chain}})
     problems.append(spo_allowed("cp-mv 16, B's mv chain in one call", got, reason))
-    return spo_result(problems, "agent B's one call that moves its copy to d.py and back is allowed and returns")
+    crashes = spo_guard_crashes(os.path.join(cfg, "guard.log"))
+    if crashes:
+        problems.append("cp-mv 16, the guard crashed on B's mv chain and failed open: %s" % crashes[0][:120])
+    return spo_result(problems, "agent B's one call that moves its copy to d.py and back is allowed, with no guard crash")
 
 
 def spo_cp_copier_folder_case():

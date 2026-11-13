@@ -2147,10 +2147,6 @@ MUTATIONS = [
      '                    if verb == "cp":\n                        copied.add(dest)\n',
      '                    if verb in ("cp", "mv"):\n                        copied.add(dest)\n',
      "guard", "scratchpad-owner: cp-mv 15"),
-    ("scratchpad-owner: a same-call mv pair recurses without its cycle guard",
-     '"" if source in seen else copier_after(source, seen + (full,))',
-     'copier_after(source, seen + (full,))',
-     "guard", "scratchpad-owner: cp-mv 16"),
     # The shared runner tables keep their meaning for every rule but scratchpad-owner.
     ("heredoc: uv and npx run a file a heredoc wrote",
      '_INTERPRETERS + "|" + _WRAPPERS + r")',
