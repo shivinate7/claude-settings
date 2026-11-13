@@ -731,6 +731,184 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
+# pre-existing-needs-main-run: a reply sentence that makes a pre-existing claim must name a run on the base
+# branch on the same line. The base is main, master or origin/<branch>. A run is "on <base> at <sha>",
+# "on <base> at commit <sha>", "on <base> (<sha>)", "<base>@<sha>", or a CI run URL on a line that says
+# "on <base>". A bare base name is no run. A hash counts only when git says it is a commit on the base
+# (main and master read origin/<name> when that ref exists) and no older than the PR's merge base with it
+# (_run_hash_counts). Any unknown (no cwd, no repo, hash not found, git fails) counts the hash. A claim is one of three forms, in a sentence that holds a failure word:
+# - "pre-existing" that describes the failure: next comes a failure noun, a preposition or no word, or before it
+#   comes is/was/it. "A pre-existing test" or "the pre-existing guard" modifies another noun and is no claim.
+# - "already red" (fails, broken, there, present), in a sentence that names a base or "before this change".
+#   "Already red on the old code" names neither.
+# - a failure word, "too", "also" or "as well", and "on" or "at" a sha or a base. A clause that starts with the
+#   ref ("..., on main too") takes the failure word from an earlier clause.
+# Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
+# list) exempts it. The sentences and clauses are the parser's (lint/_clause.py, see _pre_clauses); a clause also ends at
+# a lead-in word of the parser's lists and at "which".
+# A question of one clause holds no claim; a question of more clauses is judged whole (_claim_part).
+# Fenced blocks are skipped.
+PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
+PRE_DESCRIBES_AFTER_RE = re.compile(
+    r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b"
+    r"|(?:[\w-]+\s+)?(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red)\b)", re.I)
+PRE_DESCRIBES_BEFORE_RE = re.compile(
+    r"\b(?:is|was|are|were|be|been|it|them)\s+(?:(?!(?:an?|the|this|that|its|my|our)\b)\w+\s+)?$", re.I)
+# The words "already" takes as its state: a failure word, or the word that says the failure sat there before the change.
+ALREADY_STATES = ("red", "broken", "there", "present")
+ALREADY_RE = re.compile(r"\balready\s+(?:%s|fail\w*)\b" % "|".join(ALREADY_STATES), re.I)
+FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
+SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
+BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE_REF, re.I)
+FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
+# _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
+# subordinators, relatives) cut each of those again, where _clause.lead_opens_clause says the word opens a clause: "yet" and
+# "as" double as other words. "as" is no lead-in in "as well", the words TOO_RE reads, and "yet" is none in "as yet".
+_AS = "as"
+_YET = "yet"
+PRE_LEAD_RE = re.compile(
+    r"\b(?:%s)\b|\b%s\b(?!\s+well\b)|(?<!\bas\s)\b%s\b" % (
+        "|".join(w for w in _clause.LEAD_INS if w not in (_AS, _YET)), _AS, _YET), re.I)
+# Groups: (base, sha) for "on <base> at <sha>", (sha) for "on <base> (<sha>)", (base, sha) for "<base>@<sha>".
+MAIN_RUN_RE = re.compile(
+    r"\bon\s+({b})\s+(?:at\s+(?:commit\s+)?({s})|\(\s*({s})\s*\))|\b({b})@({s})".format(b=BASE_REF, s=SHA_WORD), re.I)
+MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
+ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
+PRE_EXISTING_REASON = (
+    "Pre-existing guard (rule pre-existing-needs-main-run): each line below calls a failure pre-existing, or "
+    "says it fails on a commit or on main too, and names no run on the base branch. Run it there and say so "
+    "on the same line (\"on main at <sha>\", or a CI run URL on main; master or origin/<branch> may be the base), "
+    "or say the failure comes from this change. The sha must be a commit on the base and no older than the "
+    "PR's merge base with it, so a sha on the PR's own head is no run. A bare \"on origin/main\" is no run. Lines: ")
+
+
+def _pre_existing_describes_failure(clause, m):
+    """True when the word at `m` describes the failure, not another noun such as test or guard."""
+    return bool(PRE_DESCRIBES_AFTER_RE.match(clause, m.end())
+                or PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
+
+
+def _cut_at_leads(clause):
+    """The pieces of `clause`, cut at each lead-in word (PRE_LEAD_RE) that opens a clause (_clause.lead_opens_clause)."""
+    begin = 0
+    for m in PRE_LEAD_RE.finditer(clause):
+        if _clause.lead_opens_clause(m.group(), clause[m.end():]):
+            yield clause[begin:m.start()]
+            begin = m.end()
+    yield clause[begin:]
+
+
+def _pre_clauses(plain):
+    """The clauses of `plain` in order: the parser's clauses, each cut again at a lead-in word (_cut_at_leads)."""
+    for c in _clause.clauses(plain, [False] * len(plain)):
+        yield from _cut_at_leads(plain[c.start:c.end])
+
+
+def _unnegated(clause, pos):
+    return not ANSWERED_NEGATOR_RE.search(clause[:pos])
+
+
+def _claims_pre_existing(sentence):
+    """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
+    if not FAILURE_RE.search(plain):
+        return False
+    names_base = bool(BASE_WORD_RE.search(plain))
+    earlier_fail = False
+    for clause in _pre_clauses(plain):
+        for m in PRE_EXISTING_RE.finditer(clause):
+            if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
+                return True
+        for m in ALREADY_RE.finditer(clause):
+            if names_base and _unnegated(clause, m.start()):
+                return True
+        fail = FAILURE_RE.search(clause)
+        if fail:
+            if TOO_RE.search(clause) and FAIL_REF_RE.search(clause) and _unnegated(clause, fail.start()):
+                return True
+            earlier_fail = earlier_fail or _unnegated(clause, fail.start())
+        elif earlier_fail and TOO_RE.search(clause) and FAIL_REF_RE.match(clause.strip()):
+            return True
+    return False
+
+
+def _run_hash_counts(cwd, base, sha, cache):
+    """False only when git shows `sha` is not on `base`, or is older than HEAD's merge base with it. True otherwise,
+    and on any unknown. One answer per distinct (base, sha) in `cache`."""
+    if not cwd:
+        return True
+    key = (base.lower() if "/" not in base else base, sha.lower())  # origin/<branch> is a ref name: case counts
+    if key not in cache:
+        cache[key] = _check_run_hash(cwd, key[0], sha)
+    return cache[key]
+
+
+def _check_run_hash(cwd, base, sha):
+    import git_reads
+    ref = base
+    if "/" not in base:  # main and master: the remote's tip when the clone has it, else the local branch
+        remote = git_reads._git(cwd, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/%s^{commit}" % base)
+        if remote is not None and remote.returncode == 0:
+            ref = "origin/" + base
+    if git_reads.branch_is_ancestor(cwd, ref, sha) is False:
+        return False
+    mb = git_reads._git(cwd, "merge-base", "HEAD", ref)
+    if mb is None or mb.returncode != 0 or not mb.stdout.strip():
+        return True
+    return git_reads.branch_is_ancestor(cwd, sha, mb.stdout.strip()) is not False
+
+
+def _names_main_run(kept, cwd=None, cache=None):
+    cache = {} if cache is None else cache
+    cites = [(m.group(1) or m.group(4), m.group(2) or m.group(3) or m.group(5)) for m in MAIN_RUN_RE.finditer(kept)]
+    if cites:  # a cited hash decides; the URL counts only on a line with no cite
+        return any(_run_hash_counts(cwd, base, sha, cache) for base, sha in cites)
+    return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
+
+
+PREMISE_RE = re.compile(r"\b(?:given|seeing)\s+that\b", re.I)  # premise words the parser's lead-in lists lack
+ASKING_LEADS = ("or", "then", "which")  # lead-ins that join or point inside a question ("pre-existing or new?"); no premise
+
+
+def _claim_part(sentence):
+    """`sentence` when it can hold a claim, else "". A sentence that does not end in `?` is all claim. A question of one
+    clause asks and holds none ("Is the failure pre-existing?"). A question of more clauses is judged whole: its premise or
+    its first clause can state the claim ("Can I merge, as the failure is pre-existing?"). A lead-in word that opens a clause
+    ("so", "and", "since", "as") or a premise ("given that") splits it too, with no comma ("... is pre-existing so should I merge?").
+    "or", "then" and "which" with no comma split nothing ("Is the failure pre-existing or new?")."""
+    if not sentence.rstrip("*_)\"' ").endswith("?"):
+        return sentence
+    if len(_clause.clauses(sentence, [False] * len(sentence))) > 1 or PREMISE_RE.search(sentence):
+        return sentence
+    if any(m.group().lower() not in ASKING_LEADS and _clause.lead_opens_clause(m.group(), sentence[m.end():])
+           for m in PRE_LEAD_RE.finditer(sentence)):
+        return sentence
+    return ""
+
+
+def pre_existing_problem(text, cwd=None):
+    """The refusal for reply lines that call a failure pre-existing with no run on main on the line, else ''.
+    `cwd` is the hook's: the repo whose history says whether a cited hash is on the base."""
+    bad, fence, cache = [], "", {}
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence:
+            continue
+        sentences = [_claim_part(body[a:b]) for a, b in _clause.sentences(body, [False] * len(body))]
+        if not any(_claims_pre_existing(s) for s in sentences):
+            continue
+        if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body), cwd, cache):
+            continue
+        bad.append(body)
+    return PRE_EXISTING_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
@@ -2791,6 +2969,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        pre_existing = pre_existing_problem(text, hook.get("cwd"))
+        if pre_existing:
+            reasons.append(pre_existing)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -3223,6 +3404,10 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+        except Exception:
+            pass
+        try:
+            relay.append(pre_existing_problem(text, hook.get("cwd")))  # same: any turn, joined with any other reason
         except Exception:
             pass
     cannot = ""

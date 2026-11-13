@@ -4748,18 +4748,21 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
 
 
 
-class AnsweredNeedsSourceTests(unittest.TestCase):
-    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
-    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
-    answered-needs-source)."""
+class StopVerdictMixin:
+    """The Stop-hook drive that the report guard's line checks share (one home): one human message and the
+    reply as the last assistant text, with a git commit before it when `landed`. run_guard runs the hook as a
+    subprocess. A verdict is the hook's JSON, or None when the reply passes."""
 
-    def hook(self, reply, landed=False, stop_hook_active=False):
+    def hook(self, reply, landed=False, stop_hook_active=False, cwd=None):
         records = [human("ask the owner")]
         if landed:
             records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         records.append(assistant_text(reply))
         path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
-        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+        payload = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+        if cwd is not None:  # the payload's cwd, as Claude Code sends it: the checks that read a repo start there
+            payload["cwd"] = cwd
+        return payload
 
     def verdict(self, reply, **kw):
         run = run_guard(REPORT_GUARD, self.hook(reply, **kw))
@@ -4768,7 +4771,7 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
 
     def assert_blocked(self, reply, *needles, **kw):
         out = self.verdict(reply, **kw)
-        self.assertIsNotNone(out, reply)
+        self.assertIsNotNone(out, "allowed, expected a block: %r" % reply)
         self.assertEqual(out.get("decision"), "block", reply)
         for needle in needles:
             self.assertIn(needle, out["reason"])
@@ -4777,6 +4780,12 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def assert_allowed(self, reply, **kw):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+
+class AnsweredNeedsSourceTests(StopVerdictMixin, unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
 
     # Red: each case below fails until the verdict exists.
 
@@ -5049,6 +5058,889 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript, GUARD_PY})
+
+
+class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
+    """The pre-existing verdict, in report_guard.py's Stop hook (rule pre-existing-needs-main-run). A reply line
+    that calls a failure pre-existing, or says it also fails on a commit, must name a run on the base branch on
+    the same line: "on main at <sha>", "on origin/<branch> at <sha>", or a CI run URL on main. A bare
+    "on origin/main" names no run. A sha on the PR's own head names no run on main, so the failure it shows is the PR's.
+    Step base-hash-on-base (the run's sha must be a commit on the base and not older than the PR's merge base): the fixture below
+    builds that branch shape, and every case reads its verdict from it."""
+
+    # The fixture (one home for this class): a repo with main at A <- B <- C, a branch pr forked at B with commit P,
+    # HEAD on pr, and origin/main at C. Local master and origin/silent-undo-ci-body also sit at C, so their rows name
+    # real refs. The folder is under the run folder (test-temp-standard), and the bare folder has no repo above it.
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.repo = os.path.join(cls.root, "repo")
+        os.makedirs(cls.repo)
+        tcj.git(cls.repo, "init", "-q")
+        tcj.git(cls.repo, "symbolic-ref", "HEAD", "refs/heads/main")
+        cls.A = cls.commit("A")
+        cls.B = cls.commit("B")
+        cls.C = cls.commit("C")
+        tcj.git(cls.repo, "checkout", "-q", "-b", "pr", cls.B)
+        cls.P = cls.commit("P")
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/main", cls.C)
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/silent-undo-ci-body", cls.C)
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/pr", cls.P)  # the PR's own branch, as a base (known debt)
+        # Step base-hash-on-base: a mixed-case base. X is a commit on B (the merge base), held only by origin/Release, so a cite of X is
+        # on that base and newer than the merge base. Made from plumbing, so HEAD stays on pr.
+        tree = tcj.git(cls.repo, "rev-parse", cls.B + "^{tree}").stdout.strip()
+        cls.X = tcj.git(cls.repo, "commit-tree", tree, "-p", cls.B, "-m", "X").stdout.strip()
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/Release", cls.X)
+        tcj.git(cls.repo, "branch", "master", cls.C)
+        cls.bare = os.path.join(cls.root, "bare")
+        os.makedirs(cls.bare)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    @classmethod
+    def commit(cls, message):
+        """An empty commit on the fixture's HEAD. Returns its full sha."""
+        tcj.git(cls.repo, "commit", "-q", "--allow-empty", "-m", message)
+        return tcj.git(cls.repo, "rev-parse", "HEAD").stdout.strip()
+
+    @classmethod
+    def ancestor(cls, older, newer):
+        """True when git says `older` is `newer` or one of its ancestors. Exit 1 is an answer here, not an error."""
+        probe = subprocess.run(["git", "-C", cls.repo, "merge-base", "--is-ancestor", older, newer],
+                               capture_output=True, env=tcj.GIT_ENV)
+        return probe.returncode == 0
+
+    def assert_fixture_shape(self):
+        """The branch shape a case reads, asserted before its verdict (P7): a drifted fixture fails here, by name."""
+        self.assertEqual(tcj.git(self.repo, "symbolic-ref", "--short", "HEAD").stdout.strip(), "pr",
+                         "fixture: HEAD is not on pr")
+        self.assertEqual(tcj.git(self.repo, "merge-base", "HEAD", "origin/main").stdout.strip(), self.B,
+                         "fixture: the merge base of pr and origin/main is not B")
+        self.assertTrue(self.ancestor(self.B, self.C), "fixture: B is not on main before C")
+
+    def hook(self, reply, landed=False, stop_hook_active=False, cwd=None):
+        # The fixture repo is the default cwd, so each case reads this branch shape, never the test runner's checkout.
+        return super().hook(reply, landed=landed, stop_hook_active=stop_hook_active, cwd=cwd or self.repo)
+
+    # Red: each case below fails until the verdict exists. One test per case, so the red count is the case count.
+
+    def test_pe_red_incident_line_is_refused(self):
+        # Catches: a failure on a sha with no main word passes when the line has no "pre-existing" word.
+        line = "fails on 32b5f8b8e too, so it is not from this step"
+        self.assert_blocked(line, line)
+
+    def test_pe_red_pre_existing_with_no_run_is_refused(self):
+        # Catches: "pre-existing" with no run named passes.
+        line = "The failing lint check is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_already_red_on_main_with_no_run_is_refused(self):
+        # Catches: a claim that the failure is on the base branch, with no run named, passes.
+        line = "The lint check was already red on main."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_pr_head_is_no_run_on_main(self):
+        # Catches: "on the PR head" is read as evidence that the failure was on main.
+        line = "The failure is pre-existing: it fails on the PR head too."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_sha_with_no_main_word_is_refused(self):
+        # Catches: a sha with no main word is read as a run on main.
+        line = "The failure is pre-existing; it also fails at 174b005c1."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_run_url_not_on_main_is_refused(self):
+        # Catches: a CI run URL that does not say it is on main is read as a run on main.
+        line = "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 is red."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        line = "The failure is pre-existing."
+        self.assert_blocked(line + "\n\n> **Done** BUILT abc123\n> **Next** ship it", line, landed=True)
+
+    def test_pe_red_each_offending_line_is_listed_and_the_cited_one_is_not(self):
+        # Catches: only the first offending line is listed, or a line with a main run is listed with the red ones.
+        # Step base-hash-on-base: the cited sha is a fixture commit on main, newer than the merge base, so the line names a real run.
+        cited = "The failure is pre-existing: it fails on main at %s too." % self.C
+        bad = "fails on 32b5f8b8e too, so it is not from this step"
+        out = self.assert_blocked("\n".join([cited, bad]), bad)
+        self.assertNotIn(cited, out["reason"])
+
+    def test_pe_red_refusal_names_the_rule(self):
+        # Catches: the refusal does not name its rule, so a reader cannot find the rule the line breaks.
+        self.assert_blocked("The failure is pre-existing.", "pre-existing-needs-main-run")
+
+    def test_pe_red_lone_apostrophe_does_not_hide_the_claim(self):
+        # Catches: a lone apostrophe in Don't opens a quote that hides the claim after it.
+        line = "Don't re-run it; the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_fence_marker_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the claim after it.
+        self.assert_blocked("Typed ``` mid-line.\nThe failure is pre-existing.", "The failure is pre-existing.")
+
+    def test_pe_red_text_after_a_closed_fence_is_judged(self):
+        # Catches: a fence hides every line after it, not only the lines inside it.
+        self.assert_blocked("```\nkeep the log\n```\nThe failure is pre-existing.", "The failure is pre-existing.")
+
+    def test_pe_red_failure_claims_with_no_run_are_refused(self):
+        # A failure claim names a run on the base branch's tip on the same line.
+        rows = [
+            # Catches: a claim that the base branch has the failure, with no run named, passes.
+            "The lint check already fails on main.",
+            # Catches: "as well" in place of "too" or "also" passes.
+            "Lint fails on 32b5f8b8e as well, so it is not from this step.",
+            # Catches: a negator before "so" exempts a claim in the next clause.
+            "Nothing in this PR touches lint so the failure is pre-existing.",
+            # Catches: a claim that the failure also occurs on the base branch, with no sha, passes.
+            "Lint fails on main too.",
+            # Catches: an all-digit sha is not read as a sha, so "fails on <sha> too" passes.
+            "Lint fails on 1234567 too.",
+            # Catches: "pre existing" with no hyphen passes.
+            "Lint has a pre existing failure.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_claim_before_a_question_is_refused(self):
+        # Catches: a line that ends in "?" passes whole, so a claim before its question is never judged.
+        self.assert_blocked("The failure is pre-existing. Want me to fix it?",
+                            "The failure is pre-existing.", "pre-existing-needs-main-run")
+
+    def test_pe_red_claim_in_the_same_sentence_as_a_question_is_refused(self):
+        # Catches: a sentence that ends in "?" is dropped whole, so a claim in the same sentence as its question passes.
+        line = "The lint failure is pre-existing, so should I merge anyway?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_claim_before_a_semicolon_question_is_refused(self):
+        # Catches: the question after a semicolon shares the claim's sentence, so the whole sentence is dropped.
+        line = "The lint failure is pre-existing; merge anyway?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_claim_before_a_dash_question_is_refused(self):
+        # Catches: a question after a dash in the claim's sentence is dropped with it, so the claim passes.
+        line = "CI is red and the failure is pre-existing - OK to merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_as_premise_in_a_can_question_is_refused(self):
+        # Catches: a question that opens with "can" is exempt whole, so a claim given as "as" premise passes.
+        line = "Can I merge, as the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_since_premise_in_a_should_question_is_refused(self):
+        # Catches: a question that opens with "should" is exempt whole, so a claim given as "since" premise passes.
+        line = "Should I merge, since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_in_a_can_question_is_refused(self):
+        # Catches: a "because" premise after a "can" question opener is exempt whole, so the claim passes.
+        line = "Can I merge because the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_given_that_premise_in_a_should_question_is_refused(self):
+        # Catches: a "given that" premise after a "should" question opener is exempt whole, so the claim passes.
+        line = "Should I merge anyway, given that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_in_an_is_question_is_refused(self):
+        # Catches: a "because" premise after an "is" question opener is exempt whole, so the claim passes.
+        line = "Is it OK to merge, because the red lint is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_since_premise_in_a_do_question_is_refused(self):
+        # Catches: a "since" premise after a "do" question opener is exempt whole, so the claim passes.
+        line = "Do you want me to merge, since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_claim_before_a_so_question_is_refused(self):
+        # Catches: an "is" question opener exempts the claim before its "so" clause, so the claim passes.
+        line = "Is the failure pre-existing, so should I merge anyway?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_before_a_can_clause_is_refused(self):
+        # Catches: an "is" question opener exempts a claim given as a "because" premise before a "can" clause.
+        line = "Is CI red because the failure is pre-existing, and can I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_question_is_refused(self):
+        # Catches: a claim followed by "so" and a question, with no comma, passes.
+        line = "The failure is pre-existing so should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_and_question_is_refused(self):
+        # Catches: a claim followed by "and" and a question, with no comma, passes.
+        line = "The failure is pre-existing and should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_since_premise_in_a_should_question_is_refused(self):
+        # Catches: a "since" premise with no comma before a "should" question passes, as the question is exempt whole.
+        line = "Should I merge since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_as_premise_in_a_can_question_is_refused(self):
+        # Catches: an "as" premise with no comma before a "can" question passes, as the question is exempt whole.
+        line = "Can I merge as the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_given_that_premise_in_a_should_question_is_refused(self):
+        # Catches: a "given that" premise with no comma before a "should" question passes, as the question is exempt whole.
+        line = "Should I merge anyway given that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_seeing_that_premise_in_a_can_question_is_refused(self):
+        # Catches: a "seeing that" premise before a "can" question passes, as the question is exempt whole.
+        line = "Can I merge seeing that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_leading_since_claim_before_a_should_question_is_refused(self):
+        # Catches: a "since" clause that opens the sentence and states the claim before a "should" question passes.
+        line = "Since the failure is pre-existing should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_before_an_ok_question_is_refused(self):
+        # Catches: a claim joined by "so" to a question with no auxiliary opener passes, as the question is exempt whole.
+        line = "The failure is pre-existing so ok to merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_and_before_an_ok_question_is_refused(self):
+        # Catches: a claim joined by "and" to a question with no auxiliary opener passes, as the question is exempt whole.
+        line = "The failure is pre-existing and ok to merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_before_an_i_clause_is_refused(self):
+        # Catches: a claim joined by "so" to a question clause that opens with "I" passes, as the question is exempt whole.
+        line = "The failure is pre-existing so I can merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_bare_base_ref_is_no_run_and_is_refused(self):
+        # A bare "on origin/main" with no sha or run URL is not a run.
+        rows = [
+            # Catches: a bare ref with no sha passes as proof the failure was already there.
+            "The failure was already there, verified on origin/main.",
+            # Catches: a bare "on origin/main" passes as a run.
+            "Pre-existing: the same lint check fails on origin/main.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_negator_does_not_reach_past_as_or_which(self):
+        # A negator in one clause does not exempt a claim in the clause after "as" or "which".
+        rows = [
+            # Catches: a negator before "as" exempts the claim after it.
+            "That failure is not from my change as it is pre-existing.",
+            # Catches: a negator before "which" exempts the claim after it.
+            "Lint failure is not mine which makes it pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_failure_on_several_places_with_no_run_is_refused(self):
+        # A failure on the PR, here, or a base, with no run on the same line, is a claim.
+        rows = [
+            # Catches: "on the PR and on <sha> too" passes as no claim.
+            "Lint fails on the PR and on 32b5f8b8e too.",
+            # Catches: "here and on main too" passes as no claim.
+            "Lint fails here and on main too.",
+            # Catches: "on master as well" passes as no claim.
+            "It fails on the branch and on master as well.",
+            # Catches: "here, on main too" passes as no claim.
+            "It fails here, on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_capital_is_refused(self):
+        # A period with no space after it, before a capital, ends a clause. A negator before it exempts no claim after it,
+        # and the claim after it is refused.
+        rows = [
+            # Catches: "did not" before "main.The" reaches the claim after the glued period, so the claim is exempt.
+            "It did not fail on main.The failure is pre-existing.",
+            # Catches: "did not" before "fail.The" reaches the claim after the glued period, so the claim is exempt.
+            "The lint did not fail.The failure is pre-existing.",
+            # Catches: "Nothing" before "lint.The" reaches the claim after the glued period, so the claim is exempt.
+            "Nothing in this PR touches lint.The failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    # Red: a yet hedge, an as clause, a plain-verb as, a glued period and a dotted name. One test per line.
+
+    def test_pe_red_as_before_a_pronoun_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "it also fails" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not rerun it as it also fails on 32b5f8b8e."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_as_before_it_fails_with_a_too_opens_a_clause(self):
+        # Catches: "as" before "it fails" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not fix it as it fails on abc1234 too."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_as_before_a_noun_subject_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "the failure seems" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not touch it as the failure seems pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_a_code_span_before_a_capital_ends_a_clause(self):
+        # Catches: a period after a code span cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on `main`.The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_a_close_paren_before_a_capital_ends_a_clause(self):
+        # Catches: a period after a close paren cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail (see the log).The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_capital_i_ends_a_clause(self):
+        # Catches: a period before "I" cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on main.I think the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_an_upper_case_word_before_a_capital_ends_a_clause(self):
+        # Catches: a period after an upper-case word cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on CI.The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_lower_case_determiner_ends_a_clause(self):
+        # Catches: a period before "the" cuts no clause, so "did not" reaches the claim after it.
+        # The blocked pin for report_guard.py has the same letter-dot-letter shape, so the word after the period must
+        # decide the cut, not the shape alone.
+        line = "It did not fail on main.the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_digit_after_a_letter_ends_a_clause(self):
+        # Catches: a period between a letter and a digit cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on it.2 failures are pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_not_yet_and_yet_to_hedges_are_no_claim(self):
+        # A negator before "yet" sits in the claim's clause, so the claim is exempt. The clause cut at "yet" separates the
+        # negator from the claim, so each hedge is refused.
+        rows = [
+            # Catches: "not" before "yet confirmed" is cut from the claim after "yet", so the hedge is refused.
+            "I have not yet confirmed the failure is pre-existing.",
+            # Catches: "yet to" is cut at "yet", so the negator "yet to" never reaches the claim after it.
+            "I have yet to confirm the failure is pre-existing.",
+            # Catches: "not" before "yet confirmed as" is cut from the claim after "yet", so the hedge is refused.
+            "The failure is not yet confirmed as pre-existing.",
+            # Catches: "not" before "yet been shown" is cut from the claim after "yet", so the hedge is refused.
+            "The failure has not yet been shown to be pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_yet_before_say_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "say" cuts the clause, so "cannot" never reaches the claim after it.
+        self.assert_allowed("I cannot yet say the failure is pre-existing.")
+
+    def test_pe_red_yet_before_known_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "known" cuts the clause ("known" is no participle), so "not" never reaches the claim.
+        self.assert_allowed("The failure is not yet known to be pre-existing.")
+
+    def test_pe_red_yet_before_know_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "know" cuts the clause, so "don't" never reaches the claim after it.
+        self.assert_allowed("We don't yet know the failure is pre-existing.")
+
+    def test_pe_red_yet_before_sure_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the adjective "sure" cuts the clause, so "not" never reaches the claim after it.
+        self.assert_allowed("I am not yet sure whether the failure is pre-existing.")
+
+    def test_pe_red_yet_before_that_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "that" cuts the clause, so "no" never reaches the claim after it.
+        self.assert_allowed("I have no proof yet that the failure is pre-existing.")
+
+    def test_pe_red_as_yet_is_a_hedge_not_a_claim(self):
+        # Catches: "as" before "yet", then "yet" itself, cut the clause, so "not" never reaches the claim after them.
+        self.assert_allowed("I have not established as yet that the failure is pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_by_a_later_be_verb(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_when_while_follows(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red while main is red.")
+
+    def test_pe_red_as_being_is_no_clause_cut(self):
+        # Catches: "as" before "being" opens a clause, so the negator "did not" never reaches the claim after it.
+        self.assert_allowed("I did not confirm the failure as being pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_and_unrelated_is_no_clause_cut(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and unrelated to my change.")
+
+    def test_pe_red_dotted_pascal_name_in_a_claim_ends_no_clause(self):
+        # Catches: the period in Console.WriteLine cuts the clause, so "is pre-existing" loses the "not" before it.
+        self.assert_allowed("I have not confirmed the failure in Console.WriteLine is pre-existing.")
+
+    # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_pe_green_brief_control_on_main_at_sha_passes(self):
+        # Catches: a line that names a run on main at a sha is refused.
+        # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base, so the run is real.
+        self.assert_allowed("fails on main at %s too" % self.C)
+
+    def test_pe_green_pre_existing_with_a_run_on_main_passes(self):
+        # Step base-hash-on-base: each sha is a fixture commit on main, newer than the merge base.
+        rows = [
+            # Catches: "on main at <sha>" is not read as a run on main.
+            "The failure is pre-existing: it fails on main at %s too." % self.C,
+            # Catches: a CI run URL that says it is on main is not read as a run on main.
+            "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 on main.",
+            # Catches: a sha in a code span is not read as the sha.
+            "The failure is pre-existing: it fails on main at `%s` too." % self.C,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_a_question_about_the_failure_passes(self):
+        # Catches: a question that names the failure is refused as a claim. A question asks; it claims nothing.
+        for line in ("Is the failure pre-existing?", "Did the failure fail on main too?"):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_a_question_with_a_run_on_main_passes(self):
+        # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base, so the run is real.
+        self.assert_allowed("Is the failure on main at %s pre-existing?" % self.C)
+
+    def test_pe_red_or_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or" with no clause after it reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing or new?")
+
+    def test_pe_red_or_not_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or not" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing or not?")
+
+    def test_pe_red_then_in_a_one_clause_question_is_allowed(self):
+        # Catches: a trailing "then" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failure pre-existing then?")
+
+    def test_pe_red_or_flaky_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or flaky" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the failing test pre-existing or flaky?")
+
+    def test_pe_red_or_caused_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or caused by" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Is the red job pre-existing or caused by my change?")
+
+    def test_pe_red_or_only_here_alternative_in_a_one_clause_question_is_allowed(self):
+        # Catches: "or only here" reads as a lead-in, so a one-clause question is refused as a claim.
+        self.assert_allowed("Did the failure fail on main too or only here?")
+
+    def test_pe_red_which_opener_in_a_one_clause_question_is_allowed(self):
+        # Catches: a "which" question is read as a claim-bearing clause, so a one-clause question is refused.
+        self.assert_allowed("Which failure is pre-existing?")
+
+    def test_pe_red_which_of_opener_in_a_one_clause_question_is_allowed(self):
+        # Catches: a "which of" question is read as a claim-bearing clause, so a one-clause question is refused.
+        self.assert_allowed("Which of the failures is pre-existing?")
+
+    def test_pe_green_lines_with_no_pre_existing_claim_pass(self):
+        rows = [
+            # Catches: a failure on a sha with no "too" is read as the claim.
+            "Lint fails on 32b5f8b8e in this PR run.",
+            # Catches: a red PR head with no sha is read as the claim.
+            "The lint check is red on the PR head; the fix is in lint/report_guard.py.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_quoted_and_code_span_claims_pass(self):
+        rows = [
+            # Catches: a claim quoted from someone else's words is read as this report's claim.
+            'The lane wrote "pre-existing" in its report, and the claim was false.',
+            # Catches: a claim in a code span is read as this report's claim.
+            "The lane wrote `fails on 32b5f8b8e too` in its report.",
+            # Catches: an already-red claim in a code span is read as this report's claim.
+            "The check said `already red on main` before the fix.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_fenced_block_claim_passes(self):
+        # Catches: a claim inside a multi-line fenced block is read as this report's claim.
+        self.assert_allowed("```\nThe failure is pre-existing.\nfails on 32b5f8b8e too\n```")
+
+    def test_pe_green_negated_claim_passes(self):
+        # Catches: "not pre-existing" is read as the claim.
+        self.assert_allowed("The failure is not pre-existing; it comes from this step.")
+
+    def test_pe_green_hyphen_joined_slug_is_not_the_word(self):
+        # Catches: the rule's step slug (pre-existing-needs-main-run) is read as the claim word.
+        self.assert_allowed("Step pre-existing-needs-main-run is in progress.")
+
+    def test_pe_green_long_reply_with_one_cited_claim_passes(self):
+        # Catches: a long reply trips the check on a line with no claim, or on a claim that cites a run on main.
+        # Step base-hash-on-base: the cited sha is a fixture commit on main, newer than the merge base.
+        lines = ["Line %d of the report: the suite ran and is green." % n for n in range(40)]
+        lines.append("The failure is pre-existing: it fails on main at %s too." % self.C)
+        self.assert_allowed("\n".join(lines))
+
+
+    def test_pe_green_claim_words_without_a_failure_pass(self):
+        rows = [
+            # Catches: "pre-existing" with no failure word in its sentence is read as a failure claim.
+            "The 12 pre-existing tests pass.",
+            # Catches: a build note that names the guard is read as a failure claim.
+            "BUILT pre-existing guard in lint/report_guard.py (builder sonnet, reviewer haiku)",
+            # Catches: a negated claim with the noun "failure" is read as a claim.
+            "not a pre-existing failure",
+            # Catches: "no" before a plural claim is read as a claim.
+            "no pre-existing failures",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_failure_on_a_sha_without_too_or_also_passes(self):
+        rows = [
+            # Catches: "too" that closes a later clause is read as "fails on <sha> too".
+            "Lint fails on 9f8e7d6c and the unit job fails too.",
+            # Catches: "also" in a later clause is read as "fails on <sha> also".
+            "CI fails on 9f8e7d6c, and I also pushed a fix.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_each_base_with_a_run_passes(self):
+        # Step base-hash-on-base: each sha is the fixture's main tip C, and each ref in these rows is a fixture ref at C.
+        rows = [
+            # Catches: "on master at <sha>" is refused as no run on main.
+            "The failure is pre-existing on master at %s." % self.C,
+            # Catches: "on origin/main at <sha>" with no "on main" word is refused.
+            "pre-existing on origin/main at %s" % self.C,
+            # Catches: "on origin/<branch> at <sha>" is refused as no run on main.
+            "The failure is pre-existing on origin/silent-undo-ci-body at %s." % self.C,
+            # Catches: a run URL on a line that says "on main" is refused.
+            "already red on main, run https://github.com/o/r/actions/runs/123",
+            # Catches: a run URL on a line that says "on master" is refused.
+            "The failure is pre-existing on master, run https://github.com/o/r/actions/runs/123.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+
+    def test_pe_green_pre_existing_as_a_modifier_passes(self):
+        rows = [
+            # Catches: "a pre-existing test" (a noun modifier, not a failure claim) is read as a claim.
+            "A pre-existing test fails on the new code; I re-pointed it.",
+            # Catches: "the pre-existing guard" (a noun modifier) is read as a claim.
+            "I extended the pre-existing guard so a failing line is refused.",
+            # Catches: "the 12 pre-existing tests pass" is read as a claim.
+            "The 12 pre-existing tests pass, 0 failed.",
+            # Catches: "already red on the old code" is read as a claim on main.
+            "The new cases are already red on the old code.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_base_named_with_a_sha_passes(self):
+        # Step base-hash-on-base: each sha is a fixture commit on main, newer than the merge base, so each form names a real run.
+        rows = [
+            # Catches: "on main (<sha>)" is refused as no run on main.
+            "It fails on main (%s) too." % self.C,
+            # Catches: "on main at commit <sha>" is refused as no run on main.
+            "It fails on main at commit %s too." % self.C,
+            # Catches: "main@<sha>" is refused as no run on main.
+            "pre-existing: red on main@%s" % self.C,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_twins_without_the_hedge_pass(self):
+        # Control: each hedge's twin, with its "yet" taken out, is allowed on the current code, and stays allowed.
+        rows = [
+            "I cannot confirm the failure is pre-existing.",
+            "The failure is not known to be pre-existing.",
+            "We don't know the failure is pre-existing.",
+            "I am not sure whether the failure is pre-existing.",
+            "I have no proof that the failure is pre-existing.",
+            "I have not established that the failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_as_before_a_claim_with_no_later_verb_passes(self):
+        # Control: "as" before a bare claim, with no verb after it, opens no clause, so the negator reaches the claim.
+        self.assert_allowed("I have not confirmed the failure as pre-existing.")
+
+    def test_pe_green_as_before_a_verb_with_a_run_on_main_passes(self):
+        # Control: a line that names its run on main passes whether or not "as" opens a clause, and a line with no claim passes.
+        # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base.
+        rows = [
+            "I did not touch it as the failure seems pre-existing on main at %s." % self.C,
+            "I did not touch it as the failure seems fixed.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_glued_period_with_a_run_on_main_passes(self):
+        # Control: a line that names its run on main passes whether or not the period cuts a clause.
+        # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base.
+        rows = [
+            "It did not fail on main.The failure is pre-existing on main at %s." % self.C,
+            "It did not fail on main. The failure is pre-existing on main at %s." % self.C,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_dotted_name_twin_without_the_dot_passes(self):
+        # Control: the twin with the dot taken out of the name is allowed on the current code, and stays allowed.
+        self.assert_allowed("I have not confirmed the failure in Console is pre-existing.")
+
+    # Pins: green on the built code. Each row's claim sits after a word that the clause cut splits at, with a negator before
+    # that word, so the negator reaches the claim only when the cut is gone. Each row goes red on that removal.
+
+    def test_pe_pin_negator_does_not_reach_past_or_yet_then_or_though(self):
+        rows = [
+            # Catches: the cut at "or" is removed, so "not" before it exempts the claim after it.
+            "The lint did not start or the failure is pre-existing.",
+            # Catches: the cut at "yet" is removed, so "not" before it exempts the claim after it.
+            "The lint did not start yet the failure is pre-existing.",
+            # Catches: the cut at "then" is removed, so "not" before it exempts the claim after it.
+            "The lint did not run then the failure is pre-existing.",
+            # Catches: the cut at "though" is removed, so "not" before it exempts the claim after it.
+            "The lint did not run though the failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_pin_a_dot_inside_a_token_ends_no_clause(self):
+        # Catches: a dot inside a token ends a clause, so the failure word before "a.py" loses the "on main too" after it.
+        # Both rows are refusals: a negator is absent, so the only thing that can exempt them is a clause break.
+        rows = [
+            "Lint fails in a.py on main too.",
+            "Lint fails in a.py on 32b5f8b8e too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_pin_a_dot_in_a_file_or_version_name_ends_no_clause(self):
+        # Catches: a period with no space after it ends a clause, so the failure word in "report_guard.py" or "v1.2" loses
+        # the "on main too" after it. Both rows stay refusals.
+        rows = [
+            "Lint fails in report_guard.py on main too.",
+            "It fails at v1.2 on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+
+    # Step base-hash-on-base: a run's sha counts only when it is a commit on the base and not older than the merge base. Red: the
+    # incident form, and a main commit older than the merge base. Green: the newest main commit and the merge base in
+    # each run form, origin/main as the base, and the paths that fail open.
+
+    # The four run forms, each with its base and its sha: "on <base> at <sha>", "on <base> at commit <sha>",
+    # "on <base> (<sha>)" and "<base>@<sha>". Each is a claim line's tail.
+    RUN_FORMS = ("it fails on %s at %s.", "it fails on %s at commit %s.", "it fails on %s (%s).", "it is red on %s@%s.")
+
+    def test_pe_red_incident_pr_head_hash_on_main_is_refused(self):
+        # Catches: "on main at <sha>" passes for the PR's own head sha, so the PR's failure reads as pre-existing.
+        # Decision pre-existing-needs-main-run names this form as the one to refuse: a lane cited its own head as main's run.
+        self.assert_fixture_shape()
+        self.assertFalse(self.ancestor(self.P, "origin/main"), "fixture: P is on pr only, not on main")
+        line = "The failure is pre-existing; it fails on main at %s." % self.P
+        self.assert_blocked(line, line)
+
+    def test_pe_red_main_hash_older_than_the_merge_base_is_refused(self):
+        # Catches: "on main at <sha>" passes for a main commit older than the PR's merge base. A is on main, so the
+        # ancestor rule alone passes it; only the merge-base rule refuses it.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.A, "origin/main"), "fixture: A is not on main")
+        self.assertFalse(self.ancestor(self.B, self.A), "fixture: A is not older than the merge base B")
+        line = "The failure is pre-existing; it fails on main at %s." % self.A
+        self.assert_blocked(line, line)
+
+    def test_pe_green_main_hash_newer_than_the_merge_base_passes(self):
+        # Catches: "on main at <sha>" is refused for a main commit newer than the merge base.
+        self.assert_fixture_shape()
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.C)
+
+    def test_pe_green_merge_base_hash_passes(self):
+        # Catches: "on main at <sha>" is refused for the merge base itself, which is on main and no older than itself.
+        self.assert_fixture_shape()
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.B)
+
+    def test_pe_green_each_run_form_on_main_with_the_newest_hash_passes(self):
+        # Catches: one of the four run forms with the newest main commit is refused.
+        self.assert_fixture_shape()
+        for form in self.RUN_FORMS:
+            line = "The failure is pre-existing; " + form % ("main", self.C)
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_origin_main_as_the_base_with_the_newest_hash_passes(self):
+        # Catches: "on origin/main at <sha>" is refused for the newest main commit, so origin/main is not read as a base.
+        self.assert_fixture_shape()
+        for form in self.RUN_FORMS:
+            line = "The failure is pre-existing; " + form % ("origin/main", self.C)
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_no_repo_under_the_cwd_fails_open(self):
+        # Catches: a cwd with no repo refuses a run the rule cannot check. The rule fails open, so the line passes.
+        probe = subprocess.run(["git", "-C", self.bare, "rev-parse", "--git-dir"], capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(probe.returncode, 0, "fixture: a repo sits above the bare folder")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.P, cwd=self.bare)
+
+    def test_pe_green_unknown_hash_fails_open(self):
+        # Catches: a hash git does not know refuses the line. git fails on it, so the rule fails open and the line passes.
+        self.assert_fixture_shape()
+        unknown = "0123456789abcdef0123456789abcdef01234567"
+        probe = subprocess.run(["git", "-C", self.repo, "cat-file", "-e", unknown], capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(probe.returncode, 0, "fixture: git knows the hash")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % unknown)
+
+    # Step base-hash-on-base: the rule's git cost, the shallow-clone limit, and the known debt of a PR's own branch as a base.
+
+    # Runs the guard under a wrapper that logs each git process it starts. Every git read the guard makes goes through
+    # subprocess.Popen, so the log holds the git calls of one run.
+    COUNT_GIT_CODE = (
+        "import json, os, runpy, subprocess, sys\n"
+        "real = subprocess.Popen\n"
+        "class Counting(real):\n"
+        "    def __init__(self, args, *rest, **kwargs):\n"
+        "        argv = [str(a) for a in args] if isinstance(args, (list, tuple)) else [str(args)]\n"
+        "        if argv and os.path.basename(argv[0]).lower() in ('git', 'git.exe'):\n"
+        "            with open(os.environ['GIT_COUNT_LOG'], 'a', encoding='utf-8') as f:\n"
+        "                f.write(json.dumps(argv) + '\\n')\n"
+        "        super().__init__(args, *rest, **kwargs)\n"
+        "subprocess.Popen = Counting\n"
+        "sys.argv = sys.argv[1:2]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    )
+
+    def git_calls(self, reply, cwd=None):
+        """The git processes one guard run starts for `reply`, as argv lists. The hook is the one the class drives."""
+        hook = self.hook(reply, cwd=cwd)
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "git.log")
+        env = dict(os.environ, GIT_COUNT_LOG=log)
+        run = subprocess.run([sys.executable, "-c", self.COUNT_GIT_CODE, REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        if not os.path.exists(log):
+            return []
+        with open(log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_pe_pin_git_calls_per_path_are_exact(self):
+        # Catches: the rule's git cost moves off its measured paths. A reply with no run-form hash runs git, and so does a
+        # line that names main with no hash. One hash costs 4 git calls for the newest main commit C, 5 for A (older than the
+        # merge base), 3 for the PR head P (the ancestor test fails, then the shallow probe), and 4 for the merge base B.
+        # A hash repeated on a second line adds none (the per-hash cache). Two distinct hashes cost their sum. step base-hash-on-base.
+        self.assert_fixture_shape()
+
+        def line(sha):
+            return "The failure is pre-existing; it fails on main at %s." % sha
+
+        none = self.git_calls("The failure is pre-existing.")
+        self.assertEqual(none, [], "a reply with no run-form hash ran git: %d calls" % len(none))
+        on_main = self.git_calls("The failure is pre-existing on main.")
+        self.assertEqual(on_main, [], "a line that names main with no hash ran git: %d calls" % len(on_main))
+        newest = self.git_calls(line(self.C))
+        self.assertEqual(len(newest), 4, "the newest main hash ran %d git calls, not 4" % len(newest))
+        older = self.git_calls(line(self.A))
+        self.assertEqual(len(older), 5, "the main hash older than the merge base ran %d git calls, not 5" % len(older))
+        pr_head = self.git_calls(line(self.P))
+        self.assertEqual(len(pr_head), 3, "the PR-head hash ran %d git calls, not 3" % len(pr_head))
+        base = self.git_calls(line(self.B))
+        self.assertEqual(len(base), 4, "the merge-base hash ran %d git calls, not 4" % len(base))
+        repeat = self.git_calls(line(self.C) + "\n" + line(self.C))
+        self.assertEqual(len(repeat), len(newest), "the same hash on a second line ran %d git calls, not %d"
+                         % (len(repeat), len(newest)))
+        two = self.git_calls("The failure is pre-existing; it fails on main at %s and on main at %s." % (self.A, self.P))
+        self.assertEqual(len(two), 8, "two distinct hashes ran %d git calls, not 8" % len(two))
+
+    def test_pe_pin_run_hash_is_read_by_git(self):
+        # Catches: a run-form hash passes with no git call, so nothing reads whether the sha is on the base. The bound
+        # above is met at zero calls; this lower bound is what makes it a read. step base-hash-on-base.
+        self.assert_fixture_shape()
+        calls = self.git_calls("The failure is pre-existing; it fails on main at %s." % self.C)
+        self.assertGreaterEqual(len(calls), 1, "one run-form hash ran no git call: the sha was not read")
+
+    def test_pe_green_shallow_clone_fails_open_on_a_pr_head_hash(self):
+        # Catches: the record's 'now refused' claim must name the shallow limit; step base-hash-on-base.
+        # A shallow clone cuts history, so an ancestry exit 1 there proves nothing: the rule fails open, and a PR-head
+        # sha passes. The pass is that named limit, pinned as today's behaviour, not a bypass.
+        clone = os.path.join(self.root, "shallow")
+        subprocess.run(["git", "clone", "-q", "--no-single-branch", "--depth", "2", "file://" + self.repo, clone],
+                       capture_output=True, env=tcj.GIT_ENV, check=True)
+        shallow = subprocess.run(["git", "-C", clone, "rev-parse", "--is-shallow-repository"], capture_output=True,
+                                 text=True, env=tcj.GIT_ENV).stdout.strip()
+        self.assertEqual(shallow, "true", "fixture: the clone is not shallow")
+        cut = subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", self.P, "origin/main"],
+                             capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(cut.returncode, 0, "fixture: P is reachable from origin/main in the clone")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.P, cwd=clone)
+
+    def test_pe_green_known_debt_pr_own_branch_as_base_passes(self):
+        # Catches: a sha on the PR's own head passes when the PR's own branch is named as the base. Known debt, pinned as
+        # today's behaviour and not fixed here: the base ref is the PR's own branch, so it always holds the head.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.P, "origin/pr"), "fixture: origin/pr does not hold P")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/pr at %s." % self.P)
+
+    def test_pe_red_url_does_not_outweigh_a_cited_pr_head_hash(self):
+        # Catches: a run URL on a line that also says "on main" passes when the line cites the PR's head sha, because the
+        # URL check returns before the cites are read. When a line cites a run-form hash, the cites decide, and the URL
+        # counts only with no cite. step base-hash-on-base.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        line = "The failure is pre-existing; it fails on main at %s (%s)" % (self.P, url)
+        self.assert_blocked(line, line)
+
+    def test_pe_green_url_with_a_cited_main_hash_or_no_hash_passes(self):
+        # Catches: a run URL on a line that cites a commit on main, newer than the merge base, is refused; so is a line
+        # that says "on main" with the URL and no hash. step base-hash-on-base.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        rows = [
+            "The failure is pre-existing; it fails on main at %s (%s)" % (self.C, url),
+            "The failure is pre-existing on main, run %s." % url,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_mixed_case_origin_base_refuses_a_commit_off_it(self):
+        # Catches: the base is lowercased before the git read, so "origin/Release" reads as "origin/release", a ref git
+        # does not have. The read fails open, and a commit the base does not hold passes. Only main and master lowercase;
+        # origin/<branch> is read as written. step base-hash-on-base.
+        self.assert_fixture_shape()
+        self.assertFalse(self.ancestor(self.P, "origin/Release"), "fixture: P is on origin/Release")
+        line = "The failure is pre-existing; it fails on origin/Release at %s." % self.P
+        self.assert_blocked(line, line)
+
+    def test_pe_green_mixed_case_origin_base_passes_a_commit_on_it(self):
+        # Catches: "on origin/Release at <sha>" is refused for a commit that base holds, newer than the merge base. This is
+        # the control for the case above: the case must keep its case, and a commit on the base still passes. step base-hash-on-base.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.X, "origin/Release"), "fixture: X is not on origin/Release")
+        self.assertEqual(tcj.git(self.repo, "merge-base", "HEAD", "origin/Release").stdout.strip(), self.B,
+                         "fixture: the merge base with origin/Release is not B")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/Release at %s." % self.X)
 
 
 class PendingRefusalTests(unittest.TestCase):
