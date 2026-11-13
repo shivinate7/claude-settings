@@ -33,7 +33,7 @@ else:
 
 
 def sim_test_cap_check():
-    """No booted-count cap is set anywhere (owner ruling 2026-11-12 21:59 CST): bin/sim-test has no CAP line, and the
+    """No booted-count cap is set anywhere (decision sims-load-brake-only): bin/sim-test has no CAP line, and the
     guard has no SIM_BOOT_CAP. The load brake is the only gate on a boot."""
     with open(os.path.join(HERE, "..", "bin", "sim-test"), encoding="utf-8") as f:
         caps = re.findall(r"^CAP=", f.read(), re.M)

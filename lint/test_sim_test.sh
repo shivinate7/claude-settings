@@ -11,13 +11,13 @@
 #    exit 2, no lock, no boot.
 #  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown, no lease. With two, the first
 #    is used. An iPad is not an iPhone. pro reuses the first booted iPhone whose name does not contain "Duo".
-#  - No cross-role refusal (owner ruling 2026-11-12 21:59 CST): a duo run boots its own Duo beside a booted 18 Pro, and a
+#  - No cross-role refusal (decision sims-load-brake-only): a duo run boots its own Duo beside a booted 18 Pro, and a
 #    pro run boots its own 18 Pro beside a booted Duo. It shuts down no device it did not boot.
 #  - None booted, its own boot: the lease (bin/sim-lease, beside the script) grants the UDID for the role, duo slot 1 or
 #    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The UDIDs are read from SLOT_UDID
 #    in bin/sim-lease, the one home of the device IDs.
 #  - A failed boot exits non-zero, runs no xcodebuild, and shuts nothing down.
-#  - No booted-count cap (owner ruling 2026-11-12 21:59 CST): the number of booted devices never refuses a run. The load
+#  - No booted-count cap (decision sims-load-brake-only): the number of booted devices never refuses a run. The load
 #    brake in bin/sim-lease is the only gate: on a busy disk the take exits 1 with no boot and no xcodebuild.
 #  - A no-op lease (sim-lease prints none: CI or GITHUB_ACTIONS true, or not Darwin): it boots nothing, runs nothing,
 #    prints one stderr line saying no lease, and exits 1.
@@ -436,7 +436,7 @@ need "boot was tried on the Duo's UDID" has_call "simctl boot $DUO1"
 need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
 end_case "18 failed boot exits non-zero and runs no xcodebuild"
 
-# Case 21 (owner ruling 2026-11-12 21:59 CST: no booted-count cap): two non-iPhones booted on a quiet machine. The Duo boots.
+# Case 21 (decision sims-load-brake-only: no booted-count cap): two non-iPhones booted on a quiet machine. The Duo boots.
 fresh; booted "iPad Pro 13-inch" $OTHER; booted "Apple Watch Ultra 3" $THIRD; run
 need "exit code" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
@@ -792,7 +792,7 @@ need "the Duo is reused: the role is not read after -scheme" dest_is "$DUO1"
 need "--device and its value reach xcodebuild unchanged" has_call "xcodebuild test -scheme X --device pro -only-testing:AppUITests/Login -collect-test-diagnostics never -destination platform=iOS Simulator,id=$DUO1"
 end_case "58 control: a flag after the first xcodebuild argument is xcodebuild's own"
 
-# Cases 59 and 60 (owner ruling 2026-11-12 21:59 CST: no cross-role refusal): each run boots its own device beside the other.
+# Cases 59 and 60 (decision sims-load-brake-only: no cross-role refusal): each run boots its own device beside the other.
 fresh; booted "iPhone 18 Pro" $PRO; run
 need "exit code" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
@@ -906,7 +906,7 @@ duo_full_during_wait() {
   kill "$second" 2>/dev/null; wait "$second" 2>/dev/null
   ARGS=(-scheme X)
 }
-# Case 69 (owner ruling 2026-11-12 21:59 CST: no cross-role refusal): the 18 Pro is booted during the wait, and the queued
+# Case 69 (decision sims-load-brake-only: no cross-role refusal): the 18 Pro is booted during the wait, and the queued
 # run boots its own Duo after its grant.
 duo_full_during_wait yes
 need "exit code" rc_is 0
@@ -1025,7 +1025,7 @@ need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
 
-# Cases 81 and 82 (owner ruling 2026-11-12 21:59 CST): the booted count never refuses a run. Three non-iPhones booted on a
+# Cases 81 and 82 (decision sims-load-brake-only): the booted count never refuses a run. Three non-iPhones booted on a
 # quiet machine: the Duo boots. The same three on a busy disk: the brake refuses the take, and it reads the disk to do so.
 FOURTH=CCCCCCCC-0000-4000-8000-000000000003
 fresh; booted "iPad Pro 13-inch" $OTHER; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Air" $FOURTH; run
