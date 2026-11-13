@@ -1,6 +1,6 @@
 # The pin drift check skips the code-check action
 
-**What.** `bin/ste-changed` warns when CI pins the ste-lint or zizmor action at a commit whose files differ from the session's copy. It does not read `actions/code-check@<sha>` pins. `bin/ci-job --lint` runs this repo's code-check action in place, so a child that pins an older code-check can pass locally and fail in CI, or the reverse. Merge's ready check (`--pinned`) runs the pinned code-check, so it matches CI but gives no signal that the pin is old.
+**What.** `bin/ste-changed` warns when CI pins the ste-lint or zizmor action at a commit whose files differ from the session's copy. It does not read `actions/code-check@<sha>` pins. `bin/ci-job --lint` runs this repo's code-check action in place, so a child that pins an older code-check can pass locally and fail in CI, or the reverse. Merge's ready check and the lane lint run the pinned code-check, so it matches CI but gives no signal that the pin is old.
 
 **Where.** `bin/ste-changed`, the `PINNED` table and the `PIN` pattern.
 

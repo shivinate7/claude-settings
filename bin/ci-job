@@ -114,7 +114,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
-from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, job_workflow, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, job_workflow, run_body, settings_pins, step_blocks, step_env, step_key, step_with, yaml_scalar  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
 PREAMBLE_MARK = "ci-job-preamble-done"
@@ -282,7 +282,7 @@ def code_check(top, step, pinned=None):
 
 
 def uses(step):
-    return (step_key(step, "uses") or "").split(" #")[0].strip()
+    return yaml_scalar(step_key(step, "uses"))
 
 
 def known_action(step):
