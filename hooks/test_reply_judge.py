@@ -1976,9 +1976,9 @@ def case_prompt_flag_sentence_exempts_only_a_search_rest_confirms():
           has_pin(clauses, ("never", "not"), ("candidate",), ("rest",), ("confirm",)), clauses)
 
 
-# Red on a165a7c88. SEARCH_WORD needs a word boundary, and "_" is a word character, so a search word joined to
-# other words by "_" (mcp__github__search_issues, search_pull_requests) is not seen. The control is a whole-word
-# search with a digit before it, which already triggers.
+# SEARCH_WORD needs a word boundary, and "_" is a word character, so a search word joined to other words by "_"
+# (mcp__github__search_issues, search_pull_requests) must still be seen. The control is a whole-word search with a
+# digit before it, which already triggers.
 UNDERSCORE_ISSUES_REPLY = "Done: mcp__github__search_issues found 4 open issues."
 UNDERSCORE_PRS_REPLY = "Done: search_pull_requests returned 5 open PRs."
 TOTAL_CONTROL_REPLY = "Done: GraphQL totalCount 6 open PRs from the search."
@@ -1993,8 +1993,8 @@ def case_search_joined_by_underscore_is_judged_off_sample():
         check("search trigger, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
 
 
-# Mutation-proof pins: green on a165a7c88. Each one names the alternative it proves. A scratch mutant that drops
-# that alternative turns its own case red and no other case in this block.
+# Mutation-proof pins. Each one names the alternative it proves. A scratch mutant that drops that alternative turns
+# its own case red and no other case in this block.
 NO_COUNT_WORD_REPLY = "Done: the search found no open PRs."  # the count word no, and no digit anywhere
 SEARCHES_REPLY = "Done: the rule searches returned 4 open PRs."  # the search word with es, the digit 4 after it
 SEARCHING_REPLY = "Done: searching the rule returned 4 open PRs."  # the search word with ing, the digit 4 after it
@@ -2018,8 +2018,8 @@ def case_searching_with_a_digit_is_judged_off_sample():
 
 
 # The counts rule as CLAUDE.md states it. The rule's words sit between the anchor before it and its own anchor.
-# They must name the GitHub REST API as the count source, and say a search is not one. Red on a165a7c88: the
-# line there says bare "REST" and never "not a search". No other test reads rule-line text, so this one lives here.
+# They must name the GitHub REST API as the count source, and say a search is not one. Naming REST alone is not
+# enough: the case also needs the "not a search" clause. No other test reads rule-line text, so this one lives here.
 COUNTS_ANCHOR = "<!-- rule:verification-counts-from-rest -->"
 CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
 
