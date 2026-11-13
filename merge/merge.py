@@ -4180,7 +4180,7 @@ def parse_review(text):
         if not m:
             return None
         i = int(m.group(1))
-        skip = (last, i) == (1, 3)  # ruling r9: a PASS Fix check stands in for round 2, so only this one skip, checked once the Fix check line is read
+        skip = (last, i) == (1, 3)  # ruling r9: a PASS Fix check stands in for the middle round, so this is the one skip allowed, checked once the Fix check line is read
         if (i not in (last, last + 1) and not skip) or i < 1 or i > ceiling:
             return None
         skipped = skipped or skip
@@ -5736,7 +5736,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 else:
                     print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
                 return 2
-            if {r[0] for r in a.round} >= {3} and 2 not in {r[0] for r in a.round}:  # ruling r9: round 3 after round 1 skips round 2, which only a PASS fix check on a round 1 FAIL replaces
+            if {r[0] for r in a.round} >= {3} and 2 not in {r[0] for r in a.round}:  # ruling r9: a record that jumps from the first round to the last skips the middle one, which only a PASS fix check on a failed first round replaces
                 prior = earlier[-1] if earlier else None
                 r1 = [v for i, _, _, v in prior["rounds"] if i == 1] if prior and max((i for i, *_ in prior["rounds"]), default=0) == 1 else []
                 if not (a.fix_check and a.fix_check[3] == "PASS" and any(v != "PASS" for v in r1)):
