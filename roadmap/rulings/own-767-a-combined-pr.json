@@ -1,0 +1,10 @@
+{
+ "id": "own-767-a-combined-pr",
+ "at": "2026-11-13T15:34:32-06:00",
+ "title": "A PR merges alone and may combine several reviewed lanes when that saves CI",
+ "ruling": "Owner 15:33 CST Nov 13, to the retrospective: \"yup A is good\" (page item 767 a), built on his 15:31 words that merges, batches and individual lanes were never exclusive, an either or. A PR merges alone; it may combine several reviewed lanes as one PR when that saves CI. For the drain: one combined PR per step group of keep rows that read done, each merging alone on its own green run. Only the wording of CLAUDE.md rule git-integration-branch-merge changes (\"Each lane PR merges alone\" becomes \"A PR merges alone; it may combine several reviewed lanes\"), not the tool. backlog-drain-plan's \"Runner 10 batches\" is rewritten in place to this.",
+ "quote": "yup A is good",
+ "source": "Owner chat with the retrospective 15:33 CST Nov 13, relayed 15:34 CST; filed by triage.",
+ "status": "open",
+ "step": "backlog-drain"
+}
