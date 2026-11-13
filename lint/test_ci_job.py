@@ -2351,12 +2351,49 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a sha the clone lacks was not fetched from its origin and run\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness run was not the one at the fetched sha\n" + text)
 
-    def test_lint_under_the_flag_runs_as_without_it_and_the_pin_does_not_apply(self):
+    def test_lint_under_the_flag_runs_the_harness_at_the_pin(self):
+        """--pinned under --lint runs a code-check pinned to a sha from that sha's tree, as the ready check does. Without the flag the
+        local copy runs. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
         (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--lint", "--base", "origin/main")
         self.assertIn("Code check", by_step(lines0), "scope: --lint did not select the code-check step\n" + text0)
-        self.assertEqual(rc, rc0, "under --pinned --lint exits differently from --lint\n" + text)
-        self.assertEqual(by_step(lines), by_step(lines0), "under --pinned --lint reads a step differently from --lint\n" + text)
-        self.assertIn("fixture harness: strict", text, "--lint ran the harness at the pin, not the local copy\n" + text)
+        self.assertEqual((rc0, self.verdicts(lines0)), (1, ["FAIL"]), "precondition: without the flag the local strict copy did not FAIL\n" + text0)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "under --pinned --lint the step pinned to a sha did not PASS\n" + text)
+        self.assertIn("fixture harness: lenient", text, "under --pinned --lint the local strict copy ran, not the harness at the pin\n" + text)
+
+    def test_lint_under_the_flag_with_a_sha_no_clone_holds_reads_unknown_and_the_local_copy_never_runs(self):
+        rc, lines, text = self.run_step(self.code_step(UNFETCHABLE), "--lint", "--base", "origin/main", "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "under --pinned --lint an unfetchable pin did not read unknown\n" + text)
+        self.assertIn("pin %s of code-check" % UNFETCHABLE[:7], lines[0], "the unknown line does not name the pin it could not read\n" + text)
+        self.assertNotIn("fixture harness", text, "under --pinned --lint the local copy ran for a sha it could not fetch\n" + text)
+
+    def test_a_branch_ref_under_lint_under_the_flag_keeps_the_local_copy(self):  # the control: a non-sha ref is not pinned
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step("main"), "--lint", "--base", "origin/main")
+        self.assertIn("fixture harness: strict", text0, "scope: without the flag the branch ref did not run the local copy\n" + text0)
+        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned --lint a branch ref reads differently\n" + text)
+        self.assertIn("fixture harness: strict", text, "under --pinned --lint a branch ref did not keep the local copy\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
+    def test_an_ste_lint_pin_under_lint_and_the_flag_stays_local(self):  # the control: the ste-lint step is never pinned
+        """Under --pinned --lint the ste-lint step reads as it does without the flag, and its pin exports nothing."""
+        pin = self.add_ste_lint()
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        env, calls = self.git_stub(RUN_FOLDER)
+        rc0, lines0, text0 = self.run_step(ste, "--lint", "--base", "origin/main", env=env)
+        self.assertIn("STE lint", by_step(lines0), "scope: --lint did not select the ste-lint step\n" + text0)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main", "--pinned", env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned --lint the ste-lint step reads differently\n" + text)
+        self.assertEqual(self.stub_calls(calls, "archive"), [], "under --pinned --lint the ste-lint pin was exported, not run locally\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
+    def test_lint_plan_under_the_flag_prints_as_without_it_and_never_fetches(self):  # the control: --plan is unchanged
+        """--lint --plan prints the same under --pinned, and no git fetch or archive runs, even for a sha no clone holds."""
+        env, calls = self.git_stub(RUN_FOLDER)
+        args = ("--lint", "--plan", "--base", "origin/main")
+        rc0, lines0, text0 = self.run_step(self.code_step(UNFETCHABLE), *args, env=env)
+        self.assertEqual(by_step(lines0).get("Code check"), "would run", "scope: --lint --plan does not plan the code-check step\n" + text0)
+        rc, lines, text = self.run_step(self.code_step(UNFETCHABLE), *args, "--pinned", env=env)
+        self.assertEqual((rc, lines), (rc0, lines0), "under --pinned --lint --plan prints differently from --lint --plan\n" + text)
+        self.assertEqual(self.stub_calls(calls), [], "under --pinned --lint --plan git fetched or archived the pin\n" + text)
 
     def test_plan_under_the_flag_prints_as_without_it(self):
         """Control: a pin the clone holds plans the same with or without the flag, so a --plan that fetched would still pass
@@ -2375,10 +2412,11 @@ class PinnedHarness(Job):
         self.assertEqual(by_step(lines)["Code check"], "would run", "under --plan --pinned an unfetchable pin does not plan the local copy\n" + text)
         self.assertEqual(self.stub_calls(calls), [], "under --plan --pinned git fetched or archived the pin\n" + text)
 
-    def assert_local_uses_runs_the_repo_copy(self, uses):
-        """A local uses: runs the repo under test's own code_check.py, with or without the flag, never a pinned tree."""
+    def assert_local_uses_runs_the_repo_copy(self, uses, flags=None):
+        """A local uses: runs the repo under test's own code_check.py, with or without the flag, never a pinned tree. flags: the run's
+        arguments, else the --step run the ready check makes."""
         self.write_child_code_check()
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(step("Code check", uses=uses), *self.LINT)
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(step("Code check", uses=uses), *(flags or self.LINT))
         self.assertIn("child harness", text0, "scope: without the flag the local uses did not run the repo's own copy\n" + text0)
         self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned a local uses: reads differently\n" + text)
         self.assertNotIn("fixture harness", text, "under --pinned a local uses: ran a harness from a pinned tree or the local copy\n" + text)
@@ -2388,6 +2426,9 @@ class PinnedHarness(Job):
 
     def test_a_local_dot_uses_under_the_flag_runs_the_repos_own_copy(self):
         self.assert_local_uses_runs_the_repo_copy("./actions/code-check")
+
+    def test_a_local_dollar_uses_under_lint_and_the_flag_runs_the_repos_own_copy(self):  # the control: the lane lint's flags
+        self.assert_local_uses_runs_the_repo_copy("$/actions/code-check", ("--lint", "--base", "origin/main"))
 
     def test_a_branch_ref_under_the_flag_keeps_the_local_copy(self):
         """Control: the run without --pinned is the scope check and must run the local copy. The run with --pinned must
