@@ -64,7 +64,7 @@ def run_spelling(command, darwin_spelling):
 HEAD_1 = "### 2026-11-06 11:38 CST (UTC-06:00)"
 HEAD_2 = "### 2026-11-06 11:40 CST (UTC-06:00)"
 GOAL = "# Handoff\n\n## Goal\n\nShip the state check.\n\n"
-PREMISES = "## Working premises\n\n- the owner's word settles a ruling\n"
+PREMISES = "## Working premises\n\n- the owner's grant settles a ruling\n"
 OK_JSON = '{\n  "a": 1,\n  "b": 2\n}\n'
 
 # An inbox with two owner blocks. Each fence closes; each block has one item line.
