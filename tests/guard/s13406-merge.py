@@ -600,10 +600,12 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id", body=None):
     """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
-    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
-    body = "Created session " + session + "." if plain else json.dumps({key: session})
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture. `body`, when given,
+    is the result text as it stands, for a shape the other options do not build."""
+    if body is None:
+        body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
 

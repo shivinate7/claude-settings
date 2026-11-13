@@ -108,6 +108,22 @@ STEPDUP_LINES = {
                         + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK02", plain=True),
     "stepdup-ok-session-id": stepdup_list("l1", stepdup_fill(40))
                              + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK03", key="session_id"),
+    # A successful create whose result nests its id under `ccr`, the wrapper a get_session record comes back in.
+    "stepdup-nest-id": stepdup_list("l1", stepdup_fill(40))
+                       + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": "session_NEST01", "title": "x"}})),
+    "stepdup-nest-session-id": stepdup_list("l1", stepdup_fill(40))
+                               + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"session_id": "session_NEST02"}})),
+    "stepdup-nest-send": stepdup_list("l1", stepdup_fill(40))
+                         + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": "session_NEST01", "title": "x"}}))
+                         + role_target_call("t2", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True),
+    "stepdup-nest-null": stepdup_list("l1", stepdup_fill(40))
+                         + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": None}})),
+    # An errored create whose result nests an id, and one whose result is an object with an id. Each started no session.
+    "stepdup-nest-error": stepdup_list("l1", stepdup_fill(40))
+                          + stepdup_failed_create("c1", STEP_CREATE_TAGS,
+                                                  body=json.dumps({"ccr": {"id": "session_NEST03", "title": "x"}}), is_error=True),
+    "stepdup-error-flat-id": stepdup_list("l1", stepdup_fill(40))
+                             + stepdup_failed_create("c1", STEP_CREATE_TAGS, body='{"id":"session_ERR01"}', is_error=True),
 }
 
 
@@ -232,6 +248,24 @@ stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an ea
                "deny", role_path("stepdup-ok-plain"), STEP_CREATE_TAGS, carries="session_OK02")
 stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned a session_id, and names that session",
                "deny", role_path("stepdup-ok-session-id"), STEP_CREATE_TAGS, carries="session_OK03")
+# Refused: a successful create whose result nests its id under ccr, and the retry names that session. The id is read
+# from the ccr object under either key, as a get_session record holds it.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create's result nests its id under ccr, and names that session",
+               "deny", role_path("stepdup-nest-id"), STEP_CREATE_TAGS, carries="session_NEST01")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create's result nests its session_id under ccr, and names that session",
+               "deny", role_path("stepdup-nest-session-id"), STEP_CREATE_TAGS, carries="session_NEST02")
+stepdup_send("a lane brief for dup-step-a is refused when an earlier create's result nests its id under ccr, and names that session",
+             "deny", role_path("stepdup-nest-send"), STEPDUP_BRIEF, carries="session_NEST01")
+# Allowed: a nested id that is null names no session, so the retry of the step is not held.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create's result nests a null id under ccr",
+               "allow", role_path("stepdup-nest-null"), STEP_CREATE_TAGS)
+# Allowed: an errored create names no session, nested or not.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed and its result nests an id under ccr",
+               "allow", role_path("stepdup-nest-error"), STEP_CREATE_TAGS)
+# Allowed: an errored create whose result is an object with a flat id names no session, so the retry of the step passes.
+# The guard reads no id from an errored result, whatever its shape.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed and its result is an object with an id",
+               "allow", role_path("stepdup-error-flat-id"), STEP_CREATE_TAGS)
 
 # Refused, pinned as it is now: a brief to a triage target with no whole list read is refused as unproved. The target is
 # no lane, so lane-one-topic passes the brief, and this rule alone judges it.
