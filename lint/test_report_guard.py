@@ -2286,10 +2286,13 @@ class SameTurnWriter:
         """The tags a session of `role` (triage or lane) carries for `repo`."""
         return ["cs-build:" + role, "cs-repo:" + repo]
 
-    def listing(self, sessions):
-        """A list_sessions call and result over (session_id, tags) pairs: the transcript's tag read of a session list."""
-        body = json.dumps({"sessions": [{"id": sid, "tags": list(tags)} for sid, tags in sessions]})
-        return self.call(self.LIST_SESSIONS, {}, result=body)
+    def listing(self, sessions, has_more=False):
+        """A list_sessions call and result over (session_id, tags) pairs: the transcript's tag read of a session list.
+        `has_more` marks a page that does not hold the whole list."""
+        page = {"sessions": [{"id": sid, "tags": list(tags)} for sid, tags in sessions]}
+        if has_more:
+            page["has_more"] = True
+        return self.call(self.LIST_SESSIONS, {}, result=json.dumps(page))
 
     def session_record(self, session_id, tags, wrapped=False):
         """A get_session call and result naming `session_id` with `tags`. `wrapped` gives the record the wrapper the

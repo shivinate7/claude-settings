@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import test_report_guard as trg  # noqa: E402  the run folder, the send, transcript and listing helpers, the guard (one home)
+import test_report_guard_stalled as trs  # noqa: E402  the lane's own record and remote id (one home)
 import feedback_guard  # noqa: E402  Pages.is_writer, the owner-feedback page check
 
 layout = trg.RG.layout  # the module the guard reads the extras key from, so this file reads the same key
@@ -32,6 +33,7 @@ NEW = "session_pwtnew1"  # a triage session whose id is not the extras key
 OTHER = "session_pwtother"  # a second triage session, or one whose newest record is no longer triage
 LANE = "session_pwtlane"  # a session tagged as a lane, never a writer
 META = "session_pwtmeta"  # the writer a meta/page get names
+PARENT_ID = "session_parent1"  # the parent id a lane's own record names
 
 
 def setUpModule():
@@ -73,18 +75,26 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
 
     def refusal(self, root, acts):
         """The refusal question_problem gives a pick asked after `acts` in the same turn; "" when it passes."""
-        records = [trg.human("decide"), *acts, trg.assistant_text(self.reply(self.PICK))]
+        return self.refusal_after(root, [], acts)
+
+    def refusal_after(self, root, before, turn):
+        """The refusal for a pick asked in `turn`, after the records `before` of the same transcript; "" when it passes."""
+        records = [*before, trg.human("decide"), *turn, trg.assistant_text(self.reply(self.PICK))]
         hook = {"hook_event_name": "Stop", "transcript_path": trg.write_transcript(records, self.run_dir),
                 "stop_hook_active": False, "cwd": root}
-        refusal, _note = trg.RG.question_problem(records, records[1:], self.reply(self.PICK), hook)
+        refusal, _note = trg.RG.question_problem(records, records[len(before) + 1:], self.reply(self.PICK), hook)
         return refusal
 
     def is_writer(self, acts, session_id, repo):
-        """Pages.is_writer on the transcript of `acts`, asked with the repo. The signature is checked first, so a build
+        """Pages.is_writer on a transcript whose one owner message holds `acts`."""
+        return self.is_writer_of([trg.human("decide"), *acts], session_id, repo)
+
+    def is_writer_of(self, records, session_id, repo):
+        """Pages.is_writer on the transcript `records`, asked with the repo. The signature is checked first, so a build
         without the repo argument fails on that, named."""
         params = inspect.signature(feedback_guard.Pages.is_writer).parameters
         self.assertIn("repo", params, "Pages.is_writer takes no repo, so it cannot read the triage tag")
-        path = trg.write_transcript([trg.human("decide"), *acts], self.run_dir)
+        path = trg.write_transcript(records, self.run_dir)
         return feedback_guard.Pages(path).is_writer(session_id, repo=repo)
 
     def test_tag_new_triage_session_passes_a_delivered_send(self):
@@ -218,6 +228,70 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         with self.subTest(session=OTHER):
             refusal = self.refusal(root, [*acts, *self.send(session_id=OTHER, result=self.DELIVERED)])
             self.assertNotEqual(refusal, "", "a session whose newest record is a lane passed the pick check")
+
+    def test_tag_has_more_listing_names_no_writer(self):
+        # Catches: a list_sessions page marked has_more naming a triage session as the writer. The page may miss the
+        # real triage session, so no writer is named from it. The same session in a complete listing still names it.
+        root, repo, key = self.scope()
+        with self.subTest(listing="has_more true"):
+            acts = [*self.listing([(NEW, self.session_tags("triage", repo))], has_more=True),
+                    *self.send(session_id=NEW, result=self.DELIVERED)]
+            refusal = self.refusal(root, acts)
+            self.assertNotEqual(refusal, "", "a delivered send to a triage session named by a has_more page passed")
+        with self.subTest(listing="complete"):
+            acts = [*self.listing([(NEW, self.session_tags("triage", repo))]),
+                    *self.send(session_id=NEW, result=self.DELIVERED)]
+            refusal = self.refusal(root, acts)
+            self.assertEqual(refusal, "", "a delivered send to a triage session in a complete listing was refused: %s" % refusal)
+
+    def test_tag_listing_from_an_earlier_turn_names_no_writer(self):
+        # Catches: a triage session read in an earlier turn named as this turn's writer. Triage restarts and gets new ids,
+        # so a tag read before the last owner message may be stale. The same listing in this turn still names it.
+        root, repo, key = self.scope()
+        listing = self.listing([(NEW, self.session_tags("triage", repo))])
+        send = self.send(session_id=NEW, result=self.DELIVERED)
+        with self.subTest(turn="earlier"):
+            before = [trg.human("first"), *listing, trg.assistant_text("Listed.")]
+            refusal = self.refusal_after(root, before, send)
+            self.assertNotEqual(refusal, "", "a delivered send to a triage session listed in an earlier turn passed")
+        with self.subTest(turn="this"):
+            before = [trg.human("first"), trg.assistant_text("Done.")]
+            refusal = self.refusal_after(root, before, [*listing, *send])
+            self.assertEqual(refusal, "", "a delivered send to a triage session listed in this turn was refused: %s" % refusal)
+
+    def test_tag_lane_send_to_the_tagged_writer(self):
+        # Catches: a lane's send to the triage session its tag read names refused, because the lane branch counts only a
+        # meta/page writer. An undelivered send to that writer still does not pass.
+        root, repo, key = self.scope()
+        os.environ[REMOTE_ENV] = trs.LANE_ENV  # the session is the lane: its own record is read from the transcript
+        own = trs.own_record(trs.LANE_ID, ["cs-build:lane"], parent=PARENT_ID)
+        listing = self.listing([(NEW, self.session_tags("triage", repo))])
+        with self.subTest(send="delivered"):
+            acts = [*own, *listing, *self.send(session_id=NEW, result=self.DELIVERED)]
+            refusal = self.refusal(root, acts)
+            self.assertEqual(refusal, "", "a delivered lane send to the tag writer %s was refused: %s" % (NEW, refusal))
+        with self.subTest(send="undelivered"):
+            acts = [*own, *listing, *self.send(session_id=NEW, result=self.NOT_DELIVERED)]
+            refusal = self.refusal(root, acts)
+            self.assertNotEqual(refusal, "", "an undelivered lane send to the tag writer %s passed the pick check" % NEW)
+
+    def test_tag_is_writer_and_pick_check_agree_on_the_turn_rules(self):
+        # Catches: is_writer and the pick check reading the turn or the page differently. Each transcript names no
+        # writer by spec, and both checks must say so for a delivered send to either session.
+        root, repo, key = self.scope()
+        rows = [
+            ("has_more page", [], self.listing([(NEW, self.session_tags("triage", repo))], has_more=True)),
+            ("earlier turn", [trg.human("first"), *self.listing([(NEW, self.session_tags("triage", repo))]),
+                              trg.assistant_text("Listed.")], []),
+        ]
+        for label, before, now in rows:
+            for sid in (NEW, key):
+                with self.subTest(transcript=label, session=sid):
+                    turn = [*now, *self.send(session_id=sid, result=self.DELIVERED)]
+                    passed = self.refusal_after(root, before, turn) == ""
+                    written = self.is_writer_of([*before, trg.human("decide"), *turn], sid, repo)
+                    self.assertEqual(passed, written, "the pick check and is_writer disagree on %s" % sid)
+                    self.assertFalse(written, "the writer read names %s, which the spec does not name" % sid)
 
     def test_tag_control_meta_page_writer_passes(self):
         # Control, green on the old code: the meta/page writer's delivered send passes, so the harness does pass a real send.
