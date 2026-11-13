@@ -1175,19 +1175,19 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def comment_rows(self, since, seen=None):
-        """-> the review record and lane-lint rows updated since `since`: the module's comment_rows of this host."""
+        """-> the review log and lane-lint rows updated since `since`: the module's comment_rows of this host."""
         return comment_rows(self, since, seen)
 
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since` (comment_rows, grouped by comment_groups).
-        records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
+        records is {PR number: [(body, created_at, updated_at) of each review log comment, oldest first]}: a body counts only when the review log
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
         return comment_groups(comment_rows(self, since))
 
     def review_records(self, since):
-        """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
+        """-> {PR number: [(body, created_at, updated_at) of each review log comment, oldest first]}: the records half of issue_comments."""
         return self.issue_comments(since)[0]
 
     def post_comment(self, n, body):
@@ -4374,6 +4374,8 @@ REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batc
 REVIEWED_FULL_REREAD_SECS = 1800  # a cache older than this is read in full again: an incremental read never sees a deleted comment
 REVIEWED_OVERLAP_SECS = 300  # an incremental read starts this long before the cursor, so a comment GitHub listed late is not skipped
 
+ROW_LOG, ROW_LINT = "log", "lint"  # the kind of a comment row: a review log comment, a lane-lint comment
+
 def iso_secs(text):
     """-> the epoch seconds of an ISO 8601 UTC time as GitHub writes it, or None when `text` is not one."""
     try:
@@ -4386,19 +4388,20 @@ def iso_stamp(secs):
     return datetime.datetime.fromtimestamp(secs, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def comment_rows(h, since, seen=None):
-    """-> [{id, issue, kind, body, created, updated}] of the repo's review record and lane-lint comments updated since `since`, in the list's order
-    (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is "record" when the review record marker is the whole
-    first line, or "lint" when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
-    gets the updated_at of every comment the read returned, rows or not: the newest of them is a safe cursor. A failed read is a Stop.
+    """-> [{id, issue, kind, body, created, updated}] of the repo's review log and lane-lint comments updated since `since`, in the list's order
+    (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is ROW_LOG when the review log marker is the whole
+    first line, or ROW_LINT when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
+    gets the (id, updated_at) of every comment the read returned, rows or not: the newest updated_at is a safe cursor, and an id with no row is a comment
+    edited so it is no row any more. A failed read is a Stop.
     The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it. A function of the host, not only a
     Host method: a test fake borrows issue_comments and has only `pages`."""
     rows = []
     for c in h.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
         if seen is not None:
-            seen.append(c.get("updated_at"))
+            seen.append((c.get("id"), c.get("updated_at")))
         body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
         first = body.splitlines()[:1]
-        kind = "record" if first == [REVIEW_MARKER] else "lint" if first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR else None
+        kind = ROW_LOG if first == [REVIEW_MARKER] else ROW_LINT if first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR else None
         if m and kind:
             rows.append({"id": c.get("id"), "issue": int(m.group(1)), "kind": kind, "body": body, "created": c.get("created_at"), "updated": c.get("updated_at")})
     return rows
@@ -4407,7 +4410,7 @@ def comment_groups(rows):
     """-> (records, lints) of comment_rows `rows`, in their order: records is {PR number: [(body, created, updated)]}, lints is {PR number: [body]}."""
     records, lints = {}, {}
     for r in rows:
-        if r["kind"] == "record":
+        if r["kind"] == ROW_LOG:
             records.setdefault(r["issue"], []).append((r["body"], r["created"], r["updated"]))
         else:
             lints.setdefault(r["issue"], []).append(r["body"])
@@ -4417,7 +4420,7 @@ def is_whole(v):
     return isinstance(v, int) and not isinstance(v, bool)
 
 def valid_cache_row(r):
-    return (isinstance(r, dict) and is_whole(r.get("id")) and is_whole(r.get("issue")) and r.get("kind") in ("record", "lint") and isinstance(r.get("body"), str)
+    return (isinstance(r, dict) and is_whole(r.get("id")) and is_whole(r.get("issue")) and r.get("kind") in (ROW_LOG, ROW_LINT) and isinstance(r.get("body"), str)
             and all(r.get(k) is None or isinstance(r.get(k), str) for k in ("created", "updated")))
 
 def valid_reviewed_cache(c):
@@ -4435,7 +4438,7 @@ def read_state():
         return {}, True
     except OSError:
         return {}, False
-    except ValueError:  # UnicodeDecodeError and JSONDecodeError
+    except (ValueError, RecursionError):  # UnicodeDecodeError, JSONDecodeError, and a file nested too deep for the parser
         return {}, True
     return (data, True) if isinstance(data, dict) else ({}, True)
 
@@ -4452,28 +4455,45 @@ def write_state(data):
             tmp.unlink()
         raise
 
+def repo_key(h):
+    """-> the OWNER/NAME of the host's repo, or None when it cannot be read. Host.repo when the host names it; else the one read of the bare repo route
+    that root_host makes. Never the checkout path: a checkout can be re-pointed at another repo."""
+    if getattr(h, "repo", None):
+        return h.repo
+    try:
+        c, out = h.api("")
+        name = None if c else json.loads(out)["full_name"]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return name if isinstance(name, str) and name else None
+
 def reviewed_rows(h, floor):
     """-> the comment rows of the repo for `merge --reviewed`, `floor` being the oldest open pull request's created_at. The cursor cache of this repo
-    (merge-role.json, key reviewed_cursor) is read first: a valid cache whose floor is no newer than `floor`, taken within REVIEWED_FULL_REREAD_SECS, gives
-    its rows plus the comments updated since its cursor less REVIEWED_OVERLAP_SECS, merged by comment id (an edit replaces its row), oldest first.
-    Anything else (no or invalid cache, an older pull request reopened, a stale cache) is a full read from `floor`, as before the cursor. The cursor is the
-    newest updated_at read, never a wall clock. One write of the file follows; a failed write never fails the read."""
-    key = getattr(h, "repo", None) or str(getattr(h, "cwd", None) or ".")  # OWNER/NAME, else the checkout the host runs in: one repo's rows never serve another's
-    now = getattr(h, "now", time.time)()  # a test fake has no repo name or clock
-    state, readable = read_state()
+    (merge-role.json, key reviewed_cursor, keyed by OWNER/NAME, see repo_key) is read first: a valid cache whose floor is no newer than `floor`, taken
+    within REVIEWED_FULL_REREAD_SECS, gives its rows plus the comments updated since its cursor less REVIEWED_OVERLAP_SECS, merged by comment id (an edit
+    replaces its row; a returned comment that no longer gives a row drops its cached one), oldest first.
+    Anything else (no or invalid cache, an older pull request reopened, a stale cache, a repo whose name cannot be read) is a full read from `floor`, as
+    before the cursor; a repo with no name reads and writes no cache. The cursor is the newest updated_at read, never a wall clock. One write of the file
+    follows; a failed write never fails the read."""
+    key = repo_key(h)
+    now = getattr(h, "now", time.time)()  # a test fake has no clock
+    state, readable = read_state() if key else ({}, False)
     cache = state.get("reviewed_cursor")
     cache = cache.get(key) if isinstance(cache, dict) else None
     floor_s, seen = iso_secs(floor), []
     warm = valid_reviewed_cache(cache) and floor_s is not None and iso_secs(cache["floor"]) <= floor_s and 0 <= now - cache["full_at"] <= REVIEWED_FULL_REREAD_SECS
     if warm:
         merged = {r["id"]: r for r in cache["rows"]}
-        merged.update({r["id"]: r for r in comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)})
+        fresh = comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)
+        for cid, _updated in seen:
+            merged.pop(cid, None)  # the comment came back: its new row replaces this one, or it is no row now
+        merged.update({r["id"]: r for r in fresh})
         rows = sorted(merged.values(), key=lambda r: (r["created"] or "", r["id"]))
         entry, newest = {"floor": cache["floor"], "full_at": cache["full_at"], "rows": rows}, [iso_secs(cache["cursor"])]
     else:
         rows = comment_rows(h, floor, seen)
         entry, newest = {"floor": floor, "full_at": now, "rows": rows}, [floor_s]
-    newest += [iso_secs(u) for u in seen]
+    newest += [iso_secs(u) for _cid, u in seen]
     top = max((t for t in newest if t is not None), default=None)
     if top is not None and readable:
         entry["cursor"] = iso_stamp(top)
@@ -5500,7 +5520,7 @@ def read_merge_role():
         return None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+    except (OSError, ValueError, RecursionError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors; RecursionError is a file nested too deep
         return None
     if not isinstance(data, dict) or data.get("session") != sid:
         return None
