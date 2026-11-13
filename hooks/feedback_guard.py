@@ -16,15 +16,18 @@ a turn end in these cases:
   - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page, repo
     (KIND_WORDS: the home each kind without a file home takes);
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
-    (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
+    (HOME_KINDS, paths from lint/layout.py, judged in the repo the inbox sidecar binds and in the repo of
+    the hook's cwd: a home good in either passes, Homes._repos) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
     never count for these two kinds (rule building-memory-is-short-term). A home outside them is
     reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). A task item,
     open or closed, may instead name `step:<slug>`: it passes when roadmap/data/steps/<slug>.json is a blob
     on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. Cost:
     the rev-parse, for-each-ref and cat-file reads a closed note runs, inside the Stop process, once per
-    task item homed to a step. When the cwd is in no git repo, or the layout cannot be read, these homes
-    pass unchecked and a systemMessage says so;
+    task item homed to a step. A repo whose layout or git cannot be read (LayoutError, _GitFailure) is
+    skipped, and a readable repo still decides; the block reason then names the skipped repo
+    (Homes.unread_note). Only when no repo reads (neither folder is in a git repo, or every repo is
+    unreadable) do these homes pass unchecked, and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
@@ -230,11 +233,13 @@ EXPORT_REASON = (
     " \"Keep a copy in the repo\" says, commit and push the record branch, then stop. An export run whose"
     " verdict is `same` also clears this.")
 EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
-ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
-STANDING_HOMES = "a [ruling] item whose home is a tracked file, or a [page] item `page:<n>` with its send"
-GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
-               " [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a one-shot"
-               " grant" % (NOT_A_GRANT, ONCE_HOME))
+ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot grant: `once:<act>`
+# The homes of a grant, in parts: STANDING_HOMES (a standing word bars a once: home) and GRANT_HOMES share the first two.
+_HOME_RULING = "a [ruling] item whose home is a tracked file"
+_HOME_PAGE = "a [page] item `page:<n>` with its send"
+STANDING_HOMES = "%s, or %s" % (_HOME_RULING, _HOME_PAGE)
+GRANT_HOMES = ("%s, %s, a [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a"
+               " one-shot grant" % (_HOME_RULING, _HOME_PAGE, NOT_A_GRANT, ONCE_HOME))
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -380,7 +385,9 @@ def waiting_copy(layout, root):
 
 
 def session_repo(session_id):
-    """The folder the session's inbox sidecar binds (local_time.write_repo_marker), or None."""
+    """The folder the session's inbox sidecar binds (local_time.bind_repo), or None: no sidecar, or an unreadable
+    one. The one home of the sidecar read, for the Stop's own session and the other sessions' inboxes
+    (other_inbox_candidates)."""
     try:
         marker = local_time.repo_marker_path(session_id)
         with open(marker, encoding="utf-8") as f:
@@ -435,27 +442,35 @@ class Homes:
         return [(root, os.path.normpath(found).replace(os.sep, "/")) for root in roots], None
 
     def _held(self, path, closed=False):
-        """(error, held) for a repo-relative or absolute path: `held` is true when some branch's tree holds
-        it in one of the repos, or when the check stood down. `error` is set when an absolute path is in no
-        repo. The one read behind a task's or a closed note's `step:<slug>` home and a closed note's
-        file home."""
+        """(error, held, skipped) for a repo-relative or absolute path: `held` is true when some branch's tree
+        holds it in one of the repos, or when the check stood down. `error` is set when an absolute path is in
+        no repo. `skipped` lists the repo tops git could not read, for the reason text (unread_note). The one
+        read behind a task's or a closed note's `step:<slug>` home and a closed note's file home. Raises
+        ruling_home._GitFailure when no repo could be read."""
         places, err = self._locate(path, closed)
         if err:
-            return err, False
-        held, read, failed = not places, not places, None
+            return err, False, []
+        held, read, failed, skipped = not places, not places, None, []
         for root, rel in places:  # a repo git cannot read is skipped; a readable one still decides
             try:
                 held = ruling_home.value_resolves(rel, root) or held
                 read = True
             except ruling_home._GitFailure as e:
                 failed = failed or e
+                skipped.append(root)
         if not read:  # no repo could be read: the caller stands the check down
             raise failed
-        return None, held
+        return None, held, skipped
+
+    @staticmethod
+    def unread_note(skipped):
+        """The sentence a block reason ends with when a repo was skipped as unreadable, so the reader sees the
+        verdict rests on the other repos. Empty when none was skipped."""
+        return "" if not skipped else ". Skipped as unreadable (git or its layout could not be read): %s" % ", ".join(skipped)
 
     def problem(self, item_id, kind, rest, grant=False):
         """None when the home is good in some repo or the check stood down, else the reason text (the first
-        repo's). `grant` is true in a block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES
+        readable repo's, then the repos skipped as unreadable). `grant` is true in a block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES
         file, if the repo tracks it."""
         try:
             import layout  # lint/layout.py, the one home of where each kind lives
@@ -464,23 +479,25 @@ class Homes:
         try:
             step = step_home(rest) if kind == "task" else None
             if step:  # steps hold tasks, so only a task may name one; the step file is the proof
-                err, held = self._held(STEP_PATH % step.group(1))
+                err, held, skipped = self._held(STEP_PATH % step.group(1))
                 if held:
                     return None
                 return "%s [task] %s" % (item_id, err) if err else (
-                    "%s [task]: `step:%s` is no task home, as no branch holds its step file" % (item_id, step.group(1)))
+                    "%s [task]: `step:%s` is no task home, as no branch holds its step file%s"
+                    % (item_id, step.group(1), self.unread_note(skipped)))
             places, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
-            reasons, failed = [], None
+            reasons, failed, skipped = [], None, []
             for root, rel in places:  # a repo whose read fails is skipped; a readable one still decides
                 try:
                     reasons.append(self._judge(layout, item_id, kind, root, rel, grant))
                 except (layout.LayoutError, ruling_home._GitFailure) as e:
                     failed = failed or e
+                    skipped.append(root)
             if not reasons:  # no repo could be read (or none resolved): stand down
                 return self._stand_down(failed) if failed else None
-            return None if None in reasons else reasons[0]
+            return None if None in reasons else reasons[0] + self.unread_note(skipped)
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
 
@@ -511,19 +528,19 @@ class Homes:
             return self._closed_reason(item_id)
         step = step_home(rest)
         try:
-            err, held = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True)
+            err, held, skipped = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True)
             if err:
                 return "%s [note] %s" % (item_id, err)
             if held:
                 return None
         except ruling_home._GitFailure as e:
             return self._stand_down(e, True)
-        return self._closed_reason(item_id)
+        return self._closed_reason(item_id, self.unread_note(skipped))
 
     @staticmethod
-    def _closed_reason(item_id):
+    def _closed_reason(item_id, unread=""):
         return ("%s [note] is closed with no home: a closed note needs a tracked file, `step:<slug>` naming a"
-                " step file that some branch holds, `page:<n>`, `not-a-grant` or `not-page-form`" % item_id)
+                " step file that some branch holds, `page:<n>`, `not-a-grant` or `not-page-form`%s" % (item_id, unread))
 
     def step_names_template(self, root, branch, slug):
         """True when the step file `slug` at origin/<branch> holds TEMPLATE_DIR, False when it holds none. None when
@@ -892,7 +909,7 @@ def is_grant(text):
 
 
 def once_home(it, text):
-    """True when the item is an open `[note] -> once:<act>` for a one-shot approval. A message with a standing
+    """True when the item is an open `[note] -> once:<act>` for a one-shot grant. A message with a standing
     word is a standing grant, so no once: home covers it."""
     word = home_word(it[1])
     return (it[1].startswith("[note]") and not it[3] and word.startswith(ONCE_HOME)
@@ -1151,12 +1168,8 @@ def other_inbox_candidates(inbox, root):
         if not name.endswith(INBOX_SUFFIX) or name == own:
             continue
         sid, path = name[:-len(INBOX_SUFFIX)], os.path.join(folder, name)
-        marker = local_time.repo_marker_path(sid)
+        bound = session_repo(sid)
         try:
-            if marker is None:
-                continue
-            with open(marker, encoding="utf-8") as f:
-                bound = f.read().strip()
             if bound and under(bound, root):
                 found.append((os.stat(path).st_mtime, sid, path))
         except (OSError, ValueError):

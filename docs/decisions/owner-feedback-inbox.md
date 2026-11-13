@@ -57,7 +57,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
   all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of four
   homes: a `ruling` item whose home passes, an open `page` item with its send, a `note` item `-> not-a-grant`, or an
-  open `note` item `-> once:<act>` for a one-shot approval. A once: home is barred when the message holds a standing
+  open `note` item `-> once:<act>` for a one-shot grant. A once: home is barred when the message holds a standing
   word (the guard's STANDING list, such as "whenever", "going forward", "each time", "until withdrawn", "any open").
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
@@ -74,9 +74,14 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   standing -> handoff; page -> page:<n>; repo -> repo:<owner>/<name>`, with the closed-note and grant homes in the note's text). Items added in any later turn count, so the session needs no new heading. A home outside
   its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
   nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
-  judges repeats (the Repeats bullet). When the session's
-  folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
-  in one line.
+  judges repeats (the Repeats bullet). A relative home is judged in the repo the inbox sidecar binds
+  and in the Stop's cwd repo, and passes if either holds it. File homes (`Homes.problem`, `_judge`) skip
+  a repo whose git or layout read fails, and a block reason names it. Step and closed-note homes
+  (`Homes._held`) skip a repo whose git read fails only, and a block reason names it. A repo whose
+  `rev-parse` exits non-zero is dropped with no skip and no name (`Homes._root`). A `rev-parse` that cannot
+  run stands the whole check down, passing its homes unchecked with a systemMessage line. Homes also pass
+  unchecked when no repo reads: neither folder is in a git repo (a dropped one counts as none), or every
+  repo is unreadable.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows a send after the owner's message. The send is a send_message or
@@ -132,7 +137,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
   glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New
   items are well-formed, open items whose ids the turn state's `judged` list lacks; a state file
-  from before the key counts the items already there as judged. One call per Stop covers all of
+  from before the key counts the items already there as judged. A `[repo]` item is skipped
+  (hooks/feedback_guard.py `new_items`): it is feedback for another repo, so it is never compared with
+  this repo's roadmap and backlog. One call per Stop covers all of
   them, through `decision_watch.invoke_model` (`claude-haiku-5-5`, 45 s, no effort; the Stop hook's
   timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
