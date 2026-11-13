@@ -2690,5 +2690,73 @@ def CI87_full_size_flags_only_merge_closes_the_wait():
     return silent_with_control(items + [shell('gh pr merge --squash --body "x"')], items)
 
 
+@case
+def CI88_close_with_an_unquoted_comment_value_closes_the_wait():
+    """CI88. gh pr close -c done and gh pr close --comment superseded, with the comment unquoted, are bare: the value
+    is the comment, not the PR, so each closes the wait on N: passes. Control: the wait alone blocks"""
+    wait = [ready()]
+    return ["gh pr close %s: %s" % (flags, p)
+            for flags in ("-c done", "--comment superseded")
+            for p in silent_with_control(wait + [shell("gh pr close " + flags)], wait)]
+
+
+@case
+def CI89_merge_with_disable_auto_closes_nothing():
+    """CI89. gh pr merge N --disable-auto, and a bare gh pr merge --disable-auto, merge nothing, so each leaves the
+    wait on N open: it blocks and names PR N. Control: gh pr merge N --squash closes the wait"""
+    wait = [ready()]
+    return (["gh pr merge N --disable-auto: " + p
+             for p in expect_block(wait + [shell("gh pr merge %s --disable-auto" % CI_PR)])]
+            + ["bare gh pr merge --disable-auto: " + p
+               for p in expect_block(wait + [shell("gh pr merge --disable-auto")])]
+            + ["control, gh pr merge N --squash: " + p
+               for p in expect_silent(wait + [shell("gh pr merge %s --squash" % CI_PR)])])
+
+
+@case
+def CI90_unquoted_subject_and_body_values_are_skipped_and_the_merge_closes_the_wait():
+    """CI90. gh pr merge --subject Fix and gh pr merge --body x, with the values unquoted, are bare: each value is a
+    flag's value, not the PR, so each closes the wait on N: passes. Control: the wait alone blocks"""
+    wait = [ready()]
+    return ["gh pr merge %s: %s" % (flags, p)
+            for flags in ("--subject Fix", "--body x")
+            for p in silent_with_control(wait + [shell("gh pr merge " + flags)], wait)]
+
+
+@case
+def CI91_short_value_flags_and_author_email_skip_their_value_and_the_merge_closes_the_wait():
+    """CI91. gh pr merge -b x, -t Fix, -A dev@example.com and --author-email dev@example.com, with no PR word, are
+    bare: each value is a flag's value, so each closes the wait on N: passes. Control: the wait alone blocks"""
+    wait = [ready()]
+    return ["gh pr merge %s: %s" % (flags, p)
+            for flags in ("-b x", "-t Fix", "-A dev@example.com", "--author-email dev@example.com")
+            for p in silent_with_control(wait + [shell("gh pr merge " + flags)], wait)]
+
+
+@case
+def CI92_session_value_is_not_read_as_the_pr():
+    """CI92. merge --session 12 N (the merge tool) and gh pr merge --session 12 N read N as the PR, not 12: on the
+    wait on N each closes it, passes. On the wait on PR 1111 neither closes it: it blocks and names 1111, not N"""
+    wait, other = [ready()], [ready(number=CI_OTHER_PR)]
+    problems = []
+    for call_text in ("merge --session 12 %s" % CI_PR, "gh pr merge --session 12 %s" % CI_PR):
+        problems += ["%s, wait on N: %s" % (call_text, p)
+                     for p in silent_with_control(wait + [shell(call_text)], wait)]
+        problems += ["%s, wait on PR %s: %s" % (call_text, CI_OTHER_PR, p)
+                     for p in expect_block(other + [shell(call_text)], pr=CI_OTHER_PR, not_named=[CI_PR])]
+    return problems
+
+
+@case
+def CI93_match_head_commit_value_is_not_read_as_the_pr():
+    """CI93. gh pr merge --match-head-commit 1234567 N reads N as the PR, not the SHA prefix: on the wait on N it
+    closes it, passes. On the wait on PR 1111 it leaves it open: blocks and names 1111, not N"""
+    wait, other = [ready()], [ready(number=CI_OTHER_PR)]
+    call_text = "gh pr merge --match-head-commit 1234567 %s" % CI_PR
+    return (["wait on N: " + p for p in silent_with_control(wait + [shell(call_text)], wait)]
+            + ["wait on PR %s: %s" % (CI_OTHER_PR, p)
+               for p in expect_block(other + [shell(call_text)], pr=CI_OTHER_PR, not_named=[CI_PR])])
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
