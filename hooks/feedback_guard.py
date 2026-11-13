@@ -1107,27 +1107,29 @@ def line_candidates(path, prefix):
 def backlog_candidates(root):
     """[(ref, label, text)] from the layout's backlog files in the working tree: one per debt file
     (its title and opening text), one per non-blank line of the todo and notes files. A missing or
-    unreadable file is skipped."""
+    unreadable file is skipped. Under a bad "rolled-out" mark each kind reads at either place
+    (layout.folders_any_mark); a ref already taken by the first place is not added again, so each ref names one item."""
     import layout  # lint/layout.py, the one home of where each kind lives
-    out, known = [], layout.kinds(root)
-    where = {key: os.path.join(root, *layout.path(root, key).split("/")) for key in HOME_KINDS["task"]
-             if key in known}
+    out = []
+    where = {key: [os.path.join(root, *f.split("/")) for f in layout.folders_any_mark(root, key)]
+             for key in HOME_KINDS["task"]}
+    notes = set(where["debt-notes"])
     for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note")):
-        try:
-            if key not in where:
+        for place in where[key]:
+            try:
+                if os.path.isdir(place):
+                    for name in sorted(os.listdir(place)):
+                        path = os.path.join(place, name)
+                        if name.endswith(".md") and path not in notes and os.path.isfile(path):
+                            with open(path, encoding="utf-8", errors="replace") as f:
+                                text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
+                            out.append(("debt:" + name[:-len(".md")], squash(text, 60), text))
+                elif os.path.isfile(place):
+                    out += line_candidates(place, prefix)
+            except OSError:
                 continue
-            if os.path.isdir(where[key]):
-                for name in sorted(os.listdir(where[key])):
-                    path = os.path.join(where[key], name)
-                    if name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path):
-                        with open(path, encoding="utf-8", errors="replace") as f:
-                            text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
-                        out.append(("debt:" + name[:-len(".md")], squash(text, 60), text))
-            elif os.path.isfile(where[key]):
-                out += line_candidates(where[key], prefix)
-        except OSError:
-            continue
-    return out
+    seen = set()
+    return [c for c in out if not (c[0] in seen or seen.add(c[0]))]
 
 
 def inbox_candidates(blocks, sid, skip=()):

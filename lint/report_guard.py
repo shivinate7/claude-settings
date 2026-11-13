@@ -1250,7 +1250,10 @@ def question_problem(records, turn, text, hook):
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
-        writer = layout.page_writer_key(root)
+        try:
+            writer = layout.page_writer_key(root)
+        except layout.LayoutError as err:
+            return LAYOUT_UNREADABLE % err, ""
         if writer:
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
@@ -1381,7 +1384,8 @@ def _stamp_time(stamp, human_ts):
 def rewrite_stamp_problem(text, human_ts, cwd):
     """The refusal text when a sentence says a decision was rewritten for a ruling that is later than the
     record's last commit on every local branch, every remote branch and HEAD, else ''. A cited id is a word next
-    to the rewrite word that names a file in the decisions folder of the checkout. Fails open on any unknown: no
+    to the rewrite word that names a file in the decisions folder of the checkout (under a bad "rolled-out" mark, in
+    either decisions folder). Fails open on any unknown: no
     record file, no stamp next to "ruling", a failed read. Git runs once per distinct cited id in the reply, and
     not at all for an id with no record file. A shallow clone shows a later last commit than the real one, so
     it can miss a stale rewrite and never refuses a fresh one."""
@@ -1394,11 +1398,16 @@ def rewrite_stamp_problem(text, human_ts, cwd):
     root = repo_root(cwd)
     if not root:
         return ""
-    folder = layout.path(root, "decisions")
+    # A bad "rolled-out" mark leaves only the rolled-out answer unknown, so the check reads the decisions folder at
+    # either place (layout.folders_any_mark) and takes the first that holds the record, never standing down.
+    folders = layout.folders_any_mark(root, "decisions")
+
+    def record(d):
+        return next((f for f in folders if os.path.isfile(os.path.join(root, *f.split("/"), d + ".md"))), None)
+
     reasons, epochs = [], {}
     for sentence in sentences:
-        ids = [d for d in _rewritten_ids(sentence)
-               if os.path.isfile(os.path.join(root, *folder.split("/"), d + ".md"))]
+        ids = [d for d in _rewritten_ids(sentence) if record(d)]
         stamp = _ruling_stamp(sentence) if ids else None
         if stamp is None:
             continue
@@ -1408,7 +1417,7 @@ def rewrite_stamp_problem(text, human_ts, cwd):
             if d not in epochs:
                 if len(epochs) >= REWRITE_CAP:
                     continue
-                epochs[d] = git_reads.last_commit_epoch(root, "%s/%s.md" % (folder, d))
+                epochs[d] = git_reads.last_commit_epoch(root, "%s/%s.md" % (record(d), d))
             d_epoch = epochs[d]
             if d_epoch is None or d_epoch >= ruling.timestamp():
                 continue
