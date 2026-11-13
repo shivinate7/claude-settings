@@ -251,8 +251,8 @@ if [ -z "$udid" ]; then
     have_lease=
   else
     udid=$granted
-    # PosterBoard keeps a home-screen snapshot per fold or launch and never frees them (41 GB in 10 days on a Duo, iOS 27.1;
-    # Degen report, 2026-11-12). The store is rebuilt on boot, so it goes before this run boots the device.
+    # PosterBoard keeps a home-screen snapshot per fold or launch and never frees them (41 GB in 10 days seen on a Duo,
+    # iOS 27.1). The store is rebuilt on boot, so it goes before this run boots the device.
     # rm -rf removes a symlink at the LAST path component (the store itself) and does not follow it; a symlinked parent
     # folder is followed.
     rm -rf "${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$udid/data/Library/Application Support/PRBPosterExtensionDataStore"
