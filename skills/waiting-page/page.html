@@ -1243,9 +1243,12 @@ function sorted() {
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
-  const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
+  // An item with no valid date counts as oldest, so it comes last among the new items (it is never seen, so seen items still follow it); a group sits at its newest member, as the Answered section does.
+  const born = (x) => { const t = ts(x.added); return t === Infinity ? -Infinity : t; };
+  const age = (it) => Math.max(...mates(it).map(born));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
-  const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
+  // Newest first inside a tier (owner ruling page-newest-first, 2026-11-12 21:37 CST); rank and tiers still lead.
+  const byAge = (a, b) => age(b) - age(a) || born(b) - born(a) || b.n - a.n;
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };

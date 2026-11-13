@@ -67,7 +67,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
-    ranked items, oldest first. A group sits together at its best member's `rank`. Inside a tier,
+    ranked items, newest first. A group sits together at its best member's `rank`. Inside a tier,
     new items come first, then seen ones, each part in that order. Seen: the item is open, has no
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
