@@ -1055,11 +1055,12 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False, literal_cd=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
+    when that folder cannot be told. `literal_cd` follows a `cd` into a missing folder too
+    (`dir_before_segment`). `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
     `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
@@ -1096,9 +1097,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown, script = [], [], []
+        words, shown, script, blanked = [], [], [], set()
         for index, word in enumerate(raw):
             if index in data:
+                blanked.add(len(words))   # a blanked word names no path: the predicate never reads it
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -1121,22 +1123,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        at = (dir_before_segment(segments, number, cwd, ends, literal_cd=literal_cd) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
-            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command,
+                                   literal_cd=literal_cd)
             if hit:
                 return hit
-        for word in words:
-            if word.startswith("-") or REDIRECT.fullmatch(word):
+        for position, word in enumerate(words):
+            if position in blanked or word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     for text in inner:
-        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
+        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position, literal_cd=literal_cd)
         if hit:
             return hit
     return ""
@@ -1175,8 +1178,9 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
-def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None, follow_cd=False, literal_cd=False) -> str:
     """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
+    With `follow_cd`, `predicate` gets the folder a leading `cd` moved to; `literal_cd` as in `_shell_write_hit`.
     A shell reads the command with its heredoc bodies dropped, except a body a shell runs
     (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
     a file written and then run by one, and the script of a `python -c` or `node -e` are read only at their
@@ -1184,7 +1188,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
     falls back to reading every body, which refuses more and never less."""
     try:
         hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
-                           script_data=True)
+                           follow_cd=follow_cd, script_data=True, literal_cd=literal_cd)
         texts = []
         resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
         for lang, body, quote in interpreter_bodies(resolved):
@@ -1195,10 +1199,10 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
             for kind, script, *_ in _inline_scripts(resolved):
                 texts += script_spots(script, kind)
         for text in texts:
-            hit = hit or _shell_write_hit(text, cwd, predicate, holds)
+            hit = hit or _shell_write_hit(text, cwd, predicate, holds, follow_cd, literal_cd=literal_cd)
         return hit
     except Exception:
-        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds, follow_cd, literal_cd=literal_cd)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
@@ -1820,21 +1824,22 @@ def interpreter_may_write(raw: str) -> bool:
         _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
-def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
+def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False, literal_cd: bool = False) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
     `node -e` script. With `script_files`, also each script file a python or node command runs by name
     (read from disk, and from each heredoc of the same command that writes it before the run). Only the
     builder-test check asks for that: it reads files, which no other caller pays for. A script that only
     reads a path, or names it in a string, hits nothing.
+    `literal_cd` follows a `cd` into a missing folder (`dir_before_segment`).
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
-        return _interpreter_write_hit(raw, cwd, predicate, script_files)
+        return _interpreter_write_hit(raw, cwd, predicate, script_files, literal_cd)
     except Exception:
         return ""
 
 
-def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
+def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False, literal_cd: bool = False) -> str:
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
@@ -1852,7 +1857,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = F
                     return hit
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
         for kind, script, number, segments, ends in _inline_scripts(raw):
-            at = dir_before_segment(segments, number, cwd, ends) or cwd
+            at = dir_before_segment(segments, number, cwd, ends, literal_cd=literal_cd) or cwd
             hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
             if hit:
                 return hit

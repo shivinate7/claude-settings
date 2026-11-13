@@ -154,7 +154,7 @@ oj("a task with a Why yours line and no form lines is not judged", "allow",
    tn_task(context=TN_CTX + "\n" + TN_WHY))
 oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
 oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
-oj("a set to another collection is allowed", "allow", oj_item(), collection="answers")
+oj("a set to another collection is allowed", "allow", oj_item(), collection="receipts")
 add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
 
@@ -212,7 +212,7 @@ oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is sh
 
 # A batch judges each write.
 oj_batch("with an item that has no form lines among the sets is denied", "deny",
-         [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
+         [oj_write({"note": "x"}, collection="receipts"), oj_write(oj_item())])
 oj_batch("whose second write has no form lines is denied", "deny",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
 oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
