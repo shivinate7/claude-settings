@@ -1,12 +1,12 @@
 {
  "title": "A check that each open PR is assigned to one session only",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 1044,
  "owner": "triage",
  "why": "Coordinator's 16:49 CST record via the retrospective session (reversible pick): #1166 and #2366 went to two sessions.",
- "note": "triage's merge-main builder worked both at 16:10-16:59 CST.",
- "updatedAt": "2026-11-10T17:04:00-06:00",
- "lane": "",
+ "note": "triage's merge-main builder worked both at 16:10-16:59 CST. Express lane started 12:43 CST Nov 13 (coordinator 12:44 CST): session_013NEJL27Zw8otLsDBqaNN61, with step release-check-vs-batch-head.",
+ "updatedAt": "2026-11-13T12:43:41-06:00",
+ "lane": "session_013NEJL27Zw8otLsDBqaNN61",
  "blockedBy": []
 }

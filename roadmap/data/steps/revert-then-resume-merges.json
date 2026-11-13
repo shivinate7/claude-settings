@@ -1,0 +1,14 @@
+{
+ "id": "revert-then-resume-merges",
+ "title": "Revert, then resume merges (express, from the unlanded ledger)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3es8X5NZo7QAAZD1M",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Express lane from the unlanded ledger; detail is in the ledger row.",
+ "source": "coordinator 12:44 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
+ "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL3es8X5NZo7QAAZD1M.",
+ "updatedAt": "2026-11-13T12:43:41-06:00"
+}

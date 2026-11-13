@@ -1,12 +1,12 @@
 {
  "title": "The coordinator's release check also runs merge-tree against the open batch head, not main only",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 1040,
  "owner": "triage",
  "why": "Coordinator 16:50 CST Nov 10: #2413 passed the release check at 16:21 CST, then conflicted with #2382 inside batch 74.",
- "note": "Owner of the code: the coordinator's release-check script (step release-check-script). The retrospective session sent the same step at 16:59 CST as release-check-vs-batch.",
- "updatedAt": "2026-11-10T17:04:00-06:00",
- "lane": "",
+ "note": "Owner of the code: the coordinator's release-check script (step release-check-script). The retrospective session sent the same step at 16:59 CST as release-check-vs-batch. Express lane started 12:43 CST Nov 13 (coordinator 12:44 CST): session_013NEJL27Zw8otLsDBqaNN61, with step one-owner-per-pr.",
+ "updatedAt": "2026-11-13T12:43:41-06:00",
+ "lane": "session_013NEJL27Zw8otLsDBqaNN61",
  "blockedBy": []
 }

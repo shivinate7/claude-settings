@@ -1,14 +1,14 @@
 {
   "id": "page-answered-not-closed",
   "title": "A check flags a waiting-page item that holds an owner answer but stays open",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
   "why": "On 13:28 CST Nov 11 the page showed 23 open items; 19 held owner answers from Nov 6-10 that triage never closed, so the owner could not tell what still needed him.",
-  "note": "Triage mistake, found when the owner asked 13:28 CST whether the page was stale. Source: answers collection fetch1312. The check reads items and answers at the page copy and lists each open item with an answer, for the page writer to close with the owner's words and a home. Meanwhile triage sweeps the 19 by hand. Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Parked as a note, not built (coordinator pick 08:24 CST Nov 12): its record cites no owner ruling or coordinator pick (lane fan-code-waiting-page).",
+  "note": "Triage mistake, found when the owner asked 13:28 CST whether the page was stale. Source: answers collection fetch1312. The check reads items and answers at the page copy and lists each open item with an answer, for the page writer to close with the owner's words and a home. Meanwhile triage sweeps the 19 by hand. Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Parked as a note, not built (coordinator pick 08:24 CST Nov 12): its record cites no owner ruling or coordinator pick (lane fan-code-waiting-page). Triage's own ledger row, started 12:43 CST Nov 13 (coordinator 12:44 CST): the 19 page items answered Nov 6 to 10 and never closed. Triage closes them on the page.",
   "source": "triage 2026-11-11 13:28 CST",
   "owner": "triage",
-  "updatedAt": "2026-11-12T10:13:00-06:00",
+  "updatedAt": "2026-11-13T12:43:41-06:00",
   "blockedBy": []
 }
