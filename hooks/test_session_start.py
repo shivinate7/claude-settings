@@ -820,6 +820,20 @@ class GitFixtureMixin:
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
+    def advance_origin_main(self, commits=1):
+        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
+        does not fetch them. Returns the new tip's sha. Needs self.origin_repo, set by the class's setUp."""
+        other = os.path.join(self.root, "other")
+        vcs(self.root, "clone", "-q", self.origin_repo, other)
+        self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
+        self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
+        vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
+        vcs(other, "commit", "-q", "-m", "fresh grants at origin")
+        for number in range(2, commits + 1):
+            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
+        vcs(other, "push", "-q", "origin", "HEAD:main")
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
     def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None):
         """The hook's lines, after a control: the hook ran and printed its checkout line."""
         lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout,
@@ -1127,20 +1141,6 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.commit("stale grants")
         vcs(self.primary, "push", "-q", "origin", "main")
 
-    def advance_origin_main(self, commits=1):
-        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
-        does not fetch them. Returns the new tip's sha."""
-        other = os.path.join(self.root, "other")
-        vcs(self.root, "clone", "-q", self.origin_repo, other)
-        self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
-        self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
-        vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
-        vcs(other, "commit", "-q", "-m", "fresh grants at origin")
-        for number in range(2, commits + 1):
-            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
-        vcs(other, "push", "-q", "origin", "HEAD:main")
-        return vcs(other, "rev-parse", "HEAD").stdout.strip()
-
     def checkout_lane(self):
         vcs(self.primary, "checkout", "-q", "-b", "lane-x")
 
@@ -1429,6 +1429,102 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertTrue(wired("SessionStart"), "scope: SessionStart runs no session_start hook")
         for event in ("UserPromptSubmit", "PreToolUse"):
             self.assertEqual(wired(event), [], "session_start is wired to %s" % event)
+
+
+# The pin-update note: where the hook says the pointer clone is behind origin/main or on another branch, it also names the
+# newest "session-start hook:" line of the install log, which the SessionStart pull writes when it skips.
+INSTALL_LOG = "claude-settings-install.log"
+PIN_NOTE = "claude-settings: last pin-update note: "
+BEHIND_LINE = re.compile(r"^claude-settings: .+ is \d+ commits behind origin/main; global rules and hooks are stale$")
+NOT_MAIN_LINE = re.compile(r"^claude-settings: .+ is on .+, not main; global rules and hooks are that branch$")
+NEWEST_HOOK = "2026-11-12T08:02:47-06:00 session-start hook: another pull holds the lock"
+HELPER_LINE = "2026-11-12T08:02:50-06:00 install_from_main.sh: start id=7f3a pid=4411"
+
+
+def older_hook_lines(count):
+    """`count` older session-start lines, one a minute, all before NEWEST_HOOK: the full-size log the reader reads to its end."""
+    return ["2026-10-01T%02d:%02d:00-05:00 session-start hook: older line %d" % (number // 60, number % 60, number)
+            for number in range(count)]
+
+
+class SessionStartPinNoteTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The config's CLAUDE.md names the primary checkout, so the hook reads it as the claude-settings clone. Each case
+    holds a pin alarm (behind origin/main, or on lane-x) and checks the note the log adds. A case with no alarm, or no
+    session-start line, prints no note. Each negative check follows a positive one in the same case, so it is red on
+    a hook that prints no note at all."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+        self.log = os.path.join(self.config, INSTALL_LOG)
+
+    def write_log(self, *lines):
+        self.put(self.log, "".join(line + "\n" for line in lines))
+
+    @staticmethod
+    def alarm_lines(lines):
+        return [line for line in lines if BEHIND_LINE.match(line) or NOT_MAIN_LINE.match(line)]
+
+    @staticmethod
+    def note_lines(lines):
+        return [line for line in lines if "last pin-update note" in line]
+
+    def test_a_pin_behind_main_prints_the_newest_session_start_line_as_its_note(self):
+        self.advance_origin_main()
+        self.write_log(*older_hook_lines(200), NEWEST_HOOK, HELPER_LINE)
+        lines = self.run_checked()
+        # Scope first: the behind line must print, or the note explains nothing.
+        self.assertEqual(len(self.alarm_lines(lines)), 1, "want one behind line, got %r" % lines)
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "the note is not the newest session-start line of the log: %r" % lines)
+
+    def test_a_pin_on_another_branch_prints_the_newest_session_start_line_as_its_note(self):
+        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        # Scope first: the not-main line must print and name lane-x.
+        self.assertEqual(len(self.alarm_lines(lines)), 1, "want one not-main line, got %r" % lines)
+        self.assertIn("on lane-x", self.alarm_lines(lines)[0], "the alarm does not name lane-x: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "the note is not the newest session-start line of the log: %r" % lines)
+
+    def test_no_alarm_prints_no_note_even_when_the_log_holds_a_session_start_line(self):
+        self.advance_origin_main()
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        # Control: with the alarm on, the note prints. A hook that prints no note at all fails here.
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "want the note while the pin is behind: %r" % lines)
+        # The alarm clears: local main fast-forwards to origin/main, so the pin is no longer behind.
+        vcs(self.primary, "merge", "-q", "--ff-only", "origin/main")
+        lines = self.run_checked()
+        self.assertEqual(self.alarm_lines(lines), [], "scope: an alarm still prints after main caught up: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [], "a note prints with no alarm: %r" % lines)
+
+    def test_an_alarm_with_no_session_start_line_in_the_log_prints_no_note(self):
+        self.advance_origin_main()
+        self.write_log(NEWEST_HOOK)
+        lines = self.run_checked()
+        # Control: the note prints while the log holds a session-start line.
+        self.assertEqual(self.note_lines(lines), [PIN_NOTE + NEWEST_HOOK],
+                         "want the note while the log holds a session-start line: %r" % lines)
+        # The log keeps its alarm but loses its session-start line: only the helper's own line is left.
+        self.write_log(HELPER_LINE)
+        lines = self.run_checked()
+        self.assertEqual(len(self.alarm_lines(lines)), 1, "scope: the behind line did not print: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [], "a note prints for a log with no session-start line: %r" % lines)
+        # No install log at all.
+        os.remove(self.log)
+        lines = self.run_checked()
+        self.assertEqual(len(self.alarm_lines(lines)), 1, "scope: the behind line did not print: %r" % lines)
+        self.assertEqual(self.note_lines(lines), [], "a note prints with no install log: %r" % lines)
 
 
 # The platform's Stop-hook script, trimmed to what the stop-push cases need. The anchor line and the two lines around it
