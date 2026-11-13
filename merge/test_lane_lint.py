@@ -1653,6 +1653,9 @@ CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    p
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
+BATCH_PINNED = "batch-lint-flags-pinned-sha"  # a batch whose checks job holds one code-check step pinned to UNFETCHABLE_PIN
+BATCH_REF = "batch-lint-flags-pinned-ref"  # the same step at a branch ref: the control, which keeps the local copy
+UNFETCHABLE_PIN = "1111111111111111111111111111111111111111"  # 40 hex, in no clone the copy of ci-job can fetch from
 BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds one lint step that runs only off a pull request
 PUSH_ONLY = "Push-only lint"
 PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
@@ -2261,7 +2264,7 @@ class BatchLintFlags(tm.Env):
         job = self.found if found is None else found
         tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(job))
         for name, ci_step in job:
-            if name != STE and script_of(ci_step).startswith("lint/") and script_of(ci_step) not in skip:
+            if name != STE and run_body(ci_step) and script_of(ci_step).startswith("lint/") and script_of(ci_step) not in skip:
                 tm.put(os.path.join(o, script_of(ci_step)), CALL_STUB % self.call_log(script_of(ci_step)))
         tm.sh(o, "git", "add", "-A")
         tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint CI steps and their stubs")
@@ -2277,6 +2280,15 @@ class BatchLintFlags(tm.Env):
                 missing_from_lint_tree(missing), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
+
+    def pinned_code_check(self, branch, ref):
+        """Pushes `branch`, whose checks job holds one code-check step at uses: ...code-check@`ref` (a sha or a branch name). Writes a
+        logging code_check.py beside the copy of ci-job, the first place a remote uses: looks for it, and gives that copy a git clone of
+        its own with no remote, so a sha it lacks cannot be fetched. -> the branch's head sha."""
+        tm.sh(os.path.join(self.t, "ci"), "git", "init", "-q")
+        tm.put(os.path.join(self.t, "ci", "actions", "code-check", "code_check.py"), CALL_STUB % self.call_log("code_check.py"))
+        text = "      - name: Code check\n        uses: shivinate7/claude-settings/actions/code-check@%s\n" % ref
+        return self.push_batch(branch, found=[("Code check", text)])
 
     def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
         head = self.push_batch(BATCH)
@@ -2313,6 +2325,46 @@ class BatchLintFlags(tm.Env):
                              "bin/ste-changed sets SCOPE to other than the PR-path scope of checks.yml")
             self.assertEqual(source.get("FAIL"), gh_text(gh_eval(with_["fail"], inputs)),
                              "bin/ste-changed sets FAIL to other than the PR-path fail of checks.yml")
+
+    def test_a_pinned_sha_under_lane_lint_is_unknown_refuses_and_never_runs_the_local_copy(self):
+        """A code-check pinned to a sha no clone holds reads unknown under --pinned, which the lane lint refuses (exit 1), and the local
+        copy never runs for it. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
+        self.pinned_code_check(BATCH_PINNED, UNFETCHABLE_PIN)
+        out = io.StringIO()
+        try:
+            self.lane_lint(BATCH_PINNED, out)
+        except merge.Liftable as e:
+            refusal = str(e)
+        else:
+            self.fail("the lint of an unfetchable pin passed; it must refuse as unknown: " + out.getvalue())
+        text = out.getvalue()
+        self.assertIn("is unknown, not a pass", refusal, "the lint of an unfetchable pin did not read as unknown: " + text)
+        self.assertIn("pin %s of code-check" % UNFETCHABLE_PIN[:7], refusal, "the refusal does not name the pin it could not read: " + text)
+        self.assertEqual(self.stub_calls("code_check.py"), [], "the local code_check.py ran for a sha no clone holds: " + text)
+        self.assertEqual(pass_lines(text), [], "a pin that could not be read printed a PASS line: " + text)
+
+    def test_a_pinned_sha_under_lane_lint_is_lifted_only_by_a_reason_and_logs_one_unknown_line(self):
+        """The unknown pin lifts under --lint-unknown-ok as any ci-job unknown does: exit 0, one logged line with the reason, no PASS line."""
+        self.pinned_code_check(BATCH_PINNED, UNFETCHABLE_PIN)
+        reason = "the pinned tree is not fetched on this box"
+        out = io.StringIO()
+        rc = self.lane_lint(BATCH_PINNED, out, unknown_ok=reason)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, "a reason did not lift the unknown pin, as it lifts any ci-job unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "a lifted unknown pin printed a PASS line: " + text)
+        logged = [line for line in text.splitlines() if reason in line]
+        self.assertEqual(len(logged), 1, "the reason is not logged on one line: " + text)
+        self.assertIn("unknown", logged[0].lower(), text)
+        self.assertEqual(self.stub_calls("code_check.py"), [], "the local code_check.py ran for a sha no clone holds: " + text)
+
+    def test_a_branch_ref_under_lane_lint_runs_the_local_copy_and_passes(self):  # the control: a non-sha ref is not pinned
+        self.pinned_code_check(BATCH_REF, "main")
+        out = io.StringIO()
+        rc = self.lane_lint(BATCH_REF, out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(self.stub_calls("code_check.py")), 1, "a branch ref did not run the local code_check.py once: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
     def test_a_missing_check_script_refuses_and_never_passes(self):
         red_run = dict(self.found)["Red-run trailer"]
