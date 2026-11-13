@@ -184,16 +184,9 @@ def is_marker_line(line):
     return any(line.startswith(form) for form in MARKER_FORMS)
 
 
-def fenced_pairs(lines):
-    """(line, inside a ``` fence) for each line; a fence line counts as inside."""
-    fenced, pairs = False, []
-    for line in lines:
-        if line.strip().startswith("```"):
-            fenced = not fenced
-            pairs.append((line, True))
-        else:
-            pairs.append((line, fenced))
-    return pairs
+def at_line_start(line, form):
+    """True when a line opens with the marker form after any blanks, in any case: the text a line-start row reads."""
+    return line.lstrip(" \t").lower().startswith(form.lower())
 
 
 def spawn_brief(block, marker=None):
@@ -626,17 +619,15 @@ class SpawnBriefHead(BriefCase):
         self.assertIsNotNone(block, "the output has no Agent spawn brief head block")
         return block
 
-    def test_block_lists_each_marker_form_inside_a_fence_and_none_at_a_line_start_outside_one(self):
+    def test_block_names_each_marker_form_inline_and_at_no_line_start(self):
         block = self.block()
-        self.assertTrue(any(line.strip().startswith("```") for line in block),
-                        "the block has no code fence to hold the marker listing")
-        pairs = fenced_pairs(block)
+        text = "\n".join(block)
         for form in MARKER_FORMS:
-            self.assertTrue(any(line.startswith(form) and fenced for line, fenced in pairs),
-                            "the block does not list the marker form %r inside a code fence" % form)
-            self.assertFalse(any(line.startswith(form) and not fenced for line, fenced in pairs),
-                             "the block lists the marker form %r at a line start outside a fence" % form)
-        self.assertTrue(any("first line" in line for line, _fenced in pairs),
+            self.assertIn(form, text, "the block does not name the marker form %r" % form)
+            self.assertFalse(any(at_line_start(line, form) for line in block),
+                             "the block has the marker form %r at a line start, where a pasted block lifts a round row"
+                             % form)
+        self.assertTrue(any("first line" in line for line in block),
                         "the block does not say the marker goes on the spawn brief's first line")
 
     def test_spawn_brief_from_the_block_passes_the_real_guard_with_each_marker(self):
@@ -657,6 +648,13 @@ class SpawnBriefHead(BriefCase):
         self.assertTrue(reason.startswith("agent-model-cap:"),
                         "the marker listing in the pasted block lifted a builder spawn with no first-line marker: %r"
                         % reason[:200])
+
+    def test_block_pasted_whole_into_a_haiku_reviewer_spawn_is_allowed(self):
+        pasted = "\n".join(self.block())  # the block verbatim: its marker forms sit inline, none opens a line
+        reason = guard_reason(self.config, pasted, model="haiku", role="reviewer")
+        self.assertEqual(reason, "",
+                         "the real guard refused a haiku reviewer for the pasted block, its marker forms inline: %r"
+                         % reason[:200])
 
 
 class DoneCheckFields(BriefCase):
