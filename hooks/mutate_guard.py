@@ -4081,6 +4081,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
