@@ -12,7 +12,7 @@ lint/layout.json, key "tending" (read by layout.tending()), holds one entry per 
   runs-from   a subset of POINTS: the call points that run the store
   state       live, or declared (named, but no call point runs it yet)
 
-tend(entry, text, root, known=None) gives one row per open item line, in order: (line index, id, verdict), the verdict "true",
+tend(entry, text, root, reads=None, known=None) gives one row per open item line, in order: (line index, id, verdict), the verdict "true",
 "stale" or "unknown". A repeated id gives one row per line and never merges. A claim that cannot be read is
 "unknown", never "true" (rule verification-report-unknown-reads). A line that holds no claim the test reads is
 "unknown" too. An item already marked [closed] gets no verdict. A UTF-8 byte-order mark before a line is not part of
@@ -35,7 +35,7 @@ tend() and close(). Asked for by --store at a point with no text, it prints `unk
 open-until-home-on-main reads a feedback-log item (`- <id> [<kind>] -> <home>`, hooks/feedback_guard.item): it is
 "true" (still needs work) until a ruling or task whose home is a file is held on main, then "stale". A step home,
 and any other kind, stay "true". The caller supplies the proof as `known`, {(line index, kind, home path): held on
-main}, from the home check it already ran on that line (feedback_guard.Homes), so the test starts no process.
+main}, from the home check it already ran on that line (feedback_guard.Homes), so the test starts no process. When the caller also passes `reads`, `known` is not used.
 A line missing from `known` is "unknown". Without `known` the test is "unknown" for every ruling and task: the runner reads no external store.
 
 Reuse: the home test resolves a home as hooks/ruling_home.py does (its whole-value read, `_unwrap`, the refusal of an
