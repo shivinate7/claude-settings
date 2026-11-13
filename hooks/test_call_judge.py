@@ -313,7 +313,7 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, own=None, cloud=False):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -326,6 +326,13 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
     env.update({"CLAUDE_CONFIG_DIR": cfg, "PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base,
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
+    # The own id (the env form, cse_<x>) and the cloud flag are set or cleared here, so no run depends on the runner's env.
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    if own:
+        env["CLAUDE_CODE_REMOTE_SESSION_ID"] = own
+    if cloud:
+        env["CLAUDE_CODE_REMOTE"] = "true"
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
@@ -368,11 +375,13 @@ def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=No
                            "options": options or good_options()}]}
 
 
-def question_input(session=SID_A, agent=None, box=None, cwd=PAGE_REPO):
+def question_input(session=SID_A, agent=None, box=None, cwd=PAGE_REPO, transcript=None):
     payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box(),
                "cwd": cwd}
     if agent:
         payload["agent_id"] = agent
+    if transcript is not None:
+        payload["transcript_path"] = transcript
     return json.dumps(payload)
 
 
@@ -1716,6 +1725,123 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a lane's question box (R13 point 1, lane-no-popup)
+#
+# A session with a parent is a lane, and a lane never opens the question box. The refusal is in code, before any model
+# call, and routes the question to the parent. The session reads its own record from its transcript through
+# hooks/own_session.py, and names its own id by the env form (cse_<x>, record session_<x>). The record builder is
+# written here, not imported: the get_session fixtures live in tests/guard/s13406-merge.py, which only the guard runner
+# loads, so they cannot be imported. A lane case differs from its control in the parent only.
+OWN_ENV, OWN_RECORD = "cse_LANE0001", "session_LANE0001"
+PARENT_ID = "session_PARENT01"
+LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+LANE_ROUTE = re.compile(r"keep working|end (your|the) turn")
+
+
+def own_transcript(name, parent, tags=(), session=OWN_RECORD, filler=0):
+    """A transcript whose one get_session result holds the record of `session` with `tags` and `parent` (None: no
+    parent). `filler` adds that many plain lines after it, for the full-size state. The shape is the one
+    hooks/own_session.py reads: a tool_use line, then its tool_result line."""
+    record = {"ccr": {"id": session, "title": "a session", "tags": list(tags), "parent_session_id": parent}}
+    lines = [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "g1", "name": "mcp__claude-code-remote__get_session", "input": {}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "g1", "content": [{"type": "text", "text": json.dumps(record)}]}]}},
+    ] + [{"type": "user", "message": {"role": "user", "content": "filler %d" % i}} for i in range(filler)]
+    path = os.path.join(ROOT, name + ".jsonl")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(json.dumps(line) for line in lines) + "\n")
+    return path
+
+
+def own_parent(path):
+    """The parent own_session reads for OWN_RECORD in the transcript: the scope the lane cases stand on (P7)."""
+    import own_session
+    return own_session.own_session_read(path, OWN_RECORD)[2]
+
+
+def case_lane_box_is_refused():
+    # ANSWER is ALLOW, so a model that would pass the box cannot be what denies it.
+    path = own_transcript("lane", PARENT_ID, LANE_TAGS)
+    check("lane box: scope, the own record names the parent", own_parent(path) == PARENT_ID, repr(own_parent(path)))
+    r = run_hook(question_input(transcript=path), answer=ALLOW, own=OWN_ENV)
+    reason = r.reason()
+    check("lane box: a lane's box is denied", r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("lane box: the refusal routes the question with send_message to @parent",
+          "send_message" in reason and "@parent" in reason, reason[-200:])
+    check("lane box: the refusal says to keep working or end the turn", LANE_ROUTE.search(reason) is not None, reason[-200:])
+    check("lane box: the refusal names no box tool", bool(reason) and "AskUserQuestion" not in reason, reason[-200:])
+    check("lane box: a lane's box makes no model call", len(r.calls) == 0, detail(r))
+    check("lane box: one deny line is logged", r.log.count("\tdeny\t") == 1, detail(r))
+
+
+def case_lane_box_without_a_lane_tag_is_refused():
+    # R13 point 1 names any session with a parent. A parent with no lane tag is refused too.
+    path = own_transcript("parent-only", PARENT_ID, [])
+    check("parent-only box: scope, the own record names the parent", own_parent(path) == PARENT_ID, repr(own_parent(path)))
+    r = run_hook(question_input(transcript=path), answer=ALLOW, own=OWN_ENV)
+    check("parent-only box: denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("parent-only box: no model call", len(r.calls) == 0, detail(r))
+
+
+def case_lane_box_refused_in_cloud():
+    # The lane check does not use the cloud gate of the load brake (guard_core.is_cloud). A lane in a cloud session is a lane.
+    path = own_transcript("lane-cloud", PARENT_ID, LANE_TAGS)
+    check("cloud lane box: scope, the own record names the parent", own_parent(path) == PARENT_ID, repr(own_parent(path)))
+    r = run_hook(question_input(transcript=path), answer=ALLOW, own=OWN_ENV, cloud=True)
+    check("cloud lane box: denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("cloud lane box: no model call", len(r.calls) == 0, detail(r))
+
+
+def case_lane_box_refused_in_a_full_size_transcript():
+    path = own_transcript("lane-full", PARENT_ID, LANE_TAGS, filler=3000)
+    check("full-size lane box: scope, the own record names the parent", own_parent(path) == PARENT_ID, repr(own_parent(path)))
+    r = run_hook(question_input(transcript=path), answer=ALLOW, own=OWN_ENV)
+    check("full-size lane box: denied with no model call", (r.deny() or {}).get("permissionDecision") == "deny"
+          and len(r.calls) == 0, detail(r))
+
+
+def case_box_stays_open_outside_a_lane():
+    # Green controls, passing on main. Each is judged by the model once and not denied.
+    # (label, transcript, own env id, the parent scope the reader must read for it)
+    cases = (
+        ("a session with no parent", own_transcript("plain", None, ["cs-repo:o/r"]), OWN_ENV, None),
+        ("a parent on another session's record only", own_transcript("foreign-parent", PARENT_ID, LANE_TAGS,
+                                                                     session="session_OTHER001"), OWN_ENV, None),
+        ("no session id in the env", own_transcript("noenv", PARENT_ID, LANE_TAGS), None, PARENT_ID),
+    )
+    for label, path, own, scope in cases:
+        check("box, %s: scope, the reader reads the parent the case names" % label, own_parent(path) == scope,
+              repr(own_parent(path)))
+        r = run_hook(question_input(transcript=path), answer=ALLOW, own=own)
+        check("box, %s: not denied, and the model judges it once" % label,
+              r.code == 0 and r.out == "" and len(r.calls) == 1, detail(r))
+
+
+def case_lane_box_fails_open_on_an_unread_record():
+    # An unread record or an error counts as no lane (lane_session_hit's rule): the box goes to the model as usual, and
+    # the hook does not crash. Green on main.
+    folder = os.path.join(ROOT, "transcript-folder")
+    os.makedirs(folder, exist_ok=True)
+    garbage, empty = os.path.join(ROOT, "garbage.jsonl"), os.path.join(ROOT, "empty.jsonl")
+    with open(garbage, "w", encoding="utf-8") as handle:
+        handle.write("not json\n{\n")
+    with open(empty, "w", encoding="utf-8") as handle:
+        handle.write("")
+    cases = (
+        ("a transcript that names no file", os.path.join(ROOT, "missing.jsonl")),
+        ("a transcript that is a folder", folder),
+        ("a transcript that is not JSON", garbage),
+        ("an empty transcript", empty),
+        ("no transcript_path in the payload", None),
+    )
+    for label, path in cases:
+        r = run_hook(question_input(transcript=path), answer=ALLOW, own=OWN_ENV)
+        check("box, %s: no crash, not denied, and the model judges it once" % label,
+              r.code == 0 and r.out == "" and len(r.calls) == 1 and "Traceback" not in r.err, detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1741,7 +1867,10 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_lane_box_is_refused, case_lane_box_without_a_lane_tag_is_refused,
+                 case_lane_box_refused_in_cloud, case_lane_box_refused_in_a_full_size_transcript,
+                 case_box_stays_open_outside_a_lane, case_lane_box_fails_open_on_an_unread_record):
         try:
             case()
         except Exception as exc:

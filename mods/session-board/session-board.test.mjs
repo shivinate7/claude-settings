@@ -1456,6 +1456,35 @@ for (const tool of ['mcp__ccd_session__start_session', 'mcp__claude-code-remote_
   })
 }
 
+// R13 point 4 (lane-no-popup): the started-session refusal drops "may wait on it" and routes the question to the parent.
+// Each test names one cause; each asserts the deny first.
+await test('question box: the started-session refusal no longer says the started session may wait on the box', async () => {
+  const h = await start({ liveAgents: [], python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  const r = await askBox(h)
+  same(r && r.decision, 'deny', 'verdict')
+  assert.doesNotMatch(r.reason, /may wait on it/, 'the reason names no wait on the box')
+})
+
+await test('question box: the started-session refusal routes the question with send_message', async () => {
+  const h = await start({ liveAgents: [], python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  const r = await askBox(h)
+  same(r && r.decision, 'deny', 'verdict')
+  assert.match(r.reason, /send_message/, 'the reason routes the question with send_message')
+})
+
+await test('question box: the started-session refusal routes the question to @parent', async () => {
+  const h = await start({ liveAgents: [], python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  const r = await askBox(h)
+  same(r && r.decision, 'deny', 'verdict')
+  assert.match(r.reason, /@parent/, 'the reason routes the question to @parent')
+})
+
 await test("question box: the desktop start tool is the guard's own SESSION_TOOL", async () => {
   const { readFileSync } = await import('node:fs')
   const guard = readFileSync(fileURLToPath(new URL('../../hooks/guard.py', import.meta.url)), 'utf8')
