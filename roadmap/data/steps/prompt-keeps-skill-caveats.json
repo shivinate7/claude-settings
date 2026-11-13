@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The retrospective's 21:16 CST paste prompt to Degen and Home dropped the ci-hygiene skill's \"Unverified: R61 part 3\" caveat and told child repos to stop push suites; that is how Degen's PR 708 got the no-merge-onto-red-main hole.",
  "source": "retrospective 21:45 CST Nov 12",
- "note": "Mistake: a prompt built from an unmerged skill's text left out its caveats. No guard holds it. Fix candidate: a prompt or brief that quotes a skill carries every \"Unverified:\" line of the quoted section, checked when the message is sent. A note until it repeats, or a guard if cheap.",
- "updatedAt": "2026-11-12T21:49:15-06:00"
+ "note": "Mistake: a prompt built from an unmerged skill's text left out its caveats. No guard holds it. Fix candidate: a prompt or brief that quotes a skill carries every \"Unverified:\" line of the quoted section, checked when the message is sent. A note until it repeats, or a guard if cheap. Triage 23:18 CST Nov 12: stays todo, not ready. Its own note makes it a note until the mistake repeats.",
+ "updatedAt": "2026-11-12T23:18:28-06:00"
 }

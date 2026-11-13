@@ -1,14 +1,14 @@
 {
  "id": "main-claim-branch-only",
  "title": "The main-claim check flags only a branch-like use of \"main\"",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL46rpKFF3qjYhGTH4u",
  "owner": "triage",
  "blockedBy": [],
  "why": "The check refuses plain lines like \"same as the main window\", \"matches the main points\" and \"worse than the main menu\", because it takes any word after main. Cost today: one rewrite per false alarm.",
  "source": "lane claim-vs-main-needs-read (session_013NEJL1D4J39Z3Xqh1gfQag, draft PR 3068), 22:42 CST Nov 12",
  "note": "Narrow the check so only a branch-like use counts, red test first. The code-span escape is in the record's Known limit.",
- "updatedAt": "2026-11-12T23:14:45-06:00"
+ "updatedAt": "2026-11-12T23:18:28-06:00"
 }

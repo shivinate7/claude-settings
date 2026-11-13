@@ -1,14 +1,14 @@
 {
  "id": "ios-apps-test-shapes",
  "title": "skills/ios-apps and its starter name the test shape for each kind of iPhone test",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL32DjpWSN8KkRiC69i",
  "owner": "triage",
  "blockedBy": [],
  "why": "Degen ledger D21: iPhone lanes pick test kinds by guess, so presses and gestures go untested or every test launches the app.",
  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D21",
  "note": "Add a test-shape section to skills/ios-apps and its starter: pure rules in swift test; render tests at every shipped size with no app launch; one or two XCUITest smoke cases per screen for presses, gestures and navigation; taps at the drawn shape's centre through one helper; waits on state, never on time. Extends decision test-practices P1 and P5. Where each kind runs follows SKILL.md:23-24 and decision swift-tests-at-milestones.",
- "updatedAt": "2026-11-12T21:43:35-06:00"
+ "updatedAt": "2026-11-12T23:18:28-06:00"
 }
