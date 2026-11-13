@@ -5295,6 +5295,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
+        self.assertEqual(self.paused, [], out)  # no pause at all: the green head is read once and merges
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
