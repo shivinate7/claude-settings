@@ -422,6 +422,94 @@ class Ios(unittest.TestCase):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "runs-on: macos-26", "runs-on: macos-latest")
         self.red(repo, "ci runner: gap - .github/workflows/ios.yml: macos-latest")
 
+    # The CI exemption form (skills/ios-apps): one JSON object at tools/ios-ci-exemption.json, with non-empty string `sdk` and
+    # `reason`. A valid form grades `ci runner` and `ci checks` pass, detail `exempt: <sdk>`, even on a tree that cannot build
+    # the app on the pinned image. A broken form grades both gap, and names the problem. A floating macOS image stays a gap.
+    EXEMPT_FORM = "tools/ios-ci-exemption.json"
+    VALID_FORM = {"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"}
+    BROKEN_FORMS = (  # (the form's text, the keys its detail must name)
+        ('{"sdk": "iOS 27.1"}', ("reason",)),
+        ('{"reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "", "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "iOS 27.1", "reason": ""}', ("reason",)),
+        ('{"sdk": 27.1, "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ("{}", ("sdk", "reason")),
+        ('{"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"', ()),  # cut short: invalid JSON
+        ('["iOS 27.1"]', ()),  # JSON, but no object
+        ("", ()),  # a 0-byte file
+    )
+
+    def with_form(self, repo, text):
+        return repo.write(self.EXEMPT_FORM, text)
+
+    def cannot_build(self, runner="ubuntu-latest"):
+        """The starter with its macOS job on `runner` and no compile step: a tree that cannot build the app on macos-26."""
+        repo = self.edit(self.gold(), self.FLOW, "runs-on: macos-26", "runs-on: " + runner)
+        return self.edit(repo, self.FLOW, "run: make app-build", "run: echo no compile")
+
+    def line(self, repo, item):
+        """The whole line of one item of the ios group, `<item>: <grade> - <detail>`. Scope first: the run must judge an iOS app."""
+        code, out = repo.run("ios")
+        self.assertFalse(out.startswith("ios: n/a"), out)
+        found = [raw.strip() for raw in out.splitlines() if raw.startswith("  %s:" % item)]
+        self.assertEqual(len(found), 1, "no single '%s' line in:\n%s" % (item, out))
+        return found[0]
+
+    def test_a_valid_exemption_form_passes_both_items_on_a_tree_that_cannot_build(self):
+        bare = self.cannot_build()  # green control: without the form, both items are gaps
+        for item in ("ci runner", "ci checks"):
+            line = self.line(bare, item)
+            self.assertTrue(line.startswith(item + ": gap - "), line)
+        for sdk, reason in (("iOS 27.1", "Degen builds with the iOS 27 SDK"),
+                            ("iOS 27.0", "Needs the SDK, see https://example.com/issue #12"),  # `#` after a space, inside a JSON string
+                            ("iOS 27.1", "Degen builds with the iOS 27 SDK. " * 40)):  # a full-size reason
+            with self.subTest(sdk=sdk, reason_chars=len(reason)):
+                repo = self.with_form(self.cannot_build(), json.dumps({"sdk": sdk, "reason": reason}))
+                for item in ("ci runner", "ci checks"):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith("%s: pass - exempt: %s" % (item, sdk)), line)
+
+    def test_a_broken_exemption_form_grades_both_items_gap_and_names_the_problem(self):
+        for text, keys in self.BROKEN_FORMS:
+            repo = self.with_form(self.cannot_build(), text)
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=text, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    detail = line.split(" - ", 1)[1]
+                    self.assertIn(self.EXEMPT_FORM, detail, line)
+                    for key in keys:
+                        self.assertIn(key, detail, line)
+
+    def test_a_broken_exemption_form_is_a_gap_on_a_tree_that_builds(self):
+        # A broken form grades both items gap with no condition on the tree: the plain reading of the form rule, which a builder may narrow.
+        repo = self.with_form(self.gold(), '{"sdk": "iOS 27.1"}')
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, line)
+
+    def test_a_valid_form_does_not_excuse_a_floating_macos_runner(self):
+        # Green control: a floating image is a gap on main too. A builder that returns `exempt` before this check turns it red.
+        repo = self.with_form(self.cannot_build("macos-latest"), json.dumps(self.VALID_FORM))
+        line = self.line(repo, "ci runner")
+        self.assertTrue(line.startswith("ci runner: gap - .github/workflows/ios.yml: macos-latest"), line)
+        self.assertNotIn("exempt", line, line)
+
+    def test_a_valid_form_on_a_tree_that_builds_leaves_it_in_shape(self):
+        # Green control: the form changes nothing on a tree that passes, so the starter tree still exits 0.
+        repo = self.with_form(self.gold(), json.dumps(self.VALID_FORM))
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", out)
+
+    def test_ios_apps_skill_names_the_exemption_form_and_the_ios_26_5_sdk(self):
+        with open(os.path.join(os.path.dirname(HERE), "skills", "ios-apps", "SKILL.md"), encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn(self.EXEMPT_FORM, text, "SKILL.md does not name the one CI exemption form")
+        self.assertIn("26.5", text, "SKILL.md does not say the macos-26 image holds the iOS 26.5 SDK")
+
     def test_swift_5_mode_is_red(self):
         repo = self.edit(self.gold(), "native/project.yml", 'SWIFT_VERSION: "6.0"', "SWIFT_VERSION: 5.0")
         self.red(repo, "swift 6: gap - native/project.yml: SWIFT_VERSION 5.0")
@@ -772,11 +860,7 @@ class Ios(unittest.TestCase):
 
     def grade(self, repo, item):
         """The grade of one item line of the ios group: pass, gap or partial."""
-        code, out = repo.run("ios")
-        for line in out.splitlines():
-            if line.strip().startswith(item + ":"):
-                return line.strip().split(": ", 1)[1].split(" - ", 1)[0]
-        self.fail("no '%s' line in:\n%s" % (item, out))
+        return self.line(repo, item).split(": ", 1)[1].split(" - ", 1)[0]
 
     def step(self, repo, command):
         """`repo` with `command` as one more step of the macOS job."""
