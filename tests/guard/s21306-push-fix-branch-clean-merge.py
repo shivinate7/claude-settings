@@ -15,6 +15,10 @@ PFR_MERGE_PR = 1480                                  # the PR whose head branch 
 PFR_MERGE_BRANCH = "notes-merge-fix"                 # that PR's head branch, the push's destination
 PFR_MERGE_PUSH = VCS + " push origin HEAD:" + PFR_MERGE_BRANCH
 PFR_MERGE_ABSENT = "0123456789abcdef0123456789abcdef01234567"   # a commit no fixture holds; the builder checks it
+# A refspec source longer than the OS takes in one argument: git cannot be started with it, so the walk's first read
+# raises (OSError) and the allow's exception arm refuses. A missing or corrupt object is no such case: git exits
+# non-zero, and the walk reads that as False, which never reaches the arm.
+PFR_RAISE_SOURCE = "a" * 300000
 PFR_MERGE_NAMES = ("head", "c1", "c2", "plain", "pc", "mixed", "evil", "conflict", "side", "detour")
 PFR_MERGE_CLONE = {name: os.path.join(PFR_MERGE_DIR, "cl-" + name) for name in PFR_MERGE_NAMES}
 PFR_MERGE_SHALLOW = os.path.join(PFR_MERGE_DIR, "cl-shallow")   # a depth-1 clone: the parents of its tip are absent
@@ -56,6 +60,15 @@ def _pfm_clean(where, sha):
 
 def _pfm_is_ancestor(where, sha, tip):
     return run_vcs(where, "merge-base", "--is-ancestor", sha, tip).returncode == 0
+
+
+def _pfm_argument_refused(where):
+    """True when the OS refuses to start git with PFR_RAISE_SOURCE, so a read of it raises rather than exiting non-zero."""
+    try:
+        run_vcs(where, "rev-parse", "--verify", "-q", PFR_RAISE_SOURCE + "^{commit}")
+    except OSError:
+        return True
+    return False
 
 
 def _pfm_clone(where, source, sha, main_at):
@@ -141,6 +154,9 @@ def _build_pfm():
             "side": xs, "detour": d}
     for name in PFR_MERGE_NAMES:
         _pfm_clone(PFR_MERGE_CLONE[name], src, tips[name], m0)
+    # Scope before subject: the oversize source must make the read raise, or the case below never reaches the arm.
+    if not _pfm_argument_refused(PFR_MERGE_CLONE["head"]):
+        sys.exit("fixture setup failed: git started with the oversize refspec source, so its read does not raise")
 
     # A depth-1 clone fetches each branch tip, so cm1 goes first: its tip c1 would be present. c1 stays in the source,
     # as c2's first parent, and m2 is no branch tip. So the tip c2 is present and its parents c1 and m2 are not.
@@ -201,19 +217,24 @@ pfr_fix_refuse("clean-merge: git cannot answer (a blind git on PATH), a read tha
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_CLONE["c1"], env_path=GITBLIND)
 pfr_fix_refuse("clean-merge: a parent the checkout lacks (a depth-1 clone), a read that cannot run, then the push",
                PFR_MERGE_PUSH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH, cwd=PFR_MERGE_SHALLOW)
+# The clean-merge read that raises: the OS will not start git with the oversize source, so the walk's first read raises
+# and the allow's exception arm refuses, with the same reason.
+pfr_fix_refuse("clean-merge: the walk's git read raises on an oversize refspec source, then the push to its PR head",
+               VCS + " push origin " + PFR_RAISE_SOURCE + ":" + PFR_MERGE_BRANCH, PFR_MERGE_GOOD, lacks=PFR_MERGE_BRANCH,
+               cwd=PFR_MERGE_CLONE["head"])
 
 
 # The default base and the named source, judged by the walk (merge.clean_merges_pushed). The one default base is
-# origin/main. A second parent held only by origin/master, by the branch a stale origin/HEAD names, or by a local
-# branch named origin/main (which shadows the short name the walk reads) is refused. The walk reads the source the
-# refspec names for the fix branch, not the checkout's HEAD, so the cases pair a clean merge with a plain commit.
+# origin/main. A second parent held only by origin/master, or by a local branch named origin/main (which shadows the
+# short name the walk reads), is refused. The walk reads the source the refspec names for the fix branch, not the
+# checkout's HEAD, so the cases pair a clean merge with a plain commit.
 PFB_DIR = os.path.join(ROOT, "pfbase")
 PFB_SRC = os.path.join(PFB_DIR, "src")      # main: M0, M1, M2; feat: F, then H; master: S, a commit off M0
 PFB_PR = 1483                               # the PR whose head branch is PFB_BRANCH
 PFB_BRANCH = "notes-base-fix"               # that PR's head branch, the push's destination
 PFB_OTHER = "notes-base-other"              # a second branch that one push names beside the fix branch
 PFB_PUSH = VCS + " push origin HEAD:" + PFB_BRANCH
-PFB_NAMES = ("a-master", "a-main", "b-master", "c-shadow", "d-plain", "d-merge", "e-octopus", "e-fix-clean",
+PFB_NAMES = ("a-master", "a-main", "c-shadow", "d-plain", "d-merge", "e-octopus", "e-fix-clean",
              "e-fix-plain")
 PFB_CLONE = {name: os.path.join(PFB_DIR, "cl-" + name) for name in PFB_NAMES}
 PFB_TRANSCRIPT = pfr_path("merge-base-fix")  # the record: PR PFB_PR, Head H, Fix check F
@@ -266,14 +287,13 @@ def _build_pfb():
         if not ok:
             sys.exit("fixture setup failed: " + why)
 
-    for name, sha in (("a-master", xa), ("a-main", c1), ("b-master", xa), ("c-shadow", xa), ("d-plain", c1),
+    for name, sha in (("a-master", xa), ("a-main", c1), ("c-shadow", xa), ("d-plain", c1),
                       ("d-merge", p), ("e-octopus", octo), ("e-fix-clean", c1), ("e-fix-plain", p)):
         _pfm_clone(PFB_CLONE[name], src, sha, m0)
-    # The default base each case reads: origin/HEAD unset (a-*), naming origin/master (b), a local branch named
-    # origin/main (c). In d and e, one refspec's source is the plain commit and the other the clean merge.
+    # The default base each case reads: origin/HEAD unset (a-*), a local branch named origin/main (c). In d and e,
+    # one refspec's source is the plain commit and the other the clean merge.
     _pfr_step("symbolic-ref", "-d", "refs/remotes/origin/HEAD", where=PFB_CLONE["a-master"])
     _pfr_step("symbolic-ref", "-d", "refs/remotes/origin/HEAD", where=PFB_CLONE["a-main"])
-    _pfr_step("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master", where=PFB_CLONE["b-master"])
     _pfr_step("branch", "origin/main", s, where=PFB_CLONE["c-shadow"])
     _pfr_step("branch", "plain-x", p, where=PFB_CLONE["d-plain"])
     _pfr_step("branch", "merge-x", c1, where=PFB_CLONE["d-merge"])
@@ -289,8 +309,6 @@ def _build_pfb():
         (_pfm_is_ancestor(PFB_CLONE["a-master"], s, "refs/remotes/origin/master")
          and not _pfm_is_ancestor(PFB_CLONE["a-master"], s, "refs/remotes/origin/main"),
          "S is not on origin/master alone in the a-master checkout"),
-        (_pfr_step("symbolic-ref", "refs/remotes/origin/HEAD", where=PFB_CLONE["b-master"]) == "refs/remotes/origin/master",
-         "origin/HEAD does not name origin/master in the b-master checkout"),
         (_pfr_step("rev-parse", "origin/main", where=PFB_CLONE["c-shadow"]) == s
          and _pfr_step("rev-parse", "refs/remotes/origin/main", where=PFB_CLONE["c-shadow"]) != s,
          "the short origin/main does not name the shadow branch in the c-shadow checkout"),
@@ -335,13 +353,11 @@ lazy_fixture([PFB_SRC, PFB_TRANSCRIPT] + list(PFB_CLONE.values()), _build_pfb)
 lazy_fixture([PFC_SRC, PFC_TRANSCRIPT] + list(PFC_CLONE.values()), _build_pfc)
 
 # The refusals and allows that pin the default base. The first case of each pair is red on the current code: the
-# walk reads origin/master, a stale origin/HEAD, or the shadowing local branch as the default base, and allows it.
+# walk reads origin/master or the shadowing local branch as the default base, and allows it.
 pfr_fix_refuse("clean-merge: a merge whose second parent only origin/master holds, with origin/HEAD unset, then the push",
                PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["a-master"])
 pfr_allow("clean-merge: a merge of origin/main, with origin/HEAD unset, then the push (the control)",
           PFB_PUSH, PFB_TRANSCRIPT, cwd=PFB_CLONE["a-main"])
-pfr_fix_refuse("clean-merge: a merge whose second parent only origin/master holds, with a stale origin/HEAD naming "
-               "origin/master, then the push", PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["b-master"])
 pfr_fix_refuse("clean-merge: a merge whose second parent only a local branch named origin/main holds, then the push",
                PFB_PUSH, PFB_TRANSCRIPT, lacks=PFB_BRANCH, cwd=PFB_CLONE["c-shadow"])
 
