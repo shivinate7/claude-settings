@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retrospective 13:44 CST Nov 12: merge/merge.py line 26 (\"MODEL must be sonnet on every record\") reads as covering every round, but it covers only --fix-check; sessions choked on where to record a Haiku round 1.",
  "source": "retrospective 13:44 CST Nov 12",
- "note": "Home: decision agent-model-cap. Reword the usage line to name --fix-check; a test pins the line. R9 and the code already settle the question; the retrospective answered runner 10 directly. S, one file. Taken by lane review-record-fix-check-reads (coordinator 13:59 CST Nov 12).",
- "updatedAt": "2026-11-12T14:02:37-06:00"
+ "note": "Home: decision agent-model-cap. Reword the usage line to name --fix-check; a test pins the line. R9 and the code already settle the question; the retrospective answered runner 10 directly. S, one file. Taken by lane review-record-fix-check-reads (coordinator 13:59 CST Nov 12). Coordinator 18:57 CST Nov 12 (lane record-before-fix-push, #2979): `merge --review-record --fix-check` accepts sonnet only, so a haiku fix check could not be recorded. This adds to the haiku round-1 note: the usage line and the fix-check model rule must say where a haiku fix check is recorded, or that it is not allowed.",
+ "updatedAt": "2026-11-12T18:57:08-06:00"
 }
