@@ -2428,10 +2428,15 @@ class PinnedHarness(Job):
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
 class QuietStepKeepsTheStallWatchFed(Job):
     """A step quiet past the stall limit must not strand its job. verdict's heartbeat has to reach ci-job's own
-    output, so the stall watch sees the job alive. The job then ends on its own, with no process of it left."""
+    output, so the stall watch sees the job alive. The job then ends on its own, with no process of it left.
+    ci-job's start line for each step also goes to the beat file, so a job of short steps with its output hidden
+    still feeds the watch. With the verdict heartbeat above the quiet age, the start lines alone do not keep a
+    silent step alive."""
 
     QUIET = step("quiet", "sleep 6")
     SLOW = step("slow", "sleep 2.5")
+    SHORT = tuple(step("s%d" % n, "sleep 1") for n in range(1, 7))  # six steps, each quieter than the 3 s stall limit
+    HANG = step("hang", "sleep 30")
 
     def start_job(self, *steps, env):
         """Start ci-job, stdout and stderr to one file, in its own process group that cleanup alone kills."""
@@ -2451,10 +2456,31 @@ class QuietStepKeepsTheStallWatchFed(Job):
             pass
         proc.wait()
 
+    def run_watch(self, pid, log, beat=None, quiet="3"):
+        """One stall-watch run on a job: the argv every case of this class uses, so the call has one home."""
+        argv = [sys.executable, STALL_WATCH, "--watch-pid", str(pid), "--log", log, "--quiet", quiet]
+        if beat is not None:
+            argv += ["--beat", beat]
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+
+    def empty_file(self, name):
+        """A file in this job's folder, empty, as the wrapper makes its log and beat files before a job starts."""
+        path = os.path.join(self.root, name)
+        with open(path, "w", encoding="utf-8"):
+            pass
+        return path
+
+    def tree(self):
+        """Every file under this job's folder, by path from it, except git's own."""
+        found = set()
+        for folder, dirs, files in os.walk(self.root):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            found.update(os.path.relpath(os.path.join(folder, f), self.root) for f in files)
+        return found
+
     def test_a_quiet_step_does_not_trip_the_stall_watch(self):
         proc, out = self.start_job(self.QUIET, env={"VERDICT_HEARTBEAT": "1"})
-        watch = subprocess.run([sys.executable, STALL_WATCH, "--watch-pid", str(proc.pid), "--log", out,
-                                "--quiet", "3"], capture_output=True, text=True, timeout=60)
+        watch = self.run_watch(proc.pid, out)
         with open(out, encoding="utf-8", errors="replace") as f:
             job_out = f.read()
         self.assertEqual(watch.returncode, 0, watch.stdout + watch.stderr + job_out)
@@ -2469,6 +2495,52 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), done.stdout + done.stderr)
         self.assertNotIn("still running", done.stdout)
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
+
+    def test_a_job_of_short_steps_feeds_the_watch_through_the_beat_file(self):
+        log, beat = self.empty_file("empty.log"), self.empty_file("stall-watch.beat")
+        proc, out = self.start_job(*self.SHORT, env={"VERDICT_HEARTBEAT": "60", "STALL_WATCH_BEAT": beat})
+        watch = self.run_watch(proc.pid, log, beat)  # the log never grows, so only the beat file can keep the watch fed
+        proc.wait(timeout=60)  # the job ends on its own
+        with open(out, encoding="utf-8", errors="replace") as f:
+            job_out = f.read()
+        passed = [ln for ln in job_out.splitlines() if ln.startswith("PASS ")]
+        self.assertEqual((proc.returncode, len(passed)), (0, len(self.SHORT)),
+                         "the job did not run every step to PASS\n" + job_out)  # scope: the job ran
+        self.assertEqual(watch.returncode, 0, "the stall watch cut a job of short steps: no byte reached its log or beat\n"
+                         + watch.stdout + watch.stderr)  # subject: the watch saw the job alive
+        with open(beat, encoding="utf-8") as f:
+            starts = [ln for ln in f.read().splitlines() if ln.startswith("start: ")]
+        self.assertEqual(starts, ["start: s%d" % n for n in range(1, 7)],
+                         "ci-job wrote no start line per step to STALL_WATCH_BEAT")
+
+    def test_start_lines_alone_do_not_keep_a_silent_step_alive(self):
+        """With the verdict heartbeat above the quiet age, the start lines alone do not keep a silent step alive."""
+        log, beat = self.empty_file("empty.log"), self.empty_file("stall-watch.beat")
+        proc, out = self.start_job(self.HANG, env={"VERDICT_HEARTBEAT": "60", "STALL_WATCH_BEAT": beat})
+        watch = self.run_watch(proc.pid, log, beat)
+        with open(out, encoding="utf-8", errors="replace") as f:
+            job_out = f.read()
+        self.assertIn("start: hang", job_out, "the job never reached its silent step\n" + job_out)  # scope
+        # subject: with the verdict heartbeat above the quiet age, the start lines alone do not keep a silent step alive
+        self.assertEqual(watch.returncode, 3, "a silent step was not cut after 3 s with no output\n"
+                         + watch.stdout + watch.stderr)
+        self.assertIsNone(proc.poll(), "the watch ended the job, which it never does")
+
+    def test_without_a_beat_path_ci_job_writes_no_beat_file_and_stdout_keeps_only_verdicts(self):
+        for beat in (None, ""):  # unset, and set but empty: neither names a beat file
+            with self.subTest(STALL_WATCH_BEAT=beat):
+                argv, env = self.job_call(step("one", "true"), step("two", "true"), env={"VERDICT_HEARTBEAT": "60"})
+                if beat is None:
+                    env.pop("STALL_WATCH_BEAT", None)  # job_call copies os.environ, which may carry a beat path
+                else:
+                    env["STALL_WATCH_BEAT"] = beat
+                before = self.tree()
+                done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
+                lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+                self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS", "PASS"]),
+                                 "stdout holds a line that is not a verdict\n" + done.stdout + done.stderr)
+                self.assertLessEqual(self.tree() - before, {"verdict.log"},
+                                     "ci-job wrote a file besides the verdict log")
 
 
 def load_ci_job():

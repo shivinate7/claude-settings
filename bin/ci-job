@@ -79,7 +79,8 @@
 # only when shallow.
 # A step's stdout is its one verdict line. verdict's "still running" heartbeat (every $VERDICT_HEARTBEAT s) goes to
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
-# line at least every 120 s).
+# line at least every 120 s). Each `start: <name>` line is also appended to the file $STALL_WATCH_BEAT names, when set
+# and non-empty, once as the CI step starts (never on a timer), so a job of short steps with stderr hidden (`| tail`, `2>/dev/null`) is not cut while healthy.
 # Under --lint, the ste-lint action step runs bin/ste-changed with STE_CHANGED_PIN_NOTE=1: a stale pin of this repo's ste-lint or
 # zizmor action never fails a passing lint, and its PASS line ends `; <the whole drift line>`, which starts with the marker
 # `ste-changed: pin note: ` (hooks/pin_note.py). A --step run (merge's ready checks) never gets the variable: a drifted pin
@@ -91,7 +92,7 @@
 # own, so the reads from its start offset see only its output; each log is appended to $VERDICT_LOG in CI step order, and each verdict line
 # prints in CI step order, whatever order the CI steps finish. A `start:` or heartbeat line is written whole, so two never mix. A plain run,
 # --step and --plan stay serial.
-# Cost: one process per CI step (bin/verdict and the CI step's shell), one log file; no timer, no lasting process. Under
+# Cost: one process per CI step (bin/verdict and the CI step's shell), one log file, one append to the beat file per CI step start; no timer, no lasting process. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python.
 # With N above 1, --lint adds one thread per worker, one temp folder, and one log file per lint CI step run, all deleted when ci-job ends, except a log whose copy into $VERDICT_LOG failed (then the folder stays)
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
@@ -102,6 +103,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from stall_beat import beat as append_beat  # noqa: E402  the one home of an append to $STALL_WATCH_BEAT (hooks/stall_beat.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
@@ -498,6 +500,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
     suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
     top, base, values, pinned = ctx
     err_line("start: %s\n" % name)
+    append_beat("start: %s" % name)  # apart from stderr: `| tail` or `2>/dev/null` hides it, the stall watch reads this file
     with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
                                      encoding="utf-8", newline="\n") as f:
         marked = preamble_marked(detail, shell[0]) if suite else None

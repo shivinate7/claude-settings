@@ -191,8 +191,45 @@ def module_or_fail():
         raise Fail(f"{MODULE} is missing")
 
 
-def hook(command, os_name=None, quiet="2"):
-    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr)."""
+# Counts only the listings of the one folder named, so the module's other reads of the disk do not count.
+LISTING_PATCH = """\
+_folder = %r
+_listings = [0]
+
+
+def _counted(real):
+    def listing(path=".", *args, **kwargs):
+        if isinstance(path, str) and os.path.realpath(path) == _folder:
+            _listings[0] += 1
+        return real(path, *args, **kwargs)
+    return listing
+
+
+os.scandir = _counted(os.scandir)
+os.listdir = _counted(os.listdir)
+"""
+
+
+def listing_driver(os_name, count_to, folder):
+    """Source for `python -c`, which runs the hook module. It patches os.name when os_name is given, and counts the
+    os.scandir and os.listdir calls on folder into the file count_to. The count is written in a finally, so it lands
+    when the hook exits through SystemExit."""
+    # The stdlib is imported first, so only the module's own os.name checks see the patch.
+    src = "import json, os, runpy, shlex, shutil, signal, subprocess, sys, tempfile, time\n"
+    if os_name is not None:
+        src += "os.name = %r\n" % os_name
+    src += "sys.argv = [sys.argv[1], '--hook']\n"
+    if count_to is None:
+        return src + "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    tail = ("try:\n    runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            "finally:\n    with open(%r, 'w') as _f:\n        _f.write(str(_listings[0]))\n") % count_to
+    return src + (LISTING_PATCH % folder) + tail
+
+
+def hook(command, os_name=None, quiet="2", tmpdir=None, count_to=None):
+    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr).
+    tmpdir is the folder the hook sees as TMPDIR, and the folder it prunes (default SCRATCH). count_to, when given,
+    is a file that receives the number of listings of tmpdir the hook made (see listing_driver)."""
     module_or_fail()
     payload = {
         "session_id": "test-stall-watch",
@@ -202,15 +239,11 @@ def hook(command, os_name=None, quiet="2"):
     }
     # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
     # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
-    env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=SCRATCH)
-    if os_name is None:
+    env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=tmpdir or SCRATCH)
+    if os_name is None and count_to is None:
         argv = [PY, MODULE, "--hook"]
     else:
-        # Import the stdlib first, so only the module's own os.name checks see the patch.
-        driver = "import json, os, runpy, shlex, shutil, signal, subprocess, sys, tempfile, time\n" \
-                 "os.name = %r\nsys.argv = [sys.argv[1], '--hook']\n" \
-                 "runpy.run_path(sys.argv[0], run_name='__main__')\n" % os_name
-        argv = [PY, "-c", driver, MODULE]
+        argv = [PY, "-c", listing_driver(os_name, count_to, os.path.realpath(tmpdir or SCRATCH)), MODULE]
     proc = subprocess.run(argv, input=json.dumps(payload).encode("utf-8"),
                           capture_output=True, env=env, timeout=20)
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
@@ -239,12 +272,17 @@ def job_env(**extra):
     return env
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2", own_group=False,
+                  prepare=None):
     """Run the rewritten command in the given shell, with `env` as its environment (default: job_env()).
     Return (rc or None, text, seconds, cmd).
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
-    names. Text added to the command would change it, for one ending in a backslash."""
+    names. Text added to the command would change it, for one ending in a backslash.
+    own_group: start the command in a session of its own, so a case can kill that group and no other.
+    prepare: called with the rewritten command before the job starts, for a case that plants a file the wrapper reads."""
     cmd, _hso = rewrite(command, quiet=quiet)
+    if prepare is not None:
+        prepare(cmd)
     mark = mark or new_mark()
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
@@ -252,7 +290,7 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     with open(out_path, "wb") as out:
         proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT,
-                                env=job_env() if env is None else env)
+                                env=job_env() if env is None else env, start_new_session=own_group)
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -1088,10 +1126,38 @@ def wait_until(cond, secs):
         time.sleep(0.2)
 
 
+def pid_ended(pid):
+    """True once pid is gone or a zombie. A job's EXIT trap runs before its process stops, so this means
+    the trap has run. A zombie counts as ended, whether or not its parent has reaped it yet."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return not state or state.startswith("Z")
+
+
+def job_group(pid):
+    """The process group of a live job, read while it runs: a live pid cannot have been reused for another group."""
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+
+
+def kill_job_group(pgid, pid):
+    """Kill the group job_group read, for a job that run_rewritten started with own_group. Nothing is killed once
+    the job has ended: its pid may then belong to another process. The runner's own group is never killed."""
+    if pgid is None or pid is None or pid_ended(pid) or pgid == os.getpgid(0):
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 def stall_then_end_problems(shell):
-    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned."""
+    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned. Its BEAT is
+    removed when it ends; its LOG is kept."""
     done = os.path.join(new_dir(), "done")  # the job's last act, so the wait below has a file to see
     orig = 'echo pre-stall-line; echo x >> "$STALL_WATCH_BEAT"; sleep 4; touch %s' % shlex.quote(done)
+    log = None
     try:
         rc, text, _secs, cmd = run_rewritten(orig, shell=shell)
         log, beat = job_files(cmd)
@@ -1109,18 +1175,22 @@ def stall_then_end_problems(shell):
             problems += expect(any("pre-stall-line" in line for line in lines[header + 1:]),
                                "the pre-stall line is not in the report's tail")
         problems += expect(wait_until(lambda: os.path.exists(done), 30), "the job did not end within 30 s")
-        wait_until(lambda: not (os.path.exists(log) or os.path.exists(beat)), 5)
-        problems += expect(not os.path.exists(log), f"LOG {log} is left after the job ended")
+        # BEAT goes when the job's trap runs, so the wait on it shows the trap has run before the LOG check.
+        wait_until(lambda: not os.path.exists(beat), 5)
         problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after the job ended")
+        problems += expect(os.path.exists(log), f"LOG {log} is removed when the job ends: a stalled job's log is kept")
         return problems
     finally:
         reap()
+        if log is not None and os.path.exists(log):
+            os.remove(log)  # kept after the job ends; the case removes it
 
 
 @posix_case
-def stalled_job_leaves_no_files_when_it_ends():
+def stalled_job_keeps_its_log_and_removes_its_beat_when_it_ends():
     """A1. a job that stalls, then ends: the STALL report reaches stdout with the pre-stall line in its
-    tail, and once the job ends neither LOG nor BEAT is left"""
+    tail, and once the job ends its BEAT is removed while its LOG stays. A stalled job's log is kept so the
+    STALL report's Log: path still names a file when the job has ended (decision stall-watch)."""
     problems = []
     for shell in shells():
         problems += ["%s: %s" % (shell, p) for p in stall_then_end_problems(shell)]
@@ -1143,6 +1213,194 @@ def exit_code_job_leaves_no_files():
         found += expect(not os.path.exists(beat), f"BEAT {beat} is left after the wrapper returned")
         problems += ["%s: %s" % (shell, p) for p in found]
     return problems
+
+
+@posix_case
+def stalled_job_keeps_its_log_when_it_ends():
+    """A3. a job that stalls, then ends with one last line: the STALL report names its LOG, and that LOG still
+    exists once the job has ended and holds the last line. The verdict a stalled job prints last is what the
+    owner reads, so the wrapper must not lose it"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 4; echo FINAL-VERDICT", quiet="1", own_group=True)
+    log = job = group = None
+    try:
+        problems = expect(rc == 3, f"exit {rc}, want 3 (the silence is a stall at 1 s)")
+        m_log = re.search(r"^Log: (/\S+\.log) ", text, re.M)
+        m_pid = PID_RE.search(text)
+        if not m_log or not m_pid:
+            return problems + ["the STALL report has no Log: path or no pid="]
+        log, job = m_log.group(1), int(m_pid.group(1))
+        group = job_group(job)  # read now, while the job sleeps, so its group is known for the cleanup
+        # Scope: the LOG exists while the job runs, so its survival after the job ends proves something.
+        problems += expect(os.path.exists(log), f"LOG {log} is gone before the job ends")
+        problems += expect(wait_until(lambda: pid_ended(job), 30), f"job pid={job} did not end within 30 s")
+        # Subject: the job's last line is still readable after the job ends.
+        problems += expect(os.path.exists(log), f"LOG {log} was removed when the job ended, so its last line is lost")
+        if os.path.exists(log):
+            with open(log, encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            problems += expect("FINAL-VERDICT" in body, f"LOG holds {body[:80]!r}, want FINAL-VERDICT")
+        return problems
+    finally:
+        kill_job_group(group, job)
+        reap()
+        if log is not None and os.path.exists(log):
+            os.remove(log)  # the case keeps the LOG to read it; it is scratch, so the case removes it
+
+
+@posix_case
+def job_that_never_stalls_removes_its_log_and_beat():
+    """A3b. the control for A3: a job with the same last line and no silence past the quiet time. It exits 0,
+    relays its line, and neither LOG nor BEAT is left. It differs from A3 only by the stall"""
+    rc, text, _secs, cmd = run_rewritten("echo FINAL-VERDICT", quiet="2")
+    log, beat = job_files(cmd)
+    if log is None or beat is None:
+        return ["the rewrite names no --log or no --beat"]
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("FINAL-VERDICT" in text.splitlines(), f"the job's line is not relayed: {text!r}")
+    problems += expect(not os.path.exists(log), f"LOG {log} is left after a job that never stalled")
+    problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after a job that never stalled")
+    return problems
+
+
+def plant_and_prune(folder, fixtures):
+    """Plant each fixture in folder, then run the hook on folder. A fixture is (name, log_days, marker_days): a
+    stall-watch log aged log_days, and its marker (LOG + ".stalled") aged marker_days, or no marker when that is None.
+    Each file has its own age. Return (problems, paths), where paths maps each fixture key to (log, marker or None).
+    The problems cover the fixtures and the hook's command, so a removal the caller checks has a prune behind it."""
+    now = time.time()  # ages sit a day or more either side of the 7-day line, so clock drift cannot move one across it
+    paths, written = {}, []
+    for key, (name, log_days, marker_days) in fixtures.items():
+        log = os.path.join(folder, name)
+        marker = log + ".stalled" if marker_days is not None else None
+        for path, days in ((log, log_days), (marker, marker_days)):
+            if path is None:
+                continue
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("kept\n")
+            os.utime(path, (now - days * 86400, now - days * 86400))
+            written.append(path)
+        paths[key] = (log, marker)
+    # Scope: every fixture exists before the hook runs, so a removal below proves something.
+    problems = expect(all(os.path.exists(p) for p in written), "a fixture is missing before the hook runs")
+    rc, out, err = hook("echo hi", tmpdir=folder)
+    problems += expect(rc == 0, f"hook exit {rc}: {err.strip()[:200]}")
+    try:
+        command = json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+    except (ValueError, KeyError, TypeError):
+        command = None
+    problems += expect(isinstance(command, str), "the hook printed no updatedInput command")
+    return problems, paths
+
+
+@posix_case
+def hook_prunes_kept_logs_older_than_seven_days():
+    """Prune, by the log's own age. Before a background call, the hook removes a stalled job's kept log only when
+    the log was last written more than 7 days ago, and then its marker (LOG + ".stalled"). Here the marker is 8 days
+    old and the log 1 day old, so both stay. A marked log 6 days old stays. So does an unmarked stall-watch log aged
+    8 days, which may be a live job's log, and a file that is not a stall-watch log. Only the hook runs here, so no
+    job starts and no process is left to stop."""
+    folder = os.path.realpath(new_dir())  # the hook names its folder by the realpath of TMPDIR
+    fixtures = {
+        "marker_old": ("stall-watch-%s.log" % ("8" * 32), 1, 8),
+        "young": ("stall-watch-%s.log" % ("6" * 32), 6, 6),
+        "unmarked": ("stall-watch-%s.log" % ("4" * 32), 8, None),
+        "other": ("other-job.log", 8, None),
+    }
+    problems, paths = plant_and_prune(folder, fixtures)
+    log, marker = paths["marker_old"]
+    problems += expect(os.path.exists(log), "a log aged 1 day was removed, though its marker is aged 8 days")
+    problems += expect(os.path.exists(marker), "the marker of a log aged 1 day was removed")
+    log, marker = paths["young"]
+    problems += expect(os.path.exists(log), "a marked log aged 6 days was removed; only older than 7 days go")
+    problems += expect(os.path.exists(marker), "the marker of a kept log aged 6 days was removed")
+    log, _ = paths["unmarked"]
+    problems += expect(os.path.exists(log), "an unmarked stall-watch log aged 8 days was removed")
+    log, _ = paths["other"]
+    problems += expect(os.path.exists(log), "a file that is not a stall-watch log, aged 8 days, was removed")
+    return problems
+
+
+@posix_case
+def hook_prunes_kept_log_by_its_own_age_not_its_marker():
+    """Prune, the other way round. A stalled job's kept log aged 8 days goes with its marker even when the marker is
+    1 day old, because the age that counts is the log's. A log and its marker both aged 8 days go too."""
+    folder = os.path.realpath(new_dir())
+    fixtures = {
+        "log_old": ("stall-watch-%s.log" % ("7" * 32), 8, 1),
+        "both_old": ("stall-watch-%s.log" % ("8" * 32), 8, 8),
+    }
+    problems, paths = plant_and_prune(folder, fixtures)
+    log, marker = paths["log_old"]
+    problems += expect(not os.path.exists(log), "a log aged 8 days stayed, though its marker is aged 1 day")
+    problems += expect(not os.path.exists(marker), "the marker of a log aged 8 days stayed after the hook ran")
+    log, marker = paths["both_old"]
+    problems += expect(not os.path.exists(log), "a log and its marker both aged 8 days: the log stayed")
+    problems += expect(not os.path.exists(marker), "a log and its marker both aged 8 days: the marker stayed")
+    return problems
+
+
+@posix_case
+def prune_lists_the_log_folder_once():
+    """Cost. One prune call lists its folder once: one os.scandir or os.listdir on that folder, in the hook process
+    already running. It runs over an empty folder and a full one, since a listing per entry shows only in the full one."""
+    problems = []
+    for state, count in (("empty", 0), ("full", 200)):
+        folder = os.path.realpath(new_dir())
+        for i in range(count):
+            with open(os.path.join(folder, "stall-watch-%032x.log" % i), "w", encoding="utf-8") as f:
+                f.write("kept\n")
+        listed = os.path.join(new_dir(), "listings")
+        rc, out, err = hook("echo hi", tmpdir=folder, count_to=listed)
+        # Scope: the hook ran past its prune to print its command, and the driver wrote a count.
+        try:
+            command = json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+        except (ValueError, KeyError, TypeError):
+            command = None
+        scope = expect(rc == 0, f"{state} folder: hook exit {rc}: {err.strip()[:200]}")
+        scope += expect(isinstance(command, str), f"{state} folder: the hook printed no updatedInput command")
+        scope += expect(os.path.exists(listed), f"{state} folder: the driver wrote no listing count")
+        if scope:
+            problems += scope
+            continue
+        with open(listed, encoding="utf-8") as f:
+            listings = int(f.read())
+        problems += expect(listings == 1, f"{state} folder: {listings} listings, want exactly 1")
+    return problems
+
+
+@posix_case
+def job_ending_with_a_stall_marker_keeps_its_log():
+    """A stalled job's log is kept when its marker (LOG + ".stalled") is there at the end, even though the job
+    ends normally. The watcher writes that marker before it exits 3; a watcher that exits some other way may leave
+    it too. The case plants the marker before the job starts, then runs a job that ends at once, so the wrapper's
+    own removal after wait is the one under test."""
+    planted = {}
+
+    def plant(cmd):
+        log, _beat = job_files(cmd)
+        planted["log"] = log
+        if log is not None:
+            with open(log + ".stalled", "w", encoding="utf-8"):
+                pass
+
+    rc, text, _secs, _cmd = run_rewritten("echo FINAL-VERDICT", prepare=plant)
+    log = planted.get("log")
+    if log is None:
+        reap()
+        return ["the rewrite names no --log"]
+    marker = log + ".stalled"
+    try:
+        problems = expect(rc == 0, f"exit {rc}, want 0")
+        problems += expect("FINAL-VERDICT" in text.splitlines(), f"the job's line is not relayed: {text!r}")
+        # Scope: the marker is still there once the job has ended, so the log's survival below is about it.
+        problems += expect(os.path.exists(marker), f"marker {marker} is gone after the job ended")
+        problems += expect(os.path.exists(log), f"LOG {log} was removed at job end, though its marker was there")
+        return problems
+    finally:
+        reap()
+        for p in (log, marker):
+            if os.path.exists(p):
+                os.remove(p)  # kept by the wrapper; the case removes it, as the run's cleanup would
 
 
 @posix_case

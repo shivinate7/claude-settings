@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
-# While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
+# While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set (hooks/stall_beat.py).
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
@@ -10,6 +10,7 @@
 import os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from stall_beat import beat as append_beat  # noqa: E402  the one home of an append to $STALL_WATCH_BEAT (hooks/stall_beat.py)
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
 CAP = 30
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
@@ -68,7 +69,7 @@ def main(argv):
         try: proc = _nowindow.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
-            say, beat_file = True, os.environ.get("STALL_WATCH_BEAT")
+            say = True
             try:
                 while True:
                     try: rc = proc.wait(timeout=beat); break
@@ -77,10 +78,7 @@ def main(argv):
                         if say:
                             try: print(line, file=sys.stderr, flush=True)
                             except OSError: say = False  # reader gone: keep waiting, keep the child's rc
-                        if beat_file:  # apart from say: a gone stderr reader must not stop the beat to the watch
-                            try:
-                                with open(beat_file, "a", encoding="utf-8") as b: b.write(line + "\n")
-                            except OSError: pass
+                        append_beat(line)  # apart from say: a gone stderr reader must not stop the beat to the watch
             except KeyboardInterrupt:
                 rc = 130
                 try:

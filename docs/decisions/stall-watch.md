@@ -54,6 +54,11 @@ guard rule, so the watcher does the waiting and the session is told once.
   `hooks/test_guard.py` does the same. It prints a stderr line and appends to `STALL_WATCH_BEAT` at most once
   per `GUARD_HEARTBEAT` seconds (default 60) of quiet, read at checkpoints between cases. It starts no
   thread, timer or process. `hooks/test_guard_beat.py` (`BeatCost`) pins the cost.
+  `ci-job` appends each `start: <step>` line to the
+  beat file too, once as the step starts (never on a timer). So a lint of short steps with stderr hidden is not cut.
+  Every ci-job step runs under `verdict`, whose
+  heartbeat feeds the watch every 120 s, so the watch does not cut a hung step: merge stops waiting on a hung lane lint after
+  `LINT_SECONDS` (3600 s), though the process may run on (note `ci-job-timeout-kills-only-ci-job`). The append is hooks/stall_beat.py, shared with `verdict`.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
@@ -68,18 +73,26 @@ guard rule, so the watcher does the waiting and the session is told once.
   Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
   it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  heartbeat. The watcher reads it on each 0.2 s loop pass.
-- The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
-  until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
-  kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
-  handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
-  handle. An EXIT trap in the job does the removal. The job runs as a `( )` subshell because bash 3.2
-  (macOS `/bin/sh` and `/bin/bash`) runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap, and
-  so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps its pid, so
-  the report still lists one process. A stalled job of that kind leaves its two files. A job killed before it can run its
-  trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
-  `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
-  and two held handles in the watcher, no new process (unmeasured). In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
+  verdict heartbeat, plus one per ci-job step that runs (never under `--plan`; about 93 steps in a `checks --lint` run, read from `ci-job checks --lint --plan`). The watcher reads it on each 0.2 s loop pass.
+- The job removes its beat file when it ends, and its log too unless it stalled (owner, item 405 a,
+  2026-11-08 06:09 CST: "Keep a stalled job's log for 7 days"). Reason: a stalled job keeps writing after
+  its STALL report, and that final output was lost when the job ended. On a stall the watcher writes a
+  marker, `LOG.stalled`, beside the log before it exits 3. At the job's end the trap keeps the log if the
+  marker is there. Each `--hook` call for a background Bash call then removes, from the log folder, every stall-watch log that has a marker and was last written over 7 days ago. It also removes that marker, and no other file. The age runs from the log's own last-written time, and each `--hook` call makes one folder listing.
+  No timer runs and no process starts. A job that never
+  stalls leaves no files. The wrapper creates both files and opens both before the job starts. The watcher
+  inherits those handles, so a job that ends at once loses no output, and the STALL report reads its tail
+  from the handle. An EXIT trap in the job does the removal, also when the original calls `exit N` (the
+  exit code is kept). The job runs as a `( )` subshell because bash 3.2 (macOS `/bin/sh` and `/bin/bash`)
+  runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap,
+  and so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps
+  its pid, so the report still lists one process. A stalled job of that kind leaves its beat file, and its
+  log and marker stay for the prune. A job killed before it can run its trap leaves its files too. A job
+  that never stalls is cleaned by the wrapper after `wait`, which keeps a log whose marker exists, as the trap does. The report's `Log:` line says the file is kept
+  7 days after its last write. Cost: two small files created per job and two held handles in the watcher, no new process (unmeasured). A
+  stalled job keeps one log and one marker until 7 days after the log's last write, removed by the first background call after that.
+  The prune costs one folder listing per background call (pinned by the listing-count case in `hooks/test_stall_watch.py`: exactly one, for an empty and a full folder). In a wrapped run the watcher no longer polls
+  for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
 ## The Stop-time check
 
