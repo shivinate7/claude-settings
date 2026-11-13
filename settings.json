@@ -9,6 +9,7 @@
   "permissions": {
     "allow": [
       "Bash(gh pr merge:*)",
+      "Bash(merge * --confirm --head * --base-red-ok *)",
       "mcp__Claude_Browser",
       "mcp__claude-artifacts__db_get",
       "mcp__claude-artifacts__db_list",
