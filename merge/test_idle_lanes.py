@@ -273,10 +273,15 @@ class IdleLanesCli(unittest.TestCase):
                             self.stale_draft(103, "lane/c3")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.joint_for(out.splitlines(), "session_a"), [JOINT % (101, "lane/c1", "session_a")],
+        lines = out.splitlines()
+        self.assertEqual(self.joint_for(lines, "session_a"), [JOINT % (101, "lane/c1", "session_a")],
                          "control: the unheld stale draft's lane printed no joint line: %r" % out)
-        self.assertEqual(out.splitlines(), [JOINT % (101, "lane/c1", "session_a"), SUMMARY_ONE],
-                         "a held draft or an unarchived commit changed the output: %r" % out)
+        self.assertEqual(self.joint_for(lines, "session_b"), [],
+                         "a lane whose stale draft the batch runner holds printed a joint line: %r" % out)
+        self.assertEqual(self.joint_for(lines, "session_c"), [],
+                         "a lane with an unarchived commit printed a joint line: %r" % out)
+        self.assertEqual(lines, [JOINT % (101, "lane/c1", "session_a"), SUMMARY_ONE],
+                         "the output has lines beyond the control's joint line and summary: %r" % out)
 
 
 if __name__ == "__main__":

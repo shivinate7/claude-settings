@@ -4897,10 +4897,11 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(sorted(re.findall(r"archive/(\S+?)[ ;]", line)), ["c1", "lane/c1"], line)
 
     def test_each_joint_lane_has_its_own_line_sorted_with_the_plain_lanes(self):
+        # session_c is idle with its idle fields set but no pull: the empty case, which must read as a plain line.
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
                    "c3": {"status": "done", "order": 3}})
         self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2"),
-                               self.lane("session_c", "c3")],
+                               self.idle_lane("session_c", "c3")],
                      pulls=[self.stale_pull(101, "lane/c1"), self.stale_pull(102, "lane/c2")])
         self.assertEqual(self.reported(), sorted([self.JOINT % (101, "lane/c1", "session_a"),
                                                   self.JOINT % (102, "lane/c2", "session_b"),
@@ -4977,9 +4978,10 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(self.joint_for(entries, "session_b"), [], "a lane with an unarchived commit printed a joint line")
 
     def test_unarchived_epoch_missing_or_not_an_int_gets_no_joint_line(self):
-        # JSON true is a bool, which Python reads as an int, so it is the case most likely to slip through.
+        # JSON false is a bool that Python reads as an int equal to 0, so a check that only tests isinstance(v, int) and
+        # v == 0 lets it through. JSON true and a float 0.0 are the other shapes a check must refuse.
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
-        for label, value in (("missing", _ABSENT), ("text", "0"), ("true", True), ("float", 0.0)):
+        for label, value in (("missing", _ABSENT), ("text", "0"), ("false", False), ("true", True), ("float", 0.0)):
             with self.subTest(unarchived=label):
                 self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2", unarchived=value)],
                              pulls=[self.stale_pull(101, "lane/c1"), self.stale_pull(102, "lane/c2")])
@@ -5065,11 +5067,47 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: the lane with no open item printed no joint line")
         self.assertEqual(self.joint_for(entries, "session_a"), [], "a lane an open page item holds printed a joint line")
 
-    def test_the_joint_pass_starts_no_process_and_writes_no_file(self):
-        # The cheapest honest proof. Every git read goes through build._nowindow.run, so a count of its calls is the count
+    def test_one_pull_that_is_not_a_stale_draft_stops_the_lanes_joint_line(self):
+        # Lane A has its stale draft on lane/c1 and a second pull on c1 that is not a stale draft: held, a review log, under
+        # 12 h, ready, or titled with a doing step. A joint line needs every pull on the lane to be stale, so lane A waits.
+        # session_b is the control: its one stale draft prints the line.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c5": {"status": "doing", "order": 5}})
+        second = (("held", self.stale_pull(102, "c1", held=True)),
+                  ("a review log", self.stale_pull(102, "c1", reviewLog=True)),
+                  ("under 12 h", self.stale_pull(102, "c1", hours=5)),
+                  ("ready", self.stale_pull(102, "c1", draft=False)),
+                  ("titled with a doing step", self.stale_pull(102, "c1", title="Ruling 557 a home (c5)")))
+        for label, extra in second:
+            with self.subTest(second_pull=label):
+                self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2")],
+                             pulls=[self.stale_pull(101, "lane/c1"), extra, self.stale_pull(103, "lane/c2")])
+                entries = self.reported()
+                self.assertEqual(len(self.joint_for(entries, "session_b")), 1,
+                                 "control: the lane with one stale draft printed no joint line")
+                self.assertEqual(self.joint_for(entries, "session_a"), [],
+                                 "a lane with a %s pull on it printed a joint line" % label)
+
+    def test_a_lane_whose_absent_step_has_a_trailer_on_main_gets_a_joint_line(self):
+        # ghost is on no record branch, so it counts as landed only by its Step trailer on main. Its lane is judged as a
+        # lane of landed steps is, and the stale draft on lane/ghost gives the joint line. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.idle_lane("session_g", "ghost"), self.idle_lane("session_a", "c1")],
+                     pulls=[self.stale_pull(101, "lane/ghost"), self.stale_pull(102, "lane/c1")])
+        steps, _marks = self.steps_and_marks()
+        self.assertNotIn("ghost", steps, "scope: ghost is on the record branch")
+        self.assertIn("ghost", [t[0] for t in build.step_trailers(self.repo, "main")], "scope: no Step trailer names ghost on main")
+        entries = self.reported()
+        self.assertEqual(len(self.joint_for(entries, "session_a")), 1, "control: the lane of a done step printed no joint line")
+        self.assertEqual(self.joint_for(entries, "session_g"), [self.JOINT % (101, "lane/ghost", "session_g")],
+                         "a lane whose absent step has a Step trailer on main printed no joint line")
+
+    def test_the_joint_pass_starts_no_process_and_opens_no_file(self):
+        # Two parts. Process starts: every git read goes through build._nowindow.run, so a count of its calls is the count
         # of process starts. The joint lane is read once as it is, and once with its idle_since left out, which stops the
-        # joint decision and leaves the rest of the read. Equal counts show the decision starts no process of its own, and
-        # the snapshot shows the read writes no file. The live file is read by live_work, as before.
+        # joint decision and leaves the rest of the read; equal counts show the decision starts none of its own. Files:
+        # live_work reads the live file once, before the decision, so the decision on that built work opens no path.
         self.land({"c1": {"status": "done", "order": 1}})
         self.publish(sessions=[self.idle_lane("session_a", "c1")], pulls=[self.stale_pull(101, "lane/c1")])
         before = self.tree()
@@ -5092,6 +5130,22 @@ class IdleLanes(UpkeepFixture):
             plain = self.reported()
         self.assertEqual(plain, [], "scope: the lane with no idle_since is not joint and prints nothing")
         self.assertEqual(joint_starts, len(starts), "the joint decision starts %d process(es) of its own" % (joint_starts - len(starts)))
+        self.publish(sessions=[self.idle_lane("session_a", "c1")], pulls=[self.stale_pull(101, "lane/c1")])
+        steps, marks = self.steps_and_marks()
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        opened = []
+        real_open = io.open
+
+        def recorded(file, *args, **kwargs):
+            if isinstance(file, (str, os.PathLike)):  # subprocess opens its pipes by descriptor, an int, and is no path
+                opened.append(os.fspath(file))
+            return real_open(file, *args, **kwargs)
+
+        with mock.patch("io.open", side_effect=recorded), mock.patch("builtins.open", side_effect=recorded):
+            decided = build.idle_lanes(work, steps, marks, self.SLUG, self.repo)
+        self.assertEqual(decided, [self.JOINT % (101, "lane/c1", "session_a")],
+                         "control: the decision on the built work printed no joint line")
+        self.assertEqual(opened, [], "the joint decision opened %r" % (opened,))
 
 
 class SharedTagNames(unittest.TestCase):
