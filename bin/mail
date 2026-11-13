@@ -4,7 +4,7 @@
 # mail take [--addr <addr>] <id>     move one open message to done/; act on it only after this exits 0
 # --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
-# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use or MAILBOX_REPO not set. Windows: bin/mail.cmd.
+# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use, MAILBOX_REPO not set, or the platform held. Windows: bin/mail.cmd.
 import argparse
 import os
 import secrets
@@ -102,6 +102,9 @@ def main(argv):
     env = dict(os.environ)
     if not env.get("MAILBOX_REPO"):
         print("MAILBOX_REPO is not set", file=sys.stderr)
+        return 2
+    if mail.held(env):
+        print("mail is held on this platform until its round trip passes (step mail-mac-unhold)", file=sys.stderr)
         return 2
     addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
     if not addrs:
