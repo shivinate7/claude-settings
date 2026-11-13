@@ -11,7 +11,7 @@ from guard_core import (
     GIT_OPT_WITH_VALUE, HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT,
     SCRIPT_HEADERS, PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
     basename, dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, long_flag_abbrev,
-    nested_script, norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
+    command_indexes, inner_commands, nested_script, norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -2131,31 +2131,48 @@ def git_apply_hit(raw: str, cwd: str, predicate) -> str:
         return ""
 
 
-def _git_apply_hit(raw: str, cwd: str, predicate) -> str:
+def _git_apply_hit(raw: str, cwd: str, predicate, depth: int = 0) -> str:
     if "apply" not in raw:
         return ""
+    # Read the command as `_shell_write_hit` does: each `$VAR` is its earlier assignment (an unknown one stays as
+    # written, so its patch cannot be read and stays allowed), each subshell `(git apply p)` is a command start
+    # (`command_indexes`), and each script a shell, `eval` or runner starts (`inner_commands`) is read in turn.
+    raw = _resolve_vars(raw)
     ends = []
     segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment) if "apply" in segment else None
-        index = resolve_command(tokens) if tokens else None
-        if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        if not tokens:
             continue
         at = dir_before_segment(segments, number, cwd, ends) or cwd
-        call = _apply_call(tokens, index, at)
-        if not call:
-            continue
-        at, words = call
-        strip, prefix, quiet, *sources = _apply_options(words)
-        if quiet:
-            continue
-        # The names count from the repository's top folder; a patch run outside one counts from the folder.
-        for text in _apply_patch_texts(raw, segments, ends, number, at, *sources, cwd=cwd):
-            for name in _patch_names(text, strip):
-                name = prefix.rstrip("/") + "/" + name if prefix else name
-                if any(predicate(name, base) for base in dict.fromkeys((_apply_root(at), at))):
-                    return name
+        if depth < _APPLY_NEST_LIMIT:
+            for text in inner_commands(tokens):
+                hit = _git_apply_hit(str(text), at, predicate, depth + 1)
+                if hit:
+                    return hit
+        for index in command_indexes(tokens):
+            if basename(guard_core.GLUED_OPEN.sub("", tokens[index])) not in ("git", "git.exe"):
+                continue
+            call = _apply_call(tokens, index, at)
+            if not call:
+                continue
+            where, words = call
+            # a subshell's closing paren is glued to its last word: `(git apply p)`
+            if words and index == 0 and guard_core.GLUED_OPEN.match(tokens[0]):
+                words[-1] = words[-1].rstrip(")") or words[-1]
+            strip, prefix, quiet, *sources = _apply_options(words)
+            if quiet:
+                continue
+            # The names count from the repository's top folder; a patch run outside one counts from the folder.
+            for text in _apply_patch_texts(raw, segments, ends, number, where, *sources, cwd=cwd):
+                for name in _patch_names(text, strip):
+                    name = prefix.rstrip("/") + "/" + name if prefix else name
+                    if any(predicate(name, base) for base in dict.fromkeys((_apply_root(where), where))):
+                        return name
     return ""
+
+
+_APPLY_NEST_LIMIT = 4   # `bash -c "bash -c '...'"` is read this deep, then left allowed
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
