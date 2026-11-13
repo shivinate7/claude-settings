@@ -15385,7 +15385,7 @@ class ReviewRecordWrite(ReviewEnv):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
 
-class ReviewRecordPastHead(ReviewEnv):
+class ReviewLogPastHead(ReviewEnv):
     """`--review-record` may name a past head: a commit of the pull request that the live head holds. Only a record whose every line in its last
     round is FAIL, with no fix check, may name one. The ancestry read is compare(head, live), ahead with no behind. The head must also be a commit
     of the pull request, not of its base: compare(base, head) must not read behind or identical, and it is read once, after the ancestry read. A PASS,
