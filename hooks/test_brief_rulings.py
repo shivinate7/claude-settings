@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Cases for hooks/brief_rulings.py, the check that a finished lane brief keeps every owner ruling that governs its
-step. Standard library only.
+"""Cases for hooks/brief_rulings.py, which checks that a finished lane brief keeps every recorded ruling that governs
+its step, so a builder never acts on a brief that drops or narrows one. Standard library only.
 
     python3 hooks/test_brief_rulings.py
 
