@@ -1570,15 +1570,16 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
+    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question runs one git process, the roadmap read",
-          len(r.calls) == 1 and r.git == 1, detail(r))
+    check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
+          len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
-          len(q.calls) == 1 and q.git <= 1, detail(q))
+    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
+          len(q.calls) == 1 and q.git <= 2, detail(q))
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
