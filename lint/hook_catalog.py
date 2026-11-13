@@ -47,7 +47,8 @@ Sources, all read from the root:
                           README takes the `description` in its .claude-plugin/plugin.json,
                           and must hold a SOURCE.md (repo, commit, licence), which the page omits.
   skills                  the `description` in the frontmatter of skills/<name>/SKILL.md.
-  model and effort        the row of the model table whose first cell names the script.
+  model and effort        the row of the model table whose first cell names the script. A row whose
+                          first cell also names an event gives its model to that event's rows only.
 
 Exits 1 and prints one line per problem when a source is missing or empty, or the page is
 stale. Exits 2 and names the path when an input cannot be read. Writing the page refuses to
@@ -308,8 +309,9 @@ def inline_summaries():
     return found, twice
 
 
-def model_table():
-    """{script path: (model, effort)} for each model-table row that names a script."""
+def model_table(events):
+    """{(script path, event): (model, effort)} for each model-table row that names a script.
+    The event is each settings.json event word in the first cell, else "" for a row that names none."""
     found = {}
     for line in read(layout.path(ROOT, "decisions") + "/" + TABLE_NAME).split("\n"):
         if not line.lstrip().startswith("|"):
@@ -319,8 +321,15 @@ def model_table():
         if not path or len(cells) < 3:
             continue
         model = re.match(r"[\w.-]+", cells[1])
-        found[path.group(1)] = (model.group(0) if model else "unknown", cells[2].strip("` ") or "unknown")
+        value = (model.group(0) if model else "unknown", cells[2].strip("` ") or "unknown")
+        for event in [e for e in events if re.search(r"\b%s\b" % e, cells[0])] or [""]:
+            found[(path.group(1), event)] = value
     return found
+
+
+def model_of(models, path, event):
+    """The model and effort for a script's row: the event's own table row beats the script's."""
+    return models.get((path, event), models.get((path, ""), NO_MODEL))
 
 
 # ---- the page ----------------------------------------------------------------------------------
@@ -338,7 +347,7 @@ Where each text comes from:
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, and must hold a `SOURCE.md`, which says where it came from. The page omits that file's text.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
-Model and effort come from the model table (decision `agent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
+Model and effort come from the model table (decision `agent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A table row that names an event (a bare event word after the script path, as in "UserPromptSubmit only") gives its model and effort to that event's rows only, and the script's other events say "no model". A row that names no event gives its model to every row of the script. A row that names an event its script never registers fails the check. A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
 
 """
 
@@ -371,7 +380,7 @@ def inline_key(label, command):
 def render():
     """(page text, problems). A problem is one line that names its offender."""
     settings = load_settings()
-    models = model_table()
+    models = model_table(settings.get("hooks", {}))
     inline, twice = inline_summaries()
     used = set()
     problems, hook_rows, docs = ["%s writes the key %r more than once" % (INLINE, k) for k in twice], [], {}
@@ -393,15 +402,20 @@ def render():
                 problems.append("%s: %s has no docstring (a .py docstring, or a .sh comment block after the shebang)" % (label, path))
             else:
                 docs[path] = found
-                if ext == "py" and path not in models and calls_invoke_model(text):
+                if ext == "py" and not any(p == path for p, _e in models) and calls_invoke_model(text):
                     problems.append("%s: %s calls invoke_model but has no model-table row" % (label, path))
         return docs[path]
 
-    modes_of = {}
+    modes_of, registered = {}, set()
     for event, _matcher, _cond, hook in registrations(settings):
         found = CMD_PATH.search(hook.get("command", "")) if hook.get("type") == "command" else None
         if found:
             modes_of.setdefault(found.group(1), set()).add(mode_key(event, hook["command"]))
+            registered.add((found.group(1), event))
+    for path, event in sorted(models):
+        if event and (path, event) not in registered:
+            problems.append("%s: the model table has a row for %s under %s, but the script never registers that event"
+                            % (TABLE_NAME, path, event))
 
     def script_row(path, label, event, command):
         """The text of a script row: its mode line when the docstring has modes, else the first paragraph."""
@@ -438,7 +452,7 @@ def render():
             path = found.group(1)
             what = script_row(path, label, event, hook.get("command", ""))
             if what:
-                model, effort = models.get(path, NO_MODEL)
+                model, effort = model_of(models, path, event)
                 hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what, CELL_CAP)])
         elif kind in ("prompt", "agent"):
             prompt = hook.get("prompt", "")
