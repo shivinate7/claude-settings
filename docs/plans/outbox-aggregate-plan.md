@@ -121,8 +121,31 @@ The refuter held only the step text and this plan. Findings, with this lane's ch
 - Item 659, clearing route: **either works.** For the one-time push, a claude-settings session needs no
   override. It adds the child repo to its own session (`add_repo`) and acts. So act 4 may clear by the child's
   triage, or by a claude-settings session with the child attached. The session picks per repo by what runs.
-- Item 660, repo access: not answered yet. Act 1 waits on it.
+- Item 660, repo access: **yes, attach read-only** (page answer, 2026-11-13 11:06 CST, read from
+  `answers/outbox-repo-access`). The owner adds `home` and `degen` back to the sweep, so it covers 13 repos.
+  He also asks that the batch runner updates its checkout of all of them, so none is stale. That line went to the
+  batch runner at 11:08 CST.
+
+## Act 1 result (11:10 CST Nov 13, Explore sonnet)
+
+13 repos read, scope the outbox folder only. **0 items for claude-settings. No repo is in state A.**
+
+| Repo | State | Outbox on record branch |
+|---|---|---|
+| joyous, ios-adblock, home | B | `README.md` only |
+| degen | B | `README.md` plus `claude-settings-coordinator.md`, a note to degen's own triage (3 sub-items, all degen's), left by the claude-settings coordinator on Nov 10 |
+| session-mailbox, inbox-engine, advisor, Brewer-KYC, mailaudit-data, frag-head-beta, note-scrape, tile-windows, adblock-lists | C | no `roadmap` branch, so no outbox |
+
+- No read failed, so no row is unknown. State E (retired) is unproven: the explorer had the retired list
+  (`home-app` only), not an archive flag.
+- Not re-read: q_max, banchi and mailaudit (README only on Nov 10, item 490), and `home-archive` (archived).
+- Meaning: the owner's premise that other outboxes hold many findings is **false on the evidence**: 0 of 13 hold
+  one. The backlog drain (acts 3 and 4) has nothing to drain. Steady state needs no per-repo poll. What stays
+  useful is act 6: the one mailbox folder, so a child's future finding arrives without an outbox read.
+- Open for the owner: degen's `claude-settings-coordinator.md` is state B (degen's triage deletes it). Say if
+  claude-settings should clear it instead (the answer on item 659 allows it).
 
 ## Next
 
-Act 1 on the 11 unswept repos waits on item 660 (access).
+Triage tells the owner the result. The owner picks whether act 6 (the mailbox folder) is built now or waits for the
+Mac auth measurement (owner act c).
