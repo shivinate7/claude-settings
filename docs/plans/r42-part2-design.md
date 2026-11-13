@@ -4,11 +4,11 @@ Design for ruling R42 part 2 (docs/plans/restart-plan.md), not yet decided. Plan
 
 ## Plan
 
-Point: R42 part 2 (per-lane merges, test after merge, revert, stable branch) is buildable from existing homes, but 4 premises fail against live records; the "Never revert" rule and M3 (green run on current main) are the load-bearing ones, and the installers are the easy part. Order is forced: stable branch, then installers, then bisect/revert, then delete the batch brake; deleting the brake first ships a red main to every session through the installers.
+Point: R42 part 2 (per-lane merges, test after merge, revert, stable branch) is buildable from existing homes, but 4 premises fail against live records. The "Never revert" rule and M3 (green run on current main) are the load-bearing ones. The installers are the easy part. Order is forced: stable branch, then installers, then bisect/revert, then delete the batch brake; deleting the brake first ships a red main to every session through the installers.
 
 Premises (decision premise-format):
 - P1 [ruling] Owner picked A for R42 part 2. Source: restart-plan.md:762. Checked 2026-11-11. HOLDS.
-- P2 [ruling] "A lane merges on its own green checks". Source: restart-plan.md:756. Checked 2026-11-11. FAILS if it means the lane session merges: standing-merge-grant.md:16 (owner 2026-11-01 19:23, "option C absolutely not correct"); session-tiers.md:121 (cloud confirm needs batch-runner role). Plan reads it as: each lane PR merges alone, batch runner still runs merge.
+- P2 [ruling] "A lane merges on its own green checks". Source: restart-plan.md:756. Checked 2026-11-11. FAILS if it means that the lane session merges: standing-merge-grant.md:16 (owner 2026-11-01 19:23, "option C absolutely not correct"); session-tiers.md:121 (cloud confirm needs batch-runner role). Plan reads it as: each lane PR merges alone, batch runner still runs merge.
 - P3 [read] Main's CI runs after each merge, one verdict per commit. Source: checks.yml:4 (push main), :26 (group = run_id, never cancelled). Checked 2026-11-11. HOLDS. So bisect is a read: first red push run whose parent's run is green.
 - P4 [ruling] A red main run reverts the breaking commit. Source: restart-plan.md:757. Checked 2026-11-11. FAILS against skills/ci-hygiene/SKILL.md:103-104 ("Never revert") and merge-deletes-batch-lanes.md:47 (batch #663 lost 11 of 13 files, refuse_dropped_lane). Needs a re-land route (act 3).
 - P5 [read] Lanes are "green alone" today. Source: main-branch-protection.md:11-21. Checked 2026-11-11. FAILS partly: a draft PR runs no checks.yml job; Windows shards never run on a PR, so the first Windows verdict is main's (debt windows-main-run-flakes: false reds there).
@@ -41,9 +41,9 @@ Premises (decision premise-format):
 (3) Risks and guards:
 - Red main: sessions never see it, because stable does not move (acts 1-2); the red-main check (no-merge-onto-red-main) stops other merges until the revert's run is green (33-38 min per run, restart-plan.md:268).
 - Two lanes green alone, red together: lane-lint's merge-tree catches text clashes (lanes-run-no-full-ci-job.md:17); silent-undo check stays at merge (SKILL.md:124); main's run catches the rest and bisect names the later commit, so that lane is reverted.
-- Revert loops: a revert is never itself reverted (trailer); a red that survives one revert stops all reverts and posts one waiting-page item; a PR reverted twice goes to a fix lane (R26 part 2 shape); a flake re-run comes before any blame (debt windows-main-run-flakes).
-- Child repos on stable: stable moves only on a fully green main run that includes the actions' own tests (checks.yml:618-619); a child red from an action is fixed by a revert on claude-settings main; a child may hold a sha pin as a cited exception (R44).
-- CI runners: each ready lane PR and each merge start 11 runners (main-branch-protection.md); the repo is public (README.md:185), so no minutes bill; account concurrent-job limit unmeasured; measure queue time in the pace numbers before changing push-run grouping.
+- Revert loops: a revert is never itself reverted (trailer). A red that survives one revert stops all reverts and posts one waiting-page item. A PR reverted twice goes to a fix lane (R26 part 2 shape). A flake re-run comes before any blame (debt windows-main-run-flakes).
+- Child repos on stable: stable moves only on a fully green main run that includes the actions' own tests (checks.yml:618-619). A child red from an action is fixed by a revert on claude-settings main. A child may hold a sha pin as a cited exception (R44).
+- CI runners: each ready lane PR and each merge start 11 runners (main-branch-protection.md). The repo is public (README.md:185), so no minutes bill. The account concurrent-job limit is unmeasured. Measure queue time in the pace numbers before changing push-run grouping.
 
 (4) Until act 4 lands, everything stays batched: R26/3.4 batches, the batch brake, the freeze, blame-and-drop. The merge lock stays after cutover too: one merge at a time (merge-lock.md), but with no CI wait under it.
 
@@ -56,9 +56,11 @@ Input Needed (plan does not wait on them):
 ## Refuter
 
 Refuter verdict: HOLDS WITH CHANGES (Opus, 22:58 CST Nov 11).
+
+Refuter: refuter opus, 2026-11-11, HOLDS WITH CHANGES (gaps 1 to 6 below).
 Premises P1-P6 hold (P2 as the plan reads it). P7, P8, P9 unknown.
 Gaps:
-1. No wake on a red main run: ci-done runs only on PRs (checks.yml:1981); ci-alarm is tested (checks.yml:618-619) but never called; Issues ruled out (p'). Act 3 needs a named trigger, e.g. the batch runner sets a one-time check-in on main's push run after each merge (git-ci-wait-checks-in).
+1. No wake on a red main run: ci-done runs only on PRs (checks.yml:1981); ci-alarm is tested (checks.yml:618-619) but never called; Issues ruled out (p'). Act 3 needs a named trigger, for example the batch runner sets a one-time check-in on main's push run after each merge (git-ci-wait-checks-in).
 2. Part (2) misses decision draft-until-reviewed (owner: "Lane PRs stay drafts. Only one integration PR per batch goes ready."); per-lane merge needs that ruling changed. 13 decisions name the integration PR; the plan lists ~9 and omits auto-mode-owner-acts, records-index-at-merge, pr-review-record, pr-ledger, notes-merge-union, claims-carry-backing, child-cites-not-copies, plus skills/project-ops/SKILL.md and templates/operating-model.md.
 3. The merge tool is shared (~/.claude/bin/merge runs claude-settings merge.py for every repo). Act 4 removes batching and the green-on-current-base check in child repos too, which get no stable branch or revert route. A per-repo switch conflicts with decision uniform-over-variants. Owner question.
 4. Act 2 misses install.ps1:39 (refs/heads/main) and merge/launch.py:39-47 (merge tool runs from origin/main; say main or stable). The SessionStart pin move is new (session_start.sh:264-271 only warns); its done check covers only cloud.
