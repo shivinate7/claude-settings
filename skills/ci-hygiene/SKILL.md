@@ -222,6 +222,33 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     no scope `if:` (`checks.yml`, lines 75-667), so a docs-only PR runs them all. Run 43466545532
     (batch 133, docs only) ran 149 of 167. Count again before you repeat this: add a flag-free step
     and the number moves. An unreadable diff or an unmapped path runs everything.
+20. **The suites bend, not the wait** (owner, 11:34 CST Nov 13). Cut a suite's work, or run it only when
+    its inputs change. Never lengthen the wait to save runner work. Set no fixed time target. Measure wall
+    time before and after on the same kind of batch (owner, 11:36 CST, R37). Cost here is wall time, macOS
+    slots and shared-token calls. No Actions minutes are billed (`ci-cut-in-steps.md`, line 13), so step 13
+    does not apply to this repo.
+21. **Gate a suite by what it reads.** In run 43466545532 (docs only), the `code` flag was off and all
+    149 flag-free steps ran. `checks` set the wall time: 40.7 of 43.5 job minutes. A flag-free step runs
+    on every docs change. Before you add a flag to one, grep its source for the tracked docs it reads.
+    `lint/test_report_guard.py` line 994 reads `agents/<role>.md`, so it needs its own path map beside
+    the browser-job list in `ci-scope.sh` (lines 93-105). Keep the doc lints ungated. Keep each step's
+    name: `lint/rule_audit.py` reads names. Unmeasured: how many of the 81 flag-free suites that name a
+    `.md` path really read a doc.
+22. **Read the slot queue before you blame a job.** GitHub allows 5 macOS jobs at once. In run
+    43455790930 `checks-macos` queued 978 s. It started 1.4 min after run 43453097652's `checks-macos-b`
+    ended, and that run held 3 of 5 slots (`draft-until-reviewed.md`, line 15). List the runs that hold
+    slots first. Then decide where to cut.
+23. **A push run repeats a tested tree.** Batch 132's merge commit and its PR head share tree `5c450efc`
+    (run 43464896080 against PR run 43455790930). The push adds only the full Windows guard, Windows
+    merge and sweep mutation shards (`checks.yml`, lines 1527-1530 and 1607-1608). The rest repeats
+    (`test-strategy-reset.md`, line 29: a duplicate run costs time for no new verdict). Compare
+    `git rev-parse <sha>^{tree}` before you add a job to the push run. Risk: a tree that reaches main
+    with no PR run gets no macOS check until the nightly run.
+24. **Find the job that sets the wall time, then split it.** `checks` is one chain of 167 steps. It sets the
+    wall time on a docs path and on push (42.2 min, run 43453097652). On a code PR `checks-macos` is
+    longer (34.75 min, run 43455790930). A 3-job split of `checks` is projected, unmeasured. Measure it
+    before and after (step 15). 12 runners start only to skip. The rollup fails a skipped job, so a skip
+    stays at the step (step 19).
 
 ## Public repos
 
