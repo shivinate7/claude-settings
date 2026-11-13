@@ -31,7 +31,7 @@
   "owner": "lane cloud-precompact-handoff-stale (session_013NEJL34URk7P9AdEH62S3i), via coordinator",
   "pick": "a",
   "ref": "coordinator 21:22 CST Nov 12",
-  "reply": "Closed 01:09 CST Nov 13 by triage: option a taken without waiting, since it can be undone and matches what you expected (several reminders before compaction). The lane adds a second handoff reminder about 20k tokens under the compaction line, red test first, reviewed as a guard change. To undo, say so on this item and the lane reverts it.",
+  "reply": "Closed 01:09 CST Nov 13 by triage: option a taken without waiting, since it can be undone and matches what you expected (several reminders before compaction). Built as PR #3110. Changed 01:41 CST, also by triage: the item's \"only when the gap exceeds 75k\" never fires (the first reminder sits 50k under the line), so the build keeps the late reminder when it sits 25k or more past the first. To undo either, say so on this item and the lane reverts it.",
   "repo": "shivinate7/claude-settings",
   "short": "Late handoff checkpoint before compaction",
   "status": "closed",
