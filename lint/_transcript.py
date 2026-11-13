@@ -465,17 +465,20 @@ def _session_tags(node, found):
             _session_tags(child, found)
 
 
-def tag_writer(records, repo):
-    """The one session whose newest get_session or list_sessions record in the main session carries cs-build:triage and
-    cs-repo:<repo>, else None. A session's newest record decides, so one that is no longer triage drops out. Zero or
-    two such sessions name no writer: a guess between two would refuse the real one. `repo` is compared lowercase; no
-    repo names no writer. A failed result is no record. A listing counts as a record of each session it holds."""
+def tag_writer(turn, repo):
+    """The one session whose newest get_session or list_sessions record in `turn` (the main session's records after the
+    last human message) carries cs-build:triage and cs-repo:<repo>, else None. Only the current turn counts: a tag read
+    in an earlier turn may be stale, since triage restarts and gets new ids. A session's newest record decides, so one
+    that is no longer triage drops out. Zero or two such sessions name no writer: a guess between two would refuse the
+    real one. `repo` is compared lowercase; no repo names no writer. A failed result is no record. A list_sessions
+    result with has_more true is no record: its page may miss the triage session, so the writer is unknown. A
+    listing counts as a record of each session it holds."""
     if not repo:
         return None
     import own_session  # lazy: it lives in hooks/, which every caller of this module has on sys.path
     wanted = {TRIAGE_TAG, "cs-repo:" + repo.lower()}
     pending, tags = set(), {}
-    for rec in records:
+    for rec in turn:
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
@@ -485,15 +488,19 @@ def tag_writer(records, repo):
             if block.get("tool_use_id") not in pending or block.get("is_error") is True:
                 continue
             try:
-                _session_tags(own_session._record_json(result_text(block)), tags)
+                body = own_session._record_json(result_text(block))
             except (ValueError, KeyError, TypeError):
                 continue
+            if isinstance(body, dict) and body.get("has_more") is True:
+                continue
+            _session_tags(body, tags)
     match = [sid for sid, have in tags.items() if wanted <= have]
     return match[0] if len(match) == 1 else None
 
 
-def page_writer(records, repo):
-    """The page writer: the `writer` of the newest meta/page get in the main session, else the one session its triage
-    tag names for `repo` (tag_writer). The one home of "who writes the page"; the pick guard and the owner-feedback
-    check both call it, so they cannot disagree. None when neither names one."""
-    return page_writer_id(records) or tag_writer(records, repo)
+def page_writer(records, repo, turn):
+    """The page writer: the `writer` of the newest meta/page get in the main session (any turn), else the one session
+    its triage tag names for `repo` in `turn` (tag_writer). The one home of "who writes the page"; the pick guard
+    (its `turn`) and the owner-feedback check (records_after_last_human) both call it, so they cannot disagree.
+    None when neither names one."""
+    return page_writer_id(records) or tag_writer(turn, repo)

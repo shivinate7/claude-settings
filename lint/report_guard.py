@@ -1194,15 +1194,29 @@ def _is_page_writer(path):
     return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
-def _turn_acts(records, turn, acks):
-    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
-    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+def _ack_turn(records, turn, acks):
+    """`turn`, reaching back past its first record when that record is the ack of a send from a session in `acks`."""
     cut = len(records) - len(turn)
     if cut and peer_sender(records[cut - 1]) in acks:
         idx = last_incoming_index(records, acks)
         turn = records if idx is None else records[idx + 1:]
-    uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
+    return turn
+
+
+def _turn_acts(records, turn, acks):
+    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
+    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+    uses = [u for r in _ack_turn(records, turn, acks) if not r.get("isSidechain") for u in tool_uses(r)]
     return uses, [send_targets(u) for u in uses]
+
+
+def _tag_turn(records, turn):
+    """The records a session tag is read from: `turn`, reaching back past the ack of a send when the turn's last incoming
+    message is a peer's. The writer is not known yet, so the sender is taken as the one whose ack it is; a tag read from
+    before a send to the writer stays in the turn, and a sender that is no writer widens it by that one ack only."""
+    cut = len(records) - len(turn)
+    sender = peer_sender(records[cut - 1]) if cut else None
+    return _ack_turn(records, turn, {sender: {sender}}) if sender else turn
 
 
 def question_problem(records, turn, text, hook):
@@ -1210,19 +1224,19 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with none, the one session its triage tag names for this repo (`_transcript.page_writer`), read
-    from the get_session and list_sessions records of this transcript (its ack starts no turn either). A tag
-    writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send with no result,
+    meta/page read's (any turn); with none, the one session its triage tag names for this repo (`_transcript.page_writer`), read
+    from the get_session and list_sessions records of this turn only, and not from a list_sessions page with
+    has_more true (its ack starts no turn either). A tag writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send with no result,
     a failed result or a non-delivered one does not. A transcript writer counts on the send alone. With no writer
     named, or two triage sessions, the refusal says to run list_sessions in its own turn first. The question box
     counts only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    Lane: a send to the parent or the page writer (a tag writer's send must be delivered); a send to @parent counts only in a lane. A session whose own
     newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
     parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
-    import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads the repo name (git's config file) and the transcript's session records for the
-    tag writer when it has no meta/page writer, then the waiting page (`layout.waiting_page`); a delivered send to
+    import and a transcript read, only in a session with a remote id. A session with no meta/page
+    writer reads the repo name (git's config file) and the turn's session records for the tag writer, a lane too; an
+    owner-facing turn with no counted send then reads the waiting page (`layout.waiting_page`); a delivered send to
     the tag writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
@@ -1230,6 +1244,23 @@ def question_problem(records, turn, text, hook):
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
     if writer and any(writer in t for t in sends):
+        return "", ""
+    root = repo_root(hook.get("cwd"))
+    tagged = False
+    if not writer and root:
+        # The tag writer is named before the lane branch, so a lane's send to it counts like a send to the parent.
+        writer = page_writer(records, layout.repo_name(root), _tag_turn(records, turn))
+        tagged = bool(writer)
+        if writer:
+            acks[writer] = {writer}
+            uses, sends = _turn_acts(records, turn, acks)
+
+    def reached_tag_writer():
+        # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
+        delivered = delivered_tool_use_ids(records)
+        return tagged and any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends))
+
+    if reached_tag_writer():
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
@@ -1239,22 +1270,12 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        if any(t & wanted for t in sends):
+        wanted = ({parent} if parent else set()) | ({writer} if writer and not tagged else set()) | PARENT_TARGETS
+        if any(t & wanted for t in sends) or reached_tag_writer():
             return "", ""
         if not _is_page_writer(hook.get("transcript_path")):
             return LANE_REFUSAL, ""
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
-    root = repo_root(hook.get("cwd"))
-    if not writer and root:
-        writer = page_writer(records, layout.repo_name(root))
-        if writer:
-            acks[writer] = {writer}
-            uses, sends = _turn_acts(records, turn, acks)
-            # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
-            delivered = delivered_tool_use_ids(records)
-            if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
-                return "", ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
@@ -1267,8 +1288,8 @@ def question_problem(records, turn, text, hook):
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
                             "the page writer is not known to this session; the waiting page is " + page + ". Run list_sessions "
-                            "(tag cs-build:triage, the same cs-repo tag as this repo) in its own turn first, so the one triage "
-                            "session is named, then send the question to it"), ""
+                            "with the tags filter cs-build:triage and this repo's cs-repo tag, in its own turn first, so one "
+                            "page holds the one triage session, then send the question to it"), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.

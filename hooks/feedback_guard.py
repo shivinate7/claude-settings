@@ -701,10 +701,11 @@ class Pages:
 
     def is_writer(self, session_id, repo=None):
         """True when `_transcript.page_writer` names `session_id`: the newest meta/page get's writer, else the one session
-        tagged cs-build:triage and cs-repo:<repo> (the pick guard reads the same function). With no `repo`, only a
-        meta/page get can name it. False when it names another, none, or the transcript cannot be read: the writer is
+        tagged cs-build:triage and cs-repo:<repo> in this turn's records (the pick guard reads the same function over
+        the same turn). With no `repo`, only a meta/page get can name it. False when it names another, none, or the transcript cannot be read: the writer is
         not known, so the session is not it."""
-        return bool(session_id) and self._load() and _transcript.page_writer(self.records, repo) == session_id
+        return bool(session_id) and self._load() and _transcript.page_writer(
+            self.records, repo, _transcript.records_after_last_human(self.records)) == session_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
