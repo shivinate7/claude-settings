@@ -1,0 +1,16 @@
+{
+ "id": "local-time-central-line-28-stale",
+ "title": "Fix the stale line 28 of docs/decisions/local-time-central.md",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "stamp-clock-check-everywhere"
+ ],
+ "why": "A decision record says something #3234 made false, so a reader acts on stale text.",
+ "source": "Lane stamp-clock-check-everywhere, #3234 head 931c4f508 (handed to runner 10, lint PASS), via the coordinator 14:50 CST Nov 13. Item 2.",
+ "note": "Filed 14:50 CST Nov 13. Docs lane (record-writer), after #3234 merges or on its head; what the line should say follows #3234 (unread by triage). Docs only: no review beyond the repo's docs rule (decision docs-only-prs-skip-review). Coordinator asked to be told when this is ready to start: ready once #3234 has merged; until then todo.",
+ "updatedAt": "2026-11-13T14:50:23-06:00"
+}

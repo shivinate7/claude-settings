@@ -1,0 +1,14 @@
+{
+ "id": "stamp-clock-handoffs-and-step-notes",
+ "title": "The stamp clock check covers handoff writes and step-note stamps",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A handoff or step note carries a time read from memory, not from the clock helper, in the places the check does not reach.",
+ "source": "Lane stamp-clock-check-everywhere, #3234 head 931c4f508 (handed to runner 10, lint PASS), via the coordinator 14:50 CST Nov 13. Item 1.",
+ "note": "Filed 14:50 CST Nov 13. #3234 covers the other stamp places; handoff writes and step-note stamps are not covered, so step stamp-clock-check-everywhere stays open. Stacks on #3234 (one home). A check change: test-author red case first, builder, reviewer. Past rulings not checked; the lane's coverage reading is unread by triage.",
+ "updatedAt": "2026-11-13T14:50:23-06:00"
+}
