@@ -281,7 +281,7 @@ class ReviewedCursor(tm.CloudSession):
         self.assertEqual(third, second, "the cache lost the reopened pull request's log on the next run")
 
     def stale_case_comments(self):
-        """-> (open log, passing log, lint): the newest log fails round 1, so #7 is open until it is deleted."""
+        """-> (open log, passing log, lint): the newest log records a failed review, so #7 stays open until that log is deleted."""
         lint = tm.lint_of(7, tm.REVIEW_HEAD)
         passing = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
         failed = tm.review_comment(2, 7, tm.record_text(rounds=ROUND_ONE_FAIL), created=T2)
