@@ -1,0 +1,14 @@
+{
+ "id": "shell-write-scan-quadratic",
+ "title": "The shell-write scan with `writes_first` is quadratic: a 6500-word command times out and runs unjudged",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A long command that the guard cannot judge in time runs with no verdict, so the guard allows what it could not read.",
+ "source": "Lane rebuild-2123 (session_013NEJL4Lqx759D54GPKCSc2) 14:44 CST Nov 13: PR #3249 (replaces #2123) passed review; notes are in the review-record comment \"Notes, none blocking\". Lane says worth a debt.",
+ "note": "Filed 14:44 CST Nov 13. Lane's finding (unread by triage): in the PR #3249 guard the shell-write scan with `writes_first` is quadratic; 6500+ words times out and the command runs unjudged. Fix: a linear scan, or a size cap that fails closed (refuse or ask, never run unjudged); red test first with a command over 6500 words. A guard change: test-author, builder, reviewer. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:44:56-06:00"
+}

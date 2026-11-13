@@ -1,0 +1,14 @@
+{
+ "id": "coordinator-docs-write-scope",
+ "title": "The coordinator path guard blocks docs/map, README, CLAUDE.md and docs/catalog.md, while the root rule says a spawner writes docs",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A guard and a root rule give different answers to what the coordinator may write; a coordinator either breaks the rule or hits a refusal.",
+ "source": "Lane rebuild-2123 (session_013NEJL4Lqx759D54GPKCSc2) 14:44 CST Nov 13: PR #3249 (replaces #2123) passed review; notes are in the review-record comment \"Notes, none blocking\". Item 4.",
+ "note": "Filed 14:44 CST Nov 13. Lane's finding (unread by triage): coordinator cannot write docs/map, README, CLAUDE.md, docs/catalog.md under #3249; root CLAUDE.md rule roles-orchestrator-never-builds says a spawner writes records, docs and briefs. Triage reading: the rule is the owner's and governs; the guard follows it unless a recorded incident says otherwise (rule building-guard-needs-incident). Related: step coordinator-writes-page-data (same shape, page data). Not asked of the owner yet: the next step is a past-ruling check of decision session-tiers line 31 and the guard's record; if they conflict with the rule, an owner question follows. No lane.",
+ "updatedAt": "2026-11-13T14:44:56-06:00"
+}

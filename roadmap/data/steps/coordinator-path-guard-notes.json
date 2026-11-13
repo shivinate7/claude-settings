@@ -1,0 +1,14 @@
+{
+ "id": "coordinator-path-guard-notes",
+ "title": "Notes from PR #3249 (coordinator_path_outside): sed `s#a#b#w FILE` other-delimiter form, and a bare `except Exception` that allows with no log",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Two small gaps in the rebuilt coordinator path guard, filed as notes, not debts.",
+ "source": "Lane rebuild-2123 (session_013NEJL4Lqx759D54GPKCSc2) 14:44 CST Nov 13: PR #3249 (replaces #2123) passed review; notes are in the review-record comment \"Notes, none blocking\".",
+ "note": "Filed 14:44 CST Nov 13. (1) A sed `s#a#b#w FILE` other-delimiter form is allowed in #3249 and refused on main; lane says attacker-only, so it is a note (update note sed-w-flag-other-delimiter), not a debt (rule guard-guards-mistakes-only). (2) A bare `except Exception` in coordinator_path_outside allows with no log; note. (3) Process: the merge tool refused a Fix check line after an earlier record's, so the chain on #3249 is round 1 FAIL, round 2 PASS plus plain-comment fix checks (a case for step review-record-failed-post and the merge-tool lane). Unread by triage. Notes live in the repo's debt store notes file; the lane files them there, not in the PR.",
+ "updatedAt": "2026-11-13T14:44:56-06:00"
+}
