@@ -55,6 +55,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
+    - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
@@ -148,7 +149,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the item carries `shown`,
     each shown option keeps its key, so `lastAnswer` keeps its `choice`. An item with no `shown` may have moved its keys: write `lastAnswer` again without `choice`.
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when the item is posted
-    with `holds` for a lane, and when an answer takes the busy-lane path. An item that holds a lane and has no `lane` routes its answer to `owner` only, so `--unread` names it `lane-missing`. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
+    for a lane wait, and when an answer takes the busy-lane path. A lane wait sets `holdsLane` true and `lane` at posting; a merge or PR wait sets `holds` only. An item with `holdsLane` true and no `lane` routes its answer to `owner` only, so `--unread` names it `lane-missing`. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
   - `closed` (an ISO UTC time with a trailing `Z`) is when the item closed. The session that closes the item writes it in the same `update` as `status: "closed"`
     (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read.
@@ -327,7 +328,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it. A capability reason in the line ends with `(route <id>)` or `(measured <YYYY-MM-DD>, <check and result>)`; the writer refuses it otherwise.
      Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
-     with nothing waiting, leave `holds` out.
+     with nothing waiting, leave `holds` out. When a lane waits, also set `holdsLane` true and `lane`; a merge or PR wait sets `holds` only.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
@@ -362,7 +363,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. An answer already routed (its item has `lane`, a `lastAnswer.at` equal to the answer's `at`, and a receipt with `read` at or after that `at`) is not listed, so the lane is not messaged twice. A routed answer with no such receipt is listed. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text. When the line ends `, lane <slug>)`, it sends the same message to that lane too, found as "Never-ending wait" says.
-  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holds` and no `lane`, whatever its `waits`. Find the lane that waits on it (ask the item's `owner`), then write `lane` on the item, or drop `holds` when nothing waits. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears when a receipt with `read` at or after the answer's `at` exists, so write the reply and that receipt in one wake. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
+  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holdsLane` true and no `lane`, whatever its `waits`. Find the lane that waits on it (ask the item's `owner`), then write `lane` on the item. Never drop `holds`. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears when a receipt with `read` at or after the answer's `at` exists, so write the reply and that receipt in one wake. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an

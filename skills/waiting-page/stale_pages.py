@@ -109,7 +109,8 @@ Two more lines, after the answer lines and before any unknown line:
 `answer-needs-reply <id> (item <n>, owner <owner>, answered <at>)` for an item answer of `choice` `none` whose `note` is not blank, when
 the item has no `reply` with text and a `replied` later than the answer's `at` (read or unread, whatever the wake). A `replied` that is
 not an ISO time, with a `reply` text, is unknown. On an item with `waits`, `replied` is not trusted, since a wait moves it too: the line clears once a receipt for the answer has a `read` at or after the answer's `at`.
-`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holds` text and no `lane` text, whatever its `waits`.
+`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holdsLane` true and no `lane` text, whatever its `waits` and with or without `holds` text.
+An item with `holds` alone (a merge or PR wait) never gets it, and neither does a closed item.
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
@@ -823,10 +824,10 @@ def unread_mode(argv):
                     "waits" not in item and not (has_text(item.get("reply")) and reply_at is not None and reply_at > at)):
                 lines.append("answer-needs-reply %s (item %s, owner %s, answered %s)" % (
                     key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"]))
-    # An open item that holds something up (`holds`) names its lane, whatever its `waits`.
+    # An open item whose lane wait is flagged (`holdsLane` true) names its lane, whatever its `waits`. `holds` alone is a merge or PR wait: no lane to name.
     for r in entries(items):
         item = data(r)
-        if item.get("status") != "closed" and has_text(item.get("holds")) and not has_text(item.get("lane")):
+        if item.get("status") != "closed" and item.get("holdsLane") is True and not has_text(item.get("lane")):
             lines.append("lane-missing %s (item %s, owner %s)" % (r.get("id"), item.get("n", "?"), item.get("owner", "?")))
     out = lines + unknown
     print("\n".join(out) if out else "unread: clean")
