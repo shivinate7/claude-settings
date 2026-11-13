@@ -331,6 +331,15 @@ class LaneLint(LaneFixture):
         self.assertIn("main", lines[0])
         self.assertIn("batch runner", lines[0])
 
+    def test_lane_lint_runs_ci_job_with_pinned_as_the_ready_check_does(self):
+        """The lane lint's ci-job run carries --pinned, so a step pinned to a claude-settings sha runs that sha's harness. The stub logs
+        the argv it received, so this reads the run, not the code. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        argv = self.lint_calls()[0]["argv"]
+        self.assertIn("--pinned", argv, "the lane lint's ci-job run has no --pinned, so a pinned step runs the local copy: %s" % argv)
+
     def test_a_passing_lint_with_a_stale_pin_prints_the_whole_drift_line_on_its_pass_line(self):
         self.use_ci_job(PASSING, 0, details={"ste lint": PIN_NOTE_MARKER + PIN_NOTE_DRIFT})
         rc, out = self.lint_run("--lane-lint", "7")
