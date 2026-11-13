@@ -209,7 +209,7 @@ Design:
   `unknown` and exits 1, never `open`. An unsafe id prints `bad address or id` and exits 2. A git fault prints
   `mail unknown: <reason>` on stderr and exits 1. Cost per call: at most four git invocations, ls-remote, fetch, `ls-tree -r`
   and, for a taken message only, one show (`hooks/test_mail.py` pins the counts). The fetch may spawn upload-pack, rev-list
-  and `maintenance run --auto` children. It writes objects in the cache only. Status writes no message, no ref and no log. An id
+  and `maintenance run --auto` children. It writes only inside the cache (objects, the mail ref, FETCH_HEAD). Status moves no ref in the store and writes no message or log. An id
   that is empty or holds a `/` prints `bad address or id` and exits 2 before git is asked anything.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes

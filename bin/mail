@@ -2,7 +2,7 @@
 # mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->
 # mail read [--addr <addr>] [<id>]   list the open messages, or show one with its body
 # mail take [--addr <addr>] <id>     move one open message to done/; act on it only after this exits 0
-# mail status <id>                 print open, taken <time> by <taker>, or unknown (exit 1); looks under every address, writes no message, ref or log
+# mail status <id>                 print open, taken <time> by <taker>, or unknown (exit 1); looks under every address, writes only inside the cache, moves no ref in the store, writes no message or log
 # mail wait [--interval <s>] [--max-seconds <s>]   block until new mail for the session's address, then print one line per new message
 # --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
