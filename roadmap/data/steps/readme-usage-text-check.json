@@ -1,0 +1,14 @@
+{
+ "id": "readme-usage-text-check",
+ "title": "A check keeps the README's merge usage blocks equal to merge/merge.py's usage text",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident, lane pr-state-is-on-the-pr (#2845, handed in at 59192d23b): the lane got the order of the `merge --reviewed` and `--lane-lint` lines wrong and it cost a review round.",
+ "source": "coordinator 12:36 CST Nov 13, lane pr-state-is-on-the-pr",
+ "note": "Todo, after the drain unless it tracks or lands work. The README's `merge --reviewed` and `--lane-lint` blocks name the same lines, in the same order, as merge/merge.py's usage text. Done check: red on a fixture that swaps two lines. Search found no step that covers it (red-run-pre-push, lane-lint-before-push do not).",
+ "updatedAt": "2026-11-13T12:26:47-06:00"
+}

@@ -4,11 +4,11 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "session_013NEJL3cewDruVFEQKC8Nu1",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "A stopped batch build still pushed, and the rebuild after it was refused.",
  "source": "coordinator 11:25 CST Nov 12",
  "note": "Incident: runner 10 killed build pid 32666 at 11:14 CST Nov 12; the build still pushed batch-104 at 11:16 CST; the 18-lane rebuild's push was refused non-fast-forward. kill signals one pid, so lane stranded-jobs retracts its remedy \"kill the top pid and the tree ends\". Batch 104 is #2814 (17 lanes, head 74e19e3c8); #2801 goes first in batch 105.",
- "updatedAt": "2026-11-12T13:42:08-06:00"
+ "updatedAt": "2026-11-13T12:26:47-06:00"
 }
