@@ -2139,6 +2139,8 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-b
+      - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2
