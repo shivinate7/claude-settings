@@ -31,6 +31,7 @@ def invoke_model(*args, **kwargs):
 RULE = "prose-judge"
 RULE_CITE = ("(decision rulings-declare-kind, each ruling in a decision record declares its kind) "
              "(rule speak-rewrite-superseded-in-place, superseded text is rewritten in place)")
+REFUSE_REMEDY = "Remedy: change the edit as the reason says, then make the edit again."
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}
 
@@ -65,7 +66,7 @@ def is_prose(path):
 def refuse(payload, tool, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits, so its
     exit is returned to main()'s caller as the hook's exit code."""
-    text = reason + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
+    text = reason + " " + REFUSE_REMEDY + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))

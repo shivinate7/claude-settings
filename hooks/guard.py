@@ -2902,8 +2902,7 @@ FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Remedy: start the agent or session with model sonnet, "
-    "or name no model and let the default apply."
+    "Sonnet is the floor for this role. Remedy: start the agent or session with model sonnet."
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
@@ -3894,7 +3893,7 @@ LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_REMEDY = "Remedy: "
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: Wait with `bin/wait-until <time>` until the load drops, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: A lane session ends its turn now and waits for the load to drop. Any other session waits with `bin/wait-until <time>` until the load drops, then retries. " + LOAD_CITE
 
 
 def _read_memory():
@@ -4939,10 +4938,13 @@ def page_design_hit(writes, tool_input, cwd):
 #
 # SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
 # the hand-off could go missing. Whether it would deliver is unmeasured.
+SENDMESSAGE_CITE = ("Rule sendmessage-session-id "
+                    "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
+# An agent never calls the remote send tool (rule agent-no-remote-tools), so its remedy is its report.
+SENDMESSAGE_AGENT_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Remedy: put the "
+                            "message in your final report, which reaches the session that spawned you. " + SENDMESSAGE_CITE)
 SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Remedy: send it with "
-                      "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
-                      "Rule sendmessage-session-id "
-                      "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
+                      "send_message, passing the id as session_id, the sure route. " + SENDMESSAGE_CITE)
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -6238,7 +6240,8 @@ def judge(payload) -> None:
     if tool == "SendMessage":
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
-            refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+            refuse(tool, "deny", "sendmessage-session-id",
+                   SENDMESSAGE_AGENT_REASON if payload.get("agent_id") else SENDMESSAGE_REASON, target[:120])
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)

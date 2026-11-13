@@ -407,6 +407,7 @@ REFUSE_BLIND = ("this blind designer brief breaks the template: %s. Build it aga
 REFUSE_IOS = ("This designer brief is for an iPhone app: it must name skill ios-apps (ios-skill), whose "
              "Mockups section the designer reads before it draws, and its Device section names the Duo "
              "folded, then unfolded.")
+REFUSE_REMEDY = "Remedy: fix the brief as the reason says, then start the designer again with the corrected prompt."
 REFUSE_COUNT = ("an informed or directed designer brief must carry a line `%s <n>`, with n of 1 or "
               "more, or `%s none, owner: \"<the owner's words>\"`. Start the run's blind designers "
               "too (skill design-explore)." % (COUNT_HEADER, COUNT_HEADER))
@@ -417,7 +418,7 @@ REFUSE_OLD_KIND = ("this designer brief starts with the retired kind header. Its
 
 def refuse(payload, tool, reason, matched):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
-    text = reason + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
+    text = reason + " " + REFUSE_REMEDY + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
