@@ -27,8 +27,8 @@ This change changes no behaviour. It fixes stale prose in Markdown records and i
 
 Eight rules. A rule becomes a check when a check exists. Until then it is a plain rule.
 
-1. **Events.** A mechanism runs only inside a hook or tool process that the harness started. Or it runs
-   when a person asks. It never runs on a timer. The hook events on main are PreToolUse, PostToolUse,
+1. **Events.** A mechanism runs inside a hook or tool process that the harness started, or
+   when a person asks. A timer is allowed only when its record shows it costs less than it saves (rule `outcomes-mechanize-rules`; timer ruling `timer-allowed-when-cheaper`). The hook events on main are PreToolUse, PostToolUse,
    PermissionRequest, PermissionDenied, Stop, SubagentStart, SubagentStop, SessionStart, SessionEnd,
    PreCompact, PostCompact and UserPromptSubmit (checked: `settings.json`). The daily job is the one
    timer. Q4 covers it.

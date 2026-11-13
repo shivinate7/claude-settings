@@ -42,7 +42,7 @@ A plan built with no second read is a claim with no proof (checks-and-balances a
 
 ## Cost
 
-Two git processes to read the range, and one more per judged record. No file, timer or log.
+Two git processes to read the range, and one more per judged record (unmeasured). No file, timer or log.
 
 ## Done check
 
