@@ -551,7 +551,7 @@ def _module_level_bindings(tree, names):
 
 
 def case_merge_role_reader_is_imported_not_copied():
-    """merge/merge.py takes the merge tiers, the role reader and the role path from shared_names and defines none of them.
+    """merge/merge.py takes the merge roles, the role reader and the role path from shared_names and defines none of them.
     The coordinator-scope rule and the merge tool read one role file, so one reader must serve both."""
     with open(os.path.join(HERE, "..", "merge", "merge.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
@@ -567,7 +567,7 @@ def case_merge_role_reader_is_imported_not_copied():
 
 
 def case_guard_merge_reads_the_shared_merge_roles():
-    """hooks/guard_merge.py tests a session's merge role against MERGE_ROLES from shared_names. It binds no tier tuple of
+    """hooks/guard_merge.py tests a session's merge role against MERGE_ROLES from shared_names. It binds no role tuple of
     its own (ROLE_TIERS), which would drift from the merge tool's set."""
     with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
@@ -577,7 +577,7 @@ def case_guard_merge_reads_the_shared_merge_roles():
     copies = _module_level_bindings(tree, {"ROLE_TIERS", "MERGE_ROLES"})
     if copies:
         problems.append("guard_merge.py binds its own: %s" % ", ".join(copies))
-    return not problems, "; ".join(problems) or "guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple"
+    return not problems, "; ".join(problems) or "guard_merge reads MERGE_ROLES from shared_names and binds no role tuple"
 
 
 ROLE_SESSION = "cse_role_reader_check"  # a made-up environment session id (the form hooks/override.py reads)
@@ -618,7 +618,7 @@ def _role_read(cfg, session, reader):
 
 
 def case_read_merge_role_returns_the_batch_runner_for_its_own_record():
-    """Control for the merge-tier cases below: the session's own batch-runner record is read as the merge role."""
+    """Control for the merge-role cases below: the session's own batch-runner record is read as the merge role."""
     shared = _shared()
     cfg = _role_config("own-batch-runner", _role_file(ROLE_SESSION, "batch-runner"))
     got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
@@ -664,10 +664,10 @@ def case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record():
 
 
 def case_read_recorded_role_returns_the_coordinator_role_of_its_own_record():
-    """The guard reads a session's tier whatever it is, so the coordinator's record reads as 'coordinator' here.
-    Only read_merge_role narrows to the merge tiers."""
+    """The guard reads a session's role whatever it is, so the coordinator's record reads as 'coordinator' here.
+    Only read_merge_role narrows to the merge roles."""
     shared = _shared()
-    cfg = _role_config("own-coordinator-any-tier", _role_file(ROLE_SESSION, "coordinator"))
+    cfg = _role_config("own-coordinator-any-role", _role_file(ROLE_SESSION, "coordinator"))
     got = _role_read(cfg, ROLE_SESSION, shared.read_recorded_role)
     return got == "coordinator", "read_recorded_role on its own coordinator record = %r" % (got,)
 
@@ -723,7 +723,7 @@ CASES = [
      case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
     ("(r1) merge.py imports the role reader, MERGE_ROLES and role_path from shared_names and defines none of them",
      case_merge_role_reader_is_imported_not_copied),
-    ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple of its own",
+    ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no role tuple of its own",
      case_guard_merge_reads_the_shared_merge_roles),
     ("(r3) read_merge_role returns batch-runner for this session's own batch-runner record",
      case_read_merge_role_returns_the_batch_runner_for_its_own_record),
@@ -735,7 +735,7 @@ CASES = [
      case_read_merge_role_is_none_with_no_session_id),
     ("(r7) read_merge_role is None for an empty, malformed or list-role record",
      case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record),
-    ("(r8) read_recorded_role returns the coordinator tier of this session's own record",
+    ("(r8) read_recorded_role returns the coordinator role of this session's own record",
      case_read_recorded_role_returns_the_coordinator_role_of_its_own_record),
     ("(r9) role_path is state/merge-role.json under the config folder, and under ~/.claude when none is set",
      case_role_path_is_state_merge_role_under_the_config_folder),

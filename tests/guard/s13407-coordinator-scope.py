@@ -3,7 +3,7 @@ FAMILY = "coordinator-scope"
 #
 # Rule coordinator-scope (decision session-tiers; rule roles-orchestrator-never-builds). A cloud coordinator
 # briefs lanes and writes records. Its own calls write no repository path outside the record homes, spawn no
-# agent outside its list (Plan, Explore, claude-code-guide and the refuter), and merge nothing. Its tier is the
+# agent outside its list (Plan, Explore, claude-code-guide and the refuter), and merge nothing. Its role is the
 # role file's, else the cs-build tag its own get_session record holds after the tags its own later
 # set_session_tags calls add or remove in the same transcript.
 #
@@ -46,7 +46,7 @@ def coord_tags_call(tool_id, add=(), remove=()):
     return [role_use(tool_id, SET_SESSION_TAGS, tool_input), role_result(tool_id, "ok")]
 
 
-# The transcripts a session's own get_session record and later tag calls make. Each name is one tier shape.
+# The transcripts a session's own get_session record and later tag calls make. Each name is one role shape.
 COORD_TRANSCRIPTS = {
     "record": role_call("g1", COORD_TAGS, session=COORD_RECORD),
     "added": role_call("g1", LANE_TAGS, session=COORD_RECORD) + coord_tags_call("t1", add=[COORD_ROLE_TAG]),
@@ -119,7 +119,7 @@ add("coordinator-scope: a cloud coordinator's Workflow that spawns a refuter and
     script="await agent({prompt: 'Round 1. Argue against the plan.', agentType: '" + REFUTER_ROLE + "'})\n"
            "await agent({prompt: 'Build the change.', agentType: 'builder'})")
 # A settled green head (GREEN_ON, as the merge rows use) so merge-checks allows the call and only this rule can refuse it.
-# The tier comes from the own record, since the role file lives in COORD_CFG and this case's config is MERGECFG.
+# The role comes from the own record, since the role file lives in COORD_CFG and this case's config is MERGECFG.
 add("coordinator-scope: a cloud coordinator's merge_pull_request is refused", "deny", COORD_RULE,
     tool="mcp__github__merge_pull_request", cwd=NOGIT, env=dict(COORD_ENV), env_path=GREEN_ON, config=MERGECFG,
     transcript=coord_transcript("record"), owner="o", repo="r", pullNumber=1)
@@ -151,22 +151,22 @@ add("coordinator-scope: a cloud coordinator's Write into a repository in its own
 # An agent's call is not the coordinator's own call (it carries agent_id), so the rule does not judge it. The same
 # Edit without agent_id is refused (the Edit case above), so the allow pins the agent_id clause.
 add("coordinator-scope: a call carrying agent_id is not the coordinator's own call: its Edit of a repo path is allowed",
-    "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_CFG, agent_id="a114eda536eb6f76f",
+    "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_CFG, agent_id="coord-sub1",
     file_path=COORD_REPO_FILE)
 
-# --- no role file: the tier is the cs-build tag the session's own get_session record holds, after its own tag calls ---
-add("coordinator-scope: with no role file, a coordinator record's tier refuses an Edit of a repository path", "deny",
+# --- no role file: the role is the cs-build tag the session's own get_session record holds, after its own tag calls ---
+add("coordinator-scope: with no role file, a coordinator record's role refuses an Edit of a repository path", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
     transcript=coord_transcript("record"), file_path=COORD_REPO_FILE)
-add("coordinator-scope: tier apply: a coordinator's own later add of the tag holds the tier for the same session", "deny",
+add("coordinator-scope: role apply: a coordinator's own later add of the tag holds the role for the same session", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
     transcript=coord_transcript("added"), file_path=COORD_REPO_FILE)
-add("coordinator-scope: tier apply: a coordinator's own later remove of the tag never loosens its record's tier", "deny",
+add("coordinator-scope: role apply: a coordinator's own later remove of the tag never loosens its record's role", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
     transcript=coord_transcript("removed"), file_path=COORD_REPO_FILE)
-add("coordinator-scope: tier apply: an own add then an own remove in one pass leaves the lane tier, so the write is allowed",
+add("coordinator-scope: role apply: an own add then an own remove in one pass leaves the lane role, so the write is allowed",
     "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
     transcript=coord_transcript("added-then-removed"), file_path=COORD_REPO_FILE)
-add("coordinator-scope: with no own record and no own tag call, the tier is not held, so the write is allowed (/clear gap)",
+add("coordinator-scope: with no own record and no own tag call, the role is not held, so the write is allowed (/clear gap)",
     "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
     transcript=coord_transcript("no-record"), file_path=COORD_REPO_FILE)

@@ -124,7 +124,7 @@ FAMILIES = {
     "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
-    "coordinator-scope": "a cloud coordinator's own writes outside the record homes, its spawns outside Plan, Explore, claude-code-guide and the refuter, its merge tools, and the tier its own get_session record and tag calls hold",
+    "coordinator-scope": "a cloud coordinator's own writes outside the record homes, its spawns outside Plan, Explore, claude-code-guide and the refuter, its merge tools, and the role its own get_session record and tag calls hold",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
