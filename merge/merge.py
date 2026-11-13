@@ -563,6 +563,48 @@ def say(*lines):
         enc = sys.stdout.encoding or "ascii"
         print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
 
+# ------------------------------------------------------------------ the stall-watch beat
+@contextlib.contextmanager
+def phase_beat():
+    """While a run is in progress, append a line to $STALL_WATCH_BEAT every $MERGE_HEARTBEAT seconds (default 120), in every phase,
+    so a silent phase (a batch build's scans and waits) draws no false STALL (decision stall-watch). Does nothing when the variable is
+    unset. Cost: one thread a run, one append every 120 s; the thread ends, and is joined, before the run returns."""
+    path = os.environ.get("STALL_WATCH_BEAT")
+    if not path:
+        yield
+        return
+    try:
+        secs = float(os.environ.get("MERGE_HEARTBEAT") or 120)
+    except ValueError:
+        secs = 120
+    secs = secs if secs > 0 else 120
+    t0, done = time.time(), threading.Event()
+
+    def beat():
+        while not done.wait(secs):
+            try:
+                with open(path, "a", encoding="utf-8") as b:
+                    b.write(f"merge: still working, {time.time() - t0:.0f}s\n")
+            except OSError:
+                pass  # a gone beat file must not stop the run
+
+    th = threading.Thread(target=beat, daemon=True)
+    th.start()
+    try:
+        yield
+    finally:
+        done.set()
+        th.join()
+
+
+def beating(fn):
+    """Run fn inside phase_beat. The name stays fn's, so the refusal audit reads its sites as before."""
+    @functools.wraps(fn)
+    def run(*a, **k):
+        with phase_beat():
+            return fn(*a, **k)
+    return run
+
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
@@ -5520,6 +5562,7 @@ def build_parser():
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
 
+@beating
 def main(argv, host=None, lock=None, hosts=None):
     p = build_parser()
     a = p.parse_args(argv)

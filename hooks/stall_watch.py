@@ -49,10 +49,10 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
   of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
   300) without new bytes, with no change to any --also log and with no CPU time advanced in any process
   under the job's shell, it prints a STALL report and exits 3. The job keeps running.
-  The CPU time comes from the once-a-second `ps` that also reads the job's state. It adds no process,
-  timer or file. The job shell's own time does not count.
-  On Linux ps gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall.
-  So may a serial chain of sub-second children (`for t in ...; do python $t; done | tail -1`).
+  The CPU time comes from the once-a-second `ps` that also reads the job's state, plus the CPU time of the
+  children each process has already waited for, read from /proc/PID/stat (Linux; N + 1 reads for N processes
+  under the job). It adds no process, timer or file. The job shell's own time does not count.
+  On Linux ps gives whole seconds, so a live child under 1/SECS of a core (0.33% at 300 s) may still stall.
   --unwatched F (repeatable) names a log whose directory is unknown; the report lists it. The
   STALL line lists the job's shell and every process under it, parent first. Stopping them in that
   order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
@@ -376,17 +376,30 @@ def proc_table(timeout=TOOL_TIMEOUT):
     return rows, kids, ""
 
 
+def reaped_seconds(pid):
+    """CPU seconds of the children that process pid has already waited for (cutime + cstime in /proc/PID/stat). It catches a
+    chain of short children that ps never shows alive at a sample. 0 where /proc is absent or the read fails."""
+    try:
+        with open("/proc/%s/stat" % pid) as f:
+            text = f.read()
+        fields = text[text.rindex(")") + 2:].split()
+        return (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return 0.0
+
+
 def tree_cpu(table, pid):
-    """{pid: CPU seconds} for every process under pid in a proc_table. pid's own time is left out: a
-    builtin loop in the job shell, with no child, is no sign of work. At Stop the root is the job's
+    """{pid: CPU seconds} for every process under pid in a proc_table, each with the time of the children it has reaped
+    (reaped_seconds). pid's own time is left out, its reaped children's time is in: a builtin loop in the job shell, with no child,
+    is no sign of work, a child that ended is. At Stop the root is the job's
     shell; in a hook-wrapped job its subshell is under it and counts, so a builtin spin reads busy and Stop
-    does not list the job; the watcher reports it."""
+    does not list the job; the watcher reports it. Cost: one /proc read for each process under pid and one for pid, no process."""
     rows, kids, _ = table
-    cpu, stack = {}, list(kids.get(str(pid), []))
+    cpu, stack = {str(pid): reaped_seconds(pid)}, list(kids.get(str(pid), []))
     while stack:
         cur = stack.pop()
-        if cur not in cpu and cur != str(pid):
-            cpu[cur] = cpu_seconds(rows[cur][3])
+        if cur not in cpu:
+            cpu[cur] = cpu_seconds(rows[cur][3]) + reaped_seconds(cur)
             stack.extend(kids.get(cur, []))
     return cpu
 

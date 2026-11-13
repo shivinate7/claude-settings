@@ -45,7 +45,13 @@ guard rule, so the watcher does the waiting and the session is told once.
   three short `ps` reads per ancestor level and at most one process-table read (unmeasured count). While it waits, four `/proc` reads a second
   on Linux, one `ps` a second elsewhere (unmeasured). Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
-  tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
+  tool beats in every phase (`phase_beat` in `merge/merge.py`): while a run is in progress, a thread appends
+  `merge: still working, Ns` to `STALL_WATCH_BEAT` every `MERGE_HEARTBEAT` seconds (default 120), so a silent
+  phase of a batch build draws no STALL (batch 138, batch 139 build 4; `merge/test_merge_beat.py`). It does
+  nothing when the variable is unset. Cost: at most one thread a run and at most one append every 120 s, no process, pinned by
+  `test_cost_one_thread_and_one_append_per_beat`. Limit: the thread beats while the main thread waits, so a
+  hung merge run shows life; its subprocess timeouts bound that. The merge
+  tool also prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
   It also appends the line to the beat file, which the hook names next to its log, exports to the job as
   `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
@@ -75,16 +81,23 @@ guard rule, so the watcher does the waiting and the session is told once.
   CPU time is life too (coordinator ruling, 2026-11-08 05:02 CST): a child with no output, such as
   `cmd | tail -1`, is working while its CPU time advances. Any process under the job's shell counts;
   the shell's own time does not.
+  Each process also carries the CPU time of the children it has already waited for (`reaped_seconds`:
+  cutime and cstime in `/proc/PID/stat`, Linux only). `ps` shows whole seconds and only live
+  processes, so a silent parent that runs short children one after another (batch 139 build 4) drew a
+  false STALL until this time counted. The job shell's own time stays out, its reaped children's time is in.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
-  process table with CPU time, and the watcher compares each process to its last reading. On Linux ps
-  gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. So may a serial
-  chain of sub-second children (`for t in ...; do python $t; done | tail -1`). A job that
-  `exec`s has no child to count.
+  process table with CPU time, and the watcher compares each process to its last reading. Each check also
+  reads `/proc/PID/stat` once for the job's shell and once for each process under it, so N processes
+  cost N + 1 reads a second (pinned by case 25f in `hooks/test_stall_watch.py`; one `ps` pinned by 25e).
+  Where `/proc` is absent the reads give 0. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
+  (0.33% at 300 s) that has not ended may still stall. A job that `exec`s has no child to count.
+  Red cases: batch 138 (a silent parent with a busy child, case 25c) and batch 139 build 4 (a serial chain, case 25d).
+  Kept as a stall: a child that holds a lock and does nothing, no CPU (the `playwright install` hang, case 4).
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
-  it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
-  one more before each stall report, and one at each Stop check. The beat file costs one append per
+  Each background job starts at most one watcher process, unmeasured. Its process cost is open: owner Cockpit item 180 holds
+  it (plan `docs/plans/align-watchers.md`, unmeasured). Each named log gets at most one stat a second in the watcher's own loop,
+  one more before each stall report, and one at each Stop check, not pinned. The beat file costs at most one append per
   heartbeat. The watcher reads it on each 0.2 s loop pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
@@ -137,7 +150,7 @@ reliably spares only CPU-bound jobs; a job at about 25% CPU can still be listed 
 deadline of 6 s (`BUSY_BUDGET`) covers `lsof`, both `ps` reads and the wait. Each call's timeout is the time left.
 Past the deadline the check returns none, and every job is listed as before. The Stop hook is killed at 10 s, so the check
 stays well under it. Cost: no process
-that lives on, no file, no timer. A quiet shell job whose output file a process holds costs one `lsof`,
+that lives on, no file, no timer. A quiet shell job whose output file a process holds costs at most one `lsof`,
 two `ps` reads and a 1.5 s wait at that Stop. The `ps` reads run only when a process holds the file. A Stop that lists no shell job costs none.
 
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
