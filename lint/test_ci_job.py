@@ -2478,7 +2478,7 @@ class PinnedHarness(Job):
         self.assertEqual(rc, 0, "the plan with a pin did not exit 0\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
-    def test_plan_with_an_unfetchable_pin_says_would_run_and_never_fetches(self):
+    def test_plan_with_an_unfetchable_pin_says_unknown_and_never_fetches(self):
         """R67: --plan resolves no pin and fetches nothing, so a sha no clone holds reads unknown and names the fetch a run would
         make first."""
         env, calls = self.git_stub(RUN_FOLDER)
