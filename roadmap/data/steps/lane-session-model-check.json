@@ -1,11 +1,11 @@
 {
   "title": "A guard refuses a lane session started on a model other than the lane-session row's",
   "why": "Coordinator 23:55 CST Nov 8: no guard checks the model of a lane session at create_session. Tonight's lanes ran claude-sonnet-5-5, which is correct under owner item 439 (12:21 CST Nov 8, lanes run Sonnet for now); decision agent-model-cap's lane-session row still says Opus and is stale until step lanes-sonnet-trial lands (coordinator 23:57 CST).",
-  "note": "Lands after step lanes-sonnet-trial. Fix: refuse a create_session tagged cs-build:lane whose model is not the lane-session row's model, read from that row (rule building-allow-list-is-the-constant), never a copied value. Lane code-guard-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "Lands after step lanes-sonnet-trial. Fix: refuse a create_session tagged cs-build:lane whose model is not the lane-session row's model, read from that row (rule building-allow-list-is-the-constant), never a copied value. Lane code-guard-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Re-read 13:55 CST Nov 13 (coordinator 13:57 CST): lane session_013NEJL2m6PvqQJRsGM69scD (fan-code-guard-3) is archived since Nov 12. Its last report: #2799 and #2775 lint PASS, handed to runner 10. The step waits on those merges, not on a lane. Lane field cleared. Not checked against ruling own-747-role-layout; lane model-layout-to-table checks its PRs by title.",
   "phase": "now",
   "owner": "coordinator",
   "status": "doing",
   "order": 881,
-  "updatedAt": "2026-11-12T07:29:00-06:00",
-  "lane": "session_013NEJL2m6PvqQJRsGM69scD"
+  "updatedAt": "2026-11-13T13:55:23-06:00",
+  "lane": ""
 }
