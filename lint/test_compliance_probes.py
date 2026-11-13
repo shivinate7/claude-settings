@@ -1670,6 +1670,46 @@ class LiveHooks(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
 
+    def trusts(self, repo):
+        """The line `hooks` prints right after the verdict for in shape and out: the clone is the side it trusts."""
+        return "  trusts: clone (%s); live (~/.claude/settings.json) is the copy checked" % os.path.join(repo.root, "settings.json")
+
+    def test_in_shape_prints_the_trusts_line_right_after_the_verdict(self):
+        for name, doc in (("the same hooks", self.source()), ("no hooks on either side", {"hooks": {}})):
+            with self.subTest(name):
+                repo = self.clone(self.text(doc))
+                code, out, err = self.probe(repo, self.live(self.text(doc)))
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(head(out), "hooks: in shape", err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo)], out)
+
+    def test_out_prints_the_trusts_line_right_after_the_verdict_and_before_the_diff(self):
+        live = self.source()
+        event = self.other_event(live)
+        live["hooks"].pop(event)
+        repo = self.clone(self.text(self.source()))
+        code, out, err = self.probe(repo, self.live(self.text(live)))
+        self.assertEqual(code, 1, err or out)
+        self.assertEqual(head(out), "hooks: out", err or out)
+        lines = out.splitlines()
+        self.assertEqual(lines[1], self.trusts(repo), out)
+        self.assertTrue(lines[2:] and all(line.startswith("  ") for line in lines[2:]), out)
+        self.assertNotIn(self.trusts(repo), lines[2:], out)
+        self.assertTrue(any('"%s"' % event in line for line in self.changed(out)), out)
+
+    def test_unknown_and_na_print_no_trusts_line(self):
+        text = self.text(self.source())
+        cases = (("no clone settings.json", None, text, 0, "hooks: n/a"),
+                 ("live file missing", text, None, 2, "hooks: unknown - "),
+                 ("live file not JSON", text, "{ not json", 2, "hooks: unknown - "),
+                 ("clone file not JSON", "{ not json", text, 2, "hooks: unknown - "))
+        for name, clone_text, live_text, want_code, verdict in cases:
+            with self.subTest(name):
+                code, out, err = self.probe(self.clone(clone_text), self.live(live_text))
+                self.assertEqual(code, want_code, err or out)
+                self.assertTrue(head(out).startswith(verdict), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
     def test_registered_in_groups(self):
         self.assertIn("hooks", load_probes().GROUPS)
 
