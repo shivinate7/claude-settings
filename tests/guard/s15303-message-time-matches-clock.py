@@ -313,6 +313,44 @@ mtc_allow("a prose line, Deadline 15:00 CST for the merge, 10 minutes ahead is a
 mtc_allow("a prose line, Meet at 14:00 CST tomorrow, 10 minutes ahead is allowed: prose, not a header",
           "Meet at 14:00 CST tomorrow", clock="2026-11-13T13:50:00-06:00")
 
+# ---- a `Mon D` date after the zone is the stamp's date. It reads as the clock's year, or as the year that puts the date
+# nearest the clock, and the stamp is compared as an instant with no quote window, like an ISO date. Undated, the stamp
+# would read as an earlier day past 60 minutes ahead and pass. The clock is 11:38 CST on the day the date names.
+MTC_DATE_CLOCK = "2026-11-13T11:38:00-06:00"  # 11:38 CST, the clock of the cases in this block
+# Refused: 12:46 on the clock's own day is 68 minutes ahead, past the 60-minute quote window an undated stamp gets.
+mtc_refuse("a bare label with a date after the zone, triage 12:46 CST Nov 13: x, is refused: 68 minutes ahead that day",
+           "triage 12:46 CST Nov 13: x", clock=MTC_DATE_CLOCK, carries=("68 minutes ahead", "11:38 CST"))
+mtc_refuse("a bracket with a date after the zone, [triage 12:46 CST Nov 13] x, is refused: 68 minutes ahead that day",
+           "[triage 12:46 CST Nov 13] x", clock=MTC_DATE_CLOCK, carries=("68 minutes ahead", "11:38 CST"))
+# Refused: the date is a week ahead. Undated, 11:50 is 12 minutes ahead and refused too, so this case alone does not show
+# the date at work. The next case, 13:50 on the same day, is 132 minutes ahead undated and passes, so it does.
+mtc_refuse("a bare label with a date days ahead, Freeze 11:50 CST Nov 20: x, is refused: 10092 minutes ahead",
+           "Freeze 11:50 CST Nov 20: x", clock=MTC_DATE_CLOCK, carries=("10092 minutes ahead", "11:38 CST"))
+mtc_refuse("a bare label with a date days ahead, Freeze 13:50 CST Nov 20: x, is refused: 10212 minutes ahead",
+           "Freeze 13:50 CST Nov 20: x", clock=MTC_DATE_CLOCK, carries=("10212 minutes ahead", "11:38 CST"))
+# Allowed: a stamp on the day before the clock's day is behind it. Undated, its 11:48 reads 10 minutes ahead and is refused.
+mtc_allow("a bare label with a date after the zone, triage 11:48 CST Nov 12: x, is allowed: the day before is behind",
+          "triage 11:48 CST Nov 12: x", clock=MTC_DATE_CLOCK)
+# Allowed: the clock's own minute, and 1 minute ahead of it, as for every dated stamp.
+mtc_allow("a dated bare label at the clock's own minute, triage 11:38 CST Nov 13: x, is allowed",
+          "triage 11:38 CST Nov 13: x", clock=MTC_DATE_CLOCK)
+mtc_allow("a dated bare label 1 minute ahead, triage 11:39 CST Nov 13: x, is allowed: the limit is inclusive",
+          "triage 11:39 CST Nov 13: x", clock=MTC_DATE_CLOCK)
+# Year rollover. At 23:55 on the last day of the year, the stamp 00:20 on the first day is 25 minutes ahead, and 01:20 is
+# 85 minutes ahead: both are refused, and the 85-minute one passes undated.
+MTC_YEAR_END_CLOCK = "2026-12-31T23:55:00-06:00"  # 23:55 CST on the last day of the year
+mtc_refuse("a bare label across the new year, triage 00:20 CST Jan 1: x, is refused: 25 minutes ahead",
+           "triage 00:20 CST Jan 1: x", clock=MTC_YEAR_END_CLOCK, carries=("25 minutes ahead", "23:55 CST"))
+mtc_refuse("a bare label across the new year, triage 01:20 CST Jan 1: x, is refused: 85 minutes ahead",
+           "triage 01:20 CST Jan 1: x", clock=MTC_YEAR_END_CLOCK, carries=("85 minutes ahead", "23:55 CST"))
+# Allowed: the day before the new year is behind a clock just past midnight. Read in the clock's own year, it would fall
+# nearly a year ahead and be refused, so these two pin the year reading.
+MTC_NEW_YEAR_CLOCK = "2027-01-01T00:05:00-06:00"  # 00:05 CST on the first day of the year
+mtc_allow("a dated bare label on the last day of the year, triage 23:50 CST Dec 31: x, is allowed: behind",
+          "triage 23:50 CST Dec 31: x", clock=MTC_NEW_YEAR_CLOCK)
+mtc_allow("a dated bare label a day behind across midnight, triage 00:20 CST Dec 31: x, is allowed: behind",
+          "triage 00:20 CST Dec 31: x", clock=MTC_NEW_YEAR_CLOCK)
+
 # ---- a dated header in a bracket, a paren, or a dash form. The date sits in the label, before the time, so the stamp is
 # a dated instant with no window: 16:36 on the clock's own day is 9 hours 28 minutes ahead at 07:08, and is refused.
 MTC_DATED_CLOCK = "2026-11-13T07:08:00-06:00"  # 07:08 CST, the clock of the dated cases below
