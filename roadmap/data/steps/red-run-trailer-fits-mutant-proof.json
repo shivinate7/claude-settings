@@ -1,0 +1,14 @@
+{
+ "id": "red-run-trailer-fits-mutant-proof",
+ "title": "The Red-run trailer can only name a commit sha, so a mutant-proof red cannot be written truthfully",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A lane writes a trailer the check accepts but that is not literally true, which teaches readers to trust a trailer that may not say what happened.",
+ "source": "Coordinator 16:24 CST Nov 13, from PR #3284 (lane ci-alarm-reads-reverts): the lane's read, said by the lane; unchecked by triage.",
+ "note": "Filed 16:24 CST Nov 13. In #3284 the real red was mutant runs of the product code: a new module's test crashes on import, which is no red under test-practices P3, and the guard refused a mutant commit. The `Red-run:` trailer can only name a commit sha, so the lane wrote one the check accepts that is not literally true, and said so. Fix, one of: a trailer form that says \"mutant proof\" honestly, or a rule on when mutants stand for a red. First a lane reads lint/ for the Red-run check (what it accepts, why only a sha). A check change: test-author red case first, builder, reviewer. Past rulings not checked; do not widen the check to accept any text. Not started.",
+ "updatedAt": "2026-11-13T16:24:54-06:00"
+}
