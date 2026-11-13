@@ -27,6 +27,9 @@ runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNK
 
 The sixth part pins the family suites: a suite named `path::family` runs the file `path` with GUARD_FAMILY=family in
 its env, and the file part is what the profile's `tests` regex and the isfile check read.
+
+The seventh part pins the suite timeout: a suite that outlives SUITE_TIMEOUT is CRASHED, not a kill and not a survivor.
+Its mutant reads UNKNOWN, the stage-2 fallback does not run it again, and the run goes on to the next mutant.
 """
 import contextlib
 import io
@@ -405,6 +408,7 @@ def pass_result(*names):
 JOIN_WAIT = 0.5  # a call waits this long for a second call to join it, so overlap shows without a fixed sleep
 RELEASE_WAIT = 1.0  # a held control waits this long for the mutant it is held on, so no case hangs
 RUN_LIMIT = 4.0  # main must return within this long, or the case reads a stall, not a hang
+HANG_SECONDS = 10  # a hung suite sleeps this long: longer than each SUITE_TIMEOUT the timeout cases set
 
 
 class _FakeSuite:
@@ -495,11 +499,12 @@ class CleanLayoutControlTests(unittest.TestCase):
             raise error
         return code, lines
 
-    def run_main_outcome(self, entries, suite, jobs=None):
+    def run_main_outcome(self, entries, suite, jobs=None, limit=None):
         """As run_main, but return what main raised, with the lines it printed before, as (exit code or None,
         stdout lines, exception or None). main runs on its own thread, so a run that does not return reads as a
-        TimeoutError here, not as a hang. main's work folder is made under this test's run folder, not the system
-        temp dir."""
+        TimeoutError here, not as a hang. `limit` is that stall bound in seconds, RUN_LIMIT by default. main's work
+        folder is made under this test's run folder, not the system temp dir."""
+        limit = RUN_LIMIT if limit is None else limit
         out = io.StringIO()
         real_mkdtemp = tempfile.mkdtemp
         outcome = {}
@@ -521,10 +526,10 @@ class CleanLayoutControlTests(unittest.TestCase):
                 contextlib.redirect_stdout(out):
             runner = threading.Thread(target=call_main, daemon=True)
             runner.start()
-            runner.join(RUN_LIMIT)
+            runner.join(limit)
         error = outcome.get("error")
         if runner.is_alive():
-            error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % RUN_LIMIT)
+            error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % limit)
         return outcome.get("code"), out.getvalue().splitlines(), error
 
     def test_a_red_clean_layout_reads_unknown_not_killed(self):
@@ -694,6 +699,116 @@ class CleanLayoutControlTests(unittest.TestCase):
                     if not only or not any(only in required for required in fragments)]
         self.assertEqual(bad, [], "a clean-layout control asks its suite for no required case fragment of its "
                                   "own target, as (target, only): %r" % bad)
+
+    def test_a_hung_mutant_reads_crashed_and_the_run_scores_the_mutant_after_it(self):
+        """Through main, with the real run_suite. The first mutant's suite hangs past SUITE_TIMEOUT, the second's
+        prints its FAIL line. The hung one reads UNKNOWN as crashed, the other reads KILLED, and the run exits 1.
+        The scope (main returns, the control reads green) is asserted before the subject (each mutant's line)."""
+        hung, failing = self.guard_entries("role-model: Explore loses its audit exemption",
+                                           "role-model: the audit marker is read off any line")
+        hung_label = mutate_guard.mutation_parts(hung)[0]
+        failing_label, _old, _new, _target, failing_required, _only_on = mutate_guard.mutation_parts(failing)
+        _path, _suite, variable, stem = mutate_guard.TARGETS["guard"]
+        write_files(self.run, {"hung_or_failing_suite.py": (
+            "import os, sys, time\n"
+            "path = os.environ[%r]\n"
+            "if %r in path:\n"
+            "    time.sleep(%d)\n"
+            "    sys.exit(0)\n"
+            "if %r in path:\n"
+            "    print(%r)\n"
+            "    sys.exit(1)\n"
+            "print('PASS  control')\n"
+        ) % (variable, mutate_shared.safe_name(hung_label), HANG_SECONDS,
+             mutate_shared.safe_name(failing_label), "FAIL  allow (want deny) [Bash] " + failing_required)})
+        suite = os.path.join(self.run, "hung_or_failing_suite.py")
+        with mock.patch.dict(os.environ), \
+                mock.patch.dict(mutate_guard.TARGETS, {"guard": (mutate_guard.TARGETS["guard"][0], suite, variable, stem)}), \
+                mock.patch.object(mutate_guard, "SUITE_TIMEOUT", 4, create=True):
+            for name in ("MUTATE_FULL", "MUTATE_ONLY", "MUTATE_SHARD"):
+                os.environ.pop(name, None)
+            # The stall bound covers two hung runs: the old code runs a hung suite again for its stage-2 fallback.
+            code, lines, error = self.run_main_outcome([hung, failing], mutate_guard.run_suite, jobs=1,
+                                                       limit=2 * HANG_SECONDS + 40)
+        self.assertIsNone(error, "main raised %r before it scored the mutant after the hung one" % (error,))
+        self.assertFalse([line for line in lines if "clean layout" in line],
+                         "the clean-layout control did not read green, so the run judged nothing: %r" % lines)
+        self.assertTrue([line for line in lines
+                         if line.startswith("UNKNOWN") and hung_label in line and "crashed" in line],
+                        "the hung mutant does not read UNKNOWN as crashed: %r" % lines)
+        self.assertTrue([line for line in lines if line.startswith("KILLED") and failing_label in line],
+                        "the mutant after the hung one does not read KILLED: %r" % lines)
+        self.assertEqual(code, 1, "a run with an UNKNOWN mutant must exit 1, not %r" % (code,))
+
+
+class SuiteTimeoutTests(unittest.TestCase):
+    """A suite that outlives SUITE_TIMEOUT is crashed: not a kill, not a survivor (decision
+    `mutation-report-scores-suites`). run_suite returns code None with a CRASHED line, and run_mutant asks the suite
+    once, not again for the stage-2 fallback. Each patch of SUITE_TIMEOUT uses create=True, so the name missing from
+    the code before the fix fails the assert, not an AttributeError."""
+
+    GUARD_PREFIX = "role-model: Explore loses its audit exemption"  # a real guard entry: run_mutant reads its fields
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def write_suite(self, name, source):
+        write_files(self.run, {name: source})
+        return os.path.join(self.run, name)
+
+    def run_suite_with_timeout(self, suite, timeout):
+        """run_suite on one suite file, with SUITE_TIMEOUT set to `timeout` seconds. Return run_suite's tuple."""
+        with mock.patch.object(mutate_guard, "SUITE_TIMEOUT", timeout, create=True):
+            return mutate_guard.run_suite(suite, "GUARD_UNDER_TEST", os.path.join(self.run, "copy.py"), self.run)
+
+    def run_mutant_with(self, suite_answer):
+        """run_mutant on one real guard entry, its copy laid out as a stub path, and run_suite answering
+        `suite_answer` on every call. Return the `only` of each suite run, in order."""
+        entry = next(e for e in mutate_guard.MUTATIONS
+                     if mutate_guard.mutation_parts(e)[0].startswith(self.GUARD_PREFIX))
+        asked = []
+
+        def answer(suite, variable, copy_path, config_dir, only=None):
+            asked.append(only)
+            return suite_answer
+
+        with mock.patch.dict(os.environ), \
+                mock.patch.object(mutate_guard, "lay_out", return_value=os.path.join(self.run, "copy.py")), \
+                mock.patch.object(mutate_guard, "run_suite", side_effect=answer):
+            for name in ("MUTATE_FULL", "MUTATE_ONLY", "MUTATE_SHARD"):
+                os.environ.pop(name, None)
+            mutate_guard.run_mutant({}, self.run, entry)
+        return asked
+
+    def test_run_suite_returns_crashed_when_the_suite_outlives_its_timeout(self):
+        suite = self.write_suite("hung_suite.py", "import time\ntime.sleep(%d)\n" % HANG_SECONDS)
+        try:
+            code, _red, _ran, errors = self.run_suite_with_timeout(suite, 1)
+        except subprocess.TimeoutExpired:
+            self.fail("TimeoutExpired escaped run_suite: one hung suite would end the whole run")
+        self.assertIsNone(code, "run_suite returned exit %r for a suite that outlived its timeout, not None" % (code,))
+        self.assertTrue([line for line in errors if line.startswith("CRASHED") and "timed out" in line],
+                        "run_suite's fourth element holds no CRASHED timed-out line: %r" % (errors,))
+
+    def test_run_suite_keeps_a_suite_that_finishes_inside_its_timeout(self):
+        """The green control beside the case above: a suite that ends in time keeps its own exit and FAIL lines."""
+        fail_line = "FAIL  allow (want deny) [Bash] case: the rule under test"
+        suite = self.write_suite("red_suite.py", "print(%r)\nraise SystemExit(1)\n" % fail_line)
+        code, red, _ran, _errors = self.run_suite_with_timeout(suite, 60)
+        self.assertEqual(code, 1, "a suite that finished inside its timeout returned exit %r, not its own 1" % (code,))
+        self.assertEqual(red, [fail_line], "a suite that finished inside its timeout lost its FAIL line: %r" % (red,))
+
+    def test_a_timed_out_suite_runs_once_not_again_for_the_stage_two_fallback(self):
+        asked = self.run_mutant_with((None, [], [], ["CRASHED: suite timed out after 1s"]))
+        self.assertEqual(len(asked), 1, "a timed-out suite ran %d times, not once: the stage-2 fallback re-ran it: %r"
+                         % (len(asked), asked))
+
+    def test_a_suite_that_ran_no_case_still_gets_the_full_suite_fallback(self):
+        """The green control beside the case above: no timeout, so stage 2 still runs the full suite."""
+        asked = self.run_mutant_with((0, [], [], []))
+        self.assertEqual(len(asked), 2, "a suite that ran no case was asked %d times, not 2: the full-suite fallback "
+                                        "is gone: %r" % (len(asked), asked))
 
 
 def scaffold_sources(**extra):
