@@ -10,7 +10,9 @@ FAMILY = "pick-reaches-page"
 # this session wrote an item this turn that names the key. A pick sent to the page writer passes. The marker counts only
 # at a line's start, outside a closed fenced block: an unclosed fence hides nothing. Only a coordinator's send_message is
 # judged; no own record, no own session id or no transcript fails open. A message with no marker reads no transcript. The
-# page writer is the `writer` in the newest ArtifactData get of meta/page (lint/_transcript.py).
+# page writer is the `writer` in the newest ArtifactData get of meta/page (lint/_transcript.py). With no meta/page
+# read, it is the `page-writer` key of the layout extras file of the checkout that holds the cwd (lint/layout.py); with
+# neither, no writer is known, and a pick to a lane passes.
 PK_RULE = "pick-reaches-page"
 PK_SEND = "mcp__claude-code-remote__send_message"
 PK_OWN = "session_PKOWN01"  # the coordinator; override.remote_session_id reads cse_PKOWN01 as this id
@@ -23,6 +25,9 @@ PK_DIR = os.path.join(ROOT, "pickrec")
 PK_PROBE = os.path.join(PK_DIR, "pk-probe.py")  # the load-brake probe, run as the guard, with its open spy
 PK_TURN_ONE = "Owner: pick the icons for the page."
 PK_TURN_TWO = "Owner: and the colors too."
+PK_LAYOUT_WRITER = "session_PKLAYOUT01"  # the writer the layout extras key `page-writer` names, with no meta/page read
+PK_LAYOUT_REPO = os.path.join(PK_DIR, "layout-repo")  # a checkout whose layout extras name PK_LAYOUT_WRITER
+PK_NOKEY_REPO = os.path.join(PK_DIR, "nokey-repo")  # a checkout whose layout extras name no page writer
 
 
 def pk_path(name):
@@ -75,6 +80,9 @@ PK_HEAD = (role_call("o1", COORD_TAGS, session=PK_OWN) + pk_page_read("p1", PK_W
 # The same head when this session is the page writer: the coordinator's own id is the writer the meta/page read names.
 PK_OWN_HEAD = ([role_said(PK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=PK_OWN)
                + pk_page_read("p1", PK_OWN) + role_target_call("l1", LANE_TAGS, target=PK_LANE))
+# The layout route: the coordinator's own record and the lane's record, and no meta/page read at all.
+PK_LAYOUT_HEAD = ([role_said(PK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=PK_OWN)
+                  + role_target_call("l1", LANE_TAGS, target=PK_LANE))
 PK_LINES = {
     "turn-empty": [role_said(PK_TURN_ONE)] + PK_HEAD,
     "turn-writer-sent": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_WRITER, PK_PICK),
@@ -115,6 +123,9 @@ PK_LINES = {
     "no-human-none": PK_HEAD,
     # The writer's send whose result is an error still counts: only the call is read (pinned current behaviour).
     "undelivered-writer-send": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send_failed("s1", PK_WRITER, PK_PICK),
+    # The layout route: no meta/page read, so the writer is the layout key of the checkout at the cwd.
+    "layout-no-send": PK_LAYOUT_HEAD,
+    "layout-writer-sent": PK_LAYOUT_HEAD + pk_send("s1", PK_LAYOUT_WRITER, PK_PICK),
     # A transcript that is not JSON records: no own record can be read, so the send fails open.
     "unreadable": ["this is not a transcript", "42", "[1, 2]"],
 }
@@ -129,6 +140,18 @@ def write_pk_transcripts():
 lazy_fixture([pk_path(name) for name in PK_LINES], write_pk_transcripts)
 
 
+def pk_build_repos():
+    """Two checkouts for the layout route, each a `.git` folder and a layout extras file. One names PK_LAYOUT_WRITER as
+    its page writer; the other names none, so its extras file holds only the kinds."""
+    for where, extras in ((PK_LAYOUT_REPO, {"kinds": {}, "page-writer": PK_LAYOUT_WRITER}),
+                          (PK_NOKEY_REPO, {"kinds": {}})):
+        os.makedirs(os.path.join(where, ".git"), exist_ok=True)
+        write(os.path.join(where, ".claude", "layout-extras.json"), json.dumps(extras) + "\n")
+
+
+lazy_fixture([PK_LAYOUT_REPO, PK_NOKEY_REPO], pk_build_repos)
+
+
 def pk_log(label, check):
     """Register one log check. LOG_CHECKS_EXTRA joined LOG_CHECKS in s40805, before this section, so the check joins
     LOG_CHECKS itself, under this family, and needs no fixture materialized for it."""
@@ -138,15 +161,15 @@ def pk_log(label, check):
     FIXTURELESS_CHECKS.add(check)
 
 
-def pk_refuse(name, message, transcript="turn-empty", target=PK_LANE, carries=()):
-    """A coordinator's send_message the guard refuses. The reason names its rule."""
-    add("pick-reaches-page: " + name, "deny", rule=PK_RULE, tool=PK_SEND, cwd=NOGIT, transcript=pk_path(transcript),
+def pk_refuse(name, message, transcript="turn-empty", target=PK_LANE, carries=(), cwd=NOGIT):
+    """A coordinator's send_message the guard refuses. The reason names its rule. `cwd` is the checkout the send runs in."""
+    add("pick-reaches-page: " + name, "deny", rule=PK_RULE, tool=PK_SEND, cwd=cwd, transcript=pk_path(transcript),
         env=PK_ENV, carries=carries, session_id=target, message=message)
 
 
-def pk_allow(name, message, transcript="turn-empty", target=PK_LANE, env=PK_ENV):
-    """A send_message the guard lets through silently."""
-    add("pick-reaches-page: " + name, "allow", tool=PK_SEND, cwd=NOGIT, silent=True, transcript=pk_path(transcript),
+def pk_allow(name, message, transcript="turn-empty", target=PK_LANE, env=PK_ENV, cwd=NOGIT):
+    """A send_message the guard lets through silently. `cwd` is the checkout the send runs in."""
+    add("pick-reaches-page: " + name, "allow", tool=PK_SEND, cwd=cwd, silent=True, transcript=pk_path(transcript),
         env=env, session_id=target, message=message)
 
 
@@ -260,6 +283,19 @@ pk_allow("with no human record, a writer send naming the pick before the coordin
 pk_refuse("with no human record and no writer send, the pick to a lane is refused",
           PK_PICK, transcript="no-human-none")
 
+# The layout route: no meta/page read, so the writer is the page-writer key of the checkout at the cwd. With no writer
+# known (no key, or no checkout at the cwd), the pick to a lane passes.
+pk_refuse("with no meta/page read, a pick to a lane is refused while the layout's page writer has no send this turn",
+          PK_PICK, transcript="layout-no-send", cwd=PK_LAYOUT_REPO, carries=("writer",))
+pk_allow("with no meta/page read, a pick to a lane passes after the layout's page writer is sent the pick this turn",
+         PK_PICK, transcript="layout-writer-sent", cwd=PK_LAYOUT_REPO)
+pk_allow("with no meta/page read, a pick sent to the layout's page writer itself passes",
+         PK_PICK, transcript="layout-no-send", target=PK_LAYOUT_WRITER, cwd=PK_LAYOUT_REPO)
+pk_allow("with no meta/page read and a checkout whose layout key names no writer, a pick to a lane passes: no writer known",
+         PK_PICK, transcript="layout-no-send", cwd=PK_NOKEY_REPO)
+pk_allow("with no meta/page read and no checkout at the cwd, a pick to a lane passes: no writer known",
+         PK_PICK, transcript="layout-no-send", cwd=NOGIT)
+
 # Passes: only a coordinator's send is judged. A lane, no own record, no transcript and no own id all fail open.
 pk_allow("a lane's own pick passes: only a coordinator's send is judged", PK_PICK, transcript="lane-own")
 pk_allow("a coordinator send with no own record in the transcript passes: fail open", PK_PICK,
@@ -311,6 +347,35 @@ def pk_scope_check():
 
 
 pk_log("pick-reaches-page: each fixture reads as its case assumes, before the guard is judged", pk_scope_check)
+
+
+def pk_layout_transcripts_check():
+    """Each layout transcript reads as its case assumes: its coordinator is the own record, and no meta/page read names a
+    writer, so the layout key is the only route to a writer."""
+    import _transcript as pk_transcript
+    import own_session as pk_own
+    for name in ("layout-no-send", "layout-writer-sent"):
+        if pk_transcript.page_writer_id(pk_transcript.read_transcript(pk_path(name))) is not None:
+            return False, name + ": a meta/page read names a writer, so the layout key is not the route"
+        if "cs-build:coordinator" not in (pk_own.own_session_read(pk_path(name), PK_OWN)[0] or []):
+            return False, name + ": the own record does not hold cs-build:coordinator"
+    return True, "both layout transcripts hold no meta/page writer and the coordinator's own record"
+
+
+def pk_layout_key_check():
+    """Each checkout's layout page-writer key reads as its case assumes: one names PK_LAYOUT_WRITER, the other none."""
+    import layout as pk_layout
+    if pk_layout.page_writer_key(PK_LAYOUT_REPO) != PK_LAYOUT_WRITER:
+        return False, "layout-repo: its page-writer key does not read as " + PK_LAYOUT_WRITER
+    if pk_layout.page_writer_key(PK_NOKEY_REPO) is not None:
+        return False, "nokey-repo: a page-writer key reads from an extras file that names none"
+    return True, "layout-repo names its page writer, and nokey-repo names none"
+
+
+pk_log("pick-reaches-page: the layout transcripts read as their cases assume, before the guard is judged",
+       pk_layout_transcripts_check)
+pk_log("pick-reaches-page: the layout checkouts read their page-writer key as their cases assume",
+       pk_layout_key_check)
 
 
 def pk_probe_script():
