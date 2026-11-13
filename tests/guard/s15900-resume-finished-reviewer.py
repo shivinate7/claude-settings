@@ -23,6 +23,7 @@
 # spawn a fresh reviewer and pass it the prior report (rule roles-resume-by-name). Each transcript also holds the
 # round's review log after its reviewer spawn, so review-log-after-round does not refuse first.
 FAMILY = "resume-finished-reviewer"
+FAMILIES["resume-finished-reviewer"] = "a SendMessage from the main session to a spawn that has finished (a background finish notice, or a foreground result) and either ran in a worktree (isolation worktree, or with no isolation input the role file's pin, any role) or is a reviewer or design-reviewer: the target resolved by agentId or spawn name, the latest spawn with that name wins; a result of unknown shape asks; an agent's send, a send to main, a name no spawn holds, a missing transcript, and a finished spawn with no worktree that is not a reviewer are allowed"
 RF_RULE = "resume-finished-reviewer"
 RF_CARRIES = ("fresh reviewer", "prior report")
 RF_MSG = "Round 2: fix the findings on PR #12."
@@ -698,3 +699,9 @@ def rf_cost_case():
     return True, "one SendMessage to a finished reviewer opens the transcript once, as a send to main does"
 
 
+# The two checks register here, in this section's family. Each builds its own folders and reads no lazy fixture,
+# so FIXTURELESS_CHECKS lists it.
+LOG_CHECKS_EXTRA.append((RF_COST_LABEL, rf_cost_case))
+FIXTURELESS_CHECKS.add(rf_cost_case)
+LOG_CHECKS_EXTRA.append((RF_UNPARSED_LABEL, rf_unparsed_case))
+FIXTURELESS_CHECKS.add(rf_unparsed_case)

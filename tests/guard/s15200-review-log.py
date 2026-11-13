@@ -11,6 +11,7 @@
 # transcript for those calls only: an agent's own call, an Explore or Plan spawn and a session with no reviewer spawn
 # are not judged. A missing or unreadable transcript is allowed.
 FAMILY = "review-log-after-round"
+FAMILIES["review-log-after-round"] = "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost"
 RR_RULE = "review-log-after-round"
 # The remedy names the merge tool's record flags and the decision, and the comment tool by its name or its tool id.
 RR_CARRIES = ("--review-record", "--head", "pr-review-record", ("add_issue_comment", "GitHub comment"))
@@ -353,5 +354,13 @@ def rr_remedy_case():
 
 RR_REMEDY_LABEL = ("review-log-after-round: every merge command the design-reviewer refusal prints names "
                    "--review-record, --head, --kind, --guard and --round")
+# The three checks register here, in this section's family. Each builds its own folders and reads no lazy
+# fixture, so FIXTURELESS_CHECKS lists it and a run that selects only this family skips the fixture build.
+LOG_CHECKS_EXTRA.append((RR_COST_LABEL, rr_cost_case))
+FIXTURELESS_CHECKS.add(rr_cost_case)
+LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
+FIXTURELESS_CHECKS.add(review_send_matcher_case)
+LOG_CHECKS_EXTRA.append((RR_REMEDY_LABEL, rr_remedy_case))
+FIXTURELESS_CHECKS.add(rr_remedy_case)
 
 
