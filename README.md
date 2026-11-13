@@ -171,7 +171,10 @@ merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default br
 merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
-                        Posts nothing: the lane posts it as a PR comment.
+                        It first runs the lane lint on that head (as --lane-lint does, and on a PASS it posts the same lane-lint comment), for every
+                        kind, and prints the record only on a PASS: stdout holds the record alone, stderr the lint lines. A FAIL or an unknown refuses and prints
+                        no record. No flag lifts an unknown. A head with no `checks` job runs no lint, and one stderr line says so. Run it as a background command.
+                        The lane posts the record as a PR comment.
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
 merge --reviewed --root DIR [--root DIR ...]
