@@ -1,0 +1,10 @@
+{
+ "id": "model-call-setup-everywhere",
+ "at": "2026-11-06T11:43:00-06:00",
+ "title": "Model calls from hooks work on every account and device, or ask once for setup; an API key is an option, not the first route.",
+ "ruling": "Owner, 11:43 CST Nov 6, on model-call setup. Only the phrase \"An API key is an option, not the first route\" is quoted verbatim in the record; the rest is the PR's paraphrase: the `claude -p` setup works on every account and device, or prompts once for its one-time setup, and never fails quietly.",
+ "quote": "An API key is an option, not the first route",
+ "source": "waiting/items/model-call-api-key.json context (your words, 11:43 CST Nov 6); PR #2728 body. The full original words were not found in the page copy: unverified beyond the phrase.",
+ "status": "open",
+ "step": "model-call-auth-check"
+}

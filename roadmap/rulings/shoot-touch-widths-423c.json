@@ -1,0 +1,10 @@
+{
+ "id": "shoot-touch-widths-423c",
+ "at": "2026-11-08T10:20:00-06:00",
+ "title": "bin/shoot treats widths under 1024 px as touch, and a repo may list its own in touchWidths.",
+ "ruling": "Owner, page item 423 (shoot-touch-width), pick c at 10:20 CST Nov 8: \"Under 1024 px, and a repo may list its own\" (as a, plus a config key touchWidths). It replaces the coordinator's pick a (one rule for every repo, no key). PR #2715's bin/shoot header says \"No config key\" (the pre-ruling form); PR #2717 adds touchWidths.",
+ "quote": "c",
+ "source": "waiting/answers/shoot-touch-width.json (16:20:56Z); PR #2715 bin/shoot header; PR #2717 body. Owner pick.",
+ "status": "open",
+ "step": "shoot-touch-per-size"
+}

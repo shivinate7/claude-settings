@@ -1,0 +1,10 @@
+{
+ "id": "resume-rule-wording",
+ "at": "2026-11-12T09:18:00-06:00",
+ "title": "Coordinator's wording for the roles-resume-by-name sentence, built on the guard's proxy.",
+ "ruling": "Coordinator, 09:18 CST Nov 12 (not an owner ruling): 409 a's own words first (\"Resume a finished agent by name, unless its worktree is gone.\"), then the guard's proxy (\"A finished agent that ran in its own worktree, or a reviewer, has none: send a fresh agent of the same role the prior report.\"). Measured 09:17 CST in one container: 3 of 3 finished worktree agents had no tree left (small sample). The first sentence is not the words on the page for 409 a.",
+ "quote": "Resume a finished agent by name, unless its worktree is gone.",
+ "source": "PR #2771 body. Coordinator.",
+ "status": "open",
+ "step": "record-after-each-round"
+}

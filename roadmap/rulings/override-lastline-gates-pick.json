@@ -1,0 +1,10 @@
+{
+ "id": "override-lastline-gates-pick",
+ "at": "2026-11-12T08:21:00-06:00",
+ "title": "Of the notice starts, only the app's status block may lead a prompt whose last line is the override form.",
+ "ruling": "Coordinator pick a, 08:21 CST Nov 12 (not an owner ruling): the last-line override route takes no judge and obeys the plain ask's gates; of the notice starts only the status block (STATUS_BLOCK_TAG) may lead the prompt, and any other notice start grants nothing, as on main.",
+ "quote": "Of the notice starts, only the status block (`STATUS_BLOCK_TAG`) may lead the prompt; any other notice start grants nothing, as on main (coordinator pick a, 2026-11-12 08:21 CST).",
+ "source": "PR #2666 docs/decisions/owner-override.md patch; coordinator pick, relayed in the decision text.",
+ "status": "open",
+ "step": "override-strips-status-block"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "challenger-places-284",
+ "at": "2026-11-06T13:08:00-06:00",
+ "title": "Add three argue-back checks: a done-check reader, a ruling-skip check, a best-case-against-the-pick.",
+ "ruling": "Owner, page item 284 (challenger-more-places), picks a, b and c at 13:08 CST Nov 6: a, best case against the pick; b, check ruling-based skips (a Sonnet confirms the ruling names the exact act); c, check each brief's done check (a blind Sonnet reads the ask and the done-check line). Note: \"these are good, i feel like certain debators should be opus btw not all shuold be sonnet and that there are probably more areas this can be used\". PRs name it differently: #2676 says pick c, #2788 says pick b; the page shows all three.",
+ "quote": "these are good, i feel like certain debators should be opus btw not all shuold be sonnet and that there are probably more areas this can be used",
+ "source": "waiting/answers/challenger-more-places.json (19:08:48Z Nov 6); PR #2676 body (check-line-reader, c), PR #2788 body (ruling-skip-check, b). Owner picks.",
+ "status": "open",
+ "step": "check-line-reader"
+}

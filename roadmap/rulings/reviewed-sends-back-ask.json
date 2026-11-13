@@ -1,0 +1,10 @@
+{
+ "id": "reviewed-sends-back-ask",
+ "at": "2026-11-08T10:15:00-06:00",
+ "title": "merge --reviewed names each draft over 12 hours old whose record is missing, stale or bad.",
+ "ruling": "Owner ask, 10:15 CST Nov 8: \"the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw\" (ellipsis in the record). Coordinator audit 10:30 CST; triage filed 10:35 CST.",
+ "quote": "the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw",
+ "source": "roadmap/data/steps/reviewed-sends-back.json note; PR #2736 body. Owner words; the whole message was not found in waiting/asks.",
+ "status": "open",
+ "step": "reviewed-sends-back"
+}

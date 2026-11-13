@@ -1,0 +1,10 @@
+{
+ "id": "past-ruling-one-fix-445a",
+ "at": "2026-11-08T15:04:00-06:00",
+ "title": "Allow one fix to the past-ruling judge so it cites undated owner rulings again.",
+ "ruling": "Owner, page item 445 (past-ruling-undated-hold), pick a at 15:04 CST Nov 8: allow one fix, drop the evidence clause from that one prompt rule, then one fix check and a re-probe. Options b (close #2195) and c (merge as is) not taken. Done 16:04 CST per triage reply.",
+ "quote": "a",
+ "source": "waiting/answers/past-ruling-undated-hold.json (21:04:02Z); PR #2797 body (Ruling line). Owner pick.",
+ "status": "open",
+ "step": "past-ruling-s1-block"
+}

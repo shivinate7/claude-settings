@@ -1,0 +1,10 @@
+{
+ "id": "widening-guideline-278",
+ "at": "2026-11-06T12:41:00-06:00",
+ "title": "The widening mark is a guideline, set only on a per-repo exception.",
+ "ruling": "Owner, page item 278 (auto-mode-allow-lines), picks c and d (cancel a CI run of your own; delete a check-in of your own), with the note: \"how do these go against my ruling that a repo changes to fit a shared tool? also, the word \\\"never\\\" does too much firm heavy lifting, it should be moreso guindeliney-- a repo should change to fit the shared tool than the other way around etc\". The PR and step note date the words 12:41 CST; the page copy shows the answer saved 12:58 CST after he edited it. `widens: true` only on a per-repo exception.",
+ "quote": "the word \"never\" does too much firm heavy lifting, it should be moreso guindeliney-- a repo should change to fit the shared tool than the other way around etc",
+ "source": "waiting/answers/auto-mode-allow-lines.json (18:58:16Z Nov 6); PR #2705 body; step widening-rule-guideline note. Owner.",
+ "status": "open",
+ "step": "widening-rule-guideline"
+}

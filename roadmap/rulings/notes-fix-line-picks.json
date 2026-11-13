@@ -1,0 +1,10 @@
+{
+ "id": "notes-fix-line-picks",
+ "at": "2026-11-07T13:58:00-06:00",
+ "title": "A new notes or debt line names `Fix: step:<slug>` or `Fix: none` with a listed reason; ratchet; Until date.",
+ "ruling": "Coordinator picks (undoable), 13:30 CST Nov 7: a new notes or debt line names its fix as `Fix: step:<slug>` only, or `Fix: none` with a listed reason (owner decides, needs the Mac, rare and harmless, already fixed on main <sha>). 13:58 CST: a ratchet (open notes may not rise past main's count) and an `Until:` date on each `Fix: none` note. The Until date is the 14 days of item 360 b.",
+ "quote": "Coordinator picks, 13:30 CST Nov 7 and 13:58 CST Nov 7 (undoable)",
+ "source": "roadmap/data/steps/notes-name-their-fix.json note; PR #2799 body. Coordinator, not owner.",
+ "status": "open",
+ "step": "notes-name-their-fix"
+}

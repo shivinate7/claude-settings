@@ -1,0 +1,10 @@
+{
+ "id": "override-status-block-320",
+ "at": "2026-11-06T17:44:00-06:00",
+ "title": "A typed override takes even when the app puts a status block before it.",
+ "ruling": "Owner, item 320 (override-block-sample), 17:44 CST Nov 6, declining to supply a sample: \"why do you need the text to fix this? the problem occurs in a uniform way and u dont need to see it for the fix do u\". Triage read it as: `override 12h` takes when it is the last line of the message, whatever the app puts above it. Whether the scope is only the status block or any text before the form is an open owner call (PR #2666 decision owner-override.md says so).",
+ "quote": "why do you need the text to fix this? the problem occurs in a uniform way and u dont need to see it for the fix do u",
+ "source": "waiting/items/override-block-sample.json lastAnswer (owner, 23:44:50Z); PR #2666 docs/decisions/owner-override.md; triage reply on the same item. The PR body dates the owner ask ask-mw5m8up8g8 17:38 CST; the page copy has it at 17:39 CST (23:39:00Z).",
+ "status": "open",
+ "step": "override-strips-status-block"
+}

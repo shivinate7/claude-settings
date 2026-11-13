@@ -1,0 +1,10 @@
+{
+ "id": "stall-log-kept-405a",
+ "at": "2026-11-08T06:09:00-06:00",
+ "title": "A stalled job's log stays for 7 days.",
+ "ruling": "Owner, page item 405 (stall-log-kept), pick a at 06:09 CST Nov 8: on a stall the watcher writes a marker beside the log; at job end the log stays if the marker is there and the beat file goes; the next stall-watch hook call removes marked logs older than 7 days; no timer runs. Options b (stop the job) and c (today's rule) were not taken.",
+ "quote": "a",
+ "source": "waiting/answers/stall-log-kept.json (12:09:31Z); PR #2808 body. Owner pick.",
+ "status": "open",
+ "step": "stall-watch-quiet-lint"
+}

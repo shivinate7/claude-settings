@@ -1,0 +1,10 @@
+{
+ "id": "resume-any-finished-409a",
+ "at": "2026-11-08T06:11:00-06:00",
+ "title": "When any finished agent's worktree is gone, send a fresh agent of the same role the prior report.",
+ "ruling": "Owner, page item 409 (resume-any-finished-agent), pick a at 06:11 CST Nov 8: rule roles-resume-by-name reads \"Resume a dead agent by name, never fresh. When a finished agent's worktree is gone, send a fresh agent of the same role the prior report instead.\" PR #2771 words the CLAUDE.md sentence differently and PR #2780 says the rule stands unchanged.",
+ "quote": "Resume a dead agent by name, never fresh. When a finished agent's worktree is gone, send a fresh agent of the same role the prior report instead.",
+ "source": "waiting/items/resume-any-finished-agent.json option a and triage reply 06:14 CST; waiting/answers/resume-any-finished-agent.json (12:11:17Z); PRs #2771, #2780. Owner pick.",
+ "status": "open",
+ "step": "resume-finished-reviewer-no-tree"
+}

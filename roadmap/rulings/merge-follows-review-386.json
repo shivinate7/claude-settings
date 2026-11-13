@@ -1,0 +1,10 @@
+{
+ "id": "merge-follows-review-386",
+ "at": "2026-11-07T22:25:00-06:00",
+ "title": "Merges keep pace with reviews: all three parts.",
+ "ruling": "Owner, page item 386 (merge-follows-review), picks a, b and c at 22:25 CST Nov 7: a, the merge tool builds each batch from PR state; b, a lane's findings ride in its own PR; c, three backlog counts in every report. Triage routed them to steps merge-builds-batches, findings-ride-in-lane and pr-state-is-on-the-pr. Neither PR #2687 nor #2711 cites item 386 in its body; the link comes from the ledger only.",
+ "quote": "a, b, c",
+ "source": "waiting/items/merge-follows-review.json lastAnswer (04:25:43Z Nov 8); triage reply 22:28 CST. Owner picks.",
+ "status": "open",
+ "step": "merge-builds-batches"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "page-answer-session-367a",
+ "at": "2026-11-07T15:01:00-06:00",
+ "title": "A page answer carries a session field, and a session reads only its own answers.",
+ "ruling": "Owner, page item 367 (page-answer-session-field), pick a at 15:01 CST Nov 7: \"Add a session field to answers and filter on it\". The coordinator's recommended b (keep; items keyed per repo) was not taken. A session-less answer still reads for its owner (PR #2695).",
+ "quote": "a",
+ "source": "waiting/items/page-answer-session-field.json lastAnswer (21:01:51Z); no answers/ file; PR #2695 body. Owner pick.",
+ "status": "open",
+ "step": "page-answer-session-field"
+}

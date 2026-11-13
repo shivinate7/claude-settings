@@ -1,0 +1,10 @@
+{
+ "id": "lane-hold-gap-fixes-410",
+ "at": "2026-11-08T06:11:00-06:00",
+ "title": "During the lane hold, every fix for a found gap may start a lane.",
+ "ruling": "Owner, page item 410 (hold-which-fixes-start), pick a at 06:11 CST Nov 8: \"Every fix for a found gap may start a lane\" (not only a fix that unblocks a merge). Other new work still waits.",
+ "quote": "a",
+ "source": "waiting/answers/hold-which-fixes-start.json (12:11:17Z); PR #2674 docs/decisions/lane-inflow-hold.md. Owner pick.",
+ "status": "open",
+ "step": "coordinator-pick-needs-record"
+}

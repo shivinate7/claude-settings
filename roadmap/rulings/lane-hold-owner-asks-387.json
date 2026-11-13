@@ -1,0 +1,10 @@
+{
+ "id": "lane-hold-owner-asks-387",
+ "at": "2026-11-07T22:24:00-06:00",
+ "title": "During the lane hold, a lane for an ask the owner made still starts.",
+ "ruling": "Owner, page item 387 (hold-covers-owner-asks), pick a at 22:24 CST Nov 7: \"Your own asks still start (recommended)\"; the record text reads \"A lane for an ask you made starts during the hold, as the queue-fix lanes do.\"",
+ "quote": "a",
+ "source": "waiting/items/hold-covers-owner-asks.json lastAnswer (04:24:42Z Nov 8); PR #2674 docs/decisions/lane-inflow-hold.md. Owner pick.",
+ "status": "open",
+ "step": "coordinator-pick-needs-record"
+}

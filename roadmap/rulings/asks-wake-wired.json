@@ -1,0 +1,10 @@
+{
+ "id": "asks-wake-wired",
+ "at": "2026-11-12T10:54:00-06:00",
+ "title": "The writer's wake runs the open-asks end check (stale_pages --asks) on a fresh asks save.",
+ "ruling": "Coordinator ruling, 10:54 CST Nov 12: wire the --asks flag that #2699 adds into the page writer's wake (republish.md step 2 and SKILL.md 'Read the answers'). Words are the PR's paraphrase; no verbatim quote found.",
+ "quote": "Coordinator ruling, 2026-11-12 10:54 CST",
+ "source": "PR #2827 body ('coordinator ruling 10:54 CST Nov 12'). Coordinator.",
+ "status": "open",
+ "step": "open-asks-listed-at-wake"
+}

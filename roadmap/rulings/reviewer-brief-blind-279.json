@@ -1,0 +1,10 @@
+{
+ "id": "reviewer-brief-blind-279",
+ "at": "2026-11-06T12:43:00-06:00",
+ "title": "A reviewer's brief holds only the task, the diff and the rulings, never the builder's report or a prior verdict.",
+ "ruling": "Owner, page item 279 (debate-adopt), picks a, b and d at 12:43 CST Nov 6: a, blind reviewer brief; b, replay cases for each judge; d, blind plan refuter (c, guard fix check on sonnet, not taken). Note: \"how does C make sense in these options isn't that a separate thign? like where's the \\\"Debator agent\\\" in option c\" and \"arent there way more areas to add debators? also we'll need agian to decide a uniform word for them in a glossary etc lol\".",
+ "quote": "a, b, d",
+ "source": "waiting/answers/debate-adopt.json (18:43:46Z); PR #2780 body. Owner picks.",
+ "status": "open",
+ "step": "reviewer-brief-blind"
+}

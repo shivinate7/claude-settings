@@ -1,0 +1,10 @@
+{
+ "id": "page-pics-grow-phone",
+ "at": "2026-11-09T21:26:00-06:00",
+ "title": "A waiting-page option picture grows to fill the card width, up to phone size.",
+ "ruling": "Owner, 20:47 CST Nov 9: \"the images are so small in the artifact cockpit.\" Then pick a (grow to a phone) in chat, 21:26 CST Nov 9, relayed by the coordinator. PR #2792's body only pins tests for ask-phase-out and does not mention the pictures, so the PR is not where this ruling lands.",
+ "quote": "the images are so small in the artifact cockpit.",
+ "source": "roadmap/data/steps/page-pics-fill-card.json (why, note). Owner words; the 21:26 pick is relayed, no verbatim.",
+ "status": "open",
+ "step": "page-pics-fill-card"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "load-def-memory-disk-309a",
+ "at": "2026-11-06T15:45:00-06:00",
+ "title": "The shared load definition reads memory and disk only; the sim gatekeeper drops its load-average bars.",
+ "ruling": "Owner, page item 309 (load-definition-which), pick a at 15:45 CST Nov 6: \"Memory and disk only\". PR #2775's body calls this unverified; the page copy confirms it. The slot-2 'normal', full-refuses-all and unread-holds mappings are the lane's own reading, not owner words. Later owner ruling sims-load-brake-only (21:59 CST Nov 12) removes hard simulator limits and may supersede parts.",
+ "quote": "a",
+ "source": "waiting/items/load-definition-which.json lastAnswer (21:45:55Z); PR #2775 body. Owner pick.",
+ "status": "open",
+ "step": "one-load-definition"
+}

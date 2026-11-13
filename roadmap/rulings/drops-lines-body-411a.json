@@ -1,0 +1,10 @@
+{
+ "id": "drops-lines-body-411a",
+ "at": "2026-11-08T06:11:00-06:00",
+ "title": "The silent-undo check reads a Drops-lines excuse from the PR body in CI and the lane lint, as the merge tool does.",
+ "ruling": "Owner, page item 411 (drops-lines-body-everywhere), pick a at 06:11 CST Nov 8: the CLI reads the body through the merge tool's reader (env PR_BODY in CI, --pr-body locally), and decision silent-undo-check-design says every reader takes the body. Against his ruling that a repo changes to fit a shared tool; his pick overrides it for this case. The coordinator's recommended b (commit trailer) was not taken.",
+ "quote": "a",
+ "source": "waiting/answers/drops-lines-body-everywhere.json (12:11:17Z); triage reply 06:14 CST; PR #2763 body. Owner pick.",
+ "status": "open",
+ "step": "silent-undo-ci-body"
+}

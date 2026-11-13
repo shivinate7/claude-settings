@@ -1,0 +1,10 @@
+{
+ "id": "load-def-shared-304a",
+ "at": "2026-11-06T15:24:00-06:00",
+ "title": "The guard and sim-lease read machine load from one shared definition.",
+ "ruling": "Owner, page item 304 (watchers-load-definition), pick a at 15:24 CST Nov 6: \"One shared definition\" (the coordinator recommended b, keep two). Tracked first as PR #1369. PR #2775 builds hooks/guard_load.py.",
+ "quote": "a",
+ "source": "waiting/answers/watchers-load-definition.json (21:24:48Z); PR #2775 body. Owner pick.",
+ "status": "open",
+ "step": "one-load-definition"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "notes-fix-guard-itself",
+ "at": "2026-11-07T13:25:00-06:00",
+ "title": "Each new notes or debt line must name its fix, enforced by a guard.",
+ "ruling": "Owner, 13:25 CST Nov 7: \"I want the guard itself\".",
+ "quote": "I want the guard itself",
+ "source": "roadmap/data/steps/notes-name-their-fix.json why. Owner words; context of the question not found.",
+ "status": "open",
+ "step": "notes-name-their-fix"
+}

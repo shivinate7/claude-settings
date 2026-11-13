@@ -1,0 +1,10 @@
+{
+ "id": "sim-reuse-lease-336a",
+ "at": "2026-11-07T12:31:00-06:00",
+ "title": "A run that reuses an already-booted simulator takes that phone's lease.",
+ "ruling": "Owner, page item 336 (sim-reuse-takes-lease), pick a at 12:31 CST Nov 7: rewrite ruling 4 of sim-lease-tool so a reuse takes the lease. It followed his ask ask-mw6q8p58kl (12:18 CST Nov 7): \"Check commit b7bc81da it provides feedback as to issues my mac has faced in sharing ios simulators.\" Sim slot rules may be superseded by sims-load-brake-only (21:59 CST Nov 12).",
+ "quote": "a",
+ "source": "waiting/answers/sim-reuse-takes-lease.json (18:31:03Z); waiting/asks/ask-mw6q8p58kl.json; PR #2787 body. Owner pick.",
+ "status": "open",
+ "step": "sim-lease-gaps"
+}

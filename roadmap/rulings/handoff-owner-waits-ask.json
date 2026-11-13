@@ -1,0 +1,10 @@
+{
+ "id": "handoff-owner-waits-ask",
+ "at": "2026-11-08T12:30:00-06:00",
+ "title": "A coordinator keeps every item that waits on the owner in its handoff memory.",
+ "ruling": "Owner ask ask-mw864dcumn, 12:30 CST Nov 8: \"tbh coordinators should be required to keep in their handoff memory all the items that are waiting on me on the specific session like always allows or allow once etc yanno?\" Triage filed step handoff-keeps-owner-waits at 12:34 CST.",
+ "quote": "tbh coordinators should be required to keep in their handoff memory all the items that are waiting on me on the specific session like always allows or allow once etc yanno?",
+ "source": "waiting/asks/ask-mw864dcumn.json (18:30:55Z Nov 8); PR #2685 body. Owner words. The PR's other 'only here' item, coordinator ruling 07:31 CST Nov 12 (carry PRs forward by cherry-pick), is a process pick with no words of its own.",
+ "status": "open",
+ "step": "handoff-keeps-owner-waits"
+}

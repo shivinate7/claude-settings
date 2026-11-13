@@ -1,0 +1,10 @@
+{
+ "id": "subagent-probe-412a",
+ "at": "2026-11-08T06:11:00-06:00",
+ "title": "One lane's throwaway cloud container may add a temporary hook to log one subagent payload, then remove it.",
+ "ruling": "Owner, page item 412 (subagent-payload-probe), pick a at 06:11 CST Nov 8: lane resume-finished-reviewer-no-tree runs the one-shot probe (one subagent, one Workflow agent) and removes the hook. The settings write still needs words he types in that lane's chat; the pick alone does not pass auto-mode.",
+ "quote": "a",
+ "source": "waiting/answers/subagent-payload-probe.json (12:11:17Z); triage reply 06:14 CST; PR #2771 body (probe measured 10:11 CST Nov 8). Owner pick.",
+ "status": "open",
+ "step": "resume-guard-subagent-sends"
+}

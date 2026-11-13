@@ -1,0 +1,10 @@
+{
+ "id": "sim-lease-pid-expiry",
+ "at": "2026-11-12T08:38:00-06:00",
+ "title": "A sim lease expires only when its holder's pid is gone.",
+ "ruling": "Coordinator design pick, 08:38 CST Nov 12 (not an owner ruling): a lease expires only when its holder's pid is gone, so a live silent run never loses its phone. Fix from round 1 review of PR #2787.",
+ "quote": "a lease expires only when its holder's pid is gone (coordinator design pick, 08:38 CST Nov 12)",
+ "source": "PR #2787 body. Coordinator.",
+ "status": "open",
+ "step": "sim-lease-gaps"
+}

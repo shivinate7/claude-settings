@@ -1,0 +1,10 @@
+{
+ "id": "model-judge-key-541b",
+ "at": "2026-11-12T11:59:00-06:00",
+ "title": "The hook judge gets ANTHROPIC_API_KEY when no setup token exists.",
+ "ruling": "Owner, page item 541 (model-call-api-key), pick b at 11:59 CST Nov 12: pass the key only when no setup-token file exists. Note: \"we can make it a network secret and/or store the key somewhere that keeps it hidden but still callable im open to ideas if you're worried about key safety\". It replaces the coordinator's 08:16 CST rule that the key stays out of the judge env. PR #2728's body still says page letter a (key stays out); PR #2841 builds b.",
+ "quote": "we can make it a network secret and/or store the key somewhere that keeps it hidden but still callable im open to ideas if you're worried about key safety",
+ "source": "waiting/answers/model-call-api-key.json (17:59:44Z); PR #2841 body; PR #2728 body. Owner pick. The item's pick field a is the coordinator's recommendation, not the owner's.",
+ "status": "open",
+ "step": "model-call-auth-check"
+}

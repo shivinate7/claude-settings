@@ -1,0 +1,10 @@
+{
+ "id": "fix-none-14d-360b",
+ "at": "2026-11-07T14:41:00-06:00",
+ "title": "A `Fix: none` note is looked at again after 14 days.",
+ "ruling": "Owner, page item 360 (fix-none-until-cap), pick b at 14:41 CST Nov 7: a `Fix: none` note is looked at again after 14 days (not the recommended 30).",
+ "quote": "b",
+ "source": "waiting/items/fix-none-until-cap.json lastAnswer (20:41:09Z); step notes-name-their-fix note. Owner pick.",
+ "status": "open",
+ "step": "notes-name-their-fix"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "triage-builds-via-agents",
+ "at": "2026-11-10T11:26:00-06:00",
+ "title": "Triage may do its build work through agents in its own session while new spawns are held.",
+ "ruling": "Owner chat, 11:26 CST Nov 10, relayed by the coordinator 11:31 CST: \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". Process only. Coordinator yes 07:21 CST Nov 12 restarted the step.",
+ "quote": "sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time",
+ "source": "roadmap/data/steps/open-asks-listed-at-wake.json note; PR #2699 body (Ruling line). Owner words, relayed by the coordinator.",
+ "status": "closed",
+ "step": "open-asks-listed-at-wake"
+}

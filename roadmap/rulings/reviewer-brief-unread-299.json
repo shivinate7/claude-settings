@@ -1,0 +1,10 @@
+{
+ "id": "reviewer-brief-unread-299",
+ "at": "2026-11-06T15:24:00-06:00",
+ "title": "Run a version of b (refuse an unread reviewer prompt) and also improve the reviewer agent so reviewers start right.",
+ "ruling": "Owner, page item 299 (reviewer-brief-unread), no letter picked (choice none) at 15:24 CST Nov 6, note: \"should we run a version of B but also improve the reviewer agent so that way erviewr agents already start building things the rigth way\". PR #2780 reads this as 'pick c' (b plus fix where reviewer prompts are made); the page records none. Reading as c is the lane's, unconfirmed.",
+ "quote": "should we run a version of B but also improve the reviewer agent so that way erviewr agents already start building things the rigth way",
+ "source": "waiting/answers/reviewer-brief-unread.json (21:24:48Z); PR #2780 body ('settled as pick c'). Owner words; the pick letter is not his.",
+ "status": "open",
+ "step": "reviewer-brief-blind"
+}
