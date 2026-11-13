@@ -5064,17 +5064,20 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
       wired like `answered_problem`: the Stop hook runs it on any turn, landed or not, and joins its refusal with the
       other reasons in one block. A rewrite after a missing-report block is checked once, as in rewrite_problems.
     - A claim line is a prose line as `_prose_lines` yields it: outside fences, not ending in `?`, with any blockquote
-      marker removed. Any case. Emphasis marks (`*`) are removed before matching, so "**not worse** than main" is the
-      form; the refusal still lists the line as written. The forms: "not a regression", "no regression" or "no
-      regressions" (each counts with no other word on the line), and "not worse than main", "same as main", "main's
+      marker removed. Any case. Emphasis marks (`*`), and underscores (`_`, `__`) that wrap a word, are removed before
+      matching, so "**not worse** than main", "_not a regression_" and "__No regression__" are forms; the refusal still
+      lists the line as written. A snake_case name ("no_regression_test") keeps its underscores and is no form. The
+      forms: "not a regression", "no regression" or "no regressions" (each counts with no other word on the line), and
+      "not worse than main", "same as main", "main's
       own", "already on main", "pre-existing on main", "matches main", "regression from main" or "regressions from
       main", "worse than main". "The" may stand before main ("worse than the main"), and "branch" may follow it ("the
       main branch"). A hyphen joins no words, so "not-worse-than-main" and "bug-same as main" are no form.
     - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
       main()" are no claim.
     - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
-      `,`, `;`, `:`) or the line end follows it. So "main's own CI is green" is no claim, and "The layout is main's
-      own." and "The layout: main's own." are claims.
+      `,`, `;`, `:`), a closing paren `)`, a dash (—) or the line end follows it. So "main's own CI is green" is no
+      claim. "The layout is main's own.", "The layout: main's own.", "The glitch (main's own) predates this lane." and
+      "The glitch — main's own — predates this lane." are claims.
     - A hedge word on the line exempts it: "unmeasured", "unknown" or "not read", as whole words.
     - A cite of a main read on the same line: a path with a line (file.ext:123), origin/main, main@<sha>, `git show
       main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
@@ -5152,6 +5155,18 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The filter is not worse than the main branch.",
          "The filter is not worse than the main branch; see lint/x.py:12."),
     )
+    OWN_CLOSER_PAIRS = (  # (a claim, its cited twin): a closing paren or a dash after "main's own" makes the claim
+        ("The glitch (main's own) predates this lane.",
+         "The glitch (main's own) predates this lane; see lint/report_guard.py:12."),
+        ("The glitch — main's own — predates this lane.",
+         "The glitch — main's own — predates this lane; see lint/report_guard.py:12."),
+    )
+    OWN_CLOSER_NO_CLAIM = ("The glitch (main's own CI) is green.", "main's own CI is green.")
+    UNDERSCORE_PAIRS = (  # (a claim, its cited twin): underscore emphasis is stripped like `*`
+        ("This is _not a regression_.", "This is _not a regression_; see lint/report_guard.py:12."),
+        ("__No regression__.", "__No regression__; see lint/report_guard.py:12."),
+    )
+    SNAKE_NAMES = ("The no_regression_test is green.", "The no_regression_flag is set.")  # no claim: _ joins words
     NOUN_TWINS = ("No regression in the layout.", "No regressions in the layout.")  # both refused
     CITES = (
         "The filter is not worse than main; see lint/report_guard.py:123.",
@@ -5356,6 +5371,18 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_blocked(twin, twin)
                 self.assert_allowed("main's own CI is green.")
 
+    def test_mc_red_main_s_own_before_a_closer_is_a_claim(self):
+        # Catches: "main's own" before a closing paren or a dash is read as no claim, so a claim in brackets or between
+        # dashes passes. Each refusal's cited twin passes, so the cite is the only difference. "main's own CI" stays no
+        # claim, in brackets or at the start of a line.
+        for line, twin in self.OWN_CLOSER_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+        for line in self.OWN_CLOSER_NO_CLAIM:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
     def test_mc_red_a_bypass_of_a_claim_form_is_refused(self):
         # Catches: a code span round `main`, emphasis marks, a plural, or "the main branch" hides the claim form. The
         # cited twin passes, so the cite is the only difference.
@@ -5363,6 +5390,17 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
                 self.assert_allowed(twin)
+
+    def test_mc_red_underscore_emphasis_is_stripped_like_star(self):
+        # Catches: underscore emphasis ("_not a regression_", "__No regression__") hides the claim form, as `*` does
+        # not. Each refusal's cited twin passes. A snake_case name keeps its underscores, so it is no claim.
+        for line, twin in self.UNDERSCORE_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+        for line in self.SNAKE_NAMES:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_mc_red_a_hash_needs_a_digit_and_a_letter(self):
         # Catches: a pure-digit string (a date such as 20261112) or a letters-only string (deadbeef) is read as a commit
