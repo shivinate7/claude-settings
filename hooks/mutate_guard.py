@@ -3610,7 +3610,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_stream.py": ["stream"],
     "hooks/guard_push_delete.py": ["push-delete"],
     "hooks/guard_branch_worktree.py": ["branch-worktree"],
-    "hooks/guard_merge.py": ["merge"],
+    "hooks/guard_merge.py": ["merge", "review-record"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
 }
