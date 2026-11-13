@@ -42,6 +42,7 @@ RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
 SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+NO_UNPROVABLE = "check_debt_retire has no unprovable_closes(): a close whose Retire names no runnable test is not refused at lane-lint (decision debt-close-runs-retire)"
 
 
 def sh(cwd, *cmd):
@@ -422,6 +423,92 @@ class Closes(Case):
         found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the Retire of the base tip did not run")
         self.assertEqual(pairs(found), [("d-moved", "red")], "the Retire of the fork point was read, not the base tip's")
+
+
+class Unprovable(Case):
+    """unprovable_closes: a close whose Retire, read at base, names no runnable test file. Lane-lint refuses it: a PR of that shape runs
+    only the `touched` job, which selects no test, so a `Retire-run:` cite can never prove it (decision debt-close-runs-retire).
+    The check is static: it runs no test and reads no cite."""
+
+    def unprovable(self):
+        """unprovable_closes() of this case's PR. A missing function is a named red: no close can be refused at lane-lint without it."""
+        self.assertTrue(hasattr(D, "unprovable_closes"), NO_UNPROVABLE)
+        return D.unprovable_closes(self.dir, self.base, self.head)
+
+    def tracked_at_head(self):
+        return sh(self.dir, "git", "ls-tree", "-r", "--name-only", self.head).splitlines()
+
+    def test_u1_a_delete_whose_prose_retire_names_no_test_is_unprovable(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        self.assertEqual(self.statuses(), ["D"], "scope: the PR does not delete the debt")
+        found = self.unprovable()
+        self.assertEqual(pairs(found), [("d-prose", "unprovable")], "a close whose Retire names no test was not refused")
+        self.assertIn(PROSE, found[0].text, "the finding does not hold the Retire text it read")
+
+    def test_u2_a_cited_green_run_does_not_make_a_prose_close_provable(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        self.assertEqual(self.findings(pr_body=body, run_state=Runs(("success", self.head))), [],
+                         "scope: the merge-time check does not clear the close with its green cite")
+        self.assertEqual(pairs(self.unprovable()), [("d-prose", "unprovable")], "a cite made a close whose Retire names no test provable")
+
+    def test_u3_a_close_whose_retire_names_a_tracked_test_is_provable_and_runs_nothing(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        self.assertEqual(self.statuses(), ["D"], "scope: the PR does not delete the debt")
+        self.assertIn("tests/test_pass.py", self.tracked_at_head(), "scope: the head does not track the named test")
+        self.assertEqual(pairs(self.unprovable()), [], "a close whose Retire names a tracked test was refused")
+        self.assertEqual(self.ran(), [], "unprovable_closes ran the named test: the check is static, and the merge runs the test")
+
+    def test_u4_a_close_whose_retire_names_only_a_non_test_path_is_unprovable(self):
+        self.repo(debts={"d-config": "Delete the old helper. Check: `.claude/layout-extras.json`."})
+        self.change(rm=["docs/debts/d-config.md"])
+        self.assertIn(".claude/layout-extras.json", self.tracked_at_head(), "scope: the named path is not tracked at head")
+        self.assertEqual(pairs(self.unprovable()), [("d-config", "unprovable")], "a non-test path counted as a runnable check")
+
+    def test_u4b_a_close_whose_retire_names_an_untracked_test_is_unprovable(self):
+        self.repo(debts={"d-gone": "Delete the old helper. Check: `tests/test_never_written.py`."})
+        self.change(rm=["docs/debts/d-gone.md"])
+        self.assertNotIn("tests/test_never_written.py", self.tracked_at_head(), "scope: the head tracks the named test")
+        self.assertEqual(pairs(self.unprovable()), [("d-gone", "unprovable")], "an untracked test counted as a runnable check")
+
+    def test_u4c_a_close_whose_retire_names_a_test_the_same_pr_deletes_is_unprovable(self):
+        self.repo(debts={"d-gone": PASS})
+        self.change(rm=["docs/debts/d-gone.md", "tests/test_pass.py"])
+        self.assertNotIn("tests/test_pass.py", self.tracked_at_head(), "scope: the head still tracks the named test")
+        self.assertEqual(pairs(self.unprovable()), [("d-gone", "unprovable")], "a test the PR deletes counted as a runnable check")
+
+    def test_u5_a_rename_inside_the_folder_with_its_retire_unchanged_is_no_close(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(mv=[("docs/debts/d-prose.md", "docs/debts/d-prose-renamed.md")])
+        self.assertEqual(self.statuses(), ["R"], "scope: git did not pair the rename")
+        self.assertEqual(pairs(self.unprovable()), [], "a rename inside the folder with its Retire unchanged was judged a close")
+
+    def test_u6_a_rename_out_of_the_debts_folder_with_a_prose_retire_is_unprovable(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(mv=[("docs/debts/d-prose.md", "docs/archive/d-prose.md")])
+        self.assertEqual(self.statuses(), ["R"], "scope: git did not pair the rename")
+        self.assertEqual(pairs(self.unprovable()), [("d-prose", "unprovable")], "a rename out of the folder was not judged a close")
+
+    def test_u7_a_rename_inside_the_folder_whose_retire_changed_reads_the_base_retire(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write={"docs/debts/d-prose-b.md": debt(PASS)}, rm=["docs/debts/d-prose.md"])
+        self.assertEqual(self.statuses(), ["R"], "scope: git did not pair the new debt with the old one")
+        self.assertEqual(pairs(self.unprovable()), [("d-prose", "unprovable")], "the head's runnable Retire was read, not the base's prose one")
+
+    def test_u8_two_closes_in_one_diff_only_the_one_with_no_runnable_span_is_unprovable(self):
+        self.repo(debts={"d-pass": PASS, "d-prose": PROSE})
+        self.change(rm=["docs/debts/d-pass.md", "docs/debts/d-prose.md"])
+        self.assertEqual(self.statuses(), ["D", "D"], "scope: the PR does not delete both debts")
+        self.assertEqual(pairs(self.unprovable()), [("d-prose", "unprovable")], "the two closes were not judged one provable and one unprovable")
+
+    def test_u9_a_pr_that_closes_no_debt_has_no_finding(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write={"tests/test_pass.py": MARKED % 0 + "# touched\n"})
+        self.assertEqual(self.statuses(), ["M"], "scope: the PR does not modify the test file only")
+        self.assertEqual(pairs(self.unprovable()), [], "a PR with no debt close was refused")
 
 
 class RetireRun(Case):

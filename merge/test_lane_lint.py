@@ -855,6 +855,64 @@ class LaneLint(LaneFixture):
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
 
+class DebtCloseLint(LaneFixture):
+    """`merge --lane-lint <pr>` refuses a PR that closes a debt whose Retire, read at base, names no runnable test file (decision debt-close-runs-retire).
+    Such a PR runs only the `touched` job, which selects no test, so a `Retire-run:` cite can never prove it, and the merge would refuse it after a
+    batch run. The refusal tells the lane where to name the test. A debt whose Retire names a tracked test file passes this check, and the lint
+    does not run that test: the merge runs it."""
+
+    def closes_debt(self, retire, test=False):
+        """main gains docs/debts/retire-target.md with the Retire line `retire`. feat is cut from that main and deletes the debt. With `test`, feat
+        also adds tests/test_retire_target.py, the file a Retire line names, which exits 0. Each push goes to origin, as a lane's push does."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        tm.put(os.path.join(o, "docs/debts/retire-target.md"), tm.DEBT_FIXTURE % retire)
+        tm.sh(o, "git", "add", "-A"); tm.sh(o, "git", "commit", "-qm", "main: a debt")
+        tm.sh(o, "git", "push", "-q", "origin", "main")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        tm.sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
+        if test:
+            tm.put(os.path.join(o, "tests", "test_retire_target.py"), "import sys\nsys.exit(0)\n")
+        tm.sh(o, "git", "add", "-A"); tm.sh(o, "git", "commit", "-qm", "feat: close the debt")
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+
+    def tracked_at_head(self):
+        return tm.sh(self.co, "git", "ls-tree", "-r", "--name-only", self.head("feat")).splitlines()
+
+    def test_a_pr_that_closes_a_debt_whose_retire_names_no_test_is_refused_with_the_fix(self):
+        self.closes_debt(tm.PROSE_RETIRE)
+        self.assertIn("- **Retire.** %s" % tm.PROSE_RETIRE, self.show("main", "docs/debts/retire-target.md"),
+                      "scope: main does not hold the debt the PR closes, with its prose Retire")
+        self.assertNotIn("docs/debts/retire-target.md", self.tracked_at_head(), "scope: the head still holds the debt")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a PR that closes a debt whose Retire names no test passed the lint: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn("retire-target", out, "the refusal does not name the debt it refuses")
+        self.assertRegex(out, r"(?i)name[^\n]*Retire", "the refusal does not tell the lane to name the test file in the Retire line")
+        self.assertRegex(out, r"(?i)\b(touch|pin)\b", "the refusal does not tell the lane to touch or pin the test so `touched` runs it")
+        self.assertEqual(self.lint_calls(), [], "the lint ran beside a refused close: " + out)
+
+    def test_a_pr_that_closes_a_debt_whose_retire_names_a_tracked_test_passes_this_check(self):
+        self.closes_debt(tm.RETIRE_TEST, test=True)
+        self.assertIn("tests/test_retire_target.py", self.tracked_at_head(), "scope: the head does not track the test the Retire line names")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a close whose Retire names a tracked test was refused at the lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_retire_run_cite_does_not_clear_a_close_whose_retire_names_no_test_at_the_lint(self):
+        self.closes_debt(tm.PROSE_RETIRE)
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a Retire-run cite cleared a close whose Retire names no test at the lint: " + out)
+        self.assertIn("retire-target", out, "the refusal does not name the debt it refuses")
+        self.assertEqual(self.lint_calls(), [], "the lint ran beside a refused close: " + out)
+
+
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
 # lane, and against the PRs --with names, with `git merge-tree --write-tree`. The same lane is decided by one rule, in one helper pair
 # (session_of, same_lane): the session URL line of the PR body.
