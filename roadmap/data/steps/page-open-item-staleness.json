@@ -1,0 +1,14 @@
+{
+ "id": "page-open-item-staleness",
+ "title": "Triage: page open-item staleness (ledger row, from the unlanded ledger)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Triage's own ledger row, like page-answered-not-closed.",
+ "source": "coordinator 12:45 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
+ "note": "Doing by triage, 12:45 CST Nov 13. The detail is in the ledger row; no brief text yet. 24 other not-started rows wait for the drain (coordinator).",
+ "updatedAt": "2026-11-13T12:45:31-06:00"
+}

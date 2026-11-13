@@ -1,7 +1,7 @@
 {
  "id": "role-text-follows-ruling",
  "title": "A step that changes a role's duty changes its role text",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": "role-texts-match-rulings",
  "why": "The role texts went stale because a ruling or step that changes a role's duty never has to touch its role text. Owner's goal: accurate at the fastest speed (owner 13:13 CST Nov 10).",
  "source": "retrospective 09:33 CST Nov 13",
- "note": "When a step that names a role (coordinator, triage, batch runner, lane) goes done, its PR also changes that role's text in skills/project-ops, or its body says 'no role text change'. A check reads it. Red first. Builds after role-texts-match-rulings. Added 09:36 CST Nov 13 (owner 09:35 CST: \"is there anyway to reinstall them in place with the right briefs once ready? or again we'll need to do an archival wave into recreation?\", relayed by the retrospective): when a PR that changes a role's text in skills/project-ops merges, the merge sends one git-mailbox message to each live session of that role: 'your role text changed at <commit>; re-read <path> on main'. No archive-and-restart wave. The session_start.sh tier line already reaches a live session at its next compaction or resume. Own mailbox, not upstream (ruling portable-own-features). The mail-on-merge part rides the one mail of step merge-mail-refreshes-sessions (retrospective 09:57 CST Nov 13).",
- "updatedAt": "2026-11-13T10:05:11-06:00"
+ "note": "When a step that names a role (coordinator, triage, batch runner, lane) goes done, its PR also changes that role's text in skills/project-ops, or its body says 'no role text change'. A check reads it. Red first. Builds after role-texts-match-rulings. Added 09:36 CST Nov 13 (owner 09:35 CST: \"is there anyway to reinstall them in place with the right briefs once ready? or again we'll need to do an archival wave into recreation?\", relayed by the retrospective): when a PR that changes a role's text in skills/project-ops merges, the merge sends one git-mailbox message to each live session of that role: 'your role text changed at <commit>; re-read <path> on main'. No archive-and-restart wave. The session_start.sh tier line already reaches a live session at its next compaction or resume. Own mailbox, not upstream (ruling portable-own-features). The mail-on-merge part rides the one mail of step merge-mail-refreshes-sessions (retrospective 09:57 CST Nov 13). Folded into role-texts-match-rulings 12:45 CST Nov 13 (coordinator 12:45 CST): lane session_013NEJL3FhbgDYRG4xuhVAkx.",
+ "updatedAt": "2026-11-13T12:45:31-06:00"
 }

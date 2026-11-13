@@ -1,0 +1,14 @@
+{
+ "id": "r16-mistake-is-missing-guard",
+ "title": "r16: a mistake names its missing guard (express, from the unlanded ledger)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3fTMNnVHbgiss5Vcp",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Express lane from the unlanded ledger.",
+ "source": "coordinator 12:45 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
+ "note": "Doing, express lane from the retrospective's unlanded ledger; the ledger row holds the detail. Created by triage from the lane name, with no brief text of its own yet. Lane feedback-guard-findings, session_013NEJL3fTMNnVHbgiss5Vcp.",
+ "updatedAt": "2026-11-13T12:45:31-06:00"
+}
