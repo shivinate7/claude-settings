@@ -210,6 +210,7 @@ Relay: no case. A relay arrives in the `<cross-session-message` frame, the same 
 
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -4968,9 +4969,9 @@ def case_unsent_page_or_repo_refusal_does_not_name_closed():
     check("repo remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
 
 
-def case_standing_and_settled_ruling_refusals_still_name_closed():
-    """The control: the refusal for an open standing id and the refusal for a ruling whose home does not resolve both
-    still name `[closed]`, as the mark is the way out for those two."""
+def case_standing_refusal_still_names_closed():
+    """The control: the refusal for an open standing id still names `[closed]`, the one refusal the mark settles. The
+    ruling refusal is case_ruling_refusal_for_an_unresolved_home_does_not_name_closed."""
     cfg, sid = new_cfg(), "closed-control-standing"
     write_file(inbox_of(cfg, sid), render_block("standing id missing from the handoff",
                                                 items=("- fb-0958-4 [standing] -> handoff",)))
@@ -4978,10 +4979,60 @@ def case_standing_and_settled_ruling_refusals_still_name_closed():
     reason = block_reason(guard(cfg, sid)) or ""
     check("closed control: the standing refusal blocks", "fb-0958-4" in reason, reason)
     check("closed control: the standing refusal names [closed]", "[closed]" in reason, reason)
-    p = close_run(new_cfg(), "closed-control-ruling", (UNHELD_RULING,))
+
+
+# --------------------------------------------------------------------------- the remedy: [closed] for a standing id only; a dict key that is not the question; one home
+
+UNRESOLVED_RULING = "- fb-1 [ruling] -> NO HOME YET"  # a ruling whose home resolves in no repo
+UNRESOLVED_CLOSED = UNRESOLVED_RULING + " [closed]"  # the same line with the mark typed on it
+
+
+def case_ruling_refusal_for_an_unresolved_home_does_not_name_closed():
+    """Typing `[closed]` on a ruling whose home resolves nowhere does not clear its refusal, so the refusal must not offer
+    the mark. The line with the mark still blocks, as case_guard_ruling_homed_to_handoff_blocks pins."""
+    p = homed(new_cfg(), "r-unresolved", (UNRESOLVED_RULING,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling: the refusal blocks", p, named=("fb-1",))
     reason = block_reason(p) or ""
-    check("closed control: the settled-ruling refusal blocks", "fb-0958-2" in reason, reason)
-    check("closed control: the settled-ruling refusal names [closed]", "[closed]" in reason, reason)
+    check("unresolved ruling: the refusal does not name [closed]", "[closed]" not in reason, reason)
+    p = homed(new_cfg(), "r-unresolved-closed", (UNRESOLVED_CLOSED,), handoff_ids=("fb-1",))
+    expect_block("unresolved ruling typed [closed]: the block still holds", p, named=("fb-1",))
+
+
+def case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped():
+    """A dict answer keyed by a text that is not exactly the question's (a trailing space) is not dropped silently: the
+    answers are saved, or the box prints the `not saved` line."""
+    cfg, sid = new_cfg(), "qbox-key-mismatch"
+    p = question_hook(cfg, sid, {"answers": {"A?": "answer for A", "B? ": "answer for B"}},
+                      questions=box_questions("A?", "B?"))
+    text = saved_text(cfg, sid)
+    lines = text.split("\n") if text else []
+    check("question key mismatch: the hook exits 0", p.code == 0, p.desc())
+    check("question key mismatch: each answer is saved, or the not-saved line prints, never silence",
+          NOT_SAVED_ANSWER in p.out or sorted(lines) == ["answer for A", "answer for B"], p.desc() + " saved=" + text)
+
+
+def case_problems_tests_the_settling_kinds_by_their_one_home():
+    """The ruling and task branch of problems() names the settling kinds through SETTLING_PREFIXES, not a literal copy of
+    the tuple. Read with ast, the language's own parser: a copy is red even while it agrees with the one home."""
+    with open(GUARD_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), GUARD_PATH)
+    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "problems"]
+    check("one home: feedback_guard.py defines problems()", len(defs) == 1, "found %d" % len(defs))
+    if len(defs) != 1:
+        return
+    literal, named = False, False
+    for call in ast.walk(defs[0]):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "startswith" and call.args):
+            continue
+        arg = call.args[0]
+        words = [e.value for e in getattr(arg, "elts", []) if isinstance(e, ast.Constant)]
+        literal = literal or words == ["[ruling]", "[task]"]
+        named = named or any(isinstance(n, ast.Name) and n.id == "SETTLING_PREFIXES" for n in ast.walk(arg))
+    check("one home: problems() repeats the settling prefixes as a literal tuple", not literal,
+          "problems() has its own (\"[ruling]\", \"[task]\") tuple")
+    check("one home: problems() tests the settling kinds with SETTLING_PREFIXES", named,
+          "no startswith in problems() takes SETTLING_PREFIXES")
 
 
 CASES = (
@@ -5205,7 +5256,10 @@ CASES = (
     case_box_note_with_inner_quotes_is_saved_whole,
     case_close_proof_counts_only_the_session_repo,
     case_unsent_page_or_repo_refusal_does_not_name_closed,
-    case_standing_and_settled_ruling_refusals_still_name_closed,
+    case_standing_refusal_still_names_closed,
+    case_ruling_refusal_for_an_unresolved_home_does_not_name_closed,
+    case_dict_answer_with_a_key_that_is_not_the_question_is_not_dropped,
+    case_problems_tests_the_settling_kinds_by_their_one_home,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
     case_refs_are_listed_once_per_repo_not_per_item,
 )
