@@ -1079,6 +1079,10 @@ DUP_GRANT = "You have my go-ahead to merge the batch."  # a grant word and an ac
 DUP_NOT_A_GRANT_ITEM = "- fb-1616-2 [note] -> not-a-grant"
 DUP_PAGE_ANSWER_ITEM = "- fb-1616-3 [page] -> page:143"  # the page item a chat answer "143 b" is for
 DUP_NOT_PAGE_FORM_ITEM = "- fb-1616-4 [note] -> not-page-form"
+DUP_PAGE_ITEM = "- fb-1616-6 [page] -> page:98"  # sent by DUP_PAGE_SEND, which names 98
+DUP_REPO_ITEM = "- fb-1616-7 [repo] -> repo:acme/widgets"  # sent by DUP_REPO_SEND, which names the repo
+DUP_PAGE_SEND = "Ruling on page item 98: a"
+DUP_REPO_SEND = "Filed the rename in `acme/widgets`"
 
 
 def dup_copies(first_items=(), second_items=(), text=DUP_TEXT):
@@ -1210,6 +1214,72 @@ def case_chat_answer_repeated_heading_with_page_item_under_second_copy_is_not_bl
     write_transcript(cfg, sid, [owner_rec("143 b"), send_rec("Ruling on page 143: b")])
     p = guard(cfg, sid, cwd=repo, transcript=transcript_of(cfg, sid))
     check("dup answer control: a repeated chat answer with its send is not blocked", block_reason(p) is None, p.desc())
+
+
+def dup_send_run(cfg, sid, first_items=(), second_items=(), text=DUP_TEXT, send=None):
+    """Two copies of one message under one heading and quote, the items under each copy. The transcript holds the
+    owner's one record of the message and, when `send` is given, that send after it. Returns the guard's Proc."""
+    write_file(inbox_of(cfg, sid), dup_copies(first_items, second_items, text=text))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    write_transcript(cfg, sid, [owner_rec(text), said_rec("Noted.")] + ([send] if send else []))
+    return guard(cfg, sid, transcript=transcript_of(cfg, sid))
+
+
+def case_dup_page_item_under_second_copy_blocks_without_a_send():
+    """One owner record, no send, and a [page] item under the second copy of a repeated heading. The item belongs to
+    the message, so its send check runs and blocks. On the head the second copy's index is 2, the transcript has one
+    owner record, and the check stands down."""
+    p = dup_send_run(new_cfg(), "dup-send-page-second", second_items=(DUP_PAGE_ITEM,))
+    expect_block("dup send: a page item under the second copy blocks for the missing send", p, named=("fb-1616-6",))
+
+
+def case_dup_repo_item_under_second_copy_blocks_without_a_send():
+    """One owner record, no send, and a [repo] item under the second copy of a repeated heading. Its send check
+    runs and blocks, as the same item under the first copy does."""
+    p = dup_send_run(new_cfg(), "dup-send-repo-second", second_items=(DUP_REPO_ITEM,))
+    expect_block("dup send: a repo item under the second copy blocks for the missing send", p, named=("fb-1616-7",))
+
+
+def case_dup_grant_page_item_under_second_copy_blocks_without_a_send():
+    """A grant with its [page] item under the second copy of a repeated heading, one owner record, no send. The grant
+    has a home in the item, so the block is the page item's missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-grant-second", second_items=(DUP_PAGE_ITEM,), text=DUP_GRANT)
+    expect_block("dup send: a grant with its page item under the second copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_page_item_under_first_copy_blocks_without_a_send():
+    """Control: the same [page] item under the first copy blocks for the missing send, with the same record and no send."""
+    p = dup_send_run(new_cfg(), "dup-send-page-first", first_items=(DUP_PAGE_ITEM,))
+    expect_block("dup send control: a page item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_repo_item_under_first_copy_blocks_without_a_send():
+    """Control: the same [repo] item under the first copy blocks for the missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-repo-first", first_items=(DUP_REPO_ITEM,))
+    expect_block("dup send control: a repo item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-7",))
+
+
+def case_dup_grant_page_item_under_first_copy_blocks_without_a_send():
+    """Control: the grant with its [page] item under the first copy blocks for the missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-grant-first", first_items=(DUP_PAGE_ITEM,), text=DUP_GRANT)
+    expect_block("dup send control: a grant with its page item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_items_under_either_copy_are_not_blocked_once_sent():
+    """Control: each item under the second copy, with its send after the owner's record, is not blocked. The head
+    passes this only because the second copy's send check stands down, so the case asserts no block alone."""
+    for label, kwargs, send in (
+            ("a page item", {"second_items": (DUP_PAGE_ITEM,)}, send_rec(DUP_PAGE_SEND)),
+            ("a repo item", {"second_items": (DUP_REPO_ITEM,)}, send_rec(DUP_REPO_SEND)),
+            ("a grant with its page item", {"second_items": (DUP_PAGE_ITEM,), "text": DUP_GRANT},
+             send_rec(DUP_PAGE_SEND))):
+        p = dup_send_run(new_cfg(), "dup-send-sent", send=send, **kwargs)
+        check("dup send control: %s under the second copy, with its send, is not blocked" % label,
+              block_reason(p) is None, p.desc())
 
 
 # --------------------------------------------------------------------------- page cases
@@ -4490,6 +4560,13 @@ CASES = (
     case_page_form_repeated_comment_not_page_form_under_second_copy_passes,
     case_page_form_repeated_comment_not_page_form_under_first_copy_passes,
     case_chat_answer_repeated_heading_with_page_item_under_second_copy_is_not_blocked,
+    case_dup_page_item_under_second_copy_blocks_without_a_send,
+    case_dup_repo_item_under_second_copy_blocks_without_a_send,
+    case_dup_grant_page_item_under_second_copy_blocks_without_a_send,
+    case_dup_page_item_under_first_copy_blocks_without_a_send,
+    case_dup_repo_item_under_first_copy_blocks_without_a_send,
+    case_dup_grant_page_item_under_first_copy_blocks_without_a_send,
+    case_dup_items_under_either_copy_are_not_blocked_once_sent,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
     case_page_send_with_error_result_does_not_count,
