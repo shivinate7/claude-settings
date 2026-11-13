@@ -3,6 +3,7 @@
 
     python3 ~/.claude/skills/waiting-page/splice.py --page LIVE.html --block FILE --out OUT.html
     python3 ~/.claude/skills/waiting-page/splice.py --page TEMPLATE.html --carry LIVE.html --out OUT.html
+    python3 ~/.claude/skills/waiting-page/splice.py --page LIVE.html --add-design SLUG=FILE [--add-design ...] --out OUT.html
 
 The first form replaces the roadmap block. The second, --carry, is for a republish of a changed
 template: OUT.html is TEMPLATE.html with the live page's designData block, roadmap block and <title>
@@ -24,14 +25,22 @@ A marker counts only as a comment in the page's markup. Text inside <script>, <s
 is not a block.
 The splice refuses, and writes no file, when the live page has no block, an unclosed block, or more
 than one block, and when FILE is not one marked block. The message names the roadmap block.
+--add-design is the one home for a mockup's path into the page, in a local session and a cloud one alike. It runs
+alone, or after --block or --carry. For each SLUG=FILE it reads FILE (utf-8, as given from the working directory)
+and adds "SLUG": "<html>" to the page's one designData JSON object, every `<` written as \\u003c and no other
+byte changed. A SLUG that exists with the same html is a no-op. It refuses, and writes nothing, when the page's
+designData block is missing, doubled or not a JSON object, when a FILE is missing, empty or unreadable, when a
+SLUG is not [a-z0-9-]+, or when a SLUG exists with other html.
 Cost: one read of each file and one write; no process starts.
 """
 import argparse
+import json
 import re
 import sys
 
 OPEN, CLOSE = "roadmap:data", "/roadmap:data"
 DESIGN = "designData"
+SLUG = re.compile(r"[a-z0-9-]+")
 TITLE = "title"
 PAGE_NAME = "Cockpit"  # the one home of the page's name: its title is "<repo> Cockpit"
 # A live title of an old form: an optional "<X> " prefix, then Queue, Queue · Status or Roadmap.
@@ -41,6 +50,20 @@ SVG_TAG = re.compile(r"<(/?)svg(?=[\s/>])", re.I)
 DESIGN_ID = re.compile(r"""\bid\s*=\s*["']?designData["']?(?=[\s/>"'])""", re.I)
 RAW = ("script", "style", "textarea", "title")
 TAG = re.compile(r"<(%s)(?=[\s/>])" % "|".join(RAW), re.I)
+
+
+def tag_end(text, at):
+    """Index of the ">" that ends the opening tag at `at`, or -1. A ">" inside a quoted value does not count."""
+    quote = None
+    for i in range(at + 1, len(text)):
+        c = text[i]
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "\"'":
+            quote = c
+        elif c == ">":
+            return i
+    return -1
 
 
 def scan(text):
@@ -70,17 +93,8 @@ def scan(text):
             at += 1
             continue
         at_tag = at
-        quote = None
-        for i in range(at + 1, len(text)):  # the end of the opening tag: a ">" inside a quoted value does not count
-            c = text[i]
-            if quote:
-                quote = None if c == quote else quote
-            elif c in "\"'":
-                quote = c
-            elif c == ">":
-                end = i
-                break
-        else:
+        end = tag_end(text, at)
+        if end < 0:
             return found
         close = re.compile(r"</%s(?=[\s/>])" % tag.group(1), re.I).search(text, end)
         if not close:
@@ -173,19 +187,76 @@ def splice(page, block):
     return page[:start] + block[b0:b1] + page[end:]
 
 
+def read_design(slug, path):
+    """The text of the mockup file `path`; SystemExit, naming the cause, when it is missing, empty or unreadable."""
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            html = f.read()
+    except FileNotFoundError:
+        raise SystemExit("splice: the file for slug %s is missing (not found): %s. Nothing was written." % (slug, path))
+    except (OSError, UnicodeDecodeError) as e:
+        raise SystemExit("splice: the file for slug %s is unreadable (cannot read, utf-8 text only): %s: %s. Nothing was written." % (slug, path, e))
+    if not html:
+        raise SystemExit("splice: the file for slug %s is empty: %s. Nothing was written." % (slug, path))
+    return html
+
+
+def add_designs(page, pairs):
+    """`page` with "SLUG": "<html>" added to its one designData object for each (slug, html) in order, every `<`
+    as \\u003c. Only the body's closing brace moves; every other byte stays. SystemExit on a bad slug, a body
+    that is not a JSON object, or a slug that exists with other html."""
+    start, end = design_span(page, "the page")
+    body_start, body_end = tag_end(page, start) + 1, page.rindex("</", start, end)
+    body = page[body_start:body_end]
+    try:
+        designs = json.loads(body)
+    except ValueError:
+        designs = None
+    if not isinstance(designs, dict):
+        raise SystemExit("splice: the designData block is not a JSON object, so nothing was written.")
+    members = []
+    for slug, html in pairs:
+        if not SLUG.fullmatch(slug):
+            raise SystemExit("splice: the slug %r is not [a-z0-9-]+, so nothing was written." % slug)
+        if slug in designs:
+            if designs[slug] != html:
+                raise SystemExit("splice: the slug %s already exists in designData with other html, so nothing was written." % slug)
+            continue
+        designs[slug] = html
+        members.append('"%s": %s' % (slug, json.dumps(html, ensure_ascii=False).replace("<", "\\u003c")))
+    if not members:
+        return page
+    close = body.rindex("}")
+    first = not body[:close].strip("{ \t\r\n")  # nothing before the closing brace but the opener: no comma
+    return page[:body_start] + body[:close] + ("" if first else ", ") + ", ".join(members) + body[close:] + page[body_end:]
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description="Splice a roadmap block into the live waiting page, or carry the live blocks into a template.")
     ap.add_argument("--page", required=True, help="the live page, as read; with --carry, the template")
-    group = ap.add_mutually_exclusive_group(required=True)
+    group = ap.add_mutually_exclusive_group()
     group.add_argument("--block", help="the roadmap block file from roadmap/build.py --block")
     group.add_argument("--carry", help="the live page whose designData and roadmap blocks go into --page")
+    ap.add_argument("--add-design", action="append", default=[], metavar="SLUG=FILE",
+                    help="add the mockup in FILE to designData as SLUG; repeatable; runs after --block or --carry")
     ap.add_argument("--out", required=True, help="the page to write")
     args = ap.parse_args(argv)
+    if not (args.block or args.carry or args.add_design):
+        ap.error("one of --block, --carry or --add-design is required")
+    pairs = []
+    for arg in args.add_design:
+        slug, eq, path = arg.partition("=")
+        if not eq:
+            raise SystemExit("splice: --add-design takes SLUG=FILE, got %r, so nothing was written." % arg)
+        pairs.append((slug, path))
     with open(args.page, encoding="utf-8", newline="") as f:
-        page = f.read()
-    with open(args.block or args.carry, encoding="utf-8", newline="") as f:
-        other = f.read()
-    result = splice(page, other) if args.block else carry(page, other)
+        result = f.read()
+    if args.block or args.carry:
+        with open(args.block or args.carry, encoding="utf-8", newline="") as f:
+            other = f.read()
+        result = splice(result, other) if args.block else carry(result, other)
+    if pairs:
+        result = add_designs(result, [(slug, read_design(slug, path)) for slug, path in pairs])
     with open(args.out, "w", encoding="utf-8", newline="") as f:
         f.write(result)
     return 0
