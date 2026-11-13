@@ -1,7 +1,7 @@
 # Operating model
 
-Paste this into the project instructions. Replace each `<placeholder>`. The roster goes with it,
-from `roster.md`.
+Paste this into the project instructions. Replace each `<placeholder>`. The roster is not pasted: it lives on the record branch
+(`roster.md` is its form; ruling R22).
 
 ## Session tiers
 
@@ -14,7 +14,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
-  It archives each other finished session it started at its next wake, once it has read the report, and a lane it decides to stop (ruling R46; decision `session-tiers`, Archiving scope).
+  It archives each other finished session it started at its next wake, once it has read the report, (ruling R46). It also archives a lane it decides to stop (decision `session-tiers`, Archiving scope). Each lane sends the nudge below when triage flags it (ruling R56 point 3).
   The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
@@ -48,14 +48,14 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and the rulings store, one file per owner ruling, from the owner's quoted words with their time (ruling R59,
   a ruling governs at once; `lint/ruled_store.py` checks the store). It sends the coordinator the ready list.
   It closes the build's stale drafts once, then at each batch (decision `stalled-steps`; step
-  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts, and nudges a silent lane on a step
-  others wait on once (rulings R54 and R56). It writes each Opus grant on the step. It may run agents.
+  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts, and flags to the coordinator a lane on a step
+  others wait on that has sent no report since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives the lanes `merge --idle-lanes --live <file>` lists, for the coordinator (ruling R46, whoever starts a session archives it; decision `session-tiers`, Archiving scope). The coordinator archives each other finished session it started.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives the PR lanes for the coordinator, from the list `merge --idle-lanes --live <file>` prints (ruling R46; decision `session-tiers`, Archiving scope). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground (see below); whether one repo's CI wait then holds
-  another repo's hand-offs is unmeasured. Batch steps, the left-out list and `--confirm --express`
-  are in skill `ci-hygiene`, step 8.
+  another repo's hand-offs is unmeasured. Batch steps are in skill `ci-hygiene`, step 8. The left-out list
+  and `--confirm --express` are in the merge tool's usage.
   It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head
   its CI ran on. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
@@ -77,7 +77,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
   posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the
-  four-point check, writes its handoff to `roadmap/outbox/<slug>-handoff.md` and tags itself archive-ready
+  four-point check, commits its handoff to `roadmap/outbox/<slug>-handoff.md` and tags itself archive-ready
   (ruling R46). The owner never reads a lane: it sends each owner act and question to its parent with the
   exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
@@ -143,7 +143,7 @@ parent, or miss a message while busy.
 - A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
-  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge and a fresh review of the resolved hunks only (step `post-batch-conflict-merge`).
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
 - Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
