@@ -1841,7 +1841,10 @@ STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a
 # stamps it. A `Mon D` date takes a real month name only. Named limit: `label H:MM CST: text` passes as prose
 # (existing tests pin `Coordinator 13:40 CST: pick 1 taken`).
 _STAMP_LABEL = r"[^\s,:]+(?:\s+[^\s,:]+){0,3}"
-_STAMP_BRACKET_LABEL = r"[^\s,:\])]+(?:\s+[^\s,:\])]+){0,3}"
+# A bracket label word is never a `YYYY-MM-DD` date: a date there would hide the stamp's date from the date group,
+# and the stamp would read as undated, inside the quote window instead of compared as an instant.
+_STAMP_NOT_DATE = r"(?!\d{4}-\d{2}-\d{2}\s)"
+_STAMP_BRACKET_LABEL = _STAMP_NOT_DATE + r"[^\s,:\])]+(?:\s+" + _STAMP_NOT_DATE + r"[^\s,:\])]+){0,3}"
 _STAMP_TIME = r"\d{1,2}:\d{2}(?::\d{2})?\s+(?:CST|CDT)\b"
 _STAMP_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
 _STAMP_HEADER = re.compile(
