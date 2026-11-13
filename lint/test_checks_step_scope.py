@@ -2,7 +2,7 @@
 
 ci-scope.sh sets `code` false for a change that touches only .md files. A step that reads no .md file takes the gate
 `needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'`, so a docs-only pull request skips it. A
-step that reads a .md file stays ungated. The step lists are the audit of main's checks.yml at fccff95e6, by step name.
+step that reads a .md file stays ungated. The step lists are the audit of main's checks.yml when this was written, by step name.
 
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the gate, exactly.
@@ -28,12 +28,12 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import eval_if  # noqa: E402  the one home of the `if:` evaluator
+from test_windows_split import NO_MD_GATE, eval_if  # noqa: E402  the one home of the `if:` evaluator and of the gate
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
-GATE = "${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}"
+GATE = "${{ %s }}" % NO_MD_GATE
 PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
 STE_LINT = "STE lint"
 DOC = "docs/decisions/x.md"
@@ -123,6 +123,7 @@ NO_MD = [
     'Record stamp engine fixture suite',
     'Scanner trap lint',
     'Record stamp action fixture suite',
+    'Checks step scope suite',
 ]
 
 # The audit's NAMES-ONLY steps: each names a file, or copies only hooks/ and lint/ files, which already set `code`.
@@ -201,7 +202,7 @@ PR_ONLY = [
     'Comment narration check',
 ]
 
-# Every step of the checks job on main (fccff95e6), in file order. An unnamed step is its `uses:` reference.
+# The checks job's step names. An unnamed step is its `uses:` reference.
 MAIN_STEPS = [
     'uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8',
     'uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c',
@@ -370,6 +371,7 @@ MAIN_STEPS = [
     'Record stamp action fixture suite',
     'Opt-in CI template fixture suites',
     'Mod and map-skill tests',
+    'Checks step scope suite',
 ]
 
 # Each entry file that names a tracked .md file, with the names and one reason. A name here is written into a temp
@@ -411,6 +413,12 @@ ALLOWED = {
     "skills/roadmap/test_build.py": (["README.md", "docs/todo.md"], "fixture repo files"),
     "skills/waiting-page/test_stale_pages.py": (["CLAUDE.md"], "written into a temp claude folder"),
 }
+
+# This file holds the names above as data, so the check finds them here. It opens no .md file: its entry is their union.
+ALLOWED["lint/test_checks_step_scope.py"] = (
+    sorted({name for names, _ in ALLOWED.values() for name in names}),
+    "the names of this ALLOWED list, which the check compares with git ls-files",
+)
 
 ENTRY = re.compile(r"(?:^|[\s;&|(])(?:python3?|bash|node)\s+(?!-)([^\s'\"]+)", re.M)
 MD_TOKEN = re.compile(r"[\w.\-/]*\.md\b")
