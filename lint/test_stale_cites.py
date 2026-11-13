@@ -19,6 +19,10 @@ report only: the exit code does not change (RouteClaimTests).
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
 nothing tracked, STALE004 for a line anchor past the file's end (TreeTests, CostTests).
 
+STALE011 (anchor_drift; range mode on an added line, --tree on every line) reads a line that anchors `path.py:N` or
+`path.py:N-M` on a tracked .py file and names a code-looking symbol that file defines at a line outside N-3..M+3
+(AnchorSymbolTests).
+
 STALE008 (range mode) reads a Python value cite, `file.py: NAME = literal` in backticks (ValueCiteTests): a line that
 quotes the value the range changed or removed, or a line the range adds that does not match the value at head. A
 JavaScript cite prints unknown, and a JSON cite is not read. The parity rows in
@@ -75,7 +79,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]) (?P<text>.*)$")  # not STALE005: a report line
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE(?:00[1-48]|011)) (?P<text>.*)$")  # not STALE005: a report line
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -203,19 +207,24 @@ def paths_loaded_by_path(path):
 SCOPES = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)  # names inside are not module level
 
 
-def module_bindings(source):
+def module_bindings(source, lines=False):
     """(kind, name) for each name a Python source binds at module level, under any statement that is no def or
-    class: "def" for a def or class, "import", or "assign" for each name stored. Read with ast, never imported."""
+    class: "def" for a def or class, "import", or "assign" for each name stored. With `lines`, each is (kind, name,
+    line), the line the binding starts on. Read with ast, never imported."""
     found = []
+
+    def add(kind, name, node):
+        found.append((kind, name, node.lineno) if lines else (kind, name))
 
     def visit(node):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                found.append(("def", child.name))
+                add("def", child.name, child)
             elif isinstance(child, (ast.Import, ast.ImportFrom)):
-                found.extend(("import", alias.asname or alias.name.split(".")[0]) for alias in child.names)
+                for alias in child.names:
+                    add("import", alias.asname or alias.name.split(".")[0], child)
             elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
-                found.append(("assign", child.id))
+                add("assign", child.id, child)
             elif not isinstance(child, SCOPES):
                 visit(child)
     visit(ast.parse(source))
@@ -227,6 +236,12 @@ def binding_kind(source, name):
     counts. A case asserts this on its fixtures before it probes the check on the name."""
     kinds = [kind for kind, bound in module_bindings(source) if bound == name]
     return kinds[-1] if kinds else None
+
+
+def binding_line(source, name):
+    """The line the last module-level binding of `name` starts on, or None. The walk is module_bindings'."""
+    lines = [line for _, bound, line in module_bindings(source, lines=True) if bound == name]
+    return lines[-1] if lines else None
 
 
 def module_value(source, name):
@@ -336,6 +351,15 @@ class StaleCase(unittest.TestCase):
     def tree(self, notes, extra=None):
         """A repo whose HEAD holds `notes` as the NOTES page, the CODE files and `extra`. Nothing is removed."""
         return self.make_range(base_files(notes, extra=extra), lambda repo: None)
+
+    def route_range(self, rows, extra=None, base_notes="# Notes\n"):
+        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. Returns (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, NOTES, text)
+            commit(repo)
+        return self.make_range(base_files(base_notes, extra=extra), change), flagged
 
     def assert_tree_flags(self, rng, expected, rev=None, extra_env=None):
         """The findings are exactly `expected`, as (path, line, code), the verdict is FAIL and the exit is 1.
@@ -2241,6 +2265,196 @@ class TreeTests(StaleCase):
         self.assert_tree_passes(rng, rev="HEAD~1")  # HEAD~1: the file is tracked
 
 
+def def_at(line, name):
+    """A one-line def `name` on line `line`, with blank lines above it."""
+    return "\n" * (line - 1) + "def %s(lane): return lane\n" % name
+
+
+ANCHOR_PY = "hooks/anchor.py"  # the cited file: check_it is defined on line 40, keep on line 41
+ANCHOR_TEXT = def_at(40, "check_it") + "def keep(lane): return lane\n" + "\n" * 20  # 61 lines: cites to 44 are live
+KINDS_PY = "hooks/kinds.py"  # a class on line 40 and a module-level assignment on line 43
+KINDS_TEXT = "\n" * 39 + "class CheckIt: pass\n\n\nLEVEL_CAP = 4\n"
+LONG_PY = "hooks/long.py"  # full size: 400 lines, check_it is defined on line 300
+LONG_TEXT = def_at(300, "check_it") + "x = 1\n" * 100
+EMPTY_PY = "hooks/empty.py"  # a file that defines no name
+EMPTY_TEXT = "# no name is defined here\n"
+
+
+def under_title(rows):
+    """`rows` (line, flagged) under the notes title and a blank line, so each row's number is its line in the page."""
+    return [("# Notes", False), ("", False)] + list(rows)
+
+
+def expected_flags(rows):
+    """The STALE011 findings for `rows`, which are placed by under_title."""
+    return [(NOTES, n, "STALE011") for n in rows_text(under_title(rows))[1]]
+
+
+class AnchorSymbolTests(StaleCase):
+    """STALE011 (anchor_drift). A Markdown line anchors `path.py:N` or `path.py:N-M` on a tracked .py file and names a
+    backticked code-looking symbol (it has `_`, is CamelCase, or is a call form) that the file defines (a def, class or
+    module-level assignment) at a line outside N-3..M+3, with no cite of its sentence holding it. Range mode judges an
+    added line only; --tree judges every line. A dead cite is STALE003's or STALE004's, never this finding's."""
+
+    def anchor_range(self, rows, extra=None):
+        """A range that writes the notes page as `rows` under the title. The base holds ANCHOR_PY and `extra`."""
+        return self.route_range(under_title(rows), extra={ANCHOR_PY: ANCHOR_TEXT, **(extra or {})})[0]
+
+    def anchor_tree(self, rows, extra=None):
+        """`--tree` on a HEAD whose notes page is `rows` under the title. The HEAD holds ANCHOR_PY and `extra`."""
+        return self.tree(rows_text(under_title(rows))[0], extra={ANCHOR_PY: ANCHOR_TEXT, **(extra or {})})
+
+    def test_a_drifted_anchor_on_an_added_line_is_stale011(self):
+        rng = self.anchor_range([("- `check_it` holds at `hooks/anchor.py:10`.", True)])
+        self.assertEqual(binding_line(ANCHOR_TEXT, "check_it"), 40, "scope: check_it is defined on line 40")
+        self.assert_flags(rng, [(NOTES, 3, "STALE011")])
+
+    def test_an_anchor_on_the_symbol_line_passes(self):
+        rng = self.anchor_range([("- `check_it` holds at `hooks/anchor.py:40`.", False)])
+        self.assertEqual(binding_line(ANCHOR_TEXT, "check_it"), 40, "scope: check_it is defined on line 40")
+        self.assert_passes(rng)
+
+    def test_a_cite_three_lines_from_the_symbol_passes_and_four_lines_from_it_fires(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:37`.", False),  # line 40 is 3 past the cite: inside the slack
+            ("- `check_it` holds at `hooks/anchor.py:36`.", True),  # line 40 is 4 past it: outside
+            ("- `check_it` holds at `hooks/anchor.py:43`.", False),  # line 40 is 3 before the cite: inside
+            ("- `check_it` holds at `hooks/anchor.py:44`.", True),  # line 40 is 4 before it: outside
+        ]
+        self.assertGreaterEqual(ANCHOR_TEXT.count("\n"), 44, "scope: anchor.py has line 44, so cites there are live")
+        self.assertEqual(binding_line(ANCHOR_TEXT, "check_it"), 40, "scope: check_it is defined on line 40")
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_sentence_with_one_cite_that_holds_the_symbol_passes_and_one_with_none_fires(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:40`, and an older copy sat at `hooks/anchor.py:5`.", False),
+            ("- `check_it` holds at `hooks/anchor.py:5` and again at `hooks/anchor.py:9`.", True),
+        ]
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_symbol_the_cited_file_does_not_define_is_silent_and_one_it_defines_fires(self):
+        rows = [
+            ("- `_process_start_ms` holds at `hooks/anchor.py:10`.", False),  # hooks/guard.py defines it, not this file
+            ("- `check_it` holds at `hooks/anchor.py:10`.", True),
+        ]
+        self.assertIsNone(binding_line(ANCHOR_TEXT, "_process_start_ms"), "scope: anchor.py does not define the name")
+        self.assertEqual(binding_line(GUARD, "_process_start_ms"), 1, "scope: hooks/guard.py binds it on line 1")
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_plain_word_or_a_file_name_is_no_symbol_and_a_call_form_is_one(self):
+        rows = [
+            ("- The keep step holds at `hooks/anchor.py:10`.", False),  # a bare plain word is no symbol
+            ("- `keep` holds at `hooks/anchor.py:10`.", False),  # a backticked plain word: no `_`, no capital, no call
+            ("- The check_it step holds at `hooks/anchor.py:10`.", False),  # a bare snake_case word is no symbol
+            ("- `check_it.py` holds at `hooks/anchor.py:10`.", False),  # a file name is no symbol
+            ("- The `keep()` call holds at `hooks/anchor.py:10`.", True),  # a call form is a symbol
+        ]
+        self.assertEqual(binding_line(ANCHOR_TEXT, "keep"), 41, "scope: keep is on line 41, past the slack of cite 10")
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_disable_mark_for_this_code_leaves_out_its_line_and_a_mark_for_another_code_does_not(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:10`. <!-- ste-disable-line STALE011 -->", False),
+            ("- `check_it` holds at `hooks/anchor.py:10`. <!-- ste-disable-line STALE004 -->", True),
+            ("- `check_it` holds at `hooks/anchor.py:10`.", True),
+        ]
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_line_range_is_judged_from_its_first_line_minus_three_to_its_last_line_plus_three(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:30-37`.", False),  # 27 to 40 holds line 40
+            ("- `check_it` holds at `hooks/anchor.py:30-36`.", True),  # 27 to 39 does not
+        ]
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_a_class_and_a_module_level_assignment_are_symbols_too(self):
+        rows = [
+            ("- `CheckIt` holds at `hooks/kinds.py:10`.", True),
+            ("- `LEVEL_CAP` holds at `hooks/kinds.py:10`.", True),
+        ]
+        self.assertEqual(binding_line(KINDS_TEXT, "CheckIt"), 40, "scope: the class is on line 40")
+        self.assertEqual(binding_line(KINDS_TEXT, "LEVEL_CAP"), 43, "scope: the assignment is on line 43")
+        self.assert_flags(self.anchor_range(rows, extra={KINDS_PY: KINDS_TEXT}), expected_flags(rows))
+
+    def test_a_cite_past_the_end_of_its_file_is_no_symbol_finding_in_range(self):
+        rows = [("- `check_it` holds at `hooks/anchor.py:99`.", False)]  # a dead cite: STALE004's, not range mode's
+        self.assertLess(ANCHOR_TEXT.count("\n"), 99, "scope: anchor.py ends before line 99")
+        self.assert_passes(self.anchor_range(rows))
+
+    def test_a_line_already_stale_at_base_is_silent_and_an_added_copy_of_it_is_flagged(self):
+        drifted = "- `check_it` holds at `hooks/anchor.py:10`.\n"
+
+        def add_copy(repo):
+            write(repo, NOTES, "# Notes\n\n" + drifted + drifted)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n" + drifted, extra={ANCHOR_PY: ANCHOR_TEXT}), add_copy)
+        self.assertEqual(git(rng.repo, "show", "%s:%s" % (rng.base, NOTES)).count(drifted.strip()), 1,
+                         "scope: the base already holds the drifted line once")
+        self.assert_flags(rng, [(NOTES, 4, "STALE011")])
+
+    def test_a_moved_def_leaves_its_untouched_cite_silent_in_range_and_flags_an_added_copy(self):
+        drifted = "- `check_it` holds at `hooks/anchor.py:10`.\n"
+        at_base = def_at(10, "check_it")  # check_it is on line 10 at base, so the cite is right there
+
+        def move_and_copy(repo):
+            write(repo, ANCHOR_PY, ANCHOR_TEXT)  # the range moves check_it to line 40
+            write(repo, NOTES, "# Notes\n\n" + drifted + drifted)  # the old line stays untouched; a copy is added
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n" + drifted, extra={ANCHOR_PY: at_base}), move_and_copy)
+        self.assertEqual(binding_line(at_base, "check_it"), 10, "scope: at base check_it is on line 10")
+        self.assertEqual(binding_line(ANCHOR_TEXT, "check_it"), 40, "scope: at head check_it is on line 40")
+        self.assertIn(ANCHOR_PY, touched(rng), "scope: the range changes the file the cite names")
+        self.assert_flags(rng, [(NOTES, 4, "STALE011")])  # line 3 is untouched, and range mode judges added lines only
+
+    def test_a_file_that_defines_no_name_gives_no_symbol_to_judge(self):
+        rows = [("- `check_it` holds at `hooks/empty.py:1`.", False)]
+        self.assertIsNone(binding_line(EMPTY_TEXT, "check_it"), "scope: the file defines no name")
+        self.assert_passes(self.anchor_range(rows, extra={EMPTY_PY: EMPTY_TEXT}))
+
+    def test_a_full_size_file_is_judged_by_the_line_its_def_is_on(self):
+        rows = [
+            ("- `check_it` holds at `hooks/long.py:290`.", True),  # 287 to 293: the def, on line 300, is outside
+            ("- `check_it` holds at `hooks/long.py:297`.", False),  # 294 to 300: inside
+        ]
+        self.assertEqual(binding_line(LONG_TEXT, "check_it"), 300, "scope: check_it is defined on line 300")
+        self.assert_flags(self.anchor_range(rows, extra={LONG_PY: LONG_TEXT}), expected_flags(rows))
+
+    def test_comment_openers_and_a_lone_quote_do_not_hide_a_drifted_anchor_after_them(self):
+        drifted = "`check_it` holds at `hooks/anchor.py:10`."
+        rows = [
+            ("# Drifted: " + drifted, True),  # a heading
+            ("Use `#` to start a comment. " + drifted, True),
+            ("Open a comment with `<!--`. " + drifted, True),
+            ("Don't name `check_it` here: it holds at `hooks/anchor.py:10`.", True),  # a lone quote in text
+            ('Quote `"/*"` in a string. ' + drifted, True),
+            ("```", False),
+            ("/* open comment " + drifted, True),  # inside a fence, which is prose
+            ("```", False),
+            ('x = "a // b"  # don\'t ' + drifted, True),
+            ("<!--", False),
+            ("No path here.", False),
+            ("-->", False),
+            (drifted, True),
+            ("- `check_it` holds at `hooks/anchor.py:40`.", False),
+        ]
+        self.assert_flags(self.anchor_range(rows), expected_flags(rows))
+
+    def test_tree_mode_flags_a_drifted_anchor_on_every_line_it_is_on(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:10`.", True),  # no range touched this line: --tree still judges it
+            ("- `check_it` holds at `hooks/anchor.py:40`.", False),
+            ("- `check_it` holds at `hooks/anchor.py:10`.", True),
+        ]
+        self.assert_tree_flags(self.anchor_tree(rows), expected_flags(rows))
+
+    def test_tree_mode_passes_an_anchor_in_range_and_leaves_a_past_the_end_one_to_stale004(self):
+        rows = [
+            ("- `check_it` holds at `hooks/anchor.py:40`.", False),
+            ("- `check_it` holds at `hooks/anchor.py:99`.", False),  # dead: STALE004's, not this finding's
+        ]
+        self.assert_tree_flags(self.anchor_tree(rows), [(NOTES, 4, "STALE004")])
+
+
 ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
 PREMISE_HOME = os.path.join(ROOT, "hooks", "precompact_handoff.py")  # PREMISE_KINDS is read here, never copied
 FIXTURE = os.path.join(HERE, "route_claims_labelled.json")
@@ -2289,15 +2503,6 @@ class RouteClaimTests(StaleCase):
     """STALE005, range mode only, report only. An ADDED line of governed prose states a capability by route when it
     holds a capability verb and a route word. It is backed by a premise kind from PREMISE_KINDS with its source, or by a
     route id that is a row of hooks/route_rows.json. The exit code never changes."""
-
-    def route_range(self, rows, extra=None, base_notes="# Notes\n"):
-        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. Returns (range, flagged lines)."""
-        text, flagged = rows_text(rows)
-
-        def change(repo):
-            write(repo, NOTES, text)
-            commit(repo)
-        return self.make_range(base_files(base_notes, extra=extra), change), flagged
 
     def assert_route_claims(self, rng, expected, path=NOTES):
         """Scope first: the range touched `path`. Then the exit is 0, the verdict is PASS, and the STALE005 lines that
