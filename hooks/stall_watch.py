@@ -533,7 +533,7 @@ CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
-             "Set the next one after each red CI verdict, wider apart (decision ci-wait-reads-run-status).")
+             "Set the next one after each red CI verdict, wider apart.")
 
 
 def unquoted(command):
@@ -786,7 +786,7 @@ def stop():
         pr = open_ci_wait(call["transcript_path"])
         if pr is not None:
             out["decision"] = "block"
-            out["reason"] = "PR %s is marked ready and no check-in is set. %s" % (pr or "(this branch)", CI_REMEDY)
+            out["reason"] = "PR %s is marked ready and no check-in is set (decision ci-wait-reads-run-status). %s" % (pr or "(this branch)", CI_REMEDY)
     except Exception:
         pass
     if rows:
