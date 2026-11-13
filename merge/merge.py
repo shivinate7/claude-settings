@@ -4016,13 +4016,13 @@ def clean_merges_after(h, head, live, base=None):
 
 def clean_merges_pushed(root, source, head, bases):
     """True when the commits a push of `source` adds above the record's `head` are only clean merges of main, read from the local checkout `root`
-    (the push hook's walk; clean_merges_after is the same walk on the host's API reads). `source` is the pushed revision, `bases` the refs that
-    stand for main (such as origin/main). The walk follows first parents from `source` and must reach `head` within REVIEW_MERGE_WALK commits.
+    (the push hook's walk; clean_merges_after is the same walk on the host's API reads). `source` is the pushed revision, `bases` the full refs that
+    stand for main (such as refs/remotes/origin/main; a short name could be shadowed by a local branch). The walk follows first parents from `source` and must reach `head` within REVIEW_MERGE_WALK commits.
     Each commit walked has exactly two parents, a second parent that is an ancestor of one of `bases`, and git's clean merge of its parents
     (merge_tree) as its tree. A `source` that is `head` walks no commit and is True. A one-parent commit, a merge of three, a merge of a branch
     main lacks, an edited or conflicted merge, a longer walk, a head never reached, and every read that cannot answer (a commit or ref the
     checkout lacks, a shallow cut, a git that will not run) are False, never True: the caller refuses on False. Cost: one `git rev-parse`; per
-    commit walked one `git cat-file` read, one `git merge-base --is-ancestor` per base tried (one when the first holds), one merge_tree. The
+    commit walked one `git cat-file` read, one `git merge-base --is-ancestor` per base tried (the push hook passes one), one merge_tree. The
     caller starts none of it unless the fix-branch refusal would fire."""
     c, sha = git(root, "rev-parse", "--verify", "-q", f"{source}^{{commit}}")
     if c or not head:

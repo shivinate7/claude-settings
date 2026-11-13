@@ -637,9 +637,9 @@ def push_refspecs(args):
 
 def push_sources(args, cwd: str, overrides=None):
     """-> ({destination: source}, base refs) of a push that names its refs, else ({}, []): the revision each refspec sends to
-    each branch (`HEAD:b` sends HEAD, `x:b` x, a bare `b` b, a bare push or `HEAD` the checkout's HEAD), and the refs that stand for
+    each branch (`HEAD:b` sends HEAD, `x:b` x, a bare `b` b, a bare push or `HEAD` the checkout's HEAD), and the ref that stands for
     main on the pushed remote (`origin` when none is named). A deletion, `--all`, `--mirror` and a destination this cannot
-    resolve send no source, so a caller that reads none refuses. Cost: the reads `push_destinations` and `_push_default_branches` make."""
+    resolve send no source, so a caller that reads none refuses. The base list holds one full ref (`_push_main_refs`). Cost: the reads `push_destinations` and `_push_main_refs` make."""
     named = push_refspecs(args)
     if named is None:
         return {}, []
@@ -650,8 +650,21 @@ def push_sources(args, cwd: str, overrides=None):
         source = spec.lstrip("+").partition(":")[0]
         if dest and "*" not in dest and not source.startswith("-"):
             sources[dest] = source or "HEAD"
-    defaults = _push_default_branches(cwd, remote) or ()
-    return sources, ["%s/%s" % (remote, name) for name in defaults]
+    return sources, _push_main_refs(cwd, remote)
+
+
+def _push_main_refs(cwd: str, remote: str):
+    """The one full ref that stands for main in the clean-merge walk, as a list, else [] when git cannot answer.
+
+    `<remote>/HEAD`'s target when set, even a stale one (`read_default_base` trusts it), else `<remote>/main` only. Full
+    refs, so a local branch named `<remote>/main` cannot shadow it. Scoped to this walk: `_push_default_branches`, which
+    protects main and master from a force push, is unchanged. Cost: `read_default_base`'s reads."""
+    if not cwd or not os.path.isdir(cwd):
+        return []
+    _base, head = guard_core.read_default_base(cwd, remote)
+    if head is None:
+        return []
+    return ["refs/remotes/" + (head or remote + "/main")]
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
