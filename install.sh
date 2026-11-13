@@ -743,8 +743,11 @@ fi
 if [ "$CLOUD" = 1 ] && [ -n "${OWN_CHECKOUT:-}" ] && [ "$OWN_CHECKOUT" != "$SRC" ] \
    && [ "${CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD:-}" = 1 ] \
    && [ -f "$OWN_CHECKOUT/CLAUDE.md" ] && [ -f "$SRC/CLAUDE.md" ] && cmp -s "$OWN_CHECKOUT/CLAUDE.md" "$SRC/CLAUDE.md"; then
-  printf '%s\n' "# The global rules load from $OWN_CHECKOUT/CLAUDE.md, an attached source folder; no import here (it would load them twice)." > "$TARGET_MD"
-  log "wrote $TARGET_MD with no import: the harness loads $OWN_CHECKOUT/CLAUDE.md, equal to $SRC/CLAUDE.md"
+  # The pointer line stays, inside a code fence: the harness reads no import in a code block, and the readers of the pointer
+  # (guard_pointer.py, session_start.sh, this script) match the line by its text. If a harness did read it, the result is today's
+  # double load, never a missing rule.
+  printf '%s\n' "# The global rules load from $OWN_CHECKOUT/CLAUDE.md, an attached source folder. The pointer below is not an import." '```' "$POINTER" '```' > "$TARGET_MD"
+  log "wrote $TARGET_MD with the pointer in a code fence, not as an import: the harness loads $OWN_CHECKOUT/CLAUDE.md, equal to $SRC/CLAUDE.md"
 else
   printf '%s\n' "$POINTER" > "$TARGET_MD"
   log "wrote $TARGET_MD -> $POINTER"

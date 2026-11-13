@@ -5192,6 +5192,7 @@ lo1_run() {
   if [ "$1" = ontip ]; then git -C "$co" checkout -q -B main origin/main; fi
   MOVE_ENV=CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
   [ "$1" != noenv ] || MOVE_ENV=
+  [ "$1" != envzero ] || MOVE_ENV=CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=0
   move_install
   MOVE_ENV=
   if [ "$rc" -ne 0 ]; then fix_why="the install exited $rc: $(install_problems)"; return 1; fi
@@ -5200,11 +5201,16 @@ lo1_run() {
 }
 caseLO1() {
   if ! command -v jq >/dev/null 2>&1; then skip "caseLO1" "jq not found"; return; fi
-  name="caseLO1 (skip): mirror source, env var on, checkout CLAUDE.md equal to the mirror's: no import line is written"
+  name="caseLO1 (skip): mirror source, env var on, checkout CLAUDE.md equal to the mirror's: the pointer line is in a code fence, not an import, and the pointer guard still reads it"
   if ! lo1_run skip; then bad "$name" "FIXTURE $fix_why"
-  elif printf '%s\n' "$lo1_md" | grep -q '^@'; then bad "$name" "the import line was written: [$lo1_md]"
-  elif [ ! -f "$h/.claude-cfg/CLAUDE.md" ]; then bad "$name" "no CLAUDE.md file was left for the readers of that path"
+  elif [ -n "$(printf '%s\n' "$lo1_md" | awk '/^```/{f=!f; next} !f && /^@/{print}')" ]; then bad "$name" "an import line outside a code fence: [$lo1_md]"
+  elif ! printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then bad "$name" "no pointer line for the guards to read: [$lo1_md]"
+  elif [ -z "$(cd "$REPO_ROOT/hooks" && HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" python3 -c 'import guard_pointer; print(guard_pointer.pointer_checkout())' 2>/dev/null)" ]; then bad "$name" "pointer_checkout() reads nothing from the written file, so the pointer-keyed guards would go silent"
   else ok "$name"; fi
+  name="caseLO1 (envzero): the env var is 0: the import line is written"
+  if ! lo1_run envzero; then bad "$name" "FIXTURE $fix_why"
+  elif [ -n "$(printf '%s\n' "$lo1_md" | awk '/^```/{f=!f; next} !f && /^@/{print}')" ]; then ok "$name"
+  else bad "$name" "no import line outside a code fence: [$lo1_md]"; fi
   name="caseLO1 (noenv): the env var is not set: the import line is written"
   if ! lo1_run noenv; then bad "$name" "FIXTURE $fix_why"
   elif printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then ok "$name"
