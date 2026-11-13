@@ -25,6 +25,9 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     were working:`, the CLI's mid-turn frame), then a newline and that tag.
   - A peer session's message is never captured. It starts with `<cross-session-message`, the tag
     the harness puts on a send_message from another session. A tag quoted mid-message is owner text.
+  - A bash-input echo is never captured. It starts with `<bash-input>`, after any leading whitespace: the echo
+    of a shell command the owner ran with `!`. It counts toward no burst. A tag quoted mid-message, on a later
+    line, or inside a longer tag name is owner text, saved verbatim.
   - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
     replacement character) in its place, or stdout carries a line that says `not saved`. Never
     silent. The inbox stays strict UTF-8.
@@ -2773,6 +2776,72 @@ def case_cross_session_tag_mid_line_is_owner_text():
           captured_texts(cfg, sid))
 
 
+# --------------------------------------------------------------------------- bash-input echo cases
+
+# The echo of a shell command the owner ran with `!`: a prompt that starts with the bash-input tag. It is the
+# harness's echo, not feedback, so capture never saves it and its turn never counts as a burst. The long shape
+# is the full-size state: a paste of many lines.
+BASH_ECHO_SHAPES = (
+    ("a one-line command", "<bash-input>git status</bash-input>"),
+    ("a command after leading whitespace", "  \n\t<bash-input>git status</bash-input>"),
+    ("a three-line command", "<bash-input>for f in a b c; do\n  echo \"$f\"\ndone</bash-input>"),
+    ("a forty-line command", "<bash-input>" + "\n".join("echo line %d" % i for i in range(40))
+     + "</bash-input>"),
+)
+# Owner text that quotes the tag, or a dollar-sign command, or a longer tag name. It is feedback: saved verbatim.
+BASH_QUOTED_SHAPES = (
+    ("a command quoted mid-sentence", "I ran <bash-input>ls</bash-input> and it failed"),
+    ("a command quoted on a later line", "the run was:\n<bash-input>git status</bash-input>\nit failed"),
+    ("a plain line that starts with a dollar sign", "$ git status\nthe output lists a file I did not expect"),
+    ("a longer tag name", "<bash-input-log>\nan owner note whose first tag name is longer"),
+)
+BASH_NOTE = "ok, that is the result I wanted"
+
+
+def case_capture_skips_bash_input_echo():
+    """A prompt that starts with the bash-input tag is never saved, and the turn it ends does not block the
+    Stop guard, whatever the command's line count."""
+    for label, text in BASH_ECHO_SHAPES:
+        cfg, sid = new_cfg(), "bash-echo"
+        p = turn(cfg, sid, text)
+        check("bash echo, %s: nothing saved" % label, captured_texts(cfg, sid) == [],
+              captured_texts(cfg, sid))
+        expect_silent("bash echo, %s: a turn of the echo does not block Stop" % label, p)
+
+
+def case_bash_echo_does_not_make_the_next_note_a_burst():
+    """The owner runs a command, then types one short note. Only the note is saved, so the turn holds one
+    short message, and a lone short message never blocks Stop."""
+    for label, text in BASH_ECHO_SHAPES:
+        cfg, sid = new_cfg(), "bash-note"
+        p = turn(cfg, sid, text, BASH_NOTE)
+        check("bash echo, %s, then a note: only the note is saved" % label,
+              captured_texts(cfg, sid) == [BASH_NOTE], captured_texts(cfg, sid))
+        expect_silent("bash echo, %s, then a note: the turn does not block Stop" % label, p)
+
+
+def case_owner_text_that_quotes_a_bash_echo_is_saved():
+    """Owner text that quotes the tag mid-message, on a later line, after a dollar sign, or under a longer tag
+    name is feedback: saved verbatim."""
+    for label, text in BASH_QUOTED_SHAPES:
+        cfg, sid = new_cfg(), "bash-quoted"
+        p = capture(cfg, sid, text)
+        check("owner text, %s: hook ran" % label, ran_central(p), p.desc())
+        check("owner text, %s: saved verbatim" % label, captured_texts(cfg, sid) == [text],
+              captured_texts(cfg, sid))
+
+
+def case_quoted_multiline_owner_text_still_blocks_as_a_burst():
+    """The skip is narrow: a multi-line owner message that quotes a command is still a burst, so the Stop guard
+    still asks for its items."""
+    cfg, sid = new_cfg(), "bash-quoted-burst"
+    text = "the run was:\n<bash-input>for f in a b c; do\n  echo \"$f\"\ndone</bash-input>\nit failed"
+    p = turn(cfg, sid, text)
+    check("quoted burst: saved verbatim", captured_texts(cfg, sid) == [text], captured_texts(cfg, sid))
+    check("quoted burst: the Stop guard blocks, as for any burst with no items",
+          block_reason(p) is not None, p.desc())
+
+
 # --------------------------------------------------------------------------- page note cases
 
 PAGE_URL = "https://claude.ai/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"
@@ -4291,6 +4360,10 @@ CASES = (
     case_owner_text_near_a_hand_back_is_captured,
     case_capture_skips_cross_session_frame,
     case_cross_session_tag_mid_line_is_owner_text,
+    case_capture_skips_bash_input_echo,
+    case_bash_echo_does_not_make_the_next_note_a_burst,
+    case_owner_text_that_quotes_a_bash_echo_is_saved,
+    case_quoted_multiline_owner_text_still_blocks_as_a_burst,
     case_one_line_messages_never_trigger_the_guard,
     case_two_messages_in_a_turn_are_a_burst,
     case_long_or_bulleted_message_is_a_burst,
