@@ -368,7 +368,8 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
     origin_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
-    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ]; }; then
+    stable_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable 2>/dev/null)
+    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ] || [ "$pin_head" = "$stable_head" ]; }; then
       pointer_branch=main
     else
       pointer_branch="a detached HEAD"
@@ -400,10 +401,19 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d"; then
-      behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      # The pin follows origin/stable (decision merge-reinstalls-from-main); a clone with no origin/stable is
+      # counted against origin/main as before. CLAUDE_SETTINGS_REF=main (the recovery) makes main the ref the pin
+      # follows, so the count is against origin/main even when origin/stable exists.
+      if [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && (cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable >/dev/null 2>&1); then
+        behind_ref=origin/stable
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count HEAD..origin/stable 2>/dev/null)
+      else
+        behind_ref=origin/main
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      fi
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
-        printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
-          "$d" "$behind"
+        printf 'claude-settings: %s is %s commits behind %s; global rules and hooks are stale\n' \
+          "$d" "$behind" "$behind_ref"
         ptr_behind_printed=1
       fi
     else
