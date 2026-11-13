@@ -100,6 +100,7 @@ DAMAGES = (
     ("this repo's entry is a string", lambda: {"reviewed_cursor": {REPO_NAME: "x"}}, True),
     ("floor is a number", lambda: edited(floor=5), True),
     ("cursor is not a time", lambda: edited(cursor="soon"), True),
+    ("cursor is too early for an incremental read", lambda: edited(cursor="0001-01-01T00:00:00Z"), True),
     ("full_at is a string", lambda: edited(full_at="now"), True),
     ("rows is an object", lambda: edited(rows={}), True),
     ("a row is a string", lambda: edited(rows=[log_row(), "x"]), True),
