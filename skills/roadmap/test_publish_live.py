@@ -54,6 +54,7 @@ class PublishLive(unittest.TestCase):
                                 "keepSessions": [{"id": "session_a", "reason": "r"}]})
         (self.dir / "held.txt").write_text("# runner list\n9  # nine\n", encoding="utf-8")
         (self.dir / "readat.txt").write_text("2026-11-13T10:00:00Z\n", encoding="utf-8")
+        self.save("pages.json", {"open": 1, "closed": 1, "sess": 2})
         (self.dir / "items" / "items").mkdir(parents=True)
         self.save("items/items/1.json", {"n": 1, "status": "open", "home": "h", "extra": "dropped"})
         self.save("items/items/2.json", {"data": {"n": 2, "status": "open", "home": "h", "lane": None}})
@@ -82,6 +83,9 @@ class PublishLive(unittest.TestCase):
         self.assertEqual({p["number"]: p["held"] for p in raw["pulls"]}, {7: False, 9: True})
         self.assertNotIn("reviewLog", json.dumps(raw))
         self.assertEqual(sorted(r["number"] for r in raw["landedPulls"]), [5, 21])
+        landed = {r["number"]: r for r in raw["landedPulls"]}
+        self.assertEqual(landed[21]["closed_at"], "2026-11-12T00:00:00Z")
+        self.assertEqual(landed[5]["closed_at"], "2026-11-13T10:00:00Z")  # a prev row with none is stamped with this read
         self.assertEqual([r["n"] for r in raw["items"]], [1, 2])
         self.assertEqual(raw["items"][0], {"n": 1, "status": "open", "home": "h"})
         live = build.live_work(str(self.dir / "live.json"), {}, "o/r")
@@ -133,6 +137,27 @@ class PublishLive(unittest.TestCase):
         self.save("open_p1.json", [dict(pull(7, "lane-x"), number="7")])
         self.stops("number")
 
+    def test_a_lost_last_page_stops(self):
+        self.save("pages.json", {"open": 1, "closed": 1, "sess": 3})  # triage read 3 session pages; 2 are saved
+        self.stops("sess pages missing: 3")
+        self.save("pages.json", {"open": 1, "closed": 1, "sess": 1})  # more files than were read
+        self.stops("sess")
+        (self.dir / "pages.json").unlink()
+        self.stops("pages.json")
+
+    def test_hash_all_is_not_a_comment(self):
+        (self.dir / "held.txt").write_text("#ALL\n", encoding="utf-8")
+        self.stops("held.txt line")
+
+    def test_landed_rows_expire_after_14_days(self):
+        self.save("prev.json", {"landedPulls": [
+            {"number": 5, "branch": "b5", "merged": True, "closed_at": "2026-10-30T10:00:00Z"},
+            {"number": 6, "branch": "b6", "merged": True, "closed_at": "2026-10-30T10:00:01Z"}]})
+        raw = self.published()  # readAt 2026-11-13T10:00:00Z: the cut is 2026-10-30T10:00:00Z
+        self.assertEqual(sorted(r["number"] for r in raw["landedPulls"]), [5, 6, 21])
+        self.save("prev.json", {"landedPulls": [{"number": 5, "branch": "b5", "closed_at": "2026-10-30T09:59:59Z"}]})
+        self.assertEqual(sorted(r["number"] for r in self.published()["landedPulls"]), [21])
+
     def test_landed_window_compares_instants(self):
         self.save("closed_p1.json", [pull(21, "a", "2026-11-06T13:00:00Z", True)])
         done = subprocess.run([sys.executable, "-I", str(HERE / "publish_live.py"), "--dir", str(self.dir),
@@ -142,12 +167,14 @@ class PublishLive(unittest.TestCase):
         self.assertEqual([r["number"] for r in landed], [5])
 
     def test_gapped_or_missing_reads_stop_and_write_nothing(self):
+        self.save("pages.json", {"open": 1, "closed": 1, "sess": 4})
         self.save("sess_p4.json", [])  # page 3 missing
         done = self.run_pub()
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("pages missing: 3", done.stderr)
         self.assertFalse((self.dir / "live.json").exists())
         (self.dir / "sess_p4.json").unlink()
+        self.save("pages.json", {"open": 1, "closed": 1, "sess": 2})
         (self.dir / "open_p1.json").unlink()
         self.assertNotEqual(self.run_pub().returncode, 0)
         self.assertFalse((self.dir / "live.json").exists())

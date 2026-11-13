@@ -4,14 +4,16 @@
     python3 publish_live.py --dir READS --landed-since ISO [--out READS/live.json]
 
 It makes no network call. Triage saves each tool result verbatim into READS first:
-  open_p<N>.json    list_pull_requests (open, base main) pages, raw arrays. Pages count 1..N with no gap.
+  pages.json        {"open": N, "closed": N, "sess": N}: how many pages triage read of each list. Required.
+  open_p<N>.json    list_pull_requests (open, base main) pages, raw arrays. Pages count 1..N, N as in pages.json.
   closed_p<N>.json  the same tool, state closed. Adds merged_at and closed_at.
   sess_p<N>.json    list_sessions pages, raw arrays, until has_more is false.
   items/**/*.json   ArtifactData list of the waiting page, each doc a bare object or {"data": {...}}. Optional.
   prev.json         the previous live file: landedPulls, keepSessions, each session's unarchived_epoch.
   held.txt          one pull number per line, "#" comments allowed; a line ALL holds every open pull. Optional.
   readat.txt        the ISO time, with zone, of the reads.
-A missing or gapped page list, a held.txt line that is not a number, #N, ALL or a comment, an idle_since with no
+A missing, gapped or short page list (against pages.json), a held.txt line that is not a number, #N, ALL or a
+comment ("#" then a space, or a bare "#"), an idle_since with no
 zone, an unarchived_epoch that is not a JSON int, or an item or pull number that is not an int stops the run with a
 message and writes nothing. No held.txt means no holds. No items/ folder leaves `items` out of the file, so the
 build reads the items as unknown, never as none.
@@ -19,7 +21,8 @@ Output: {readAt, pulls, branches, sessions, items, landedPulls, keepSessions}. A
 row has `tags` (never absent), and `idle_since` on an IDLE row: its updated_at, which stands in for "last did
 anything". `unarchived_epoch` is carried from prev.json only (a row with none stays without the key). landedPulls
 is prev.json's rows plus the closed pulls (base main) with closed_at at or after --landed-since; the fresh read
-wins. It writes no `reviewLog` (part 2 of step stale-draft-reads-runner-holds). The idle-lanes joint line
+wins. Each row carries `closed_at`; a prev row with none is stamped with this read's time. A row whose closed_at is
+more than 14 days before readAt is dropped. `branches` is always [] (no input lists lane branches with no pull). It writes no `reviewLog` (part 2 of step stale-draft-reads-runner-holds). The idle-lanes joint line
 (`merge --idle-lanes`) reads `idle_since` and `unarchived_epoch`, so their names and types stay as written here.
 """
 import argparse
@@ -30,6 +33,8 @@ import re
 import sys
 
 IDLE = "SESSION_STATUS_IDLE"
+PAGE_LISTS = ("open", "closed", "sess")
+LANDED_DAYS = 14
 ITEM_KEYS = ("n", "status", "home", "lane", "owner")
 
 
@@ -44,8 +49,8 @@ def load(path):
         raise Stop("%s could not be read: %s" % (path.name, err))
 
 
-def pages(folder, stem):
-    """The rows of every <stem>_p<N>.json page, in page order. Pages must be 1..N."""
+def pages(folder, stem, count):
+    """The rows of every <stem>_p<N>.json page, in page order. Pages must be exactly 1..count, the number triage read."""
     found = {}
     for path in folder.glob(stem + "_p*.json"):
         match = re.fullmatch(re.escape(stem) + r"_p(\d+)\.json", path.name)
@@ -53,9 +58,11 @@ def pages(folder, stem):
             found[int(match.group(1))] = path
     if not found:
         raise Stop("no %s_p<N>.json pages in %s" % (stem, folder))
-    missing = sorted(set(range(1, max(found) + 1)) - set(found))
+    missing = sorted(set(range(1, count + 1)) - set(found))
     if missing:
         raise Stop("%s pages missing: %s" % (stem, ", ".join(map(str, missing))))
+    if max(found) > count:
+        raise Stop("%s has page %d but pages.json says %d were read" % (stem, max(found), count))
     rows = []
     for n in sorted(found):
         page = load(found[n])
@@ -80,9 +87,9 @@ def held_set(folder):
     path = folder / "held.txt"
     held = set()
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines() if path.exists() else [], 1):
-        if re.match(r"#\D", line.strip()):
+        if re.match(r"#(\s|$)", line.strip()):
             continue
-        word = line.split(" #")[0].strip().lstrip("#")
+        word = re.sub(r"^#(?=\d)", "", line.split(" #")[0].strip())
         if not word:
             continue
         if word != "ALL" and not word.isdigit():
@@ -113,22 +120,29 @@ def build(folder, since):
         raise Stop("prev.json is not an object")
     held = held_set(folder)
     since_at = instant(since, "--landed-since")
-    opens = {need(p, "number"): p for p in pages(folder, "open")}
+    counts = load(folder / "pages.json")
+    if not isinstance(counts, dict) or not all(type(counts.get(k)) is int and counts[k] >= 1 for k in PAGE_LISTS):
+        raise Stop("pages.json must give a page count of 1 or more for %s" % ", ".join(PAGE_LISTS))
+    opens = {need(p, "number"): p for p in pages(folder, "open", counts["open"])}
     if not all(type(n) is int for n in opens):
         raise Stop("an open pull number is not an int")
     pulls = [{"number": p["number"], "title": need(p, "title"), "branch": need(p, "head", "ref"),
               "draft": bool(p.get("draft")), "createdAt": need(p, "created_at"), "head": need(p, "head", "sha"),
               "held": "ALL" in held or str(p["number"]) in held} for p in opens.values()]
-    landed = {r["number"]: r for r in prev.get("landedPulls", [])}
-    for p in pages(folder, "closed"):
+    read_dt = instant(read_at, "readat.txt")
+    landed = {r["number"]: dict(r, closed_at=r.get("closed_at") or read_at) for r in prev.get("landedPulls", [])}
+    for p in pages(folder, "closed", counts["closed"]):
         if need(p, "base", "ref") == "main" and p.get("closed_at") and instant(p["closed_at"], "closed_at") >= since_at:
             landed[p["number"]] = {"number": p["number"], "branch": need(p, "head", "ref"),
-                                   "head": need(p, "head", "sha"), "merged": bool(p.get("merged_at"))}
+                                   "head": need(p, "head", "sha"), "merged": bool(p.get("merged_at")),
+                                   "closed_at": p["closed_at"]}
     epochs = {s["id"]: s["unarchived_epoch"] for s in prev.get("sessions", []) if "unarchived_epoch" in s}
     if not all(type(e) is int for e in epochs.values()):
         raise Stop("a prev.json unarchived_epoch is not a JSON int")
     sessions = {}
-    for s in pages(folder, "sess"):
+    cut = read_dt - datetime.timedelta(days=LANDED_DAYS)
+    landed = {n: r for n, r in landed.items() if instant(r["closed_at"], "a landedPulls closed_at") >= cut}
+    for s in pages(folder, "sess", counts["sess"]):
         row = {"id": need(s, "id"), "session_status": need(s, "session_status"), "tags": s.get("tags") or [],
                "status_bucket": s.get("status_bucket")}
         if row["session_status"] == IDLE and s.get("updated_at"):
