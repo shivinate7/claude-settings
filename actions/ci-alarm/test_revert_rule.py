@@ -147,6 +147,16 @@ class RuleCase(unittest.TestCase):
         except Exception as e:
             self.fail(f"main raised {type(e).__name__} ({e}) instead of an exit code: the process exits 1, which alarm.sh reads as no revert")
 
+    def main_err(self, head=H):
+        """main's exit code and its stderr, so a case can name which read gave the exit. An escaped exception is a named failure, as in exit_code."""
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                got = revert_rule.main(["--repo", REPO, "--branch", BRANCH, "--head", head])
+        except Exception as e:
+            self.fail(f"main raised {type(e).__name__} ({e}) instead of an exit code: the process exits 1, which alarm.sh reads as no revert")
+        return got, err.getvalue()
+
 
 class LiveRevert(RuleCase):
     def test_a_reachable_revert_lifts_the_run(self):
@@ -301,6 +311,73 @@ class LiveRevert(RuleCase):
                     self.gh.compare = {c: compare_reply("ahead") for c in (R1, LOW, HIGH, R3)}
                     got = self.exit_code()
                     self.assertEqual(got, want, f"search answering {order} gave exit {got}, merge.py's rule gives {want}")
+
+    def test_two_reachable_reverters_of_a_revert_on_one_date_exit_2(self):
+        # H is reverted by C1, and C1 by S1 and S2, both on the branch with one commit date. Which is the oldest cannot be told,
+        # so the run is unknown: exit 2, from the tie, in both search orders.
+        # Named failure: the tie is read as a pick, so the exit is 1 (the first reverter undoes C1), not 2 (unknown).
+        S1, S2, same = C2, C3, "2026-01-03T00:00:00Z"
+        for name, answers in {"S1 first": (S1, S2), "S2 first": (S2, S1)}.items():
+            with self.subTest(search=name):
+                self.gh.calls.clear()
+                self.gh.search = {H: search_reply(hit(C1, revert_msg(H), "2026-01-02T00:00:00Z")),
+                                  C1: search_reply(*(hit(s, revert_msg(C1), same) for s in answers))}
+                self.gh.compare = {C1: compare_reply("ahead"), S1: compare_reply("ahead"), S2: compare_reply("ahead")}
+                got, err = self.main_err()
+                self.assertEqual(self.gh.searched(), [H, C1], "the chain was not walked to the reverters of C1")
+                self.assertEqual(got, 2, f"two reachable reverters of C1 on one date exited {got}, not 2 (unknown)")
+                self.assertIn("share one commit date", err, "exit 2 came from another read, not from the tie on one date")
+
+    def test_two_reverters_one_with_no_usable_date_exit_2(self):
+        # H is reverted by C1, and C1 by X, with a commit date, and Y, whose date is missing, unparseable or naive. Both are on the branch.
+        # Y cannot be ordered against X, so the run is unknown: exit 2, from the date guard, in both search orders.
+        # Named failure: the pair is sorted anyway, so the unknown comes from the sort's TypeError, not from the guard.
+        X, Y = C2, C3
+        kinds = {"missing": None, "unparseable": "not-a-date", "naive": "2026-01-03T00:00:00"}
+        for kind, bad in kinds.items():
+            dates = {X: "2026-01-03T00:00:00Z", Y: bad}
+            for name, answers in {"X first": (X, Y), "Y first": (Y, X)}.items():
+                with self.subTest(date=kind, search=name):
+                    self.gh.calls.clear()
+                    self.gh.search = {H: search_reply(hit(C1, revert_msg(H), "2026-01-02T00:00:00Z")),
+                                      C1: search_reply(*(hit(c, revert_msg(C1), dates[c]) for c in answers))}
+                    self.gh.compare = {C1: compare_reply("ahead"), X: compare_reply("ahead"), Y: compare_reply("ahead")}
+                    got, err = self.main_err()
+                    self.assertEqual(self.gh.searched(), [H, C1], "the chain was not walked to the reverters of C1")
+                    self.assertEqual(got, 2, f"a reverter of C1 with a {kind} date exited {got}, not 2 (unknown)")
+                    self.assertIn("no usable commit date", err, "exit 2 came from the sort, not from the date guard")
+
+    def test_a_tie_with_one_reverter_off_the_branch_exits_1(self):
+        # H is reverted by C1, and C1 by S1 and S2, one commit date. S1 is on the branch and S2 is not, in both search orders.
+        # Only S1 is reachable, so there is no tie on the branch: S1 undoes C1, H stands, and the exit is 1, not unknown.
+        # Green control. Named failure: the off-branch reverter counts in the tie, so the exit is 2.
+        S1, S2, same = C2, C3, "2026-01-03T00:00:00Z"
+        for name, answers in {"S1 first": (S1, S2), "S2 first": (S2, S1)}.items():
+            with self.subTest(search=name):
+                self.gh.calls.clear()
+                self.gh.search = {H: search_reply(hit(C1, revert_msg(H), "2026-01-02T00:00:00Z")),
+                                  C1: search_reply(*(hit(s, revert_msg(C1), same) for s in answers))}
+                self.gh.compare = {C1: compare_reply("ahead"), S1: compare_reply("ahead"), S2: compare_reply("behind")}
+                got = self.exit_code()
+                self.assertEqual(self.gh.searched(), [H, C1, S1], "the chain was not walked through the on-branch reverter of C1")
+                self.assertEqual(got, 1, f"a tie with one reverter off the branch exited {got}, not 1 (H stands)")
+
+    def test_a_single_reverter_with_no_date_is_read_not_unknown(self):
+        # One reverter needs no commit date, since nothing is ordered. Case 1: a reverter of H with no date, on the branch, lifts
+        # the run (exit 0). Case 2: a reverter of C1 with no date, on the branch, undoes C1, so H stands (exit 1). Neither is unknown.
+        # Green control. Named failure: a single hit with no date reads unknown (exit 2).
+        self.gh.calls.clear()
+        self.gh.search = {H: search_reply(hit(C1, revert_msg(H)))}
+        self.gh.compare = {C1: compare_reply("ahead")}
+        got = self.exit_code()
+        self.assertEqual(self.gh.searched(), [H, C1], "the chain was not walked to the reverters of the one reverter of H")
+        self.assertEqual(got, 0, f"a single reverter of H with no date exited {got}, not 0 (lifted)")
+        self.gh.calls.clear()
+        self.gh.search = {H: search_reply(hit(C1, revert_msg(H), "2026-01-02T00:00:00Z")), C1: search_reply(hit(C2, revert_msg(C1)))}
+        self.gh.compare = {C1: compare_reply("ahead"), C2: compare_reply("ahead")}
+        got = self.exit_code()
+        self.assertEqual(self.gh.searched(), [H, C1, C2], "the chain was not walked through the one reverter of C1")
+        self.assertEqual(got, 1, f"a single reverter of C1 with no date exited {got}, not 1 (H stands)")
 
 
 class MainExitCodes(RuleCase):
