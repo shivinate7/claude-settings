@@ -372,89 +372,103 @@ def send_targets(use):
 
 
 MAIL_COMMANDS = ("mail", "mail.cmd")
+INTERPRETER = re.compile(r"python[\d.]*")  # `python3 bin/mail send` runs the mail script
 SEGMENT_CHARS = frozenset(";&|()\n")  # shlex joins a run of these into one token, such as "|\n" or "&&"
-HEREDOC_OPENER = re.compile(r"<<(?!<)-?\s*(['\"]?)([A-Za-z0-9_]+)\1")
+STDOUT_REDIRECTS = (">", ">>", ">&", "&>", "&>>")
+# Outside quotes, a redirect of fd 2 to 9 (`2>&1`, `2>/dev/null`) leaves stdout alone, so it is cut before the words
+# are read; a quoted string is matched first and kept.
+FD_REDIRECT = re.compile(r"""("(?:\\.|[^"\\])*"|'[^']*')|(?<![\w])[2-9]>(?:&\d+|>?\s*[^\s|;&<>()]+)""")
+# A shell result that reports a nonzero exit; report_guard reads a failed try the same way (CANNOT_FAIL_RE).
+EXIT_FAIL_RE = re.compile(r"^Exit code [1-9]")
 
 
-def _take_heredocs(command):
-    """(command with each heredoc body cut out, the bodies in order). A body runs from the line after its
-    opener to the line that is only the delimiter."""
-    lines, kept, bodies, i = command.split("\n"), [], [], 0
-    while i < len(lines):
-        kept.append(lines[i])
-        opener = HEREDOC_OPENER.search(lines[i])
-        i += 1
-        if opener:
-            body = []
-            while i < len(lines) and lines[i].strip() != opener.group(2):
-                body.append(lines[i])
-                i += 1
-            i += 1
-            bodies.append("\n".join(body))
-    return "\n".join(kept), bodies
+def exit_failed_tool_use_ids(records):
+    """The tool_use ids whose result text reports a nonzero shell exit (`Exit code 1`), which sets no is_error."""
+    return {b["tool_use_id"] for r in records if r.get("type") == "user" for b in tool_results(r)
+            if isinstance(b.get("tool_use_id"), str) and EXIT_FAIL_RE.search(result_text(b))}
+
+
+def _tokens(chunk):
+    """The shell words and separators of one chunk of command text; ValueError when a quote is left open."""
+    lex = shlex.shlex(FD_REDIRECT.sub(lambda m: m.group(1) or "", chunk), posix=True, punctuation_chars=";&|<>()\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    return list(lex)
 
 
 def _segments(command):
-    """The command's simple commands as (words, piped_in, heredoc_bodies), split on the shell's
-    separators. A word inside quotes stays one word, so an echo or grep that only mentions `mail send` has no `mail`
-    command word. Empty when the shell quoting does not parse."""
-    text, bodies = _take_heredocs(command)
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()\n")
-    lex.whitespace = " \t\r"
-    lex.whitespace_split = True
-    try:
-        tokens = list(lex)
-    except ValueError:
-        return []
-    out, words, piped = [], [], False
-    for tok in tokens + [";"]:
-        if set(tok) <= SEGMENT_CHARS:
-            if words:
-                out.append((words, piped, []))
-            words, piped = [], tok.strip("\n") == "|"
-        else:
-            words.append(tok)
-    return _attach(out, bodies)
-
-
-def _attach(segments, bodies):
-    """Resolve each segment's `<<` delimiter and `<<<` word into body text, taking heredoc bodies in order."""
-    out, queue = [], list(bodies)
-    for words, piped, _ in segments:
-        plain, here, i = [], [], 0
-        while i < len(words):
-            if words[i] == "<<" and i + 1 < len(words):
-                here.append(queue.pop(0) if queue else "")
-                i += 2
-            elif words[i] == "<<<" and i + 1 < len(words):
-                here.append(words[i + 1])
-                i += 2
-            elif words[i] in ("<", ">", ">>", ">&", "<&"):
-                i += 2
-            else:
-                plain.append(words[i])
+    """The command's simple commands as dicts: words, piped (stdin comes from the command before), here (the heredoc
+    and here-string bodies fed to it) and to_file (stdout goes to a file). A word inside quotes stays one word, so
+    an echo or grep that only mentions `mail send` or `<<EOF` has no command word or heredoc. A line whose quote is
+    open joins the next line. Empty when the quoting never closes."""
+    lines, segments, i = re.sub(r"\\\r?\n", " ", command).split("\n"), [], 0
+    new = lambda piped: {"words": [], "piped": piped, "here": [], "to_file": False}  # noqa: E731
+    cur = new(False)
+    while i < len(lines):
+        chunk, i = lines[i], i + 1
+        while True:
+            try:
+                tokens = _tokens(chunk)
+                break
+            except ValueError:
+                if i >= len(lines):
+                    return []
+                chunk, i = chunk + "\n" + lines[i], i + 1
+        j = 0
+        while j < len(tokens):
+            tok = tokens[j]
+            if set(tok) <= SEGMENT_CHARS:
+                if cur["words"] or cur["here"]:
+                    segments.append(cur)
+                cur = new(tok.strip("\n") == "|")
+            elif tok == "<<" and j + 1 < len(tokens):
+                body = []
+                while i < len(lines) and lines[i].strip() != tokens[j + 1].lstrip("-"):
+                    body.append(lines[i])
+                    i += 1
                 i += 1
-        out.append((plain, piped, here))
-    return out
+                cur["here"].append("\n".join(body))
+                j += 1
+            elif tok == "<<<" and j + 1 < len(tokens):
+                cur["here"].append(tokens[j + 1])
+                j += 1
+            elif tok in STDOUT_REDIRECTS + ("<", "<&") and j + 1 < len(tokens):
+                cur["to_file"] = cur["to_file"] or tok in STDOUT_REDIRECTS
+                j += 1
+            else:
+                cur["words"].append(tok)
+            j += 1
+        if cur["words"] or cur["here"]:
+            segments.append(cur)
+            cur = new(False)
+    return segments
+
+
+def _is_mail_send(words):
+    """True when the words run the mail script's send, past any env assignments or a python interpreter."""
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        words = words[1:]
+    if words and INTERPRETER.fullmatch(os.path.basename(words[0])):
+        words = [w for w in words[1:] if not w.startswith("-")]
+    return (len(words) >= 2 and os.path.basename(words[0].replace("\\", "/")) in MAIL_COMMANDS
+            and words[1] == "send")
 
 
 def _mail_send_bodies(command):
     """The body text of each `mail send` the command runs, and nothing else of its line. The body is a heredoc or
-    here-string on the send, or what a piped echo, printf or heredoc before it writes. The `--to` address and the
-    other options are never part of it."""
+    here-string on the send, or what a piped echo, printf or heredoc before it writes to the pipe. The `--to`
+    address and the other options are never part of it."""
     segments, bodies = _segments(command), []
-    for n, (words, piped, here) in enumerate(segments):
-        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
-            words = words[1:]
-        if len(words) < 2 or os.path.basename(words[0].replace("\\", "/")) not in MAIL_COMMANDS or words[1] != "send":
+    for n, seg in enumerate(segments):
+        if not _is_mail_send(seg["words"]):
             continue
-        body = list(here)
-        if not body and n and piped:
-            before, _, before_here = segments[n - 1]
-            if before_here:
-                body = before_here
-            elif before and os.path.basename(before[0]) in ("echo", "printf"):
-                body = [" ".join(w for w in before[1:] if not re.fullmatch(r"-[neE]+", w))]
+        body = list(seg["here"])
+        before = segments[n - 1] if n and seg["piped"] else None
+        if not body and before and not before["to_file"]:
+            if before["here"]:
+                body = before["here"]
+            elif before["words"] and os.path.basename(before["words"][0]) in ("echo", "printf"):
+                body = [" ".join(w for w in before["words"][1:] if not re.fullmatch(r"-[neE]+", w))]
         bodies.extend(body)
     return bodies
 

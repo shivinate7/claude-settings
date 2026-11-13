@@ -693,7 +693,8 @@ class Pages:
             except (OSError, ValueError) as e:
                 self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
                                                                       or type(e).__name__)
-            self.failed = _transcript.failed_tool_use_ids(self.records)
+            self.failed = (_transcript.failed_tool_use_ids(self.records)
+                           | _transcript.exit_failed_tool_use_ids(self.records))
             for i, rec in enumerate(self.records):
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
