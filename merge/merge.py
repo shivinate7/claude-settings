@@ -39,7 +39,7 @@
                           (Host.send_lane_mail), once for each state at each head: a comment on the PR (the lane-mail marker) records the send, and the
                           next run reads it from the one comment read it already makes. A failed send prints `merge: lane mail ... was not sent: ...`,
                           keeps every line, and exits 1. Only a session with the batch-runner role sends or posts; any other prints the same lines and
-                          `lane mail not sent: no batch-runner role`. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
+                          `merge: lane mail not sent: no batch-runner role`. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
   merge --reviewed [--root DIR ...] --live FILE
                           adds one row per open lane PR in each of five states: `lost-work #N (a-e): WHY; owner OWNER`. a: a done record over 6 h old
                           and no other open PR holds its head. b: an open or bad record whose lane message failed in this run. c: no record, the lane
@@ -4475,7 +4475,7 @@ def footer_session(body):
 def reviewed_read(h, facts=None):
     """-> (lines, done, pulls, tell): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
     for each pull request whose newest record reads done (kind is the record's Kind); the open pull request rows; and `tell`, one (number, state, head, why,
-    lane session or None, marked) entry for each pull request whose line reads open or bad (`marked` is True when a lane-mail marker comment already holds that
+    the lane's session or None, marked) entry for each pull request whose line reads open or bad (`marked` is True when a lane-mail marker comment already holds that
     state at that head), which tell_lanes sends. An open or bad line ends with ` lane session_X`, the session in the pull request body's footer, or
     ` lane unknown (no footer)`. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -4519,11 +4519,11 @@ def reviewed_read(h, facts=None):
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, tell
 
 LANE_MAIL_BODY = ("#{n} {state} at {head9}: {why}\n\n"
-                  "The batch runner reads this pull request's newest review record as {state} at its live head, so no batch takes it. "
-                  "Post a review record that reads done at the live head (`merge {n} --review-record ...`, posted as a comment on #{n}), "
+                  "The batch runner reads this pull request's newest review log as {state} at its live head, so no batch takes it. "
+                  "Post a review log that reads done at the live head (`merge {n} --review-record ...`, posted as a comment on #{n}), "
                   "or say in this lane why it waits. This is the only message for this state at this head.\n")
 
-LANE_MAIL_NO_ROLE = "lane mail not sent: no batch-runner role"
+LANE_MAIL_NO_ROLE = "merge: lane mail not sent: no batch-runner role"  # `merge: ` like its sibling lane-mail lines
 
 def tell_lanes(h, tell, failed=None):
     """-> the lines for the lanes of `tell` (reviewed_read): one message to each lane whose pull request reads open or bad and was not told for that state at
@@ -4566,17 +4566,24 @@ def reviewed_lines(h, live=None):
     rows, rows_ok = lost_work_rows(h, pulls, facts, failed, live)
     return lines + mail + rows, ok and rows_ok
 
+def done_lanes(done, pulls, base):
+    """-> {number: kind} of the done pull requests of `done` (reviewed_read) that are open on `base` and can be a lane. An integration PR (head ref
+    BATCH_PREFIX...) reads done once its review log and lint land at its head, but it is no lane of any batch. The one home of that rule for
+    batch_candidates (the `open batch now` line of `--reviewed --root` and `--batch-build NAME` with no PR list) and left_out_lines."""
+    refs = {d["number"]: d["head"]["ref"] for d in pulls if d["base"]["ref"] == base}
+    return {n: kind for n, b, kind in done if b == base and n in refs and not refs[n].startswith(BATCH_PREFIX)}
+
 def batch_candidates(h, done, pulls, base, ignore_ref=None):
     """-> (numbers, busy): the done pull requests of `done` (reviewed_read) on `base`, ascending, that can join a batch now, and the numbers of the ready
     pull requests on `base` with CI running. One that another open pull request on `base` holds (Host.holds_head, drafts included: the batch would
     merge it twice), one that `base` already holds (nothing is left to merge) and one that is ready with CI running (Host.ready_busy) are left out.
     A pull request whose head ref is `ignore_ref` holds nothing and is no candidate: a build of batch NAME again must not read the lanes of its own batch pull
-    request as held, and that pull request's own done record does not make it a lane.
+    request as held. No integration PR is a candidate (done_lanes).
     The one home of the done set that the `open batch now` line and `--batch-build NAME` with no PR list both read. With no done pull request on `base` it
     reads nothing. A failed read raises Stop. Cost: Host.ready_busy's reads and one git read per candidate and other open pull request on `base`
     (Host.holds_head), and no gh compare."""
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base and d["head"]["ref"] != ignore_ref}
-    nums = sorted(n for n, b, _kind in done if b == base and n in heads)  # the pull request of `ignore_ref` is no lane of any batch
+    nums = sorted(n for n in done_lanes(done, pulls, base) if n in heads)
     if not nums:
         return [], []
     busy = h.ready_busy(pulls, base)
@@ -5576,14 +5583,14 @@ def refuse_draft_runs(h, heads, unknown_ok="", ready=False):
 def left_out_lines(root, h, name, numbers, base):
     """-> the lines naming each pull request that `merge --reviewed` reads done on `base`, that is not in the batch's lane set `numbers` and whose
     head no other open pull request on `base` holds (a batch's draft included) and `base` does not hold: `merge: #N left out of batch NAME: REASON`,
-    ascending. REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
+    ascending. An integration PR is never named (done_lanes). REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
     with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_reason, the one home of "does this head merge cleanly onto the base"
     (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one git read (Host.holds_head, no gh
     compare) per candidate and other open pull request on `base` and one against `base`, and one merge_reason per code candidate. An unknown
     merge_reason raises Stop; a failed read raises its RELEASE_READ_ERRORS error."""
     _lines, done, pulls, _tell = reviewed_read(h)  # the lane message is --reviewed's, never a build's
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
-    kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
+    kinds = {n: kind for n, kind in done_lanes(done, pulls, base).items() if n not in numbers}
     fetched, out = {}, []
     for n in sorted(kinds):
         if any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n) or h.holds_head(heads[n], base):
@@ -5623,16 +5630,25 @@ def left_note(left):
 
 def left_rewrite(body, left):
     """`body` with each (number, reason) of `left` listed under the LEFT_HEADING line, outside the freeze block: the same-set rerun's way to print its --leave
-    reasons. The heading is added at the end when the body has none, and an entry already listed is not listed twice. Any other text is kept."""
+    reasons. The heading is added at the end when the body has none, and an entry already listed is not listed twice. A new reason for a number already
+    listed replaces that number's entry, so the list holds the newest reason only. Any other text is kept."""
     lines = body.split("\n")
     entries = [e for e in left_note(left)[2:] if e not in lines]
     if not entries:
         return body
     if LEFT_HEADING in lines:
-        at = lines.index(LEFT_HEADING) + 1
-        while at < len(lines) and lines[at].startswith("- #"):
-            at += 1
-        return "\n".join(lines[:at] + entries + lines[at:])
+        start = end = lines.index(LEFT_HEADING) + 1
+        while end < len(lines) and lines[end].startswith("- #"):
+            end += 1
+        listed = lines[start:end]
+        for e in entries:
+            key = e.split(":", 1)[0] + ":"  # `- #N:`; the colon keeps #12 apart from #123
+            same = [i for i, line in enumerate(listed) if line.startswith(key)]
+            if same:
+                listed = [e if i == same[0] else line for i, line in enumerate(listed) if i not in same[1:]]
+            else:
+                listed.append(e)
+        return "\n".join(lines[:start] + listed + lines[end:])
     tail = lines[:-1] if lines[-1] == "" else lines  # a body's final newline stays final
     return "\n".join(tail + ["", LEFT_HEADING, *entries] + ([""] if lines[-1] == "" else []))
 
