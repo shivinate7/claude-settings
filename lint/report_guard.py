@@ -1128,7 +1128,7 @@ _BROKE_INTO = (r"(?!\s+(?:(?!by\b|when\b|after\b|and\b|then\b|before\b|if\b|so\b
 MISTAKE_FAULT_RE = re.compile(
     r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke" + _BROKE_INTO + r"|clobbered|overwrote|"
     r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
-    r"should(?:n['\u2019]t|\s+not)\s+have|"
+    r"should(?:n['\u2019]t|\s+not)\s+have(?!\s+to\b)|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
 MISTAKE_NEGATOR_GAP = 3
@@ -1138,6 +1138,9 @@ MISTAKE_CLAUSE_SPLIT_RE = re.compile(
 MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
+# "the guard should not have refused it" faults the guard, not the writer: a guard, check, hook or rule right
+# before "should" clears that fault word.
+MISTAKE_SUBJECT_RE = re.compile(r"\b(?:guard|check|hook|rule)s?\s+$", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
@@ -1157,6 +1160,8 @@ def _admitted_clause(deviations):
         for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
             for fault in MISTAKE_FAULT_RE.finditer(clause):
                 before = clause[:fault.start()]
+                if fault.group().lower().startswith("should") and MISTAKE_SUBJECT_RE.search(before):
+                    continue
                 # Split on whitespace only, so a contraction such as didn't stays one word.
                 near = " ".join(before.split()[-(MISTAKE_NEGATOR_GAP + 1):])
                 if MISTAKE_FIRST_PERSON_RE.search(before) and not MISTAKE_NEGATOR_RE.search(near):
@@ -1179,8 +1184,6 @@ def mistake_problem(text):
     if len(given) == 1:
         have = next(iter(given))
         return MISTAKE_LINES_REASON % (repr(clause[:80]), have, "Guard" if have == "Cause" else "Cause")
-    if given:
-        return ""
     # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
     if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
             or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
