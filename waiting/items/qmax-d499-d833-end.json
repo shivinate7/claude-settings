@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:41:00Z",
+  "context": "Goal: child repos' CI follows the stable branch (R44).\nProblem (rule): the reviewer found no owner words retiring D-499 and D-833. R44 (your 13:57 and 14:05 CST words) only names them as the obstacle to child CI following the stable branch. Round 1 of #1167 failed on this.\nBased on (ruling): R44; decision D-570 (how decisions end).\nDeparts from: q_max main \u2014 it keeps both decisions live; choosing a deletes them.\nMeanwhile: #1167 waits; #1165 goes on.",
+  "home": "q_max PR #1167 (R44 lane)",
+  "id": "qmax-d499-d833-end",
+  "kind": "decision",
+  "n": 720,
+  "options": [
+    {
+      "gain": "#1167 can merge; child CI can follow the stable branch.",
+      "how": "q_max decisions D-499 (child guard) and D-833 (pinned-lint lock) are deleted per D-570, with about 12 cites moved.",
+      "id": "end-now",
+      "key": "a",
+      "label": "Yes, end them now",
+      "lose": "q_max main loses two live decisions with no owner words retiring them."
+    },
+    {
+      "gain": "Nothing is deleted before the stable branch exists.",
+      "how": "Drop the banners now; rewrite the pin entry when the stable branch lands.",
+      "id": "not-yet",
+      "key": "b",
+      "label": "Not yet (recommended)",
+      "lose": "#1167 waits; #1165 goes on."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "runner 11 via the coordinator, 11:39 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "q_max D-499 and D-833: end now?",
+  "shown": [
+    {
+      "id": "end-now",
+      "key": "a",
+      "label": "Yes, end them now"
+    },
+    {
+      "id": "not-yet",
+      "key": "b",
+      "label": "Not yet (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "Should q_max decisions D-499 (child guard) and D-833 (pinned-lint lock) end now?",
+  "why": "Ending a decision needs your words; none exist yet."
+}
