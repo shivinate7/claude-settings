@@ -1,0 +1,14 @@
+{
+ "id": "worktree-add-refused-false-alarm",
+ "title": "The guard refused `git worktree add` for a lane's test-author; judge whether it is a false alarm",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane bg-tail-loses-verdict, 12:37 CST Nov 13: the guard refused `git worktree add`, so the red run ran on a git archive export of main fccff95e6.",
+ "source": "lane session_013NEJL2bHJPuGxxRSmQpAyi, 12:37 CST Nov 13",
+ "note": "Todo, possible false alarm (verification-cry-wolf-guard-is-spent). Lanes run in their own worktree (rule parallelism-own-lane-orchestrator); a worktree add from the lane should be allowed. Read the guard record first; the lane supplies the exact refusal text. Unconfirmed until read. Stood pick on page item 740: an export is acceptable red proof meanwhile.",
+ "updatedAt": "2026-11-13T12:38:17-06:00"
+}

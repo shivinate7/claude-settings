@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Question from lane bg-tail-loses-verdict, relayed by the coordinator 12:37 CST Nov 13: out of that lane's scope.",
  "source": "coordinator 12:37 CST Nov 13, lane bg-tail-loses-verdict",
- "note": "Todo, the rest of step bg-tail-loses-verdict. `merge --lane-lint` and `merge --review-record` refuse a filtered tail (a verdict cut off by a pipe to tail or head); `merge --release-check` does not. Decide whether it should. A guard or check change: a build lane (test-author, builder, reviewer). Check the refusal list for other merge flags first.",
- "updatedAt": "2026-11-13T12:37:31-06:00"
+ "note": "Todo, the rest of step bg-tail-loses-verdict. `merge --lane-lint` and `merge --review-record` refuse a filtered tail (a verdict cut off by a pipe to tail or head); `merge --release-check` does not. Decide whether it should. A guard or check change: a build lane (test-author, builder, reviewer). Check the refusal list for other merge flags first. Lane bg-tail-loses-verdict 12:38 CST Nov 13: recommends NO for --release-check in its own scope (the task names only --lane-lint and --review-record); gain: no scope growth, lose: a filter after --release-check still cuts the verdict. Triage takes that: the lane leaves it out; this step stays todo for the rest.",
+ "updatedAt": "2026-11-13T12:38:17-06:00"
 }
