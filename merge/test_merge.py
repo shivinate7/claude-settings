@@ -14669,9 +14669,11 @@ class ReviewRecordForm(unittest.TestCase):
     def test_the_parser_refuses_an_unknown_role(self):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: qa-reviewer, sonnet, PASS",))))
 
-    def test_the_parser_refuses_docs_only_with_guard_yes(self):
-        # a docs-only change has no guard or check (decision docs-only-prs-skip-review)
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(), kind="docs-only", guard="yes")))
+    def test_the_parser_accepts_docs_only_with_guard_yes(self):
+        # a docs-only change with Guard or check yes owes no round, as its review row says (decision agent-model-cap, the review rows; owner
+        # ruling 2026-11-13 14:19 CST: the parser and the CLI both accept it)
+        rec = parse_text(self, record_text(rounds=(), kind="docs-only", guard="yes"))
+        self.assertEqual((rec["kind"], rec["guard"], rec["rounds"]), ("docs-only", "yes", []))
 
     def test_the_parser_refuses_a_short_head(self):
         for head in (REVIEW_HEAD[:39], REVIEW_HEAD[:7]):
@@ -15327,12 +15329,14 @@ class ReviewArgs(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
-    def test_docs_only_takes_no_guard_or_check(self):
-        # a docs-only change has no guard or check, so --guard yes is a usage error; --guard no is the control
-        _out, err = self.assert_usage_error("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "yes")
-        self.assertIn("so --guard must be no", err)
-        rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "no")
-        self.assertEqual(rc, 0, out + err)
+    def test_docs_only_takes_guard_yes_and_no(self):
+        # a docs-only change with Guard or check yes owes no round, as its review row says (owner ruling 2026-11-13 14:19 CST: the parser and
+        # the CLI both accept it). Each guard value prints a record, and the record reads back with the guard it was given.
+        for guard in ("yes", "no"):
+            with self.subTest(guard=guard):
+                rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", guard)
+                self.assertEqual(rc, 0, f"--kind docs-only --guard {guard} was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
 
     def test_preview_and_confirm_take_no_review_record(self):
         # Q1 a, pinned: the review flags add no refusal to the preview or the confirm, so a pull request with no record runs as before.
