@@ -3,8 +3,9 @@ FAMILY = "message-time-matches-clock"
 #
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
 # with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
-# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
-# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# then an optional date `YYYY-MM-DD ` and `H:MM` or `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any
+# letter case. Anything may follow it. A bracketed or parenthesised label needs no mark before the time. A bare label
+# needs `,`, `:`, or a dash spaced on both sides before the time, or a `Mon D` date and a colon after the zone. The zone must
 # be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
 # A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
 # limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
@@ -215,30 +216,37 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
            "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
 
 
-# ---- the header forms with no separator: a bracket, a paren, or a bare label. Each is a header stamp, the same as
-# `Coordinator, 12:53 CST:`. Main reads none of them: its header regex wants `,`, `:` or a spaced dash after the label.
-# So each 10-minutes-ahead refusal below is RED on main. Every other case here is marked STAYS GREEN: it passes on main
-# and must pass once the header form widens. The group's clock is 12:43 CST on 2026-11-13, so 12:53 is 10 minutes ahead.
+# ---- the forms with no separator: a bracket, a paren, or a bare label. A bracket or a paren is a header stamp with no
+# mark before the time. A bare label with no mark before the time is a header stamp only when a `Mon D` date and a
+# colon follow the zone, so the bare row is prose and stays allowed. Main reads none of these forms. Each
+# 10-minutes-ahead refusal below is RED on main. Every other case is marked STAYS GREEN: it passes on main and must
+# pass once the header form widens. The group's clock is 12:43 CST on 2026-11-13, so 12:53 is 10 minutes ahead.
 MTC_FORM_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the 10-minutes-ahead refusals
-MTC_FORMS = (  # (name, template, quote): {t} is the stamp's time, 12:53 in every form below
-    ("bracket with a date", "[coordinator {t} CST Nov 13] hi", False),
-    ("bracket", "[coordinator {t} CST] x", True),
-    ("bold bracket", "**[coordinator {t} CST]** hi", True),
-    ("paren", "(coordinator {t} CST) x", True),
-    ("bare label", "coordinator {t} CST x", True),
-    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi", False),
+MTC_FORMS = (  # (name, template, quote, header): {t} is the stamp's time, 12:53 in every form below
+    ("bracket with a date", "[coordinator {t} CST Nov 13] hi", False, True),
+    ("bracket", "[coordinator {t} CST] x", True, True),
+    ("bold bracket", "**[coordinator {t} CST]** hi", True, True),
+    ("paren", "(coordinator {t} CST) x", True, True),
+    # A bare label, time and zone with no mark is indistinguishable from prose (`Deadline 15:00 CST for the merge`).
+    ("bare label", "coordinator {t} CST x", True, False),
+    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi", False, True),
 )
 # quote is False for the two forms with `Nov 13` after the zone. The rule puts a date before the time, so whether that
 # date counts is open, and a dated stamp has no quote window. Their 70-minute case is not pinned here.
 
 
 def mtc_form_cases():
-    """Each header form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and, if undated, 70 ahead."""
-    for form, template, quote in MTC_FORMS:
+    """Each form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and, if undated, 70 ahead."""
+    for form, template, quote, header in MTC_FORMS:
         msg = template.format(t="12:53")
-        # RED on main: refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
-        mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
-                   clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+        if header:
+            # RED on main: refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
+            mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
+                       clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+        else:
+            # STAYS GREEN: prose, so 10 minutes ahead passes too, as it does on main.
+            mtc_allow("a %s is prose, not a header, so 10 minutes ahead is allowed: 12:53 CST at 12:43" % form, msg,
+                      clock=MTC_FORM_CLOCK)
         # STAYS GREEN: passes at the clock's own minute, 1 minute ahead, and behind.
         mtc_allow("a %s header at the clock's own minute is allowed: 12:53 CST at 12:53" % form, msg,
                   clock="2026-11-13T12:53:00-06:00")
