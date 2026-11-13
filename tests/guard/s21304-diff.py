@@ -546,6 +546,10 @@ LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
 LOG_FAMILY[UNREAD_NOGIT_LABEL] = "shared-tree"
 LOG_CHECKS_EXTRA.append((UNREAD_STATUS_LABEL, unread_lone_operand_status_case))
 LOG_FAMILY[UNREAD_STATUS_LABEL] = "shared-tree"
+# The wrapper-flag crash checks (WRAPPER_CRASH_COMMANDS, in the shared-tree block) register here, as above.
+for _command in WRAPPER_CRASH_COMMANDS:
+    LOG_CHECKS_EXTRA.append((WRAPPER_CRASH_LABEL % _command, wrapper_crash_log_case(_command)))
+    LOG_FAMILY[WRAPPER_CRASH_LABEL % _command] = "shared-tree"
 # The agent-owned noted rows of the reset and restore ruling. agent_worktree_noted_case is defined far below,
 # so each label stores a lambda that calls it when the check runs, not when this file loads.
 for _label, _command in AGENT_NOTED_RULING:

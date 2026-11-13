@@ -963,4 +963,131 @@ sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 
+# PWSH FOLLOWUPS. A builder's write to a test file is refused whatever PowerShell text carries it. `env -S`
+# appends the words after its split string, so `env -S pwsh -c '<script>'` runs `pwsh -c <script>`, and it is
+# refused as the plain form is. Smart quotes name a path only where PowerShell reads them as quotes, so a
+# quoted string that names a test file as text is not a write to that file. Each DENIES on a test-file write
+# and ALLOWS otherwise.
+sh("pwsh-followups: pwsh -c Set-Content onto a test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with the whole call in one quoted string, then a Set-Content onto a test file, "
+   "is refused [pwsh-followups green]",
+   "env -S 'pwsh -c \"Set-Content hooks/test_x.py x\"'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh unquoted, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -S pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh glued to the flag, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -Spwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: pwsh -c Add-Content of a smart-quoted line that names a test file as text "
+   "is allowed [pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md “edited hooks/test_guard.py”'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Copy-Item “hooks/test_x.py” docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item “hooks/test_x.py” docs/a.md", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted product file is allowed [pwsh-followups green]",
+   "pwsh -c 'Set-Content “src/app.py” x'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content “hooks/test_x.py” x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: PowerShell tool Set-Content of a smart-quoted test file is refused "
+   "[pwsh-followups green]",
+   "Set-Content “hooks/test_x.py” x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+
+sh("pwsh-followups: pwsh -c Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md \"edited hooks/test_guard.py\"'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   'Add-Content docs/log.md "edited hooks/test_guard.py"', "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of an ASCII test file as its source is allowed [pwsh-followups red]",
+   "pwsh -c 'Copy-Item hooks/test_x.py docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of an ASCII test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item hooks/test_x.py docs/a.md", "allow", tool="PowerShell", **BR)
+# An ASCII apostrophe inside smart-quoted text pairs with a later `'`, so the text reads as one quoted string
+# and a Set-Content onto a test file after it goes unseen. Each DENIES on that test-file write.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content hooks/test_x.py 'y'", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a test file, is refused [pwsh-followups red]",
+   "pwsh -c \"Set-Content src/app.py “it's”; Set-Content tests/test_app.py 'expected'\"", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A copy into a folder writes a file that keeps the test's name, so each DENIES as a write to a test file.
+sh("pwsh-followups: PowerShell tool Copy-Item of a test file into a folder is refused [pwsh-followups red]",
+   "Copy-Item hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of a test file into a folder is refused [pwsh-followups red]",
+   "pwsh -c 'Copy-Item hooks/test_x.py docs/'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: cmd /c copy of a test file into a folder is refused [pwsh-followups red]",
+   "cmd /c copy hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: cp of a test file into a folder is refused [pwsh-followups red]",
+   "cp hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), **BR)
+# Aliases and env -S that write a test file as their destination. Each DENIES.
+sh("pwsh-followups: PowerShell alias sc onto a test file is refused [pwsh-followups red]",
+   "sc hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell alias ac onto a test file is refused [pwsh-followups red]",
+   "ac hooks/test_x.py y", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c alias cpi onto a test file is refused [pwsh-followups red]",
+   "pwsh -c 'cpi hooks/guard.py hooks/test_x.py'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S tee onto a test file is refused [pwsh-followups red]",
+   "env -S tee hooks/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# Green controls beside the new denies: the same apostrophe pair and the same copy, with a product file, pass.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a product file, is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Set-Content src/app.py 'y'", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: cp of a product file into a folder is allowed [pwsh-followups green]",
+   "cp hooks/guard.py docs/", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of a product file into a folder is allowed [pwsh-followups green]",
+   "Copy-Item hooks/guard.py docs/", "allow", tool="PowerShell", **BR)
+# An ASCII apostrophe inside smart-quoted text joins two statements into one segment, and a later
+# write whose path is quoted (ASCII or smart, in PowerShell or in pwsh -c) reads as text. Each DENIES on that
+# test-file write. The allow controls beside them are the same shape with a product file.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Add-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "single-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content 'hooks/test_x.py' v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "smart-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content “hooks/test_x.py” v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto a bare "
+   "test file after a Copy-Item, is refused [pwsh-followups red]",
+   "Copy-Item docs/a.md “it's”; Add-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "test file, is refused [pwsh-followups red]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'hooks/test_x.py' v\"", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# Also deny, the same cause: smart-quoted text holding an ASCII apostrophe or a `#` leaves the statement after it
+# unseen. Each DENIES on the test-file write that follows.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes after Write-Host, then Set-Content "
+   "onto a test file, is refused [pwsh-followups red]",
+   "Write-Host “it's”; Set-Content hooks/test_x.py v", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, a # inside smart quotes, then Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “see #3”; Set-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -Command ni onto a smart-quoted test file, is refused [pwsh-followups red]",
+   "pwsh -Command ni ‘hooks/test_x.py’", "deny", rule=BT, carries=("test-author",), **BR)
+# Green controls beside the new denies: the same shapes onto a product file, which stay allowed.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted product file, is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Add-Content \"src/app.py\" v", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "product file, is allowed [pwsh-followups green]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'src/app.py' v\"", "allow", **BR)
+
 # ---- the diff, judged at commit, push and SubagentStop
