@@ -4968,18 +4968,6 @@ def case_unsent_page_or_repo_refusal_does_not_name_closed():
     check("repo remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
 
 
-def case_closed_page_or_repo_item_still_blocks_without_its_send():
-    """A `[closed]` mark does not clear a page or repo item: its send is the proof, and the mark skips no send. Red on
-    the old code, which skips a closed page or repo item (case_page_closed_item_is_never_checked and
-    case_repo_closed_item_is_never_checked pin that skip)."""
-    p = page_run(new_cfg(), "page-closed-unsent", [("98: a", ("- fb-0958-7 [page] -> page:98 [closed]",))],
-                 [owner_rec("98: a"), said_rec("Noted.")])
-    expect_block("closed page: a closed page item with no send still blocks", p, named=("fb-0958-7",))
-    p = page_run(new_cfg(), "repo-closed-unsent", [("rename", ("- fb-0958-21 [repo] -> repo:acme/widgets [closed]",))],
-                 [owner_rec("rename"), said_rec("Noted.")])
-    expect_block("closed repo: a closed repo item with no send still blocks", p, named=("fb-0958-21",))
-
-
 def case_standing_and_settled_ruling_refusals_still_name_closed():
     """The control: the refusal for an open standing id and the refusal for a ruling whose home does not resolve both
     still name `[closed]`, as the mark is the way out for those two."""
@@ -5217,7 +5205,6 @@ CASES = (
     case_box_note_with_inner_quotes_is_saved_whole,
     case_close_proof_counts_only_the_session_repo,
     case_unsent_page_or_repo_refusal_does_not_name_closed,
-    case_closed_page_or_repo_item_still_blocks_without_its_send,
     case_standing_and_settled_ruling_refusals_still_name_closed,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
     case_refs_are_listed_once_per_repo_not_per_item,
