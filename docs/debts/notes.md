@@ -2271,3 +2271,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- pin-tree-fetch-no-timeout: `pin_tree` in bin/ci-job runs `git fetch origin <sha>` with no timeout, so a stalled fetch ends at merge's `LINT_SECONDS` as "ci-job did not finish", which is not liftable. Lane lint is newly exposed; the ready check already had it. Unmeasured. Decision: ci-unknown-is-red.
