@@ -58,7 +58,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** The batch rules below stay live until the cutover (decision `all-repos-switch-together`).
 
-   After the cutover (target, not live): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run runs the full suites and the Windows shards (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). PICK PENDING OWNER: the owner's words ("until the revert merges") and the build wording ("until the revert's run on main is green") differ, so the pick is pending the owner.
+   After the cutover (target, not live): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run runs the full suites and the Windows shards (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges, with the revert's own run still going (owner pick 745 b, 2026-11-13 13:20 CST). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; the blame step is not built). Both are target, not live: the built brake still waits for the revert's run on main to be green.
 
    Until the cutover, batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
@@ -129,6 +129,38 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
+   **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
+   report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` (the full 40-hex head) on the handed-in
+   lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
+   conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict. Route a PR only when the
+   conflict is the line's only reason. A line that also says the log was edited needs the full review. A line that also says the log is not done follows the ledger's `lane round n`.
+   The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
+   needed. The owner's ruling holds the route after a PASS fix verifier (record `pr-review-record`, The review
+   a changed head owes). On a log with no Fix check line, the ledger and `--fix-check` take one fix verifier
+   too, but the record's line on an older head asks for a full review. That clash is open with the
+   coordinator. Each named lane does these acts in its own checkout:
+   1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
+      Resolve the conflicted paths only. Never rebase, never force-push, never edit a path git merged
+      without conflict. Push the merge. A review log can only name a head that is live.
+   2. Spawn a fresh fix verifier on Sonnet. Its brief opens `Fix check`, and gives the reviewed head (the
+      Head of the PR's newest review log), the conflicted paths as the named finding, and that log's
+      `Guard or check:` value. The brief names the read: for each conflicted path, `git diff <merge head>^1
+      <merge head> -- <path>` and the same with `^2`. `git show --cc` prints nothing for a conflict that
+      took one side whole, and `git diff origin/main...<merge head>` holds the lane's whole diff.
+   3. Print the log with `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the
+      earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
+      then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
+      printed text as a PR comment. The tool refuses a chain it cannot prove (record
+      `pr-review-record`, the fix verifier order).
+   4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
+   A PASS ends review only where the log allows it. A change with `Guard or check: yes` still owes
+   round 3 and its net-value test. A PR that merges clean needs no fix verifier and no new log: the log
+   stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
+   lint verdict names an exact head. A refused chain means that the lane gets the full review of its
+   new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and, after a
+   PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
+   no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
+   new lane at round 1.
    Until the cutover, batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route

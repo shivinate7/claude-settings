@@ -48,9 +48,9 @@ that triage or the batch runner writes for its successor.
    It writes `CLAUDE.md`, `roadmap/README.md`, `roadmap/outbox/README.md` and the empty folders `roadmap/data/steps`,
    `roadmap/data/topics`, `roadmap/data/meta`, `briefs` and `handoffs`. It prints each path it
    writes. It refuses, and writes nothing, when one of those files exists.
-4. **Fill the tiers.** Copy `templates/operating-model.md` and `templates/roster.md` into the
-   project's instructions on claude.ai. Fill each `<placeholder>`. The roster's home is the project
-   instructions, so keep no second copy in the repo.
+4. **Fill the tiers.** Copy `templates/operating-model.md` into the project's instructions on
+   claude.ai. Fill each `<placeholder>`. The roster (`templates/roster.md`) lives on the record branch,
+   written by triage (ruling R22).
 5. **Triage pushes the record branch.** The guard lets only the triage session push it (rule
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3
