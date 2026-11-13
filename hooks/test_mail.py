@@ -1078,7 +1078,7 @@ class SshBatchDefault(MailCase):
 
 
 class MacNotHeld(MailCase):
-    """The Mac round trip passed (roadmap e86503c2a, 20:30 CST Nov 12): no platform is held by default."""
+    """No platform is held by default (step mail-mac-unhold)."""
 
     def test_no_platform_is_held(self):
         self.assertEqual(MAIL_MODULE.HELD_PLATFORMS, (), "a platform is held by default: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
@@ -1097,7 +1097,7 @@ class MacNotHeld(MailCase):
 class MacHold(MailCase):
     """Step mail-mac-unhold: the hold mechanism for a platform in HELD_PLATFORMS. The cases below patch the tuple to
     ("darwin",) and prove the turn-start line and the `mail` command are both held there, and that MAILBOX_HOLD_OFF=1 lifts
-    the hold. The default tuple is empty since the owner's Mac round trip passed; `MacNotHeld` pins that."""
+    the hold. The default tuple is empty; `MacNotHeld` pins that."""
 
     def setUp(self):
         super().setUp()

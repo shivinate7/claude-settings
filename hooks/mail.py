@@ -28,7 +28,7 @@ LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 # Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. MAILBOX_HOLD_OFF=1
-# lifts it for one command. Empty since the owner's Mac round trip passed (step mail-mac-unhold, 20:30 CST Nov 12).
+# lifts it for one command. Empty: no platform is held.
 HELD_PLATFORMS = ()
 HOLD_OFF = "MAILBOX_HOLD_OFF"
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
