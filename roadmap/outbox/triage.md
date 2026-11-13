@@ -1094,3 +1094,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - red-run-pre-push 23:14 CST Nov 12: Coordinator 22:54 CST Nov 12: second lane tonight (page-sort-newest-first, #3075) swapped branches to avoid a force push for a missing Red-run trailer; same as #3062.
 - guard-false-alarm-cull 23:14 CST Nov 12: Coordinator 22:30 CST Nov 12, banchi note: banchi #1091 merged 14f2d72eb; its one red job, design-check (11) at tests/request-budget.spec.ts:414 (GET /pipeline/match/sweep), went green on one re-run of run 43362555957 with no app change. One flake, cause unmeasured; a banchi debt if it repeats.
 - pick-ack-past-ruling 23:14 CST Nov 12: Retrospective 22:36 CST Nov 12, note: the check reads only rulings, not facts the owner told a session (the D3/D25 re-ask tonight).
+- rounds-rules-one-record 23:24 CST Nov 12: Triage 23:24 CST Nov 12: the noise-share measurement for the Haiku round-1 deferred note is step haiku-round1-noise-share.
