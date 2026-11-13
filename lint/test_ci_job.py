@@ -7,6 +7,8 @@ None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each st
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
+  PinnedHarness also covers CLAUDE_SETTINGS_DIR under the flag: a step sees its own pin's tree, or the job's one pin's.
+SettingsDirEnv: a step's CLAUDE_SETTINGS_DIR is the caller's value when there is no pin, else this checkout; its own env: wins.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
@@ -49,6 +51,7 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
+ENV.pop("CLAUDE_SETTINGS_DIR", None)  # a case sets the caller's checkout itself; an inherited one would reach every case
 
 
 def workflow(*steps, job="lane", other=None):
@@ -539,6 +542,37 @@ class PinNoteEnv(Job):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
         self.assertEqual(verdicts, ["PASS"], out)
         self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
+
+
+class SettingsDirEnv(Job):
+    """Each step sees CLAUDE_SETTINGS_DIR, the claude-settings checkout its run uses. With no pin, that is the caller's value
+    when the caller set one, else this checkout: the clone that holds the bin/ci-job which runs the step. The step's own env:
+    wins over both. Under --pinned a pin's tree wins: PinnedHarness. The step writes the value it sees to seen.txt; `<unset>`
+    is no path."""
+
+    SEEN = "printf '%s' \"${CLAUDE_SETTINGS_DIR-<unset>}\" > seen.txt"
+
+    def test_with_no_caller_value_the_step_sees_the_checkout_that_holds_ci_job(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN))
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertFalse(seen.startswith("(no seen.txt"), out)  # scope: the step ran
+        self.assertTrue(os.path.isfile(os.path.join(seen, "bin", "ci-job")),
+                        "the step did not see a claude-settings checkout: CLAUDE_SETTINGS_DIR was %r\n%s" % (seen, out))
+        self.assertEqual(os.path.realpath(seen), os.path.realpath(CHECKOUT), out)
+
+    def test_a_caller_value_with_no_pin_still_wins(self):  # the control
+        caller = os.path.join(self.root, "caller-checkout")
+        os.makedirs(caller)
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((verdicts, seen), (["PASS"], caller), out)
+
+    def test_a_step_env_that_sets_it_wins_over_the_caller_and_the_checkout(self):  # the control
+        own, caller = os.path.join(self.root, "step-checkout"), os.path.join(self.root, "caller-checkout")
+        os.makedirs(own)
+        os.makedirs(caller)
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env={"CLAUDE_SETTINGS_DIR": own}),
+                                              env={"CLAUDE_SETTINGS_DIR": caller})
+        self.assertEqual((verdicts, seen), (["PASS"], own), out)
 
 
 def mapped(parent, body):
@@ -2111,6 +2145,17 @@ sys.exit(0 if rule == "lenient" else 1)
 UNFETCHABLE = "3c5a9e0b7d1f4824a6e9c0d5b7f1a2e4c8d6b9f0"  # 40 hex, in no clone of the fixture
 ZIZMOR_LENIENT = "echo 'fixture zizmor: lenient'\nexit 0\n"  # stands in for actions/zizmor/run.sh, which runs pipx
 ZIZMOR_STRICT = "echo 'fixture zizmor: strict'\nexit 1\n"
+ENV_HARNESS = '''import os, sys
+# Stands in for code_check.py at a pin: it prints the rule that CLAUDE_SETTINGS_DIR names, and passes on lenient.
+settings = os.environ.get("CLAUDE_SETTINGS_DIR", "<unset>")
+try:
+    with open(os.path.join(settings, "lint", "rule.txt"), encoding="utf-8") as f:
+        rule = f.read().strip()
+except OSError:
+    rule = "<no rule>"
+print("fixture env rule: " + rule)
+sys.exit(0 if rule == "lenient" else 1)
+'''
 
 
 def git_in(repo, *args):
@@ -2130,7 +2175,8 @@ class PinnedHarness(Job):
     strict rule) and commit N (B with no harness). The copied ci-job's local copy holds the strict rule, as a checkout at HEAD
     does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too. The zizmor
     run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still exports where
-    os.symlink is refused."""
+    os.symlink is refused. Under the flag a step's CLAUDE_SETTINGS_DIR is its own pin's tree, else the job's one pin's, and
+    only then the caller's value is replaced: a step with no pin keeps the caller's value."""
 
     git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
     lane = LintTools.lane
@@ -2423,6 +2469,70 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
         exports = self.stub_calls(calls, "archive")
         self.assertEqual(len(exports), 1, "two steps at one sha made %d exports, not one\n%s" % (len(exports), text))
+
+    READ_RULE = 'cat "$CLAUDE_SETTINGS_DIR/lint/rule.txt" > seen.txt 2>&1 || true'  # the step writes the rule its settings dir names
+
+    def checkout_naming(self, rule, name):
+        """A claude-settings-like folder beside the lane, whose lint/rule.txt names `rule`: -> its path."""
+        path = os.path.join(self.root, name)
+        write_lf(os.path.join(path, "lint", "rule.txt"), rule + "\n")
+        return path
+
+    def env_harness_at(self, base, rule):
+        """A commit on `base` whose code-check harness prints and passes on the rule CLAUDE_SETTINGS_DIR names. Its own
+        lint/rule.txt is `rule`, so the pin's tree names it. -> the commit's sha."""
+        git_in(self.source, "checkout", "-q", "--detach", base)
+        write_lf(os.path.join(self.source, "actions", "code-check", "code_check.py"), ENV_HARNESS)
+        write_lf(os.path.join(self.source, "lint", "rule.txt"), rule + "\n")
+        git_in(self.source, "add", "-A")
+        git_in(self.source, "commit", "-qm", "env harness reading %s" % rule)
+        return git_in(self.source, "rev-parse", "HEAD")
+
+    def rule_read(self, steps, *args, env=None):
+        """One run of `steps` with `args`: the rule the step read into seen.txt, or a note when it wrote none.
+        -> (rc, verdict lines, the rule or the note, the output)."""
+        seen = os.path.join(self.root, "seen.txt")
+        if os.path.exists(seen):
+            os.remove(seen)
+        rc, lines, text = self.run_step(steps, *args, env=env)
+        if not os.path.exists(seen):
+            return rc, self.verdicts(lines), "(no seen.txt: the step did not run)", text
+        with open(seen, encoding="utf-8") as f:
+            return rc, self.verdicts(lines), f.read().strip(), text
+
+    def test_a_plain_step_in_a_job_with_one_pin_reads_the_pins_tree_under_the_flag(self):
+        steps = self.code_step(self.pin_a) + step("Read rule", self.READ_RULE)
+        rc, verdicts, rule, text = self.rule_read(steps, "--step", "Read rule", "--pinned",
+                                                  env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
+        self.assertEqual((rc, verdicts), (0, ["PASS"]), text)
+        self.assertNotIn("(no seen.txt", rule, text)  # scope: the step ran
+        self.assertEqual(rule, "lenient", "under --pinned a step with no pin of its own read the caller's checkout, "
+                         "not the one pin's tree the job holds\n" + text)
+
+    def test_two_pinned_steps_each_see_their_own_pins_tree_not_the_callers(self):
+        lenient = self.env_harness_at(self.pin_a, "lenient")
+        strict = self.env_harness_at(git_in(self.source, "rev-parse", "main"), "strict")
+        steps = step("Lenient pin", uses="shivinate7/claude-settings/actions/code-check@%s" % lenient) + \
+            step("Strict pin", uses="shivinate7/claude-settings/actions/code-check@%s" % strict)
+        rc, lines, text = self.run_step(steps, "--step", "Lenient pin", "--step", "Strict pin", "--base", "origin/main",
+                                        "--pinned", env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
+        self.assertIn("fixture env rule: lenient", text, "the step pinned at the lenient commit did not read its own "
+                      "pin's tree in CLAUDE_SETTINGS_DIR, so it read the caller's\n" + text)
+        self.assertIn("fixture env rule: strict", text, "the step pinned at the strict commit did not read its own "
+                      "pin's tree in CLAUDE_SETTINGS_DIR, so it read the caller's\n" + text)
+        self.assertEqual(self.verdicts(lines), ["PASS", "FAIL"], "each pin's harness did not give its own rule's verdict\n" + text)
+
+    def test_a_step_env_that_sets_it_wins_over_the_job_pin_under_the_flag(self):  # the control
+        steps = self.code_step(self.pin_a) + step("Read rule", self.READ_RULE,
+                                                  env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("own", "step-checkout")})
+        rc, verdicts, rule, text = self.rule_read(steps, "--step", "Read rule", "--pinned",
+                                                  env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
+        self.assertEqual((rc, verdicts, rule), (0, ["PASS"], "own"), text)
+
+    def test_under_the_flag_with_no_pin_the_caller_value_still_wins(self):  # the control
+        rc, verdicts, rule, text = self.rule_read(step("Read rule", self.READ_RULE), "--step", "Read rule", "--pinned",
+                                                  env={"CLAUDE_SETTINGS_DIR": self.checkout_naming("decoy", "caller-checkout")})
+        self.assertEqual((rc, verdicts, rule), (0, ["PASS"], "decoy"), text)
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
