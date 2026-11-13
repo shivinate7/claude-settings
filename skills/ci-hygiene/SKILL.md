@@ -201,8 +201,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
     on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
-    the runner). The nightly skips when main's head has a green push run and the newest completed
-    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
+    the runner). CI has no nightly (decision `test-strategy-reset`).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
@@ -221,7 +220,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `actions/push-skip`. It says skip only when the push tree equals the head tree of a merged PR
     (a `batch-*` PR or a lone lane) whose run was full: every suite job passed and scope skipped no step.
     A direct push, an admin merge, a tree mismatch and any read error run everything. A schedule or
-    dispatch run never skips. The nightly is the check on what a PR run scoped out. Decision
+    dispatch run never skips. A narrowed PR run's push runs in full, since no nightly runs what it scoped out. Decision
     `push-skip-on-proven-tree` (a push skips on a proven tree). See `snippets.md`, section 20.
 
 ## Public repos

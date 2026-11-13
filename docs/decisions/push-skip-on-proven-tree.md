@@ -7,7 +7,7 @@ Owner, item 729 a (relayed by the coordinator, 2026-11-13 12:29 CST): the `push-
 - The decision's one home is the shared action `actions/push-skip` (`push-skip.py` beside its `action.yml`). `checks.yml` calls it, and child repos pin it by SHA. The suite jobs are read from the calling repo's own workflow (the jobs its `all-jobs-passed` needs, minus the bookkeeping jobs), through `lint/all_jobs_passed_rules.py` from the action's own checkout. A pin carries its readers.
 - Skip: the tree of a `batch-*` head whose ready run passed every suite job. Or the tree of a merged lone-lane head whose newest `checks.yml` run is a completed, green pull request run. In that run, every suite job and `all-jobs-passed` succeeded and no suite step was skipped. The `mutation-report` job is exempt from the step rule: its steps skip by head ref (`batch-*` only), and on a push it reports nothing.
 - Run everything: a direct push, an admin merge with no green run, a tree mismatch, and a red, draft, cancelled, in-progress, other-head or other-workflow run. Any read error or unknown state runs everything and says "unknown". A `schedule` or `workflow_dispatch` run never skips (the action reads `EVENT`).
-- The nightly is the signal for anything a PR run scoped out. A lone-lane PR run narrows its suites by diff, so a push skips on it only when it narrowed nothing. A narrowed run is partial, and its push runs in full.
+- CI has no nightly (`test-strategy-reset`), so nothing else runs what a PR run scoped out. A lone-lane PR run narrows its suites by diff, so a push skips on it only when it narrowed nothing. A narrowed run is partial, and its push runs in full.
 - Ruling 176 b (owner, 2026-11-12 21:45 CST) kept the push suites until this repo changes the red-main check. This record is that change.
 
 How the red-main check still sees a test-red main (`no-merge-onto-red-main`):
@@ -19,7 +19,7 @@ How the red-main check still sees a test-red main (`no-merge-onto-red-main`):
 Why: every merge to main re-ran suites that a full PR run had passed on the same tree, which cost Windows and macOS minutes and delayed the next merge. A tree equal to a tested-green tree has no new behaviour to test.
 
 - Risk: accepted. A suite step that the PR run skipped for a reason other than scope, such as a step with `if: failure()`, reads as narrowing, so its push runs in full. That is safe and may skip less than it could (unmeasured on a real run).
-- Risk: known gap, not closed here. `nightly-skip.py` counts any completed green push run of main's head, and a skipped push run is one. So the nightly may skip too, and then nothing runs what a PR run leaves out. A fix counts only a push run whose suites ran. Not built.
+- Risk: none from the nightly. CI has no nightly (`test-strategy-reset`), so a skipped push run cannot make a nightly skip.
 - Risk: a PR run re-run after a push cannot change that push's decision. The push reads the newest run at push time.
 
 Check: `lint/test_push_skip.py` (the decision, the event refusal, the caller workflow read, the wiring), `merge/test_merge.py` class `RedMainBrake`, `actions/ci-alarm/test_clear_rule.py`.
