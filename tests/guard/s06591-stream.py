@@ -71,7 +71,7 @@ sh("waiter-quote: a python heredoc body leaving a quote open at its end, then a 
    "python3 - <<'EOF'\nprint('C:\\Users\\')\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
 sh("waiter-quote: a node heredoc body leaving a single-quoted string open at its end, then a loop after EOF, is refused",
    "node - <<'EOF'\nconst s = 'C:\\';\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
-# Pin, no red found: refused on fccff95e6 and b62c51f67 as well, so it guards the template reading and is not a red.
+# Pin, no red found: this open template literal was already refused before the fix, so the case guards the template reading and is not a red.
 sh("waiter-quote: pin, no red found: a node heredoc body with an open template literal, then a loop after EOF, is refused",
    "node - <<'EOF'\nconst s = `open\nEOF\nwhile true; do sleep 3; done", "deny", "waiter", cwd=NOGIT)
 sh("waiter-quote: a node // opener inside a single-quoted string holding a loop is allowed",
