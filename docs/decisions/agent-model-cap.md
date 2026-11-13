@@ -247,9 +247,11 @@ pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
 Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
 lane in the field `lane`. `take()` in `hooks/override.py` reads it only on an Opus spawn refusal that no Opus
-override lifted. It reads the local ref `origin/roadmap` in the call's cwd and never fetches. Cost: one
-`git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
-it fetches `origin/roadmap`; until then the refusal stays. Kind of risk: likely. Landed 2026-10-29. Incident:
+override lifted. It reads the ref `origin/roadmap` in the call's cwd, and first fetches it through `lint/roadmap_ref.py`
+when the roadmap's last fetch is older than 60 seconds, bounded at 2 seconds. Cost: one `git grep` for the lane id,
+and one `git show` for each hit, plus, when the ref is stale, at most one `git fetch`. Freshness: a grant on origin lifts the
+refusal at the next spawn; a fetch that fails reads the ref as it is, and a `noted` entry "step grant read as of
+<time>" goes to guard.log. Kind of risk: likely. Landed 2026-10-29. Incident:
 the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
 
 **Measured.** (measured 2026-10-30, 5 lanes) Tokens per agent run, in thousands (k), from the lane reports. The models are the models the lane reports name. They are not checked against the table above. The lane reports name sonnet for each agent unless the line names a model.

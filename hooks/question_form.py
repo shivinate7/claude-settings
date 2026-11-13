@@ -1920,9 +1920,26 @@ def _tree_names(body, hash_size):
 def _read_steps(root):
     """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
     through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
-    "unreadable: <why>" (git failed, odd answer, bad JSON). Never fetches."""
+    "unreadable: <why>" (git failed, odd answer, bad JSON). Before the read, `origin/roadmap` is fetched when its last
+    roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT (lint/roadmap_ref.py, once). When the
+    fetch failed, or the check could not run, an "ok" state reads "ok, read as of <time>" (or "ok, read as of
+    unknown: <why>")."""
     if _git_root_of(root) is None:
         return {}, "absent"
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import roadmap_ref
+        note = roadmap_ref.fresh_ref(root)
+    except Exception as exc:  # a read is never silent about how fresh it is
+        note = "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+    steps, state = _read_steps_of(root)
+    return (steps, state + ", " + note) if note and state == "ok" else (steps, state)
+
+
+def _read_steps_of(root):
+    """_read_steps without the fetch: the one `git cat-file --batch` read."""
     import subprocess
     import _nowindow  # the one home of a no-window child start
     try:
@@ -2066,8 +2083,10 @@ def past_rulings(question_text, repo_root):
         if not found:
             unknown.append("%s (absent)" % label)
     steps, state = _read_steps(repo_root)
-    if state == "ok":
+    if state.startswith("ok"):
         candidates += _step_rulings(steps, _words(question_text))
+        if state != "ok":
+            unknown.append("roadmap step notes (%s)" % state[len("ok, "):])
     elif state == "absent":
         unknown.append("roadmap step notes (absent)")
     else:

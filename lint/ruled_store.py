@@ -153,8 +153,10 @@ def _load(repo_dir, ref):
 
 
 def _fresh_note(repo_dir, ref):
-    """The note "read as of HH:MM TZ" when `ref` is the store ref and could not be fetched fresh, else "". Never raises.
-    Imported at call time: lint/roadmap_ref.py is the one home of the roadmap fetch, and a case may swap it."""
+    """The note "read as of HH:MM TZ" when `ref` is the store ref and could not be fetched fresh, else "". When the
+    freshness check itself cannot run (it raises, or its module cannot be imported) the note is "read as of unknown:
+    <why>": a read is never silent about how fresh it is. Imported at call time: lint/roadmap_ref.py is the one home of
+    the roadmap fetch, and a case may swap it."""
     if ref != STORE_REF:
         return ""
     try:
@@ -162,8 +164,8 @@ def _fresh_note(repo_dir, ref):
             sys.path.append(HERE)
         import roadmap_ref
         return roadmap_ref.fresh_ref(repo_dir)
-    except Exception:
-        return ""
+    except Exception as exc:
+        return "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
 
 
 def _read(repo_dir, ref):
