@@ -1,7 +1,7 @@
 {
  "id": "gh-quota-budget",
  "title": "The merge tool and the CI wait read the GitHub rate-limit header they already receive and back off when it runs low",
- "status": "doing",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzVtYq71orELDCuDRV",
@@ -10,5 +10,5 @@
  "why": "Real incident, Nov 13: the owner's GitHub REST quota hit 0 of 15,000 at 12:54 CST (reset 13:10 CST), stalling every runner and lane for about 16 minutes (retro read; unmeasured by triage).",
  "source": "retrospective 12:54 CST Nov 13",
  "note": "Todo, a real incident. Retro's cause guess (unconfirmed): its two audit workflows, about 770 agent tool calls with many gh reads, took a large share; 33 or more live sessions poll too. Proposed: the merge tool and the CI wait read the `X-RateLimit-Remaining` header they already get; when it runs low they say so and back off. Audit briefs prefer local git reads over gh. A cost line, measured, not a fixed limit (owner R37: no hard fixed numbers). Needs a measure first: which callers spent the quota (log read on demand, no new log). A guard or check change: a build lane. Placed ahead of the rest of the queue 15:00 CST Nov 13 (retro 15:00, coordinator 14:58): the shared GitHub REST quota hit 15000 of 15000 twice today (12:54 and 14:59 CST, reset about 15:10), the second time blocking runner 10's express batch A and batch 141 builds. Every session's MCP reads, comments and PR writes stop until the reset; git reads still work. Same fault as step github-rate-limit-readers (folded in here): measure calls per session before the next wave. Still unmeasured, not read by triage. Lane 15:13 CST Nov 13 (coordinator 15:12): session_013NEJKzVtYq71orELDCuDRV, started 15:12 after the quota reset. Folds github-rate-limit-readers; told to stack on or fold step gh-get-timeout-retry. The 15:00 and 15:01 start failures (\"service temporarily unavailable\") cleared with the reset; cause not confirmed.",
- "updatedAt": "2026-11-13T16:35:55-06:00"
+ "updatedAt": "2026-11-13T17:19:45-06:00"
 }
