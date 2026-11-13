@@ -10,8 +10,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane. It holds lane state
   and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
-  `source_url` (the repo), effort `medium` and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
-  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
+  `source_url` (the repo), effort (its kind's row in `agent-model-cap`: `high` for a guard or check lane, `medium` for a product or design lane, `low` for a docs lane) and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
+  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. The brief's kind marker (`Guard or check: yes` or `Docs only: yes`) may sit on any line of the block after the Grant line. `Lane brief:` stays first in that block. The guard reads that placement once the code change lands (`agent-model-cap`, the lane effort pin). It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It archives each other finished session it started at its next wake, once it has read the report (ruling R46). It sends each lane that triage flags one line: reply if you are stuck and nobody picked it up (ruling R56 point 3).

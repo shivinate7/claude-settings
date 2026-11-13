@@ -4,7 +4,7 @@
 
 Owner, 2026-11-04 07:56 CST (Cockpit item 204 a): the design reviewer runs beside review round 1,
 on the first built head, so design fixes ride the normal review rounds. Owner, 2026-10-26 (waiting-page
-item 15, answer b): a lane that touches a screen gets two design agents, both on Opus, except a
+item 15, answer b): a lane that touches a screen gets two design agents, a designer on Opus and a design reviewer on Sonnet high (owner, 2026-11-13 14:01 CST, item 756, own-756-design-reviewer-sonnet), except a
 text-only change (owner, 2026-11-03: design reviewer only).
 
 - The designer (`agents/designer.md`) runs before the builder. It draws one HTML mockup per changed
@@ -39,8 +39,9 @@ text-only change (owner, 2026-11-03: design reviewer only).
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
   step, after the blind list is complete (`design-skills`). A second design read reuses the round-1
   blind list.
-- Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
-  with no proof run first. The model table is in `agent-model-cap`.
+- Opus is a standing grant for the designer only, a class-level exception to `roles-sonnet-is-the-ceiling`,
+  with no proof run first. The design reviewer runs Sonnet high (owner, 2026-11-13 14:01 CST, item 756).
+  The model table is in `agent-model-cap`.
 - Deferred: whether the designer runs Claude Code's `/design` canvas itself, or the owner runs it.
   Until the owner rules, the designer draws HTML mockups only.
 
