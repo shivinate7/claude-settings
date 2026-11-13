@@ -1681,7 +1681,9 @@ BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trail
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
-CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
+CALL_STUB = ("import json, os, sys\n"
+             "body = json.load(open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8')).get('pull_request', {}).get('body') if os.environ.get('GITHUB_EVENT_PATH') else None\n"
+             "with open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv, 'pr_body': body}), file=f)\n")  # logs its argv and the PR body its event file holds, exits 0
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
@@ -2346,6 +2348,20 @@ class BatchLintFlags(tm.Env):
             self.assertEqual(source.get("FAIL"), gh_text(gh_eval(with_["fail"], inputs)),
                              "bin/ste-changed sets FAIL to other than the PR-path fail of checks.yml")
 
+    def test_the_silent_undo_step_reads_the_pull_requests_body_from_its_event_file(self):
+        """A pull request's lint gives the silent-undo step the PR's body in its event file: lane_lint takes the body from the host,
+        and ci-job gives the step the event file that CI gives it, with no body in the step's env. The body holds a Drops-lines line."""
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X\n"
+        self.push_batch(BATCH)
+        self.host.branch, self.host.body = BATCH, body
+        out = io.StringIO()
+        rc = self.lane_lint("7", out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        calls = self.stub_calls(script_of(dict(self.found)["Silent undo check"]))
+        self.assertEqual(len(calls), 1, "the silent-undo step's script ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(calls[0].get("pr_body"), body, "the silent-undo step read %r from its event file, want the PR's body" % (calls[0].get("pr_body"),))
+
     def test_a_missing_check_script_refuses_and_never_passes(self):
         red_run = dict(self.found)["Red-run trailer"]
         self.push_batch(BATCH_MISSING, skip={script_of(red_run)})
@@ -2700,6 +2716,30 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a run folder two days old")
         self.assertTrue(os.path.isdir(new), "the sweep removed a run folder made now")
         self.assertTrue(os.path.isdir(own))
+
+
+class BatchReadyBody(CiJobStub, unittest.TestCase):
+    """`merge --batch-build --ready` runs the repo's ready checks on the batch head through ci-job. A batch has no PR body, so the run
+    gives ci-job an empty body file: the empty body is known, and a step that reads the body sees "", not an unread body."""
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(prefix="batch-ready-body-", dir=_test_temp.run_folder())
+        self.addCleanup(shutil.rmtree, self.t, True)
+        self.init_stub()
+
+    def test_the_batch_ready_checks_give_ci_job_an_empty_body_file(self):
+        self.use_ci_job([("PASS", "Silent undo check")], 0)
+        wt = os.path.join(self.t, "wt")
+        os.makedirs(wt)
+        cfg = {"merge": {"readyChecks": ["Silent undo check"]}}
+        with unittest.mock.patch.object(merge, "fetch_branch", lambda *a, **k: "deadbeef"), \
+                unittest.mock.patch.object(merge, "add_worktree", lambda root, head: (self.t, wt)), \
+                unittest.mock.patch.object(merge, "drop_worktree", lambda *a, **k: None), contextlib.redirect_stdout(io.StringIO()):
+            merge.batch_ready_checks(self.t, cfg, 7, "batch", "batch-branch", "main")
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the batch's ready checks ran ci-job %d times, want once" % len(runs))
+        self.assertIsNotNone(runs[0].get("pr_body"), "the batch's ready checks named no body file for ci-job (CI_JOB_PR_BODY_FILE was unset)")
+        self.assertEqual(runs[0]["pr_body"], "", "the batch's ready checks gave ci-job a body of %r, want the empty body a batch has" % (runs[0]["pr_body"],))
 
 
 class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):

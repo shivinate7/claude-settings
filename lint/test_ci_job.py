@@ -574,6 +574,29 @@ class GithubBaseRef(Job):
                                               env={"CI_JOB_PR_BODY_FILE": self.body_file(b"\xff")})
         self.assertEqual((verdicts, seen), (["PASS"], NO_BODY), out)
 
+    def test_an_unreadable_body_file_gives_each_step_an_event_file_that_holds_no_pull_request(self):
+        """A body file that cannot be read gives each step an event file holding {}: no pull request, which the step's reader takes as
+        unknown (the reader's view of it is the sentinel case above)."""
+        verdicts, seen, out = self.seen_after(step("seen", 'cat "$GITHUB_EVENT_PATH" > seen.txt'), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file(b"\xff")})
+        self.assertEqual((verdicts, seen), (["PASS"], "{}"), out)
+
+    def test_a_plan_with_a_body_file_reads_a_body_expression_unknown_and_names_it(self):
+        """With CI_JOB_PR_BODY_FILE named, --plan reads a lint step that holds the body expression as unknown and names the expression.
+        The plan never reads the body: a plain lint step beside it still plans to run."""
+        path = os.path.join(self.root, "wf.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(step("Plain lint", "python3 lint/plain.py"),
+                             step("Body lint", 'python3 lint/body.py "${{ github.event.pull_request.body }}"'), job="lane"))
+        done = subprocess.run([sys.executable, CI_JOB, "lane", "--lint", "--plan", "--workflow", path, "--base", "origin/main"],
+                              cwd=self.root, capture_output=True, text=True, timeout=60,
+                              env={**ENV, "CI_JOB_PR_BODY_FILE": self.body_file("Summary.\n")})
+        lines = done.stdout.splitlines()
+        self.assertTrue(any(re.match(r"would run\s+Plain lint$", ln) for ln in lines), done.stdout + done.stderr)
+        unknown = [ln for ln in lines if ln.startswith("unknown") and "Body lint" in ln]
+        self.assertTrue(unknown and "github.event.pull_request.body" in unknown[0],
+                        "the plan did not read the body expression as unknown, naming it: %s" % (done.stdout + done.stderr))
+
 
 class PinNoteEnv(Job):
     """ci-job sets the pin note's variable on its ste-lint step only (decision action-pins-follow-sessions). A caller that

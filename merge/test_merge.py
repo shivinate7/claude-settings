@@ -22,7 +22,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
-from event_body import EVENT_BODY_DEF  # noqa: E402  the one home of the test event-body reader (testing/event_body.py)
+from event_body import EVENT_BODY_DEF, NO_BODY  # noqa: E402  the one home of the test event-body reader (testing/event_body.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
@@ -1725,6 +1725,37 @@ class CiJobRunBody(unittest.TestCase):
             "summary: ran 1 of 2 steps\n")
         self.assertEqual(state, "unknown", lines)
         self.assertFalse(liftable, "an unknown line that names the PR body was lifted: %s" % lines)
+
+    def test_exit_2_with_an_unknown_tool_line_is_lifted(self):  # control: a missing tool is the flag's to lift
+        state, lines, _log, liftable = self.exit_2("unknown         Lint: tool missing: foo\nsummary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertTrue(liftable, "a missing tool's exit 2 was not lifted: %s" % lines)
+
+    def read_body(self, body):
+        """-> (state, what the lint step wrote, ci_job_run's lines) for a run whose PR body is `body`, passed to ci_job_run directly."""
+        env = {"SEEN_OUT": self.seen, "VERDICT_LOG": os.path.join(self.folder, "verdict.log")}
+        with unittest.mock.patch.dict(os.environ, env):
+            state, lines, _log, _liftable = merge.ci_job_run(self.repo, "checks", "--lint", "--base", "origin/main", pr_body=body)
+        return state, seen_text(self.seen), lines
+
+    def assert_body_reaches_the_check(self, body):
+        state, seen, lines = self.read_body(body)
+        self.assertIsNotNone(seen, "the check step did not run: %s" % lines)
+        self.assertEqual(seen, body, "the check step read a different body")
+        self.assertEqual(state, "pass", lines)
+
+    def test_an_empty_body_reaches_the_check_as_empty(self):  # control: an empty body is known, so the step reads ""
+        self.assert_body_reaches_the_check("")
+
+    def test_a_body_of_65536_e_acute_characters_reaches_the_check(self):
+        self.assert_body_reaches_the_check("é" * 65536)
+
+    def test_a_lone_surrogate_in_the_body_reads_the_sentinel_not_a_body(self):
+        """A body that cannot be encoded as UTF-8 is unreadable: ci-job gives the step no body, so the step reads the sentinel, never the
+        body's text and never "" (which a body check would pass)."""
+        state, seen, lines = self.read_body("before \ud800 after")
+        self.assertIsNotNone(seen, "the check step did not run: %s" % lines)
+        self.assertEqual(seen, NO_BODY, "a body with a lone surrogate reached the step as %r, want the sentinel" % (seen,))
 
 
 class SmallBaseMove(ScopedRepo, Env):
@@ -7223,7 +7254,7 @@ class ReadyChecksRun(unittest.TestCase):
                 return 0, ""
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", stub):
-            merge.run_ready_checks(wt, 7, "main", checks)
+            merge.run_ready_checks(wt, 7, "main", checks, pr_body="")
         return calls
 
     def test_the_ready_checks_run_ci_job_with_pinned(self):
@@ -10230,9 +10261,9 @@ class RecordsRebuild(RecordsEnv):
             token = real_acquire(*a, **k)
             self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
             return token
-        def holds(wt, base_ref, sha, before_run=None):
+        def holds(wt, base_ref, sha, before_run=None, **kw):
             seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+            return real_holds(wt, base_ref, sha, before_run, **kw)
         lock.acquire = acquire
         with unittest.mock.patch.object(merge, "holds_base", holds):
             rc, out = self.run_merge("7", "--confirm", lock=lock)
