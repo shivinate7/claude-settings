@@ -20,24 +20,43 @@
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
   (debt `silent-undo-rebase-no-merge`).
 
-The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
-commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
-reason. No switch turns the check off.
+The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. The check reads it from the
+commit trailers of the branch, and from the last paragraph of the PR body through the reader the merge tool
+uses (one home). Every reader takes the body (ruling `drops-lines-body-411a`).
+
+- The merge tool passes the body.
+- The lane lint passes it to `bin/ci-job` through a UTF-8 body file. `bin/ci-job` writes one event file per
+  step from that file.
+- In CI the check reads the body from the event file that `GITHUB_EVENT_PATH` names. An env string past
+  128 KB does not run on Linux.
+- `--pr-body` covers a local run.
+- No event path is an empty body. An event file that cannot be read is UNKNOWN, never an empty body. The merge
+  tool's exit-2 lift never covers an unknown that names the body.
+
+A bare path excuses nothing, and no reason excuses nothing. Each use
+prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every reason. No switch turns
+the check off. Cost: one string read of the body per check run. No process starts. `bin/ci-job` writes one
+event file per step, and the merge tool one body file per ci-job run, each removed after.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
 another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
-no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
+no run reader, so a `Retire-run` line excuses nothing there. With no
 run reader, or a read that fails, the finding stays. Cost: it runs only in the merge tool, when the scan has a
 finding and the body holds a cite. For each flagged cited debt, it runs the debt-close judgment: git reads,
 each Retire test in a temporary worktree, and at most one run read. A test proves that
 an unflagged close gets no run read. It starts no long-lived process.
 
-- **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
-  Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
+- **Body rule.** Drop fenced blocks and `<!-- -->` comments; a `<!--` inside a backtick code span or a one-line
+  double-quoted string is text. Skip closing paragraphs that hold only the Claude Code attribution line, or a
+  bare `https://claude.ai/code/session_<id>` line right after it. A blank or emptied paragraph that is last is
+  skipped; one between a `---` rule and the Generated-by footer line parts them, so that footer is not skipped.
+  Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
-  line. A session in another repo that uses `bin/merge` asked for this.
+  line. A session in another repo that uses `bin/merge` asked for this. The CLI and CI read the body too,
+  which widens a shared tool (owner ruling, Cockpit item 411 a, 2026-11-08 06:11 CST). A body edit does not
+  rerun CI (`checks.yml` `pull_request.types` has no `edited`), so a body excuse added after a red run takes
+  effect at the next push.
 - **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
   line and exits 1. An unreadable history is a plain refusal with no BLOCKED line.
 
