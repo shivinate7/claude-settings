@@ -433,6 +433,9 @@ TRANSITIVE_MD_READERS = ["skills/impeccable/SKILL.md", "test_guard.py", "drive_t
 TRANSITIVE_ALLOWED = {
     "lint/test_ci_scope.py": (["test_guard.py"], "a changed path the scope detector is given; no file is run"),
     "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
+    "hooks/mutate_guard.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
+    "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
+    "lint/check_unknown_reads_contract.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
 }
 # A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read.
 INVOKE = re.compile(r"\b(python3?|node|bash|sh|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b")
