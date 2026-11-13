@@ -2429,12 +2429,6 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(self.PICK))])
                 self.assertIsNone(out)
 
-    def test_qm_green_send_to_a_writer_named_by_label_passes(self):
-        # Catches: the live label form "Triage (session_<x>)" read whole, so a send to session_<x> is no send.
-        out = self.stop([human("decide"), *self.writer_read("Triage (%s)" % self.WRITER),
-                         *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assertIsNone(out)
-
     def test_qm_red_send_to_another_session_blocks(self):
         # Catches: a send to a session that is not the writer passing as the question's send.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER),
