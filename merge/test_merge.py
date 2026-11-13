@@ -9416,19 +9416,19 @@ class RecordsRebuildReal(RecordsEnv):
         finally:
             sh(self.co, "git", "worktree", "remove", "--force", wt)
 
-    def test_a_conflict_only_on_the_page_is_rebuilt_on_the_merged_tree(self):
-        # Only the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
-        # records_stale() must not read any conflict as "cannot be proved fresh" and revert the claim.
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the head's page commit is pushed, then the heal merges the base
+    def test_a_conflict_only_on_the_page_is_refused_for_a_rebuild_before_any_push(self):
+        # Only the generated page conflicts (add/add on both sides). The merged tree needs a page rebuild, which is a heal: it would push a
+        # commit no check has read. The ready pull request is refused with the rebuild remedy, and the feat head stays where it was.
+        # A conflict on the page reads as stale, never as unknown, so the refusal is the page's, not the conflict's.
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the head already holds its claim
+        before = self.head()
         self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
                                      "a debt and a hand-written page on main"))
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
-        page = self.show("main", "docs/records.md")
-        self.assertIn("gap-one", page)
-        self.assertIn("main-gap", page)
-        self.assertEqual(page, self.generated("origin/main"))
+        self.assertFalse(getattr(self.host, "merged", False), "the heal merged a page commit no check read:\n" + out)
+        self.assertEqual(self.head(), before, "the heal pushed a page commit before it refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"rebuild[\s\S]*\bpush\b[\s\S]*\breview\b", "the refusal does not say to rebuild the page and push before review:\n" + out)
 
     def test_a_conflict_on_another_file_still_refuses_and_reverts(self):
         # A conflict outside the generated page must still stop the merge. This blocks a blanket
@@ -9585,21 +9585,27 @@ class RecordsHeal(RecordsEnv):
                   unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
             p.start(); self.addCleanup(p.stop)
 
-    def heal_setup(self):
-        """The head adds a debt and holds its claim, so a stale page on it is pushed as a page commit (the resumed path); a debt and a
-        hand-written page land on main during the head's wait. The head's rebuild commits one page, and the heal merges both."""
+    def heal_setup(self, page=True):
+        """The head holds its claim and adds a debt. During the head's wait, main adds a debt, and with page also a hand-written page that
+        conflicts with the head's generated one. The merged tree then needs a page rebuild, which is a heal."""
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})
-        self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
-                                     "a debt and a hand-written page on main"))
+        files = {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap")}
+        if page:
+            files["docs/records.md"] = "records\n- main-gap\n"
+        self.in_wait(lambda: self.on("main", files, "a debt and a hand-written page on main" if page else "a debt on main"))
 
-    def test_the_heal_commit_names_only_the_page_in_drops_lines(self):
-        self.heal_setup()
+    def test_a_heal_with_no_page_conflict_is_refused_before_any_check_is_read(self):
+        """Main adds a debt and no page edit, so the head's page is stale with no conflict. The merged tree still needs the rebuild, and the
+        rebuild would be a commit no check has read. The per-lane run refuses it at once: no check wait, nothing pushed, nothing merged, and
+        a line that tells the lane to rebuild the page and push before review (decision: two-step confirm)."""
+        self.heal_setup(page=False)
+        before = self.head()
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.rev("origin/main")  # fetches
-        body = sh(self.co, "git", "log", "-1", "--format=%B", "origin/main^2")  # the heal commit: the merge's second parent
-        drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
-        self.assertEqual(drops, [["docs/records.md"]], body)
+        self.assertFalse(getattr(self.host, "merged", False), "the heal merged a page commit no check read:\n" + out)
+        self.assertEqual(self.host.waits, [], "the heal waited on a check:\n" + out)
+        self.assertEqual(self.head(), before, "the heal pushed a page commit before it refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"rebuild[\s\S]*\bpush\b[\s\S]*\breview\b", "the refusal does not say to rebuild the page and push before review:\n" + out)
 
 class ReadyPageState(RecordsEnv):
     """ready_page_state(root, n, host): the state of the records page on a pull request's head, read before the pull request
