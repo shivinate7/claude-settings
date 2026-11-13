@@ -2786,20 +2786,21 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str, top: str = "") -> str:
-    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+def text_at(root: str, rev, rel: str, top: str = "", missing="") -> str:
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and `missing`
     when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
-    so the working tree is read from `top`; `top` defaults to `root`."""
+    so the working tree is read from `top`; `top` defaults to `root`. A caller that must tell a missing file
+    from an empty one passes `missing=None`."""
     if rev is None:
         try:
             with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
-            return ""
+            return missing
     if not rev:
-        return ""
+        return missing
     answer = guard_core._git(root, "show", rev + ":" + norm(rel))
-    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+    return answer.stdout if answer is not None and answer.returncode == 0 else missing
 
 
 # ---- a builder's resolution of a merge conflict in a test file (decision builders-cannot-edit-tests).
@@ -2896,11 +2897,28 @@ def _case_shape(node) -> str:
     return ast.dump(bare)
 
 
+def _key_versions(parts):
+    """Each statement key of `parts` with the dumps it holds, in file order, so a key held twice (an assign and
+    an augmented assign of one name) compares as one version."""
+    versions = {}
+    for key, dump in parts["keys"]:
+        versions[key] = versions.get(key, ()) + (dump,)
+    return versions
+
+
 def _key_counts(parts):
-    counts = {}
-    for key, _ in parts["keys"]:
-        counts[key] = counts.get(key, 0) + 1
-    return counts
+    return {key: len(dumps) for key, dumps in _key_versions(parts).items()}
+
+
+def _edit_dropped(first, second, base, result) -> bool:
+    """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
+    its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
+    result must keep that version, since the base version drops that parent's edit."""
+    for key in set(first) & set(second):
+        mine, theirs, origin = first[key], second[key], base.get(key)
+        if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
+            return True
+    return False
 
 
 def merge_test_issue(result, first, second, elsewhere, base=None):
@@ -2931,14 +2949,12 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         if held and all(dump != h[0] for h in held):
             issues.add("skip" if _skip_marks(node) > max(_skip_marks(h[1]) for h in held) else "body")
     if base is not None:
-        # A case both parents hold with different bodies. Both changed it from the base: the result keeps one body
-        # at most. One changed it: the result must keep that body, since the base body drops that parent's edit.
-        for key in set(first["cases"]) & set(second["cases"]):
-            mine, theirs = first["cases"][key][0], second["cases"][key][0]
-            origin = base["cases"].get(key, (None,))[0]
-            if mine != theirs and (origin not in (mine, theirs) or (
-                    key in result["cases"] and result["cases"][key][0] == origin)):
-                issues.add("lost")
+        # The same reading for a case body and for any other statement a parent edited (a table, a helper, a class
+        # header): a result that keeps the other parent's version drops the edit, though every key survives.
+        read = (first, second, base, result)
+        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) or _edit_dropped(
+                *(_key_versions(p) for p in read)):
+            issues.add("lost")
     # A statement a parent holds (not an import, not a comment) that the result no longer holds.
     have = _key_counts(result)
     for part in parents:
@@ -2972,15 +2988,18 @@ def merge_parent_revs(root: str, new):
 
 
 def merge_base_parts(root: str, parents, rel: str, top: str):
-    """`test_file_parts` of `rel` at the merge base of the two parents; an empty reading when they share no
-    ancestor or the file is new in both; None when git or the parse could not say."""
+    """`test_file_parts` of `rel` at the merge base of the two parents, with `held` True when the base holds the
+    file; an empty reading with `held` False when they share no ancestor or the base lacks the file; None when
+    git or the parse could not say."""
     answer = guard_core._git(root, "merge-base", parents[0], parents[1])
     if answer is None or answer.returncode not in (0, 1):
         return None
     found = answer.stdout.split()
-    if not found:
-        return {"cases": {}, "others": [], "keys": [], "calls": []}
-    return test_file_parts(text_at(root, found[0], rel, top))
+    text = text_at(root, found[0], rel, top, missing=None) if found else None
+    parts = test_file_parts(text or "")
+    if parts is not None:
+        parts["held"] = text is not None
+    return parts
 
 
 def builder_merge_test_path(rel: str, names, conflicts) -> bool:
@@ -3011,11 +3030,16 @@ def builder_merge_test_why(root: str, top: str, rel: str, paths, new=None) -> st
         return "" if any(same_text(result, text_at(root, p, rel, top)) for p in parents) else "config"
     if not rel.lower().endswith(".py"):
         return "unread"
-    read = [test_file_parts(text) for text in (result,) + tuple(text_at(root, p, rel, top) for p in parents)]
+    texts = [text_at(root, p, rel, top, missing=None) for p in parents]
+    read = [test_file_parts(text or "") for text in [result] + texts]
     if None in read:
         return "unread"
     base = merge_base_parts(root, parents, rel, top)
     if base is None:
+        return "unread"
+    if None in texts and not base["held"]:
+        # A rename that conflicts: the path is new since the base, and the parent that lacks it holds the file at
+        # another path, so its cases cannot be matched here. A delete against a modify keeps the base's file.
         return "unread"
 
     def elsewhere(key):
