@@ -2426,17 +2426,22 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check with a symlink in its tree did not PASS\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run with a symlink in its tree\n" + text)
 
-    def publish_stable(self):
-        """The stable branch of the claude-settings origin, at the fixture's HEAD: the head a moving pin resolves to. The
-        clone's origin is this bare repo. -> the stable head's sha."""
+    def publish_stable(self, at="HEAD"):
+        """The stable branch of the claude-settings origin, at `at` (the fixture's HEAD by default): the head a moving pin
+        resolves to. The clone's origin is this bare repo. -> the stable head's sha."""
         home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, home, True)
         bare = os.path.join(home, "origin.git")
         subprocess.run(["git", "init", "-q", "--bare", bare], check=True, env=ENV)
-        head = git_in(self.source, "rev-parse", "HEAD")
+        head = git_in(self.source, "rev-parse", at)
         git_in(self.source, "push", bare, "%s:refs/heads/stable" % head)
         git_in(self.source, "remote", "add", "origin", bare)
         return head
+
+    @staticmethod
+    def drift_lines(text, pin):
+        """The ste-changed lines that name the stale pin `pin` by its first 7 characters."""
+        return [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
 
     def test_a_stale_ste_lint_pin_under_step_fails_the_step_and_exits_one(self):  # action-pins-follow-sessions: drift is FAIL
         pin = self.add_ste_lint()  # the pin is the first commit; the source HEAD after it is the stable head
@@ -2444,7 +2449,7 @@ class PinnedHarness(Job):
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
-        drift = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        drift = self.drift_lines(text, pin)
         self.assertEqual(len(drift), 1, "scope: no line names the stale pin\n" + text)
         self.assertNotIn("Unknown whether it matches", drift[0], "the stale pin read as unknown, not drift\n" + text)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale ste-lint pin under --step did not FAIL the named step and exit 1\n" + text)
@@ -2455,7 +2460,7 @@ class PinnedHarness(Job):
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
-        drift = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        drift = self.drift_lines(text, pin)
         self.assertEqual(len(drift), 1, "scope: no line names the stale pin under --lint\n" + text)
         self.assertEqual((rc, self.verdicts(lines)), (3, ["FAIL"]), "a stale ste-lint pin under --lint did not exit 3 with FAIL\n" + text)
 
@@ -2467,12 +2472,49 @@ class PinnedHarness(Job):
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin at the stable head did not PASS\n" + text)
 
-    def test_an_unresolvable_stable_head_reads_unknown_never_pass(self):  # no origin holds the stable branch
+    def test_no_stable_branch_and_no_local_copy_reads_unknown_never_pass(self):  # neither the stable head nor the local copy reads
         pin = self.add_ste_lint()
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        not_a_clone = tempfile.mkdtemp(prefix="not-a-clone-", dir=RUN_FOLDER)  # no git clone here, so no local copy either
+        self.addCleanup(shutil.rmtree, not_a_clone, True)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main", env={"CI_JOB_SETTINGS_CLONE": not_a_clone})
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "no stable head and no local copy did not read unknown, never PASS\n" + text)
+
+    def test_a_stale_ste_lint_pin_with_no_stable_branch_fails_under_step(self):  # fallback: the local copy judges the pin
+        pin = self.add_ste_lint()  # no publish_stable: the clone has no origin, so no stable head reads
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
-        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an unresolvable stable head did not read unknown, never PASS\n" + text)
+        drift = self.drift_lines(text, pin)
+        self.assertEqual(len(drift), 1, "scope: no line judges the stale pin against the local copy\n" + text)
+        self.assertNotIn("Unknown whether it matches", drift[0], "the stale pin read as unknown, not drift\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale pin with no stable branch did not FAIL the step under --step, exit 1\n" + text)
+
+    def test_a_stale_ste_lint_pin_with_no_stable_branch_exits_three_under_lint(self):  # fallback: --lint keeps exit 3
+        pin = self.add_ste_lint()  # no publish_stable, as above
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
+        drift = self.drift_lines(text, pin)
+        self.assertEqual(len(drift), 1, "scope: no line judges the stale pin under --lint against the local copy\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (3, ["FAIL"]), "a stale pin with no stable branch did not exit 3 with FAIL under --lint\n" + text)
+
+    def test_a_pin_equal_to_the_local_copy_passes_with_no_stable_branch(self):  # fallback: no drift against the local copy
+        self.add_ste_lint()
+        pin = git_in(self.source, "rev-parse", "HEAD")  # the local copy's own commit, and still no stable branch
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin equal to the local copy did not PASS with no stable branch\n" + text)
+
+    def test_a_stable_head_at_the_pin_wins_over_a_local_copy_that_differs(self):  # green control: stable is judged first
+        pin = self.add_ste_lint()  # the local copy is one commit past the pin, so the local copy would read as drift
+        self.publish_stable(at=pin)
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a stable head at the pin did not win over a local copy that differs\n" + text)
 
     def test_a_zizmor_pin_runs_its_own_run_sh_and_not_the_local_copy(self):
         rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())  # R67: no flag
