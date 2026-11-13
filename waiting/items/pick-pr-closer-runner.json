@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:48:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: an old PR closes only with proof and a recorded reason.\nProblem (rule): main names no closer for bulk closes of old PRs; on 11:27 CST Nov 13 an agent closed 35 PRs with no comment.\nBased on (measure): 35 PRs closed with no comment, all reopened 11:30 CST.\nBased on (ruling): your 14:29 CST Nov 10 words (the batch runner archives superseded work), decision session-tiers line 75 (the batch runner closes replaced drafts), and R66 part 3 (a close carries a pointer).\nDeparts from: main \u2014 session-tiers has the batch runner close replaced drafts only; this makes the runner the one closer of old PRs, from the evidence ledger only.",
   "home": "step bulk-close-needs-ledger",
   "id": "pick-pr-closer-runner",

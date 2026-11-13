@@ -1,0 +1,10 @@
+{
+ "id": "session-start-tmpdir-no-windows",
+ "at": "2026-11-08T00:38:00-06:00",
+ "title": "The session start hook writes no TMPDIR line on Windows.",
+ "ruling": "Coordinator ruling, 2026-11-08 00:38 CST: when uname -s starts with MINGW, MSYS or CYGWIN, hooks/session_start.sh writes nothing to CLAUDE_ENV_FILE. Git Bash always has /tmp, the incident (2026-11-07 14:47 CST) was a cloud Linux container, and a written line was wrong on Windows because Git Bash rewrites TMPDIR to its own path form (batch run 1794 had 6 subtests red). The PR body reports the ruling in the lane's words; the coordinator's own words are not in the PR.",
+ "quote": "Windows writes no line (coordinator ruling, 2026-11-08 00:38 CST): when `uname -s` starts with MINGW, MSYS or CYGWIN, the hook writes nothing. Git Bash always has /tmp, and the incident was a cloud Linux container.",
+ "source": "PR 1517 body, by the lane (notes-fix-guard-2) reporting the coordinator; no comment holds it. https://github.com/shivinate7/claude-settings/pull/1517 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "notes-fix-guard-2"
+}

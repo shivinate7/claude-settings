@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:40:00Z",
+  "added": "2026-11-13T17:28:30Z",
   "context": "Goal: degen batch 24g lands.\nProblem (money): the milestone-proof (suite) leg died in 3 s with no runner (label xcode-27, log 404); a re-run bills macOS minutes.\nBased on (measure): the leg's 3-second death and missing log.\nDeparts from: main \u2014 the leg is not re-run until you choose.",
   "home": "degen batch 24g, PR #702",
   "id": "degen-702-rerun",

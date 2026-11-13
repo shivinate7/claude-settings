@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:41:00Z",
+  "added": "2026-11-13T17:40:00Z",
   "context": "Goal: child repos' CI follows the stable branch (R44).\nProblem (rule): the reviewer found no owner words retiring D-499 and D-833. R44 (your 13:57 and 14:05 CST words) only names them as the obstacle to child CI following the stable branch. Round 1 of #1167 failed on this.\nBased on (ruling): R44; decision D-570 (how decisions end).\nDeparts from: q_max main \u2014 it keeps both decisions live; choosing a deletes them.\nMeanwhile: #1167 waits; #1165 goes on.",
   "home": "q_max PR #1167 (R44 lane)",
   "id": "qmax-d499-d833-end",

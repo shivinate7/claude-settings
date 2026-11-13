@@ -1,0 +1,10 @@
+{
+ "id": "pr-ledger-stack-by-base-ref",
+ "at": "2026-11-12T12:01:00-06:00",
+ "title": "The PR ledger stacks pull requests by base ref and gives three states a 72 hour limit.",
+ "ruling": "Coordinator picks, 12:01 CST Nov 12, reported in the body of PR 2845: the ledger stacks a PR by its base ref, not by a Based on line in the body, and a fix check, a fresh full review and a lane round 2 or later each get a 72 hour limit. A done record with no lane-lint PASS reads lane lint, owner the lane. The lane added its own undoable picks at 12:13 CST Nov 12: lane lint 72 hours and counted in the longest wait; a held, parked or replaced label with no valid Waits on line reads none and red, even on a draft.",
+ "quote": "Coordinator picks used (12:01 CST Nov 12): stack by base ref ... 72 h for fix check, fresh full review and lane round 2+",
+ "source": "PR 2845 body, Summary; written by the lane (author shivinate7), reporting the coordinator (12:01) and the lane (12:13) Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "pr-state-is-on-the-pr"
+}

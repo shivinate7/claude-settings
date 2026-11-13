@@ -1,0 +1,10 @@
+{
+ "id": "record-own-rounds-withdrawn",
+ "at": "2026-11-08T15:56:00-06:00",
+ "title": "The rule that lower rounds must sit in earlier records is withdrawn; each round names the head it read and a new round reads a new head.",
+ "ruling": "Coordinator, 15:56 CST Nov 8: withdrew the earlier own-rounds rule, because a named head proves more. At 16:03 CST the scope was set to a head on each Round line, with a gate that needs the top round on the live head. Coordinator readings at 15:18 CST: a new round reads a new head.",
+ "quote": "The scope changed at 15:56 and 16:03 CST (coordinator). The earlier rule on this branch, \"lower rounds must sit in earlier records\", is withdrawn: decision `pr-review-record` lets a record list rounds that read earlier heads. ... A new round reads a new head (coordinator readings, 15:18 CST).",
+ "source": "PR 2277 body, and decision text at head 11192dff9 (\"The coordinator withdrew the earlier own-rounds rule at 15:56 CST on 2026-11-08, because a named head proves more.\") Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "review-record-past-head"
+}

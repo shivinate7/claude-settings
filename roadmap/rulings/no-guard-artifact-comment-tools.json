@@ -1,0 +1,10 @@
+{
+ "id": "no-guard-artifact-comment-tools",
+ "at": "2026-11-12T13:44:00-06:00",
+ "title": "The Mac artifact comment tools get no guard.",
+ "ruling": "Coordinator ruling, 13:44 CST Nov 12, reported in the body of PR 2923: the artifact guard matchers name the Mac tool names but add no guard for the comment tools. The same lane also reports a coordinator split into five PRs, the normalizer first and then one per reader. Refusing a Mac write with no waiting-page url waits on owner item 626, an open question, not a ruling.",
+ "quote": "No guard for the comment tools (coordinator ruling, 13:44 CST).",
+ "source": "PR 2923 body, Summary; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "artifact-guard-matcher-names"
+}

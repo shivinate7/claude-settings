@@ -1,0 +1,10 @@
+{
+ "id": "roots-cover-guard-order",
+ "at": "2026-11-08T00:17:00-06:00",
+ "title": "process-only: the batch runner root-set guard is built as a found-gap fix.",
+ "ruling": "process-only. Coordinator, 2026-11-08 00:17 CST, citing the owner's 2026-11-07 13:20 CST ruling that a found gap gets a fix (homed in decision pr-ledger on main): build guard merge-roots-cover. This is a lane assignment.",
+ "quote": "Coordinator, 00:17 CST, citing the owner's 13:20 ruling that a found gap gets a fix.",
+ "source": "PR 1848 body, lane statement. https://github.com/shivinate7/claude-settings/pull/1848 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "runner-repos-in-parallel"
+}

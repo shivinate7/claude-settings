@@ -1,0 +1,10 @@
+{
+ "id": "merge-lock-gitlock-on-mac",
+ "at": "2026-11-07T19:18:00-06:00",
+ "title": "The merge lock uses GitLock on the Mac.",
+ "ruling": "Coordinator pick, date and time not given in the PR (time here is the PR creation time, 2026-11-07 19:18 CST). The merge lock backend is GitLock on the Mac as well. Main's merge-lock decision says GitLock runs only when CLAUDE_CODE_REMOTE is true, so the pick has no home there. The coordinator's own words are not in the PR; only the lane's one-line citation.",
+ "quote": "The test cites the coordinator's pick: GitLock on the Mac.",
+ "source": "PR 1708 body, lane statement. https://github.com/shivinate7/claude-settings/pull/1708 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "merge-lock-expired-delete-race"
+}

@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:52:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: a lane's lint result means the same as CI's.\nProblem (rule): five PRs wait on this (#1938, #1813, #1916, #2017, #1760). Your 2026-10-26 decision says the pin moves, not the prose; `--lint` ignores `--pinned` today. The pinned design is a coordinator step with no owner ruling after Oct 26, and R44 (2026-11-11 14:05 CST) says child repos should not stick on old pinned rules.\nBased on (ruling): decision action-pins-follow-sessions; R44.\nDeparts from: main \u2014 lane lint is local today; choosing b changes it to follow pins.",
   "home": "decision action-pins-follow-sessions; step lane-lint-runs-local-tools",
   "id": "drain-lane-lint-local",

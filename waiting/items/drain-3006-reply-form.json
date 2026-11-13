@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:52:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: you answer from one place without retyping options.\nProblem (rule): R18 (2026-11-10 16:46 CST) says chat holds one line, \"on the page, item N\". Main's guard option-labels-match-chat enforces `Page item: <id>` plus `a) <label>` lines, from your 2026-11-08 12:35 CST words \"A and B mean the same\". #3006 follows R18 and fights that guard.\nBased on (ruling): R18; decision option-keys-are-letters.\nDeparts from: main \u2014 main keeps the option lines; choosing b drops them.\nMeanwhile: #3006 holds until you answer.",
   "home": "rulings R18 and R60; guard option-labels-match-chat",
   "id": "drain-3006-reply-form",

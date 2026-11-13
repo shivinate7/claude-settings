@@ -1,0 +1,10 @@
+{
+ "id": "retire-run-lane-tip-deferred",
+ "at": "2026-11-07T20:03:00-06:00",
+ "title": "A Retire-run cite on a lane tip the batch contains is deferred to merge.",
+ "ruling": "Coordinator ruling, 2026-11-07 20:03 CST, design approved 20:04 CST: lint/check_debt_retire.py judge_run defers a cited run on a strict ancestor of the head (a lane tip the batch contains). In CI the silent-undo CLI excuses it with a deferred to merge note. In the merge tool it holds only when the head's own checks.yml run is green; a pending, red or missing run is refused.",
+ "quote": "a deferred lane-tip cite (coordinator ruling, 20:03 CST; design approved 20:04 CST).",
+ "source": "PR 1743 body, by the lane quoting the coordinator. https://github.com/shivinate7/claude-settings/pull/1743 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "silent-undo-reads-retire-run"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "rule-anchor-counts-as-home",
+ "at": "2026-11-12T21:32:01-06:00",
+ "title": "A decision line Home: rule:<anchor> counts as a home.",
+ "ruling": "Triage ruling, reported in a review note on PR 2915 posted 21:32 CST Nov 12 (the time of the comment): a decision whose Home line names a rule anchor, such as Home: rule:git-cite-by-id, has a home, so the tending runner must not treat it as a file path and flag it stale. The review round 3 note repeats it as a triage ruling used.",
+ "quote": "triage ruled it counts as a home (rule git-cite-by-id)",
+ "source": "PR 2915 comment 6842968813 (round 2 review record notes), posted by shivinate7 for the reviewer; repeated in comment 6843241614 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "prose-tending-contract"
+}

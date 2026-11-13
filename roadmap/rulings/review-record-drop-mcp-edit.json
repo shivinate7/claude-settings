@@ -1,0 +1,10 @@
+{
+ "id": "review-record-drop-mcp-edit",
+ "at": "2026-11-07T18:59:00-06:00",
+ "title": "The review-record guard drops its MCP edit branch, and #1687 judges that tool.",
+ "ruling": "Coordinator ruling, 2026-11-07 18:59 CST: drop the MCP edit branch (mcp__github__update_issue_comment, REVIEW_EDIT_TOOL) from the review-record guard. PR 1687 judges that tool with the full head check; the shell PATCH route and review_form_hit stay. Coordinator ruling, 19:15 CST: the drop goes in a new PR at round 1 (process). Also stated in PRs 1706 and 1722; PR 1722 says 1687 does judge the tool, so the debt review-record-mcp-edit-unjudged is false.",
+ "quote": "Coordinator ruling 2026-11-07 18:59 CST: drop the MCP edit branch (mcp__github__update_issue_comment, REVIEW_EDIT_TOOL). #1687 (lane mcp-tools-in-guard-matcher) will judge that tool with the full head check. The shell PATCH route and review_form_hit stay. ... Coordinator ruling 2026-11-07 19:15 CST: a new PR at round 1.",
+ "source": "PR 1707 body, the coordinator quoted by the lane; also PR 1706 and PR 1722 bodies. https://github.com/shivinate7/claude-settings/pull/1707 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "notes-fix-large-3"
+}

@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:45:25.533Z",
+  "choice": "a",
+  "item": "pick-pr-closer-runner",
+  "label": "A: Batch runner 10 closes old PRs (coordinator's pick)",
+  "n": 711,
+  "note": "accepted pick",
+  "optionId": "runner-closes"
+}

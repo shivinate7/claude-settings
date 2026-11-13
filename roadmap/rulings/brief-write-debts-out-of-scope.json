@@ -1,0 +1,10 @@
+{
+ "id": "brief-write-debts-out-of-scope",
+ "at": "2026-11-12T13:30:49-06:00",
+ "title": "The nine brief-write debt records on PR 2693 are out of scope for the fix lane.",
+ "ruling": "process-only. The coordinator ruled, at a time not stated in PR 2886 (the PR was opened 13:30 CST Nov 12, used as the date here), that the lane fixing the five brief-write guard notes does not touch the nine brief-write debt records on PR 2693. No owner word on closing PR 2886 is in the PR.",
+ "quote": "Not in scope, as the coordinator ruled: the nine docs/debts/brief-write-*.md debt records on #2693.",
+ "source": "PR 2886 body, Summary; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "md-midline-comment-gap"
+}

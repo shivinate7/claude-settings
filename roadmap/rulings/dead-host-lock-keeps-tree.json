@@ -1,0 +1,10 @@
+{
+ "id": "dead-host-lock-keeps-tree",
+ "at": "2026-11-07T15:05:00-06:00",
+ "title": "A live-form agent lock whose process is dead keeps its tree unless the agent finished.",
+ "ruling": "Owner pick, 15:05 CST Nov 7, confirmed 07:51 CST Nov 12, as reported in the body of PR 2783 (the PR decision text calls it a coordinator pick). In the janitor sweep, a live-form lock whose pid is dead keeps its worktree unless the agent's stop row and idle proof both exist. The pick covers the keep, not who may remove a dead-host tree from an earlier session; that owner question was routed through the coordinator. (Drafted for step: fan-prose-debts, which is a group name, not a step; home step is backlog-drain.)",
+ "quote": "a live-form lock whose pid is dead keeps the tree unless the agent's stop row and idle proof exist (owner pick 15:05 CST Nov 7, confirmed 07:51 CST Nov 12)",
+ "source": "PR 2783 body, Summary; written by the lane (author shivinate7), reporting the owner Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "backlog-drain"
+}

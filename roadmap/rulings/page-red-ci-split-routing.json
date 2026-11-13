@@ -1,0 +1,10 @@
+{
+ "id": "page-red-ci-split-routing",
+ "at": "2026-11-10T03:32:00-06:00",
+ "title": "process-only: routing orders for PR 2347 after round 3 (design findings to a step, one fresh tool record, split on red CI).",
+ "ruling": "process-only. Coordinator, 03:32 CST Nov 10: design findings F2 and F3 go to step page-narrow-breaks-rest. At 06:04 CST: a record that cannot chain a second fix check is one tool record at the live head. At 09:00 CST: the red-CI-after-round-3 split under rule roles-review-cap-three, with 40 browser-pinned cases moved to step pins-vs-main-same-run.",
+ "quote": "Coordinator 2026-11-10 03:32 CST, under rule roles-review-cap-three: design findings F2 and F3 go to step page-narrow-breaks-rest (917). | coordinator 2026-11-10 06:04 CST: a record that cannot chain a second fix check is one tool record at the live head | the split ruled by the coordinator at 2026-11-10 09:00 CST, under rule roles-review-cap-three: red CI after round 3.",
+ "source": "PR 2347 body, Rulings section; comments 6767005551 (06:04) and 6771406161 (09:00) Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "notes-fix-page"
+}

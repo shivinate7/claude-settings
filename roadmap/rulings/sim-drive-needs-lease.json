@@ -1,0 +1,10 @@
+{
+ "id": "sim-drive-needs-lease",
+ "at": "2026-11-07T16:13:00-06:00",
+ "title": "A session with no live lease of its own may not drive a booted phone.",
+ "ruling": "Coordinator ruling, 2026-11-07 16:13 CST, from the owner's 2026-11-02 sim rulings (ruling 12 of decision sim-test-is-the-one-boot-path). Every session leases the shared phone before it uses it. A session with no live lease that drives a booted phone is refused, and the remedy names sim-lease take or sim-test --hold. Not on main; the PR adds guard rule simulator-drive-lease.",
+ "quote": "Ruling: coordinator 2026-11-07 16:13 CST, from the owner's 2026-11-02 sim rulings. Every session leases the shared phone before it uses it. A session with no live lease that drives a booted phone is refused, and the remedy names `sim-lease take` or `sim-test --hold`.",
+ "source": "PR 1692 body, quoting the coordinator. https://github.com/shivinate7/claude-settings/pull/1692 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "sim-lease-gaps"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "carry-1479-restack-on-2712",
+ "at": "2026-11-12T09:16:00-06:00",
+ "title": "The second carry of old PR 1479 is restacked on PR 2712 so it holds only the rest.",
+ "ruling": "process-only. Coordinator ruling, 09:16 CST Nov 12, reported in the body of PR 2783: ten of the fifteen commits of PR 2746 are the same patches as PR 2712, so 2712 is the base and 2783 holds only the remaining commits. The batch runner batches 2712 first, then 2783. (Drafted for step: fan-prose-debts, which is a group name, not a step; home step is backlog-drain.)",
+ "quote": "by the coordinator's ruling at 09:16 CST Nov 12: 10 of the 15 commits of the old PR #2746 (carried from #1479) are the same patches as #2712's, so #2712 is the base and this PR holds only the rest",
+ "source": "PR 2783 body, Summary; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "backlog-drain"
+}

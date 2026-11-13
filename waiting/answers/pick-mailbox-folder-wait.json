@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:45:25.533Z",
+  "choice": "a",
+  "item": "pick-mailbox-folder-wait",
+  "label": "A: Wait for the Mac measurement (triage's pick)",
+  "n": 706,
+  "note": "accepted pick",
+  "optionId": "wait-mac"
+}

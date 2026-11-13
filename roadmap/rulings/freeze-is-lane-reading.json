@@ -1,0 +1,10 @@
+{
+ "id": "freeze-is-lane-reading",
+ "at": "2026-11-08T01:52:00-06:00",
+ "title": "The guard and kind freeze after the final review round is a lane's reading of decision hold-unsafe-after-round-3, not the owner's words.",
+ "ruling": "Coordinator, 01:52 CST Nov 8: approved that the freeze after the final round is the lane's reading of hold-unsafe-after-round-3. The decision itself keeps only the net value across a passing fix. The comment in merge/merge.py and decision pr-review-record are to say so where the freeze sits. (Drafted for step: same group, which is a group name, not a step; home step is backlog-drain.)",
+ "quote": "That part is the lane's reading of the decision, approved by the coordinator at 01:52 CST Nov 8, not the owner's words.",
+ "source": "PR 1873 body, written by the lane; the coordinator's approval is reported there (no separate comment) Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "backlog-drain"
+}

@@ -25,8 +25,9 @@
   "pick": "a",
   "rank": 8,
   "ref": "c108 (the decision watch says once, plainly, when a folder has no git repo)",
+  "reply": "Answered 11:45 CST Nov 13: a, accepted pick (\"Say it once per session\"). Home: item c108 (the decision watch says once, plainly, when a folder has no git repo). Undo: reopen this item.",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "How the decision watch speaks in a folder with no git repo",
   "why": "It changes no rule, and a notice that repeats every turn teaches you to skip it."
 }

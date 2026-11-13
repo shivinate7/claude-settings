@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:52:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: a guard's wrong refusals cost less than the harm it stops.\nProblem (rule): recorded false alarms include an unquoted `curl x?a=1&b=2` refused with a wrong remedy, `$[1&2]`, and `ci-job checks --lint & echo $! | cat`. The wrong-fire rate is unmeasured, so R5's test (\"only when its wrong refusals cost more than the harm it stops\") cannot be run.\nBased on (ruling): R5; decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main lists the gap as debt check-tail-trailing-amp; keeping adds the reader.",
   "home": "decision guard-that-cries-wolf-is-spent; R5",
   "id": "drain-2156-any-filter",

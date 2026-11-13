@@ -1,0 +1,10 @@
+{
+ "id": "rule-audit-max-depth-stays-12",
+ "at": "2026-11-07T21:08:00-06:00",
+ "title": "The rule audit keeps MAX_DEPTH at 12; the guard code is changed to fit.",
+ "ruling": "Coordinator rulings on PR 1758: 2026-11-07 20:35 CST, fix only the sites the rule-audit-branch-scope fix does not clear; 21:08 CST, the guard changes and MAX_DEPTH stays 12. The review-record guard's refusal chain is shortened instead of raising the audit depth.",
+ "quote": "Coordinator ruling 2026-11-07 20:35 CST: fix only the sites the rule-audit-branch-scope fix does not clear. Ruling 21:08 CST: the guard changes and MAX_DEPTH stays 12.",
+ "source": "PR 1758 body, lane quoting the coordinator. https://github.com/shivinate7/claude-settings/pull/1758 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "notes-fix-large-3"
+}

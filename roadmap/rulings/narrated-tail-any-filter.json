@@ -1,0 +1,10 @@
+{
+ "id": "narrated-tail-any-filter",
+ "at": "2026-11-08T06:47:00-06:00",
+ "title": "The narrated rule refuses merge --confirm piped through any filter before tail or head, not only through tee.",
+ "ruling": "Coordinator, 05:48 CST Nov 8, extending its 05:15 ruling on PR 1666: the narrated (live-stream) rule refuses merge --confirm piped through a tee into tail or head. At 06:47 CST the coordinator widened it to any filter between the wait and tail or head. The harm is the same: tail cuts the output and the heartbeat is hidden until exit.",
+ "quote": "The coordinator ruled at 2026-11-08 05:48 CST, extending its 05:15 ruling on #1666: the narrated rule (live-stream) refuses `merge --confirm` piped through a tee into tail or head. At 06:47 CST it widened that reading to any filter between the wait and tail or head, such as `merge --confirm | grep FAIL | tail -3`.",
+ "source": "PR 1975 body (lane report of the coordinator's rulings); review-record comment 6721876674: \"Coordinator ruling 2026-11-08 06:47 CST settled it: the narrated rule refuses any filter between `merge --confirm` and tail or head.\" Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "bg-tail-loses-verdict"
+}

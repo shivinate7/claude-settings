@@ -1,0 +1,10 @@
+{
+ "id": "carry-old-pr-fresh-branch",
+ "at": "2026-11-12T07:31:00-06:00",
+ "title": "An old open pull request is carried forward onto a fresh branch from main and the old one is closed.",
+ "ruling": "process-only. Coordinator pick, 07:31 CST Nov 12, reported in the body of PR 2735 and cited by PRs 2748, 2750 and 2833 for their own carries: carry an old open PR onto a fresh branch from main, cherry-pick its own commits and keep its red-first tests. Close the old PR citing the new one. PR 2750 also cites a second pick at 07:35 CST Nov 12 whose words are not in the PR. (Drafted for step: fan-prose-debts, which is a group name, not a step; home step is backlog-drain.)",
+ "quote": "coordinator pick 07:31 CST Nov 12: carry an old open PR onto a fresh branch from main, cherry-pick its own commits, keep its red-first tests; close the old PR citing this one",
+ "source": "PR 2735 body, Summary; written by the lane (author shivinate7), reporting the coordinator; same pick cited in PRs 2748, 2750, 2833 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "backlog-drain"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mac-db-unknown-artifact-id",
+ "at": "2026-11-10T04:54:00-06:00",
+ "title": "A Mac artifact write whose artifact id is not recognised is treated as a waiting-page write.",
+ "ruling": "Coordinator choice, 04:54 CST Nov 10, reported in the body of PR 2549: owner item 440 gave the Mac tool input shapes but not the field that names the artifact. Until that field is known, a Mac db_* call with no recognised id gets the full waiting-page item checks. This fails safe; the cost is a possibly misleading denial on a write to another artifact, cleared by an override. The open question is debt mac-artifact-id-key-unknown, closed by reading one redacted db_write input on the owner's Mac.",
+ "quote": "Coordinator choice (04:54 CST Nov 10): a Mac db_* call with no recognised id counts as a waiting-page write and gets the full item checks. It fails safe.",
+ "source": "PR 2549 body, section Decision: unknown artifact id; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "artifact-guard-matcher-names"
+}

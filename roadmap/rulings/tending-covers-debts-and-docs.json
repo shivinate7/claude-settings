@@ -1,0 +1,10 @@
+{
+ "id": "tending-covers-debts-and-docs",
+ "at": "2026-11-12T21:49:13-06:00",
+ "title": "Per-debt records and the docs prose stores are part of the tending contract, in a later step.",
+ "ruling": "Triage ruling, reported in the round 3 review note on PR 2915 posted 21:49 CST Nov 12 (the time of the comment): the shared tending contract covers per-debt records and the docs prose stores, and they are added in a later step, not in PR 2915. Each store flip to live needs its own lane.",
+ "quote": "per-debt records and docs prose stores are in the contract (a later step)",
+ "source": "PR 2915 comment 6843241614 (round 3 review record notes), posted by shivinate7 for the reviewer Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "prose-tending-contract"
+}

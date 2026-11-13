@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:45:25.533Z",
+  "choice": "a",
+  "item": "pick-lane-mail-runner-only",
+  "label": "A: Lane mail sends only from a batch-runner session (coordinator's pick)",
+  "n": 709,
+  "note": "accepted pick",
+  "optionId": "runner-only"
+}

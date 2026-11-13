@@ -1,0 +1,10 @@
+{
+ "id": "guard-imports-fail-closed",
+ "at": "2026-11-08T03:12:00-06:00",
+ "title": "A missing or misplaced guard module must fail closed, never open.",
+ "ruling": "Coordinator, 03:12 CST Nov 8: the fail-open imports of reread_check and proc_env break decision install-hooks-whole, so fix them. At 04:29 CST the coordinator folded in the precompact_handoff import. Decision install-hooks-whole says: on an import failure the guard waits about 5 s, loads again, then fails closed with guard-crash.",
+ "quote": "Coordinator ruling, 2026-11-08 03:12 CST: \"fail-open imports of reread_check and proc_env break decision install-hooks-whole; fix them\". The 04:29 CST fold-in adds the precompact_handoff import.",
+ "source": "PR 2301 body (no comment carries it); lane report of the coordinator's ruling Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "bg-tail-loses-verdict"
+}

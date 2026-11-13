@@ -1,0 +1,10 @@
+{
+ "id": "prose-lane-builds-code-steps",
+ "at": "2026-11-12T07:37:00-06:00",
+ "title": "A code step that sits in the prose lane is built in that lane.",
+ "ruling": "process-only. Coordinator pick, 07:37 CST Nov 12, reported in the body of PR 2727, on finding ruling-pr-kind-unchecked: a code step assigned to the prose lane is built by that lane, not moved to a code lane. (Drafted for step: fan-prose-debts, which is a group name, not a step; home step is backlog-drain.)",
+ "quote": "coordinator pick 07:37 CST Nov 12: code steps in the prose lane are built in the lane",
+ "source": "PR 2727 body, Summary; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "backlog-drain"
+}

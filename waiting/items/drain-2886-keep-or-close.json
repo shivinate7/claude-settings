@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:52:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: an Explore agent never writes a file.\nProblem (rule): the lane says close, because main's guard readonly-shell-write already stops the named mistake. But that guard judges only redirect, tee, touch and mktemp; a brief ordering a write by cp, sed -i or python -c still passes on main. Closing also closes #2693.\nBased on (code): guard readonly-shell-write, hooks/guard.py.\nDeparts from: main \u2014 main has no spawn-time check on the brief; this adds one.",
   "home": "step brief-write-needs-writer",
   "id": "drain-2886-keep-or-close",

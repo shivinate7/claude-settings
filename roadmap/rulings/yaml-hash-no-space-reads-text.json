@@ -1,0 +1,10 @@
+{
+ "id": "yaml-hash-no-space-reads-text",
+ "at": "2026-11-08T01:55:00-06:00",
+ "title": "process-only: an invalid-YAML quoted scalar with # and no space reads as text.",
+ "ruling": "process-only. Orchestrator of lane lint-uses-pinned-tools, 2026-11-08 01:55 CST: an invalid-YAML \"x\"#c or 'x'#c, with no space before #, reads as text. No workflow in the repo uses that form and no test pinned the old reading.",
+ "quote": "Ruling, process-only, orchestrator of lane lint-uses-pinned-tools, 2026-11-08 01:55 CST: an invalid-YAML `\"x\"#c` or `'x'#c`, with no space before `#`, reads as text.",
+ "source": "PR 1836 body, by the lane. https://github.com/shivinate7/claude-settings/pull/1836 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "lane-lint-runs-local-tools"
+}

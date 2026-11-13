@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:52:00Z",
+  "added": "2026-11-13T17:31:00Z",
   "context": "Goal: guards stop mistakes Claude has made, not imagined ones.\nProblem (rule): no record shows a runner dropping `--root`; the only incident behind the guard is a 1 h 16 min idle behind a foreground `--confirm`, which was a deferral. #2071's other change, a fix so `&&` inside `$( )` no longer falsely refuses a valid command, stands alone.\nBased on (ruling): your rule that a guard needs an incident (building-guard-needs-incident).\nDeparts from: main \u2014 main has no such guard; choosing b adds it.",
   "home": "rule building-guard-needs-incident",
   "id": "drain-2071-guard-incident",

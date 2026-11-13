@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:42:00Z",
+  "added": "2026-11-13T17:37:00Z",
   "context": "Goal: a change merges only when it leaves main no worse.\nProblem (rule): your 13:41 CST Nov 7 answer (356 a) says a round-3 FAIL holds. Main's decision hold-unsafe-after-round-3 and line 93 of pr-review-record.md say a round-3 FAIL merges at zero or positive net value. The decision holds your later words (Nov 8 to 9).\nBased on (ruling): decision hold-unsafe-after-round-3, items 402 a and 471 a; R9.\nDeparts from: main \u2014 main merges a round-3 FAIL at net value zero or above; choosing b makes every round-3 FAIL hold.\nMeanwhile: the review-record lane builds main's line 93.",
   "home": "step review-record-past-head",
   "id": "pick-356a-vs-line-93",

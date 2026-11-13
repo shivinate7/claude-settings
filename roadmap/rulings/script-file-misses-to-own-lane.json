@@ -1,0 +1,10 @@
+{
+ "id": "script-file-misses-to-own-lane",
+ "at": "2026-11-07T15:03:00-06:00",
+ "title": "process-only: the test-write guard's script-file misses go to their own lane with a red case per form.",
+ "ruling": "process-only. Coordinator, 2026-11-07 15:03 CST: the script-file misses of the test-write guard belong to lane script-file-misses, with a red case per form. This is a lane assignment, relayed in the PR body.",
+ "quote": "Coordinator 2026-11-07 15:03 CST: the test-write guard's script-file misses belong to this lane, a red case per form.",
+ "source": "PR 1598 body, lane statement of the coordinator. https://github.com/shivinate7/claude-settings/pull/1598 Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "notes-fix-large-3"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "merge-route-park-reopen",
+ "at": "2026-11-09T21:09:00-06:00",
+ "title": "process-only: PR 2491 is parked; the split merge by hand is used, and it reopens only if the split fails on a mutation test.",
+ "ruling": "process-only. Parked 21:09 CST Nov 9, speaker not named in the PR. The fix later landed on main in commit e2aec35ac (per step merge-route-author-paths), so the park condition is moot.",
+ "quote": "Parked 2026-11-09 21:09 CST: split merge by hand used instead; reopen only if the split fails on a mutation test.",
+ "source": "PR 2491 body, first line (no comments) Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "merge-route-author-paths"
+}

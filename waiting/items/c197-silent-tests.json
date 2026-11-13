@@ -32,8 +32,9 @@
   "pick": "a",
   "rank": 48,
   "ref": "c197 (the silent test files; mutation report finding, decision mutation-report-scores-suites)",
+  "reply": "Answered 11:45 CST Nov 13: a, accepted pick (\"Close the six notes as a mistake in the report\"). Home: item c197, decision mutation-report-scores-suites. Undo: reopen this item.",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "The six \"silent\" test files: they are fine, so close the notes about them?",
   "why": "They run, they pass and they fail when broken; the report paired them with the wrong files, and the right test files already cover those."
 }

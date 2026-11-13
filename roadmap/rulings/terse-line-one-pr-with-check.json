@@ -1,0 +1,10 @@
+{
+ "id": "terse-line-one-pr-with-check",
+ "at": "2026-11-12T07:33:00-06:00",
+ "title": "The short-output line in the agent role files and its check ship in one pull request.",
+ "ruling": "process-only. Coordinator pick, 07:33 CST Nov 12, reported in the body of PR 2714: under R36, the short-output line in the agent role files and the lane start text, and the check that proves it, go in one PR. The owner words behind R36 (12:49 to 12:55 CST Nov 11) are already filed in rulings r36.",
+ "quote": "(R36, docs/plans/restart-plan.md; owner 12:49-12:55 CST Nov 11, relayed; one PR with the line and its check, coordinator 07:33 CST Nov 12)",
+ "source": "PR 2714 body, Summary; written by the lane (author shivinate7), reporting the coordinator Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "closed",
+ "step": "agent-asks-become-refusals"
+}

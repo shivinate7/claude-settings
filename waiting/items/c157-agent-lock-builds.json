@@ -25,8 +25,9 @@
   "pick": "a",
   "rank": 6,
   "ref": "c157 (cleanup never deletes a live agent's build folders), part 2, PR #748",
+  "reply": "Answered 11:45 CST Nov 13: a, accepted pick (\"As built: an agent lock does not keep them\"). Home: item c157, part 2, PR #748. Undo: reopen this item.",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Does a Claude agent's lock keep its build folders from cleanup?",
   "why": "It is the change that fixes the full-disk failure; the 30-minute clock already covers a short pause."
 }

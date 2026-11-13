@@ -1,0 +1,10 @@
+{
+ "id": "past-head-fail-own-commit",
+ "at": "2026-11-08T11:43:00-06:00",
+ "title": "A FAIL review record for a past head is allowed only for one of the PR's own commits, is not widened to PASS or PARTIAL rounds, and is labelled on stderr only.",
+ "ruling": "Coordinator, 11:43 CST Nov 8: do not widen the past-head exception to PASS or PARTIAL rounds. A past round is labelled on stderr, with no new line in the record. PR 2200 adds the own-commit check on top of that ruling.",
+ "quote": "The coordinator ruled at 11:43 CST Nov 8: do not widen this to PASS or PARTIAL rounds, and label a past round on stderr with no new line in the record.",
+ "source": "PR 2200 body (lane report of the coordinator's ruling) Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "review-record-past-head"
+}

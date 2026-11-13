@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-13T17:42:00Z",
+  "added": "2026-11-13T17:37:00Z",
   "context": "Goal: reviews only use verdicts you asked for.\nProblem (rule): PR #2326 builds a WIDE verdict. No owner words, decision or step names it; the ledger rows disagree (#2365 drop, #2326 keep).\nBased on (code): the debt note wide-plain-copy-unpinned and #2326's own code are the only traces.\nDeparts from: main \u2014 main has no WIDE verdict; choosing b adds it.\nMeanwhile: the review-record lane builds no WIDE.",
   "home": "step review-record-past-head",
   "id": "pick-wide-verdict",

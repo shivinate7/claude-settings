@@ -1,0 +1,10 @@
+{
+ "id": "record-slice-own-round-line",
+ "at": "2026-11-08T18:53:00-06:00",
+ "title": "A review slice is recorded as another line in its round, and the round passes only when every line passes.",
+ "ruling": "Coordinator pick Q2 a, 18:53 CST Nov 8, not the owner's words: a slice is recorded as another line in its round. The round reads passed only when every line passes. A PARTIAL keeps the same-head refusal.",
+ "quote": "Coordinator pick Q2 a, 18:53 CST Nov 8, not owner's words: a slice is recorded as another line in its round; the round reads passed only when every line passes. A PARTIAL keeps the same-head refusal.",
+ "source": "PR 2277, decision text docs/decisions/pr-review-record.md at head 11192dff9; coordinator pick, relayed by the lane Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "review-record-past-head"
+}

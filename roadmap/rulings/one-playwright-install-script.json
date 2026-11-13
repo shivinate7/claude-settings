@@ -1,0 +1,10 @@
+{
+ "id": "one-playwright-install-script",
+ "at": "2026-11-08T06:18:00-06:00",
+ "title": "Lane lint and the shared action use one Playwright install script, and lane lint never downloads a browser.",
+ "ruling": "Coordinator, 06:18 CST Nov 8, option a: one install script shared by the playwright-setup action and ci-job. Lane lint never downloads a browser (decision playwright-install-once). When the pinned browser cannot launch, the guard suite runs anyway and one line names the skipped browser cases. The ruling makes the old MISSING_INSTALL control stale.",
+ "quote": "Coordinator ruling, 06:18 CST Nov 8, option a: one install script, shared by the action and ci-job. Lane lint never downloads a browser (decision `playwright-install-once`, one Playwright install, never from an agent). When the pinned browser cannot launch, the suite runs anyway, and one line names the skipped browser cases.",
+ "source": "PR 2001 body (no comments); the lane reports the coordinator's ruling Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "status": "open",
+ "step": "lane-lint-guard-suite-install"
+}
