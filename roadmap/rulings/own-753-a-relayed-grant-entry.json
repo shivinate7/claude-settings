@@ -2,7 +2,7 @@
  "id": "own-753-a-relayed-grant-entry",
  "at": "2026-11-13T14:24:00-06:00",
  "title": "The Relayed Merge Yes auto-mode entry and its pinned test change to match 748 b",
- "ruling": "Owner 14:24 CST, page item 753 a: edit the \"Relayed Merge Yes\" entry and its pinned test so a routed closed item counts, as in ruling own-748-b-rule-4 (item 748 b).",
+ "ruling": "Owner 14:24 CST, page item 753 a: edit the \"Relayed Merge Yes\" entry and its pinned test so a routed closed item counts, as in ruling own-748-b-rule-4 (item 748 b). RE-ASKED 14:31 CST Nov 13: same cause as own-759-b-label-allow-entry. Item 753 is open again with option a naming settings.json and the entry holding the closed-item clause (\"Relayed Grant\", line 56, per the lane of #3224; two entries or one is unchecked). His a stands as intent; the edit waits for the re-saved answer.",
  "quote": "753 a",
  "source": "Owner page save 14:24 CST Nov 13 (comment thread 56da503a, typed by the owner; answers pick-<id>); filed by triage 14:26 CST Nov 13.",
  "status": "open",

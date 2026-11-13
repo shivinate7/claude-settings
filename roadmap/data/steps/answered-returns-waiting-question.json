@@ -1,0 +1,14 @@
+{
+ "id": "answered-returns-waiting-question",
+ "title": "An item that still waits on the owner never sits in the page's Answered section",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The owner reads the question area, never Answered; a question there is never answered.",
+ "source": "Owner 14:3x CST Nov 13, page save comment: \"the 62 items in answered... if there's a question still waiting for me in there, it has to come out of answered and come back to me in the question area else i'll never go through that area to get an answer to you\".",
+ "note": "Filed 14:31 CST Nov 13. Cause (triage reading of SKILL.md isAnswered = saved answer or by-wait): a stale answer doc keeps an open item in Answered after we reply with a question or a \"none of these\" asks us for more. Triage moved 4 items back by deleting the stale answer (700, 715, 720, 728; ledger answered_return_ledger.json in the scratchpad) and closed none in bulk. Still in Answered with his question to us: 240, 324, 328, 398, 476, 572, 584, 713, 716, 724, 727, 735, 742 (replies owed, each reopened one at a time as we answer). Fix: the route-and-close step deletes or supersedes the saved answer whenever the item stays open and waits on him; a check fails an open item that has a reply ending in a question and a saved answer. Count mismatch: the owner sees 62, triage's 20:11Z export shows 30 visible and 20 closed-with-time; unexplained. Guard that would have stopped it: this step. Past rulings not checked.",
+ "updatedAt": "2026-11-13T14:31:56-06:00"
+}
