@@ -1,0 +1,14 @@
+{
+ "id": "ci-jobs-skip-unread",
+ "title": "A CI job does not start when no file its suites read changed",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Ruled but not built: decision test-strategy-reset says \"Each CI job runs only when a file that its suites read changes\" (also decision ci-cut-in-steps, item 31). Built today, jobs always start and only steps skip (.github/workflows/checks.yml line 39), so a prose-only batch still starts about 19 jobs (retrospective 11:19 CST Nov 13, after an owner question relayed by runner 10 at 11:17 CST).",
+ "source": "retrospective 11:19 CST Nov 13; runner 10 measures batch 133's job minutes",
+ "note": "Blocker to weigh: a job-level skip needs the all-jobs-passed rollup (lint/all_jobs_passed_rules.py) to accept a skipped job, which the coordinator's 14:25 CST Nov 12 pick (step guard-pr-runs-windows-shards) avoided as a widening of a check. The lane shows the rollup still fails on a job that should have run and was skipped, red then green. First measure: runner 10's job minutes for batch 133 against a prose-only batch. A CI fix, allowed under ruling drain-first-hold.",
+ "updatedAt": "2026-11-13T11:20:48-06:00"
+}

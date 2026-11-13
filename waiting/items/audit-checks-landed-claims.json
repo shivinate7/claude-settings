@@ -26,6 +26,7 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "a",
   "ref": "your 11:15 CST question; retrospective 11:17 CST",
+  "reply": "Closed 11:22 CST Nov 13 by triage: you answered in chat at 11:19 CST, wider than a: every standing role (triage, batch runners, consultants, coordinators) gets the coordinator's check after compaction, against main, the roadmap and the PRs. Ruling audit-reads-main-every-role, step handoff-audit-after-compact. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Audit: check \"landed\" claims",
   "shown": [
@@ -41,7 +42,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "Should the audit after each compaction also check every \"landed\" claim against main?",
   "why": "You asked whether every session still sends a Sonnet agent to check its transcript against what landed. Today it checks the transcript against the handoff, not against main."
 }

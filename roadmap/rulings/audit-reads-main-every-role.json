@@ -1,0 +1,10 @@
+{
+ "id": "audit-reads-main-every-role",
+ "at": "2026-11-13T11:19:00-06:00",
+ "title": "Every standing role's post-compaction audit checks against main, the roadmap and the PRs",
+ "ruling": "Owner 11:19 CST Nov 13, in chat with the retrospective: every standing role (triage, batch runners, consultants, coordinators) gets the check the coordinator has after compaction (step coordinator-transcript-reconcile): the audit checks the transcript against main, the roadmap and the PRs, not only against the handoff. Answers page item 708. Home: step handoff-audit-after-compact (widened).",
+ "quote": "i think any of the standing roles, so triage, batch runners, consultants, cordinators, etc all ought to have the check that coordinator has for compaction",
+ "source": "owner chat with the retrospective 11:19 CST Nov 13, relayed 11:19 CST",
+ "status": "open",
+ "step": "handoff-audit-after-compact"
+}
