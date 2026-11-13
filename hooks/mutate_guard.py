@@ -4069,40 +4069,51 @@ def known_defects_main(argv) -> int:
     return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
-def _loads_module(source: str, stem: str) -> bool:
-    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
-    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
-    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
-    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
-    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is followed
-    to the calls of that function in the same file: a call by a bare name, with the argument by position or by keyword
-    for that parameter, counts as a binding of the parameter, read only inside the def that owns the parameter. Two functions
-    with different names that share a parameter name keep their calls apart.
-    Only the forms above are followed. Any other form reads False, and this list is not complete. Examples: a loader
+_PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath", "join", "abspath", "realpath", "normpath"))
+_PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
+_FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
+                         "check_output", "Popen", "read_text", "read_bytes"))
+_LOADERS = frozenset(("spec_from_file_location", "SourceFileLoader", "run_path"))
+
+
+def _load_profile(source: str):
+    """(stems, loads, reads) of one Python text, read from its `ast` tree (never its text, so a comment, a string or a
+    docstring that names a file is not a load). `stems` are the modules it imports or loads by name: `import`, `from ...
+    import`, `importlib.import_module` and `__import__` with a literal name. `loads` are the basenames of the string
+    constants in the path argument of a file loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`, never
+    the module-name argument). `reads` are the basenames of the string constants of each path expression that copies, opens
+    or runs a file: an argument of `open`, `shutil.copy*`, `subprocess.run` and the like (`_FILE_CALLS`), and a `os.path.join`,
+    `Path` or `/` expression (`_PATH_NAMES`, `_PATH_METHODS`). A text that does not parse has an empty profile.
+
+    A name in a path expression is followed to the expressions it is bound to by an assignment in any scope of the file
+    (module, function or class level; one name bound in two scopes pools both values). The path argument of a loader that
+    arrives as a function parameter is also followed to the calls of that function in the same file: a call by a bare name,
+    with the argument by position or by keyword for that parameter, counts as a binding of the parameter, read only inside
+    the def that owns the parameter. Two functions with different names that share a parameter name keep their calls apart.
+    A name in a `reads` expression is followed only through the parts of its bound value that can be the path (a string,
+    a name, a `/` or `+` of those, and the arguments of a path call), and never through a parameter.
+    Only the forms above are followed. Any other form reads as no load, and this list is not complete. Examples: a loader
     imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
     `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
     it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
     (`helper = load`), a loader that takes the path as `*args` or `**kwargs` (a `**kwargs` loader that copies the
     keyword into a local of the same name, `path = kwargs["path"]`, is followed; `p = kwargs["path"]` is not), a call
-    that spreads the path in (a starred
-    argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name bound only as a `for` or
-    comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking, augmented assignment,
-    `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that takes the path
-    (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
-    literal (`"widget" + ".py"`).
-    Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
-    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
-    the argument its calls pass, not the new value.
+    that spreads the path in (a starred argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name
+    bound only as a `for` or comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking,
+    augmented assignment, `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that
+    takes the path (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding,
+    and a split literal (`"widget" + ".py"`).
+    Known false selections: a bare call `load(path=X)` also feeds a method `Loader.load` of the same name in the file, as
+    every def of that name takes the call, and a loader that reassigns its path before the load reads the argument its
+    calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
-    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    `test_action.py` repeats a stem today)."""
     import ast
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
-        return False
-    base = stem + ".py"
+        return set(), set(), set()
     bound = {}  # a name -> the expressions it is bound to, in any scope
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -4112,7 +4123,7 @@ def _loads_module(source: str, stem: str) -> bool:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
 
-    parent = {}  # a node -> its parent, built with `fed` on the first file loader, so a file with none pays nothing
+    parent = {}  # a node -> its parent, built on the first loader, so a file with none pays nothing
     fed = {}  # (a def, a parameter name) -> the argument expressions its calls pass for it
 
     def read_params() -> None:
@@ -4135,54 +4146,204 @@ def _loads_module(source: str, stem: str) -> bool:
                         if keyword.arg:
                             fed.setdefault((function, keyword.arg), []).append(keyword.value)
 
-    def names_base(expr, seen, scope=()) -> bool:
+    def scope_of(node) -> list:
+        """The defs around `node`, innermost first: the parameters it can read."""
+        if not parent:
+            read_params()
+        scope = []
+        up = parent.get(node)
+        while up is not None:
+            if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope.append(up)
+            up = parent.get(up)
+        return scope
+
+    stems, loads, reads = set(), set(), set()
+
+    def collect(expr, seen: set, scope, into: set) -> None:
+        """Add the basename of each string constant in `expr` to `into`, and of each constant in the values its names are
+        bound to. A name that is a parameter of a def in `scope` adds the argument values its calls pass for it."""
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
-                    return True
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
             elif isinstance(part, ast.Name):
                 if part.id in bound and part.id not in seen:
                     seen.add(part.id)
-                    if any(names_base(value, seen, scope) for value in bound[part.id]):
-                        return True
+                    for value in bound[part.id]:
+                        collect(value, seen, scope, into)
                 for function in scope:
                     key = (function, part.id)
                     if key in fed and key not in seen:
                         seen.add(key)
-                        if any(names_base(value, seen) for value in fed[key]):
-                            return True
-        return False
+                        for value in fed[key]:
+                            collect(value, seen, (), into)
 
-    def last_part(dotted: str) -> bool:
-        return dotted.rsplit(".", 1)[-1] == stem
+    def read_collect(expr, seen: set, into: set) -> None:
+        """Add the basename of each string constant in a read's path expression, and follow each name in it (`read_follow`)."""
+        for part in ast.walk(expr):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
+            elif isinstance(part, ast.Name):
+                read_follow(part.id, seen, into)
+
+    def read_follow(name: str, seen: set, into: set) -> None:
+        """Follow a name of a read to the values an assignment binds it to. Only the parts of such a value that can be the
+        path are followed (`read_part`): a call that takes the name as one argument does not pass on its other arguments."""
+        if name in bound and name not in seen:
+            seen.add(name)
+            for value in bound[name]:
+                read_part(value, seen, into)
+
+    def read_part(expr, seen: set, into: set) -> None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            into.add(expr.value.replace("\\", "/").rsplit("/", 1)[-1])
+        elif isinstance(expr, ast.Name):
+            read_follow(expr.id, seen, into)
+        elif isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Div, ast.Add)):
+            read_part(expr.left, seen, into)
+            read_part(expr.right, seen, into)
+        elif isinstance(expr, ast.Call) and is_path_call(expr.func):
+            for arg in list(expr.args) + [kw.value for kw in expr.keywords]:
+                read_part(arg, seen, into)
+
+    def last(dotted: str) -> str:
+        return dotted.rsplit(".", 1)[-1]
+
+    def is_path_call(func) -> bool:
+        if isinstance(func, ast.Name):
+            return func.id in _PATH_NAMES
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr == "join":  # os.path.join, never `", ".join(...)`
+            owner = func.value
+            return (isinstance(owner, ast.Attribute) and owner.attr == "path") or \
+                   (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
+        return func.attr in _PATH_METHODS
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(last_part(alias.name) for alias in node.names):
-                return True
+            stems.update(last(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
-                return True
+            if node.module:
+                stems.add(last(node.module))
+            stems.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            read_collect(node, set(), reads)
         elif isinstance(node, ast.Call):
             func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             if func in ("import_module", "__import__"):
                 first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
-                    return True
-            elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    stems.add(last(first.value))
+            elif func in _LOADERS:
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if not parent:
-                    read_params()
-                scope = []  # the defs around this call, innermost first: the parameters it can read
-                up = parent.get(node)
-                while up is not None:
-                    if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        scope.append(up)
-                    up = parent.get(up)
-                if any(names_base(part, set(), scope) for part in parts):
-                    return True
-    return False
+                scope = scope_of(node)
+                for part in parts:
+                    collect(part, set(), scope, loads)
+            elif func in _FILE_CALLS:
+                for part in list(node.args) + [kw.value for kw in node.keywords]:
+                    read_collect(part, set(), reads)
+            if is_path_call(node.func):
+                read_collect(node, set(), reads)
+    return stems, loads, reads
+
+
+def _profile_loads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) imports or loads the module `stem`: a `.py` stem imported by name, or the
+    basename `stem + extension` in a loader's path argument."""
+    stems, loads = profile[0], profile[1]
+    return (extension == ".py" and stem in stems) or stem + extension in loads
+
+
+def _profile_reads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) loads the module `stem + extension`, or names it in a path expression that
+    copies, opens or runs a file."""
+    return _profile_loads(profile, stem, extension) or stem + extension in profile[2]
+
+
+def _loads_module(source: str, stem: str, extension: str = ".py") -> bool:
+    """True when the Python text imports or loads the module `stem`, or loads `stem + extension` by a file loader
+    (`_load_profile`, `_profile_loads`). A text that does not parse reads False."""
+    return _profile_loads(_load_profile(source), stem, extension)
+
+
+def _tracked_files():
+    """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
+    done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                         encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        return None, "git ls-files failed: %s" % done.stderr.strip()
+    return [item for item in done.stdout.split("\0") if item], None
+
+
+def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
+    """The suites that test any of `paths`. Per path: each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, whether
+    or not it parses, plus each tracked `test_*.py` whose profile (`_load_profile`) reads it: it imports or loads the path's
+    module when the path is a `.py` file, or it names the path's basename in a path expression that copies, opens or runs
+    a file. A listed file (REPORT_TARGETS) adds its listed suites; with `union` False it gets those only and no scan. With
+    `chain` True a suite also tests a `.py` path that a module it loads imports, however deep: from each tracked `.py` the
+    suite names (by stem or by basename), it follows the stems that file imports (`import`, `from`, a literal
+    `import_module`) to tracked `.py` files, each file once, so a cycle ends. A deleted `.py` path is no longer tracked, so
+    its stem is matched against the stems those files import. A stem or basename with no tracked `.py` is outside the
+    repository and ends the chain there. Each file is read and parsed once, whatever the number of paths or suites. A file
+    that cannot be read has an empty profile."""
+    import re
+    listed = dict(REPORT_TARGETS)
+    names = set()
+    scan = [path for path in paths if union or path not in listed]
+    for path in paths:
+        if path in listed:
+            names.update(listed[path])
+    if not scan:
+        return names
+    profiles = {}  # a tracked path -> its profile; each file read once
+
+    def profile_of(item):
+        if item not in profiles:
+            try:
+                with open(item, encoding="utf-8") as handle:
+                    profiles[item] = _load_profile(handle.read())
+            except (OSError, ValueError):
+                profiles[item] = (set(), set(), set())
+        return profiles[item]
+
+    suites = [item for item in tracked if os.path.basename(item).startswith("test_") and item.endswith(".py")]
+    reached = {}  # a suite -> the tracked .py files its loads lead to
+    reached_stems = {}  # a suite -> the stems those files import, so a deleted module (no longer tracked) still matches
+    if chain:
+        by_stem = {}
+        for item in tracked:
+            if item.endswith(".py"):
+                by_stem.setdefault(os.path.splitext(os.path.basename(item))[0], []).append(item)
+        for suite in suites:
+            stems, loads, reads = profile_of(suite)
+            todo = [file for stem in stems for file in by_stem.get(stem, [])]
+            todo += [file for base in loads | reads if base.endswith(".py") for file in by_stem.get(base[:-3], [])
+                     if os.path.basename(file) == base]
+            seen = set()
+            followed = set()
+            while todo:
+                file = todo.pop()
+                if file in seen:
+                    continue
+                seen.add(file)
+                file_stems = profile_of(file)[0]
+                followed.update(file_stems)
+                todo.extend(next_file for stem in file_stems for next_file in by_stem.get(stem, []))
+            reached[suite] = seen
+            reached_stems[suite] = followed
+    for path in scan:
+        folder, name = os.path.split(path)
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        for item in suites:
+            if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
+                    or _profile_reads(profile_of(item), stem, extension) \
+                    or path in reached.get(item, ()) \
+                    or (extension == ".py" and stem in reached_stems.get(item, ())):
+                names.add(item)
+    return names
 
 
 def _guard_section_sources(tracked) -> list:
@@ -4216,14 +4377,14 @@ def _guard_section_sources(tracked) -> list:
 
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
-    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A guard section
-    file (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
-    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
-    `hooks/test_guard.py`. A non-`.py` file prints the suites beside it only. A suite that cannot be read or parsed is skipped.
-    It is the `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
+    suites. Any other file prints `suites_for_paths` with no union: each tracked `test_<stem>.py` and `test_<stem>_*.py`
+    beside it, plus each tracked `test_*.py` of the repository of the working folder that imports or loads its module, or
+    names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
+    (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
+    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
+    whole `hooks/test_guard.py`. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
-    import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
     parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
     args = parser.parse_args(argv)
@@ -4232,36 +4393,51 @@ def tests_for_main(argv) -> int:
     if path in listed:
         names = set(listed[path])
     else:
-        folder, name = os.path.split(path)
-        stem, extension = os.path.splitext(name)
-        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
-        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
-                             encoding="utf-8", stdin=subprocess.DEVNULL)
-        if done.returncode != 0:
-            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
             return 2
-        tracked = [item for item in done.stdout.split("\0") if item]
-        names = {item for item in tracked
-                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
-        if extension == ".py":
-            for item in tracked:
-                base = os.path.basename(item)
-                if item in names or not (base.startswith("test_") and base.endswith(".py")):
-                    continue
-                try:
-                    with open(item, encoding="utf-8") as handle:
-                        source = handle.read()
-                except (OSError, ValueError):
-                    continue
-                if _loads_module(source, stem):
-                    names.add(item)
-            # The runner reads each guard section file, so it stands for a section file that loads the module.
-            if any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
-                names.add("hooks/test_guard.py")
+        names = suites_for_paths([path], tracked, union=False)
+        stem, extension = os.path.splitext(os.path.basename(path))
+        # The runner reads each guard section file, so it stands for a section file that loads the module.
+        if extension == ".py" and any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
+            names.add("hooks/test_guard.py")
         if path in GUARD_MODULE_FAMILIES:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
             names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
+    for name in sorted(names):
+        print(name)
+    return 0
+
+
+def lint_suites_main(argv) -> int:
+    """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
+    one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets
+    the suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
+    `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
+    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
+    parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
+    args = parser.parse_args(argv)
+    done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", args.lint_suites + "...HEAD"],
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        print("ERROR git diff %s...HEAD failed: %s" % (args.lint_suites, done.stderr.strip()))
+        return 2
+    changed = sorted({item.replace(os.sep, "/") for item in done.stdout.split("\0") if item})
+    tracked = []
+    if changed:
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
+            return 2
+    names = suites_for_paths(changed, tracked, union=True, chain=True)
+    # A changed suite is picked itself: an edit that breaks its own suite is caught by that suite.
+    on_disk = set(tracked)
+    names.update(item for item in changed if item in on_disk
+                 and os.path.basename(item).startswith("test_") and item.endswith(".py"))
     for name in sorted(names):
         print(name)
     return 0
@@ -4496,6 +4672,8 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    if "--lint-suites" in sys.argv[1:]:
+        return lint_suites_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
