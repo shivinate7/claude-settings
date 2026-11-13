@@ -79,7 +79,8 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
-import guard_pointer  # noqa: E402  the claude-settings pointer, patched by the ruled-store cases
+# The pointer is patched by name, not imported: an import line here lists this suite for hooks/guard_pointer.py.
+POINTER_CHECKOUT = "guard_pointer.pointer_checkout"  # the ruled-store cases' patch target
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
@@ -1752,7 +1753,7 @@ def case_ruled_store_first_and_carries_supersedes():
         RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
         RULED_CLOSED_ID: fixture.entry(RULED_CLOSED_ID, status="closed"),
     }), tcj.ROOT)
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, _unknown = fn(tcj.APPS_GOAL, repo)
     first = candidates[0] if candidates else ""
     check("ruled store: the open entry is the first candidate, ahead of the decision records",
@@ -1781,7 +1782,7 @@ def case_ruled_store_marks_an_unread_entry_unchecked():
         RULED_UNREAD_ID: fixture.entry(RULED_UNREAD_ID, at="2026-11-13T09:00:00-06:00", ruling=RULED_TEXT,
                                        supersedes=None, supersedes_none="unread: triage has not read the supersedes"),
     }), tcj.ROOT)
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, _unknown = fn(tcj.APPS_GOAL, repo)
     unread_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_UNREAD_ID)), "")
     read_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_ID)), "")
@@ -1799,7 +1800,7 @@ def case_ruled_store_absent_is_only_unknown():
     if not callable(fn):
         return
     repo = tcj.make_repo("ruled-absent", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, unknown = fn(tcj.APPS_GOAL, repo)
     check("ruled store absent: the unknown list names the store as absent",
           "ruled store (absent)" in unknown, str(unknown)[:300])
@@ -1835,7 +1836,7 @@ def case_ruled_store_words_filter_leaves_out_an_unrelated_entry():
                                        quote="lunch options", source="page item 40",
                                        supersedes=[{"kind": "test", "ref": "lunch-menu-check"}]),
     }), tcj.ROOT)
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, _unknown = fn(tcj.APPS_GOAL, repo)
     listed = ruled_ids(candidates)
     check("ruled store words: the entry that shares words with the question is listed",
@@ -1859,7 +1860,7 @@ def case_ruled_store_caps_matching_entries_at_eight_newest_first():
                                      ruling="Owner: keep the apps' access to claude-settings, round %02d." % day)
     repo = tcj.make_repo("ruled-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
     fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, _unknown = fn(tcj.APPS_GOAL, repo)
     listed = ruled_ids(candidates)
     expected = ["ruled-cap-%02d" % day for day in range(12, 12 - RULED_CAP_MAX, -1)]
@@ -1885,7 +1886,7 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
                                      ruling="Owner: the apps menu changes on Fridays, item %02d." % day)
     repo = tcj.make_repo("ruled-rank", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
     fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
-    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
         candidates, _unknown = fn(tcj.APPS_GOAL, repo)
     listed = ruled_ids(candidates)
     check("ruled store rank: the entry that shares the most words with the question is listed",
