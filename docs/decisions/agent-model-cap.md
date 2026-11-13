@@ -3,13 +3,13 @@
 ## The ruling
 
 Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant.
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), and the designer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`). A builder's third try runs on the builder row, Sonnet.
 The arbiter and consultant sessions run Opus by their session rows below, and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter`). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused. The owner's typed override lifts that refusal (decision `owner-override`); no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model is refused. It runs only when the owner's typed override or grant names it
 (owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A session (coordinator, triage, batch runner, consultant, arbiter or lane) is not an agent: it runs the model of its session row below. A review round runs the model of its round row (see the round rows). Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows. An Agent
-or Task spawn that sets model opus is refused, unless Plan, designer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
+or Task spawn that sets model opus is refused, unless Plan, designer, refuter or an Explore's `Audit:` marker covers it.
 The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
@@ -30,7 +30,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high in a guard or check lane, medium in a product, design or docs lane (owner, 2026-11-13 14:01 CST, item 755, own-755-a-builder-by-kind) |
-| builder, try 3 after a FAIL at review round 2 | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
+| builder, try 3 after a FAIL at review round 2 | sonnet, the builder row above (owner, 2026-11-13 14:24 CST, item 758 b, own-758-b-third-try-builder-row) | the builder row above |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | sonnet, the owner's ruling of 2026-11-13 14:01 CST, item 756 (own-756-design-reviewer-sonnet) | high |
@@ -82,7 +82,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 
 Scope (owner, 2026-11-13 13:53 CST): the layout (owner, 2026-11-13 13:51 CST, item 747, own-747-role-layout) sets the session rows only. Agent rows keep their rows, except the builder's effort (owner, 2026-11-13 14:01 CST, item 755, own-755-a-builder-by-kind) and the design reviewer (owner, 2026-11-13 14:01 CST, item 756, own-756-design-reviewer-sonnet).
 
-**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix verifier's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to `ROLE_ROUND_FALLBACK` in `hooks/guard.py`. That table gives sonnet for a reviewer's `1 guard`, round 2, round 3 and `fix verifier`. For the builder's round 3 it gives opus. It has no row for a reviewer's `1 other`, so the role row (haiku) applies. `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
+**The round rows.** The one home of the model and effort of each review round. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix verifier's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to `ROLE_ROUND_FALLBACK` in `hooks/guard.py`. That table gives sonnet for a reviewer's `1 guard`, round 2, round 3 and `fix verifier`. It has no builder row, so a builder's third try runs on the builder row. It has no row for a reviewer's `1 other`, so the role row (haiku) applies. `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
 
 | Role | Round | Model | Effort |
 |---|---|---|---|
@@ -91,9 +91,8 @@ Scope (owner, 2026-11-13 13:53 CST): the layout (owner, 2026-11-13 13:51 CST, it
 | reviewer | 2 | sonnet | high |
 | reviewer | 3 | sonnet | high |
 | reviewer | fix verifier | sonnet | xhigh |
-| builder | 3 | opus | high |
 
-Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. The round 3 reviewer runs Sonnet, effort high (round 3 is the round after a round 2 FAIL; owner, 2026-11-13 14:05 CST, sharpened 14:07 CST). Rounds 2 and 3 set effort per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's round 3 (try 3) runs Opus by the owner's standing grant.
+Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. The round 3 reviewer runs Sonnet, effort high (round 3 is the round after a round 2 FAIL; owner, 2026-11-13 14:05 CST, sharpened 14:07 CST). Rounds 2 and 3 set effort per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs on the builder row, Sonnet (owner, 2026-11-13 14:24 CST, item 758 b, own-758-b-third-try-builder-row).
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -176,9 +175,8 @@ Kind of risk: likely. Landed 2026-11-08.
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
-leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
-builder on Opus just runs, with no approval. The first-line form is case-sensitive. Later lines count only
-when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. The round 3 reviewer runs Sonnet, effort high. A reviewer's Opus spawn with a `Round 3 of 3` marker is refused with the remedy `use sonnet`, and names no override (owner, 2026-11-13 14:05 CST). A try 3 builder needs Opus.
+leftmost `Try N of 3` there adds nothing. The first-line form is case-sensitive. Later lines count only
+when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. The round 3 reviewer runs Sonnet, effort high. A reviewer's Opus spawn with a `Round 3 of 3` marker is refused with the remedy `use sonnet`, and names no override (owner, 2026-11-13 14:05 CST).
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
@@ -235,7 +233,7 @@ proves exit 0 and the install offline.
 The guard holds the ceiling by a refusal (owner, 2026-11-01 17:25 CST, item 127, pick a: any spawn above its role's
 model is refused, and the owner's typed override lifts it, the same for Sonnet and Opus; before that it was an ask
 under the 2026-10-21 grant). An Agent or Task spawn that sets model opus is refused under
-`agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` marker (the step-up names the forms), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
+`agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer (the 2026-10-26 grant above), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
 it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
@@ -246,8 +244,8 @@ scan as the Haiku floor and the step-up). Item 127 pick a and the coordinator ru
 a variable brief, or a prompt key beside a spread, grants nothing. It is judged as an empty brief. The override or a literal
 brief lifts the refusal. A call whose model or `agentType` the scan cannot read is skipped. The floor reads the model, and the role only to exempt
 a Haiku role. The step-up skips an unread brief. A Workflow `agent()` call that sets its model through a variable is unseen by all four
-checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges it: a builder
-brief with `Round 3 of 3` is refused. The role row refuses it on an Agent or Task call only, when the role's agent file
+checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges it: a reviewer
+brief with `Round 2 of 3` or `Round 3 of 3` is refused. The role row refuses it on an Agent or Task call only, when the role's agent file
 pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus.
 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
