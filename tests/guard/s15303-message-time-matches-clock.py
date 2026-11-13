@@ -220,19 +220,21 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
 # So each 10-minutes-ahead refusal below is RED on main. Every other case here is marked STAYS GREEN: it passes on main
 # and must pass once the header form widens. The group's clock is 12:43 CST on 2026-11-13, so 12:53 is 10 minutes ahead.
 MTC_FORM_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the 10-minutes-ahead refusals
-MTC_FORMS = (  # {t} is the stamp's time, 12:53 in every form below
-    ("bracket with a date", "[coordinator {t} CST Nov 13] hi"),
-    ("bracket", "[coordinator {t} CST] x"),
-    ("bold bracket", "**[coordinator {t} CST]** hi"),
-    ("paren", "(coordinator {t} CST) x"),
-    ("bare label", "coordinator {t} CST x"),
-    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi"),
+MTC_FORMS = (  # (name, template, quote): {t} is the stamp's time, 12:53 in every form below
+    ("bracket with a date", "[coordinator {t} CST Nov 13] hi", False),
+    ("bracket", "[coordinator {t} CST] x", True),
+    ("bold bracket", "**[coordinator {t} CST]** hi", True),
+    ("paren", "(coordinator {t} CST) x", True),
+    ("bare label", "coordinator {t} CST x", True),
+    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi", False),
 )
+# quote is False for the two forms with `Nov 13` after the zone. The rule puts a date before the time, so whether that
+# date counts is open, and a dated stamp has no quote window. Their 70-minute case is not pinned here.
 
 
 def mtc_form_cases():
-    """Each header form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and 70 minutes ahead."""
-    for form, template in MTC_FORMS:
+    """Each header form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and, if undated, 70 ahead."""
+    for form, template, quote in MTC_FORMS:
         msg = template.format(t="12:53")
         # RED on main: refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
         mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
@@ -245,8 +247,9 @@ def mtc_form_cases():
         mtc_allow("a %s header 10 minutes behind is allowed: 12:53 CST at 13:03" % form, msg,
                   clock="2026-11-13T13:03:00-06:00")
         # STAYS GREEN: undated and more than 60 minutes ahead, so it reads as a quote from an earlier day.
-        mtc_allow("a %s header 70 minutes ahead is allowed: undated, past the quote window" % form, msg,
-                  clock="2026-11-13T11:43:00-06:00")
+        if quote:
+            mtc_allow("a %s header 70 minutes ahead is allowed: undated, past the quote window" % form, msg,
+                      clock="2026-11-13T11:43:00-06:00")
 
 
 mtc_form_cases()
