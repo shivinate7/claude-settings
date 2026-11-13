@@ -18601,7 +18601,9 @@ class BatchFreeze(CloudSession):
         super().setUp()
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
         self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
+        self.red_jobs = {}  # run URL -> names of the jobs of that run that finished red: the answers the host's jobs read gives
         self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
+        self.host.red_job_names = lambda url: self.red_jobs.get(url, [])  # the real Host.red_job_names, scripted per case
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -19461,6 +19463,54 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
         self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a blame from a run still running is not refused as one: %s" % out)
         self.assertEqual(rc, 1, "a blame from a run still running exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_blame_from_a_run_still_going_whose_job_finished_red_is_stored(self):
+        """A run with a job that finished red and other jobs still going blames the lane: the red job already shows the cause."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.scripted_run(7005, None, self.head("batch-nightly"))
+        self.red_jobs[url] = ["checks (ubuntu)"]  # macOS and Windows jobs of the same run are still going
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertEqual(self.stored_blamed(pr), [102], "a run still going with a finished red job did not store Blamed: #102: %s" % out)
+        self.assertEqual(rc, 0, "the blame from a still-going run with a red job exited %s, not 0: %s" % (rc, out))
+        self.assertIn("checks (ubuntu)", out, "the blame does not name the finished red job it rests on: %s" % out)
+        self.assertEqual(self.pushes(), [], "the blame pushed to origin, though it writes only the frozen block: %s" % out)
+
+    def test_the_host_jobs_read_counts_only_failure_and_leaves_out_the_rollup(self):
+        """The real Host.red_job_names: only a non-rollup job whose conclusion is failure is red. Skipped, cancelled, success and running are not."""
+        host = merge.Host(["checks"], "main", minute=60, now=lambda: 0, pause=lambda s: None)
+        jobs = [{"id": 1, "name": "checks (ubuntu)", "conclusion": "failure"}, {"id": 2, "name": "checks (macos)", "conclusion": None},
+                {"id": 3, "name": "checks (windows)", "conclusion": "success"}, {"id": 4, "name": merge.ROLLUP_JOB, "conclusion": "failure"},
+                {"id": 5, "name": "docs", "conclusion": "skipped"}, {"id": 6, "name": "lint", "conclusion": "cancelled"}, {"id": 7, "conclusion": "failure"}]
+        def pages(path, key=None, **kw):
+            if path != "actions/runs/7007/jobs":
+                raise merge.Stop("no jobs scripted for %s" % path)
+            return jobs
+        host.pages = pages
+        self.assertEqual(host.red_job_names("https://github.com/o/r/actions/runs/7007"), ["checks (ubuntu)", "7"])
+        host.pages = lambda path, key=None, **kw: [j for j in jobs if j["conclusion"] in (None, "skipped", "cancelled", "success") or j.get("name") == merge.ROLLUP_JOB]
+        self.assertEqual(host.red_job_names("https://github.com/o/r/actions/runs/7007"), [], "skipped, cancelled, running, success and the rollup count as red")
+        with self.assertRaises(merge.Stop):
+            host.red_job_names("https://github.com/o/r/pull/7")
+
+    def test_a_blame_from_a_still_going_run_on_an_older_head_is_refused_even_with_a_red_job(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        older = self.head("batch-nightly")
+        self.bump("batch-nightly")
+        url = self.scripted_run(7006, None, older)
+        self.red_jobs[url] = ["checks (ubuntu)"]
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertRegex(out, r"current head|older head", "a still-going run on an older head is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "the blame exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
     def test_a_blame_with_no_run_is_refused_and_names_the_run_flag(self):
