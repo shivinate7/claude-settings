@@ -33,7 +33,7 @@
   "pick": "a",
   "rank": 1,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
-  "reply": "Answered in the retrospective's chat at 20:24 CST: \"yes \u2014 i figure some prose has to wait behind some code changes otherwise it'd be confusing, but for a large part prose truly can all be done first \u2014 u can even work on readying that now!\" Reading: a, moved toward b. Prose-only steps go first, as their own batches, ahead of code. A prose step that describes code not yet on main waits behind that code. The one short round stays. The quote-match skip applies only to a PR of verbatim quotes and their times. The retrospective is sorting every open step into prose, prose-after-code and code now. Home: decision docs-only-prs-skip-review.",
+  "reply": "Reading rewritten 11:40 CST Nov 13 (owner 11:19 and 11:24 CST, in runner 10's chat: prose and code stay in separate batches \"when it's faster\"). Your 20:24 CST Nov 11 words (\"some prose has to wait behind some code changes ... prose truly can all be done first\") were about merge order, not a wall. Two earlier readings were wrong: \"as their own batches\" (retrospective) and \"never share a batch\" (coordinator, 11:34 CST Nov 12). Now: the batch runner mixes prose and code in one batch when that lands both sooner; a prose lane that describes code not yet on main never merges ahead of that code, and the same batch is fine. The one short review round stays; the quote-match skip applies only to a PR of verbatim quotes and their times. Home: ruling prose-batch-order on the roadmap record; a docs/decisions record is still owed (record-writer lane). Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "prose merge order",
   "status": "closed",

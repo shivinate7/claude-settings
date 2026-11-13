@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-13T17:40:00Z",
+  "context": "Goal: degen batch 24g lands.\nProblem (money): the milestone-proof (suite) leg died in 3 s with no runner (label xcode-27, log 404); a re-run bills macOS minutes.\nBased on (measure): the leg's 3-second death and missing log.\nDeparts from: main \u2014 the leg is not re-run until you choose.",
+  "home": "degen batch 24g, PR #702",
+  "id": "degen-702-rerun",
+  "kind": "decision",
+  "n": 710,
+  "options": [
+    {
+      "gain": "The xcode-27 label found no runner, so this avoids the same 3-second death.",
+      "how": "Re-run the milestone-proof (suite) leg once on the degen-mac runner.",
+      "id": "degen-mac",
+      "key": "a",
+      "label": "Re-dispatch once on degen-mac (recommended)",
+      "lose": "Bills macOS minutes for one run."
+    },
+    {
+      "gain": "Keeps the label the job asks for.",
+      "how": "Re-run on the xcode-27 label.",
+      "id": "xcode-27",
+      "key": "b",
+      "label": "Re-dispatch on xcode-27",
+      "lose": "Likely dies again with no runner; bills minutes."
+    },
+    {
+      "gain": "No minutes spent.",
+      "how": "Leave #702 unmerged until a runner is up.",
+      "id": "hold",
+      "key": "c",
+      "label": "Hold #702",
+      "lose": "Degen batch 24g waits."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 11:26 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Degen #702: re-run the dead leg?",
+  "shown": [
+    {
+      "id": "degen-mac",
+      "key": "a",
+      "label": "Re-dispatch once on degen-mac (recommended)"
+    },
+    {
+      "id": "xcode-27",
+      "key": "b",
+      "label": "Re-dispatch on xcode-27"
+    },
+    {
+      "id": "hold",
+      "key": "c",
+      "label": "Hold #702"
+    }
+  ],
+  "status": "open",
+  "title": "Re-run degen #702's dead milestone-proof leg, and on which runner?",
+  "why": "The re-run spends money, so it needs your word."
+}

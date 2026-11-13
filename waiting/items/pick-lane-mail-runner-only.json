@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:40:00Z",
+  "context": "Goal: the merge tool tells a lane its review result without spamming.\nProblem (risk): after #3148, merge --reviewed posts a lane-mail marker and sends mail; a run on your computer should not mail lanes.\nBased on (finding): reviewer finding 9 on #3148.\nDeparts from: main \u2014 main sends no lane mail; this adds mail from runner sessions only.",
+  "home": "step merge-tool-allow-text",
+  "id": "pick-lane-mail-runner-only",
+  "kind": "decision",
+  "n": 709,
+  "options": [
+    {
+      "gain": "No stray mail from a test or hand run.",
+      "how": "merge --reviewed sends lane mail only in a batch-runner session; on your computer it prints \"lane mail not sent\".",
+      "id": "runner-only",
+      "key": "a",
+      "label": "Lane mail sends only from a batch-runner session (coordinator's pick)",
+      "lose": "Your own run sends no mail."
+    },
+    {
+      "gain": "Same behaviour everywhere.",
+      "how": "merge --reviewed sends mail wherever it runs.",
+      "id": "any-session",
+      "key": "b",
+      "label": "Lane mail sends from any session",
+      "lose": "A hand run can mail a lane by mistake."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "coordinator 11:26 CST Nov 13; reviewer finding 9 on #3148",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane mail: runner sessions only",
+  "shown": [
+    {
+      "id": "runner-only",
+      "key": "a",
+      "label": "Lane mail sends only from a batch-runner session (coordinator's pick)"
+    },
+    {
+      "id": "any-session",
+      "key": "b",
+      "label": "Lane mail sends from any session"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Send lane mail from merge --reviewed only in a batch-runner session?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}
