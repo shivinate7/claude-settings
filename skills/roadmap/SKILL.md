@@ -286,12 +286,23 @@ After each build the roadmap build script prints the upkeep list for the triage 
     The page writes `open` and `closed` only, so only `closed` releases a lane;
   - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
 
+  A lane whose only holders are stale drafts reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane
+  <session id>)`, and the row counts it. A stale draft meets every test in this list. It is over 12 h old at `readAt`,
+  not held, and has no review log. Its `head` is a full 40-hex sha not in the default branch (a draft with none, or a
+  short one, gives no joint line). Its branch is not one that another live lane's row holds. No doing step is named in
+  its branch or title. Any step still doing under the lane holds the joint line, even one a merged pull marks landed.
+  So does an open pull on a `lane/<slug>-*` branch (the archive guard counts it as the lane's own). The lane's session
+  row needs `idle_since` (ISO time with a zone) over 12 h before `readAt`. It also needs `unarchived_epoch` as the JSON
+  int 0 (not false, 0.0 or text). One open pull whose title or branch holds the word
+  `records` stops every joint line. The batch runner pushes each branch to `archive/<branch>`, closes each draft, then
+  archives the lane. The joint pass reads rows already loaded: no process, file or log of its own.
+
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
   `Step:` trailer on main. When the lane also carries another repo's `cs-repo:` tag, that reason ends `; also tagged <those tags>`.
   `step <ids> still doing under this lane`: each step whose `lane` is the session, with status doing or active, not landed on main.
   The last clears when the step's status is set to todo or done. A lane that waits (a step not done, an
-  open pull, an open item) prints no line. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
+  open pull, an open item) prints no line, except the joint case below. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;

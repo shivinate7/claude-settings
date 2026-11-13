@@ -5,7 +5,8 @@ Run it from the repository root:
 
     python hooks/test_guard.py
 
-GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below); unset
+GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below);
+GUARD_TESTS=macos-slice runs only the cases that reach a darwin arm (see MACOS_REACH); unset
 runs every case. Any other value stops the run before a case runs.
 
 GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this file). An unknown
@@ -86,8 +87,13 @@ os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 CASES = []
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
-# guard code. Unset or empty keeps every case. Any other value stops the run before a case runs.
-GUARD_TESTS_MODES = ("", "windows-slice")
+# guard code. GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin
+# arm (MACOS_REACH). Unset or empty keeps every case. Any other value stops the run before a case runs.
+GUARD_TESTS_MODES = ("", "windows-slice", "macos-slice")
+# The tag each slice keeps. The windows slice also keeps the log checks in WINDOWS_CHECKERS. The macOS
+# slice also keeps each log check whose family reaches a darwin arm. A log check has no session, so only
+# a case reaches the session row.
+SLICE_TAG = {"windows-slice": "windows", "macos-slice": "macos"}
 
 # GUARD_FAMILY=<name> keeps only the cases of one family, so a change to one rule runs in that
 # family's time. A case takes the family of the nearest FAMILY line above it (one per section),
@@ -351,6 +357,114 @@ def windows_shaped(*parts):
     return WINDOWS_SHAPE.search(text) is not None
 
 
+# GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin arm. Each row
+# names an arm by file and function, with the cases that reach it. macos_arm_problems() holds the rows to
+# the arms the ast scan finds in hooks/, so an arm with no row fails the run before any case runs.
+# The macOS-only arms, by kind: a sys.platform test that holds on darwin, the else of one that does not,
+# and a ps, lsof or launchctl argument list. Each arm is read in a hooks module the guard suite reaches.
+MACOS_COMMANDS = ("ps", "lsof", "launchctl")
+MACOS_REACH = {
+    ("hooks/guard.py", "_read_memory"): lambda family, session: family == "load-brake",
+    ("hooks/guard_rm_var.py", "_rm_real"): lambda family, session: family == "rm-var",
+    ("hooks/proc_env.py", "holds_session_tag"): lambda family, session: session is not None,
+    ("hooks/git_reads.py", "_process_start_ms"): lambda family, session: family in ("kill", "branch-worktree"),
+    ("hooks/guard_kill.py", "_process_parents"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_ps_ppid"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
+}
+
+
+def macos_reached(family, session):
+    return any(reach(family, session) for reach in MACOS_REACH.values())
+
+
+def _mentions_sys_platform(node):
+    return any(isinstance(n, ast.Attribute) and n.attr == "platform"
+               and isinstance(n.value, ast.Name) and n.value.id == "sys" for n in ast.walk(node))
+
+
+def _platform_truth(test):
+    """What a sys.platform test says when sys.platform is darwin: True or False, or None when the test reads
+    a name other than sys, which this scan does not evaluate."""
+    if {n.id for n in ast.walk(test) if isinstance(n, ast.Name)} - {"sys"}:
+        return None
+
+    class DarwinSys:
+        platform = "darwin"
+
+    expr = ast.fix_missing_locations(ast.Expression(body=test))
+    try:
+        return bool(eval(compile(expr, "<platform test>", "eval"), {"sys": DarwinSys}, {}))
+    except Exception:
+        return None
+
+
+def _product_reach():
+    """The hooks modules the guard suite reaches: guard.py and every hooks module it imports, read with the ast.
+    Test files are not product code, so they are left out."""
+    hooks = os.path.dirname(os.path.abspath(__file__))
+    modules = {n[:-3] for n in os.listdir(hooks) if n.endswith(".py") and not n.startswith("test_")}
+    reach, todo = set(), ["guard"]
+    while todo:
+        module = todo.pop()
+        if module in reach:
+            continue
+        reach.add(module)
+        with open(os.path.join(hooks, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = {node.module.split(".")[0]}
+            else:
+                continue
+            todo.extend((names & modules) - reach)
+    return reach
+
+
+def darwin_arms():
+    """(file, function) of each macOS-only arm in a hooks module the guard reaches. The ast reads the code, so a
+    string or a comment that names darwin, ps or lsof is not an arm."""
+    found = set()
+    hooks = os.path.dirname(os.path.abspath(__file__))
+    for module in sorted(_product_reach()):
+        name = module + ".py"
+        path = os.path.join(hooks, name)
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+        def owner(node):
+            while node in parents and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node = parents[node]
+            return getattr(node, "name", "<module>")
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.If, ast.IfExp)) and _mentions_sys_platform(node.test):
+                truth = _platform_truth(node.test)
+                if truth or (truth is False and node.orelse):
+                    found.add(("hooks/" + name, owner(node)))
+            if isinstance(node, (ast.List, ast.Tuple)) and node.elts \
+                    and isinstance(node.elts[0], ast.Constant) and node.elts[0].value in MACOS_COMMANDS:
+                found.add(("hooks/" + name, owner(node)))
+    return found
+
+
+def macos_arm_problems():
+    """What is wrong with MACOS_REACH against the darwin arms in hooks/: an arm with no row, a row that names
+    no arm, and a row that reaches no case."""
+    arms = darwin_arms()
+    rows = set(MACOS_REACH)
+    problems = ["untagged darwin arm %s::%s: add a row to MACOS_REACH" % arm for arm in sorted(arms - rows)]
+    problems += ["MACOS_REACH row %s::%s names no darwin arm in hooks/" % row for row in sorted(rows - arms)]
+    units = [(c["family"], c["session"]) for c in CASES] + [(LOG_FAMILY.get(label), None) for label, _ in LOG_CHECKS]
+    problems += ["MACOS_REACH row %s::%s reaches no case or log check" % row for row in sorted(rows)
+                 if not any(MACOS_REACH[row](family, session) for family, session in units)]
+    return problems
+
+
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
@@ -413,6 +527,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "family": _family(name),
         "windows": bool(windows or session is not None or windows_shaped(
             tool, raw, cwd, env_path, config, *tool_input.values())),
+        # Tagged for GUARD_TESTS=macos-slice: the case reaches a darwin arm (MACOS_REACH).
+        "macos": macos_reached(_family(name), session),
     })
 
 
@@ -681,15 +797,24 @@ SKIP = "skip"
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
-        say("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
+        say("GUARD_TESTS=%r: want unset, 'windows-slice' or 'macos-slice'. Nothing ran." % mode)
         return 2
+    problems = macos_arm_problems()
+    if problems:
+        for problem in problems:
+            say("macos arm check FAIL: " + problem)
+        return 1
+    tag = SLICE_TAG.get(mode)
     fam = GUARD_FAMILY
-    cases = [c for c in CASES if (not mode or c["windows"]) and (not fam or c["family"] == fam)]
+    cases = [c for c in CASES if (not tag or c[tag]) and (not fam or c["family"] == fam)]
     logs = [(label, check) for label, check in LOG_CHECKS
-            if (not mode or check in WINDOWS_CHECKERS) and (not fam or LOG_FAMILY.get(label) == fam)]
+            if (not mode or (tag == "windows" and check in WINDOWS_CHECKERS)
+                or (tag == "macos" and check not in WINDOWS_CHECKERS
+                    and macos_reached(LOG_FAMILY.get(label), None)))
+            and (not fam or LOG_FAMILY.get(label) == fam)]
     total = len(cases) + len(logs)
     if mode and not total:
-        say("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
+        say("GUARD_TESTS=%s: no case is tagged. Nothing ran." % mode)
         return 2
     # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
     picked = shard_of(cases + logs, GUARD_SHARD)

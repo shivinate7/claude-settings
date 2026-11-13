@@ -263,7 +263,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -289,7 +289,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -306,6 +306,14 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
+    # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
+    # the finished-agent section). The ungated verdict frees such a lock with no proof of the finish,
+    # and a general sweep reaps the tree with a shell the agent may have left inside.
+    ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+     "sweep",
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n',
+     "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
@@ -654,6 +662,14 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^.{1,64}$")',
      "test_an_unsafe_or_unknown_agent_id_names_nothing"),
+    # `_restore_cut_short` reads the finish proof for a locked tree: a cut-short removal under a dead
+    # host's lock is written back only when the agent is proven finished. Passing False reads every
+    # such tree as unproven, so the half-removed tree is never restored and stays dirty.
+    ("cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+     "sweep",
+     '            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):\n',
+     '            entry.get("locked_reason") or "", False) is not True):\n',
+     "test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
     # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real
