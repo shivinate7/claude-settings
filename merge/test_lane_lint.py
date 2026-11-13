@@ -3014,6 +3014,21 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
         self.assertNotEqual(rc, 0, "a fix verifier PASS on FAIL-only rounds printed past a lint FAIL: " + out + err)
         self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed past a lint FAIL: " + out)
 
+    def test_a_fail_only_record_with_a_fail_fix_verifier_prints_with_no_lint_run_and_no_lane_lint_comment(self):  # FAIL arm of the fix check; its PASS twin lints once
+        self.use_ci_job(PASSING, 0)  # a lint that runs and passes would post its comment, so that post and the run count show whether it ran
+        reviewed = self.head()
+        self.commit_feat({"fix-step.txt": "the fix after the FAIL round\n"})
+        head = self.head()
+        self.host.review_comments = lambda since: {7: [tm.record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), head=reviewed)]}  # a valid earlier record: its Head is the fix's reviewed head, and it has no fix line
+        fix = f"{reviewed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:FAIL"
+        rc, out, err = self.record("7", "--review-record", *self.flags("--fix-check", fix, rounds=("1:reviewer:sonnet:FAIL",)))
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times on a FAIL-only record with a FAIL fix verifier, want 0: %s" % (len(self.lint_calls()), out + err))
+        self.assertEqual(rc, 0, "a FAIL-only record with a FAIL fix verifier was refused: " + out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assertIn(tm.fix_verifier_line("FAIL", reviewed), tm.posted_body(self, out).splitlines(), "the printed record lacks the FAIL fix check line: " + out)
+        posts = [body for _n, body in self.host.posted if body.splitlines()[:1] == [LANE_LINT_MARKER]]
+        self.assertEqual(posts, [], "a FAIL-only record with a FAIL fix verifier posted the lane-lint comment: " + out + err)
+
     def test_a_fail_only_record_refused_for_its_state_runs_no_lint(self):  # a control: the refusals already come before the lint
         self.use_ci_job(PASSING, 0)
         self.host.pr_state = "CLOSED"
