@@ -42,7 +42,7 @@
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
+# processes (take, give), one more simctl list and one more rm (the PosterBoard store; no file written); a waiting take costs one sysctl and one ps per poll there, and writes
 # leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
 # the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
@@ -215,6 +215,9 @@ if [ -z "$udid" ]; then
     # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
     # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
     booted_by_me=$udid
+    # iOS 27.1 PosterBoard keeps one snapshot per fold or launch and never frees it (41 GB in 10 days). The store is
+    # rebuilt on boot, so it goes while the device is shut down. rm -rf on a symlink removes the link, not its target.
+    rm -rf "${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$udid/data/Library/Application Support/PRBPosterExtensionDataStore"
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
   fi
