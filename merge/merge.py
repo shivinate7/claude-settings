@@ -16,6 +16,9 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
+                          After a landed merge (never a refused one) it fetches origin/roadmap and reads roadmap/live/live.json: a readAt later than the merge
+                          commit's time prints the `merge --idle-lanes` report; otherwise one line says the idle-lanes pass is owed because the file is stale
+                          or unread. Neither changes the exit code. Cost: one fetch, two git reads, one temp file, one idle_lanes run.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push. The batch brake still holds.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
@@ -124,6 +127,8 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
+                          A session whose id is in the live file's keepSessions ([{id, reason}]) prints no line and is not counted; a keepSessions
+                          that is not a list, or an entry with no id, reads unknown (exit 1).
   merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
                           the batch NAME: branch batch-NAME (each lane head merged no-ff onto the base, or onto origin/BRANCH, a running
                           batch) and its one integration PR, opened as a draft. The lane heads read now are the freeze:
@@ -3954,6 +3959,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
+    idle_lanes_after_merge(root, commit)  # lock released: it fetches and runs the idle-lane read, and never moves `code`
     report = prose_judge_run(judge, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
     if report:
         say(*report)
@@ -5297,6 +5303,50 @@ def idle_lanes(live, repo_dir=None):
         entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
+
+LIVE_PATH = "roadmap/live/live.json"  # triage commits the live file here on origin's roadmap branch at each batch merge
+
+def idle_lanes_after_merge(root, commit):
+    """After a landed merge: print the `merge --idle-lanes` report when the live file on origin/roadmap was read after the merge commit's time,
+    else one line saying the pass is owed. A read that could not run is the owed line too, so an unread file never reads as an empty list.
+    Never raises and never moves the exit code: the merge has landed. Cost: one fetch, two git reads, one temp file, one idle_lanes run."""
+    owed = "merge: the idle-lanes pass is owed: the live file on origin/roadmap is %s. Run merge --idle-lanes --live FILE once triage has read it."
+    path = None
+    try:
+        try:
+            fetch_branch(root, "roadmap")
+        except Stop as e:
+            say(owed % f"unread ({str(e).splitlines()[0]})")
+            return
+        c, text = git(root, "show", f"refs/remotes/origin/roadmap:{LIVE_PATH}")
+        c2, merged_at = git(root, "show", "-s", "--format=%cI", commit)
+        if c or c2:
+            say(owed % "unread (git could not read the file or the merge commit's time)")
+            return
+        try:
+            read_at = datetime.datetime.fromisoformat(json.loads(text)["readAt"].replace("Z", "+00:00"))
+            landed = datetime.datetime.fromisoformat(merged_at)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            say(owed % "unread (its readAt is not an ISO time)")
+            return
+        if read_at.tzinfo is None:
+            say(owed % "unread (its readAt has no time zone)")
+            return
+        if read_at <= landed:
+            say(owed % "stale (read before this merge landed)")
+            return
+        fd, path = tempfile.mkstemp(prefix="merge-live-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        idle_lanes(path, root)  # its exit code is the report's own; the merge's code stays as it was
+    except Exception as e:
+        say(owed % f"unread ({type(e).__name__}: {e})")
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.

@@ -679,6 +679,10 @@ def live_work(path, steps, slug=None):
     the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
     branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
+    One more optional key, `keepSessions`: [{"id": str, "reason"?: str}], the lane sessions the owner keeps (idle_lanes lists
+    no line for them). `keepSessions` holds their ids. A value that is not a list, or an entry that is not an object with a
+    text id, sets `keepWhy` and only idle_lanes reads it: an unreadable keep list is unknown, never an empty one. An absent key
+    keeps nothing.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -781,6 +785,13 @@ def live_work(path, steps, slug=None):
         why.append("unknown (%d landedPulls rows skipped)" % landed_skipped)
         pull_why = pull_why or why[-1]
     stale_why = why[0] if why else None
+    keep_ids, keep_why = [], None
+    if "keepSessions" in raw:
+        rows = raw["keepSessions"]
+        if isinstance(rows, list) and all(isinstance(r, dict) and text(r, "id") for r in rows):
+            keep_ids = [r["id"] for r in rows]
+        else:
+            keep_why = "unknown (the live file's keepSessions is not a list of {id, reason} rows)"
     page_items, items_why = None, None
     if read_why:
         items_why = read_why
@@ -800,7 +811,7 @@ def live_work(path, steps, slug=None):
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
-            "landedPulls": landed_pulls}
+            "landedPulls": landed_pulls, "keepSessions": keep_ids, "keepWhy": keep_why}
 
 
 def live_age_minutes(read):
@@ -1558,6 +1569,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done, open pull, open
     item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
+    A session named in the live file's keepSessions prints no line (no lane line, no hold line); a keepSessions that
+    could not be read makes the whole list unknown.
+
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
     on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
@@ -1570,6 +1584,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     why = live_why(work)
     if why:
         return [why]
+    if work.get("keepWhy"):
+        return [work["keepWhy"]]
     if steps is None:
         return ["unknown (the steps could not be read)"]
     if not steps:
@@ -1593,10 +1609,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
     if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
         return ["unknown (no live lane session row carries a status_bucket enum name)"]
+    kept = set(work.get("keepSessions") or [])
     out = []
     for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
-        if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
+        if row["id"] in kept or row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
         sid = row["id"]
         mine = sorted(step_tag_ids(tags))
