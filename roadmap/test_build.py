@@ -1,5 +1,6 @@
 """build.py refuses a tree with git conflict markers (step c72); the pre-commit hook refuses an over-cap
-note (step c138). Run: python roadmap/test_build.py"""
+note (step c138) and a staged roadmap/rulings/*.json that does not parse (step rulings-store-parses).
+Run: python roadmap/test_build.py"""
 import contextlib
 import io
 import json
@@ -18,6 +19,9 @@ import build  # noqa: E402
 STEP = {"title": "t", "status": "open", "phase": "p", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 HERE = pathlib.Path(__file__).resolve().parent
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
+VALID_RULING = '{"id": "r1", "title": "t", "ruling": "x", "status": "open"}\n'
+# A ruling quoted with unescaped inner quotes, as a hand-written store entry can be.
+BROKEN_RULING = '{"id": "r1", "why": "he said "no" here"}\n'
 
 
 def words(n):
@@ -309,6 +313,83 @@ class NoteCapHook(unittest.TestCase):
         self.step("", 300)
         self.git("add", "-A")
         self.assert_refused(self.commit(), ".json (300 words)")
+
+    def ruling(self, name, text):
+        """Write roadmap/rulings/<name> as raw text, so a broken ruling stays broken."""
+        path = self.repo / "roadmap" / "rulings" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def assert_ruling_refused(self, r, name):
+        self.assertEqual(r.returncode, 1, "a staged ruling that does not parse was not refused: " + r.stdout + r.stderr)
+        self.assertIn(name, r.stderr, "the refusal does not name the ruling file")
+
+    def test_staged_ruling_with_unescaped_quotes_is_refused(self):
+        self.ruling("quote-ruling.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "quote-ruling.json")
+
+    def test_valid_staged_ruling_passes(self):
+        self.ruling("r1.json", VALID_RULING)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_broken_worktree_copy_does_not_block_valid_staged_ruling(self):
+        self.ruling("r1.json", VALID_RULING)
+        self.git("add", "-A")
+        self.ruling("r1.json", BROKEN_RULING)
+        self.assertEqual(self.git("show", ":roadmap/rulings/r1.json").stdout, VALID_RULING)
+        self.assert_passed(self.commit())
+
+    def test_valid_worktree_copy_does_not_hide_broken_staged_ruling(self):
+        self.ruling("r1.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.ruling("r1.json", VALID_RULING)
+        self.assertEqual(self.git("show", ":roadmap/rulings/r1.json").stdout, BROKEN_RULING)
+        self.assert_ruling_refused(self.commit(), "r1.json")
+
+    def test_empty_staged_ruling_is_refused(self):
+        self.ruling("r1.json", "")
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "r1.json")
+
+    def test_broken_ruling_already_on_head_does_not_block(self):
+        self.ruling("quote-ruling.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assertEqual(self.git("diff", "--cached", "--name-only").stdout.split(), ["README.md"])
+        self.assert_passed(self.commit())
+
+    def test_deleted_broken_ruling_passes(self):
+        self.ruling("quote-ruling.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+        self.git("rm", "-q", "roadmap/rulings/quote-ruling.json")
+        self.assert_passed(self.commit())
+
+    def test_non_json_files_in_rulings_are_ignored(self):
+        self.ruling("README.md", 'Not a ruling: he said "no" {\n')
+        self.ruling("notes.txt", "{not json\n")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_only_top_level_ruling_files_count(self):
+        self.ruling("old/r0.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assertIn("roadmap/rulings/old/r0.json", self.git("diff", "--cached", "--name-only").stdout)
+        self.assert_passed(self.commit())
+        self.ruling("r9.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "r9.json")
+
+    def test_broken_ruling_among_a_full_store_is_refused(self):
+        for i in range(111):  # the size of roadmap/rulings/ today
+            self.ruling(f"r{i}.json", VALID_RULING)
+        self.ruling("r111.json", BROKEN_RULING)
+        self.git("add", "-A")
+        self.assert_ruling_refused(self.commit(), "r111.json")
 
     def path_with(self, *tools):
         bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
