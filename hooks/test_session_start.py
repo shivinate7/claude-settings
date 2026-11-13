@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "session_start.sh")
@@ -70,6 +71,33 @@ def sh_exe(name="sh"):
         if os.path.isfile(candidate):
             return candidate
     sys.exit("fixture setup failed: Git %s.exe not found" % name)
+
+
+# Git for Windows' sh.exe is a launcher: before the script runs, it puts its own folders ahead of PATH, so a stub folder
+# put first on PATH is no longer first inside sh. sh_argv puts the stub folders first again, inside the shell the launcher
+# started. A case may set WINDOWS_LAUNCH to True to run this form on Linux.
+WINDOWS_LAUNCH = os.name == "nt"
+STUB_FIRST = 'PATH="$1:$PATH"; export PATH; shift; exec sh "$@"'  # $1: the folders as sh reads them, then sh's arguments
+
+
+def sh_path(native_folders):
+    """Native folders joined by os.pathsep, as sh reads a PATH: a drive letter C: becomes /c and each separator a colon.
+    Plain string handling, so no cygpath is needed. Git for Windows mounts drives under /c by default."""
+    parts = []
+    for folder in native_folders.split(os.pathsep):
+        match = re.match(r"([A-Za-z]):(.*)$", folder)
+        if match:
+            folder = "/" + match.group(1).lower() + match.group(2)
+        parts.append(folder.replace("\\", "/"))
+    return ":".join(parts)
+
+
+def sh_argv(path_dirs, *sh_args):
+    """The argv that runs sh with `sh_args`. With `path_dirs` (native folders joined by os.pathsep), those folders lead PATH
+    inside that sh. Off Windows, or with no folders, the argv is the plain one."""
+    if path_dirs is None or not WINDOWS_LAUNCH:
+        return [sh_exe(), *sh_args]
+    return [sh_exe(), "-c", STUB_FIRST, "sh", sh_path(path_dirs), *sh_args]
 
 
 def vcs(where, *args):
@@ -148,7 +176,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
             env["CLAUDE_CODE_REMOTE_SESSION_ID"] = remote_session_id
-        return [sh_exe(), HOOK], env, payload, where
+        return sh_argv(path_dir, HOOK), env, payload, where
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
                  remote_session_id=None, path_dir=None, trace_file=None):
@@ -957,7 +985,8 @@ class GitFixtureMixin:
         if any(start.split()[0] == command and must_name in start for start in starts):
             return
         _argv, env, _payload, where = self.hook_launch(path_dir=folder)
-        answer = subprocess.run([sh_exe(), "-c", 'command -v git; printf "%s\\n" "$PATH"'], capture_output=True,
+        # The same launch as the hook's, so a stub that is still bypassed shows here.
+        answer = subprocess.run(sh_argv(folder, "-c", 'command -v git; printf "%s\\n" "$PATH"'), capture_output=True,
                                 text=True, env=env, cwd=where, timeout=60)
         wanted = " ".join(part for part in (command, must_name) if part)
         self.fail("the git stub was not reached: no logged call matches git %s (logged: %r); sh with this PATH "
@@ -1591,6 +1620,30 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
 
     def test_a_fetch_that_hangs_prints_one_did_not_run_line_and_keeps_origin_main(self):
         self.assert_a_hung_refresh_keeps_origin_main("fetch")
+
+    def run_under_windows_form(self, folder, git_first):
+        """The hook's lines, run through the Windows form with `folder` first on PATH. With git_first, the folder of the
+        real git goes ahead of it, as Git for Windows' sh launcher leaves PATH; the form must put the stub back first."""
+        with mock.patch.dict(globals(), {"WINDOWS_LAUNCH": True}):
+            argv, env, payload, where = self.hook_launch(path_dir=folder)
+        if git_first:
+            env["PATH"] = os.pathsep.join([os.path.dirname(shutil.which("git")), env["PATH"]])
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=where, timeout=120)
+        self.assertEqual(answer.returncode, 0, "the hook exited %d" % answer.returncode)
+        return answer.stdout.splitlines()
+
+    def assert_windows_form_reaches_the_stub(self, git_first):
+        folder = self.make_git_stub("windows-form-shim", "")
+        lines = self.run_under_windows_form(folder, git_first)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertTrue(self.stub_starts(folder), "the git stub was not reached: the hook logged no git call to it")
+
+    def test_the_windows_form_reaches_a_stub_that_the_launcher_left_behind_git(self):
+        self.assert_windows_form_reaches_the_stub(git_first=True)
+
+    def test_the_windows_form_reaches_a_stub_first_on_path_as_a_control(self):
+        self.assert_windows_form_reaches_the_stub(git_first=False)
 
     # The grant line prints before a slow step, even when the refresh fails or is killed. The slow step is the caution
     # call, which runs before the grant block on main. run_to_slow_step cuts the run there.
