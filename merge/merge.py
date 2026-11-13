@@ -3951,8 +3951,8 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
-    A claim commit on the reviewed or linted head carries the record and the lint to the live head (claim_only, with the stamp config `cfgrel`),
-    as `--reviewed` reads them.
+    A claim commit on the reviewed or linted head carries the record and the lint to the live head (claim_only, with the stamp config `cfgrel`,
+    DEFAULT_CONFIG when None, as main calls it), as `--reviewed` reads them.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
     base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
     process kept, file or timer."""
@@ -4410,7 +4410,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 root_why = "not in a git checkout" if c else None
             except (OSError, subprocess.TimeoutExpired) as e:  # OSError: git is missing
                 root, root_why = None, e
-            lines, ok = release_check(root, host or Host(cwd=a.repo_dir if root_why else root), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why, a.config)  # before the role check and any lock: it reads, merges and pushes nothing
+            lines, ok = release_check(root, host or Host(cwd=a.repo_dir if root_why else root), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why)  # before the role check and any lock: it reads, merges and pushes nothing
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
