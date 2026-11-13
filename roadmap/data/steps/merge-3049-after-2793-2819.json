@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Coordinator stood pick, 12:36 CST Nov 13: the design's order (approved 09:48 CST Nov 12, ruling ow-05) puts the stable branch (#2793) and the installers (#2819) before act 4.",
  "source": "coordinator 12:36 CST Nov 13 (a stood pick, not an owner word)",
- "note": "Todo, stood pick for owner veto. #3049 (act 4: drops the batch brake and the small-move run) merges only after #2793 (stable branch) and #2819 (installers) are on main and live; no order waiver. Its PR also retires decisions no-merge-during-batch-ci and batch-freeze-lane-set, after act 5 merges. Lane fan-prose-debts could not find #3049: it is this act-4 PR. The coordinator's message time is a clock-drift suspect (step stamp-clock-check-everywhere); the 12:36 stamp is the sender's.",
- "updatedAt": "2026-11-13T12:37:01-06:00"
+ "note": "Todo, stood pick for owner veto. #3049 (act 4: drops the batch brake and the small-move run) merges only after #2793 (stable branch) and #2819 (installers) are on main and live; no order waiver. Its PR also retires decisions no-merge-during-batch-ci and batch-freeze-lane-set, after act 5 merges. Lane fan-prose-debts could not find #3049: it is this act-4 PR. The coordinator's message time is a clock-drift suspect (step stamp-clock-check-everywhere); the 12:36 stamp is the sender's. Contradiction found 12:47 CST Nov 13 (lane revert-then-resume-merges): #3049 body Q3 i says merges resume \"until the revert's run on main is green\"; ruling ow-29 (622 b, owner 09:46 CST answer, retro-picked 14:17 CST Nov 12) says merges resume when the revert merges. One of them changes before #3049 merges.",
+ "updatedAt": "2026-11-13T12:47:09-06:00"
 }
