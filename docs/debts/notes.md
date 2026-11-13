@@ -2272,6 +2272,6 @@
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
 - idle-lanes-reads-closed-lane-item: `idle_lanes` in `skills/roadmap/build.py` may read a lane whose only item is closed (routed) as idle; unpinned.
-- routed-no-done-report-silent: a receiver that ends with no done report no longer trips `stalled_items` in `skills/roadmap/build.py` or `wait_lines` in `skills/waiting-page/stale_pages.py`, since both skip closed rows; SKILL.md names the `--items` lane line as the page-side sign.
 - routed-waits-skipped: a routed closed item with `waits` is skipped by `kept_answer_lines` before its waits branch.
 - routed-kept-answer-at-unchecked: `kept_answer_lines` skips a routed closed item without comparing the kept answer's `at` to `lastAnswer.at`, so a changed answer on it is silent.
+- kept-answer-skip-wider-than-routed: `stale_pages.py` `kept_answer_lines` skips a closed item on `lane` and `lastAnswer` alone, while `routed_close` in `page_grant.py` also needs a non-blank `home` and a `lastAnswer.at` equal to the answer's `at`; a hand-closed leftover with `lane` and `lastAnswer` but no `home` stays silent in the kept-answer line. Low harm; no code change.

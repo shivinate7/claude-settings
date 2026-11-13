@@ -443,21 +443,21 @@ report (see the park branch below). A `none` answer on this path gets no new opt
   the owner's grant typed in the receiver's own session.
 
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
-re-read `answers/<id>`, then delete it (pinned to its version), A closed item with `lane` and `lastAnswer` is routed, so no line names it: it stays closed and its answer stays until the done report. The writer reopens it only on a withdraw (see the busy-lane path).
+re-read `answers/<id>`, then delete it (pinned to its version). A closed item with `lane` and `lastAnswer` is routed, so no line names it: it stays closed and its answer stays until the done report. The writer reopens it only on a withdraw (see the busy-lane path).
 A closed item with `waits` is named too ("is closed with waits"), since a chat answer can close an item during a wait: when its wait has ended, drop `waits`, then delete `answers/<id>`.
 A `kept-answer: unknown` line means that the check did not run: fetch again.
 
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
 of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
 `cs-build:<tier>` and the same `cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: every page once per turn
-start, shared by all lane items, and one `get_session` per lane item, with no timer. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
+start, shared by all lane items, and one `get_session` per lane item, with no timer. The page-side sign is the home step's stalled row. If the owning session itself ended, the
 inherit rule applies (see "Read the answers", the watch bullet). The receiver's status is `ended` when it ended, failed or was
 archived, and `unknown` when the read cannot run or finds no session, never `ended`. For either status with no done report,
 never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the setting
-changed). If it did, drop `lane` and delete `answers/<id>`. If it did not, or you cannot tell, write one line on the item's
-`context` (the page draws `context`): "receiver <slug> <status> at <time> with no done report; the act is unconfirmed". Write it
-once: append it to `context`, never replace `context`, and skip it when `context` already holds a line for this receiver. Leave
-the item as it is, with `lane` and the kept answer. There is no age threshold.
+changed). If it did, drop `lane` and delete `answers/<id>`. If it did not, or you cannot tell, write one line on the item's home step or debt note:
+"receiver <slug> <status> at <time> with no done report; the act is unconfirmed". Write it
+once: append it to that note, and skip it when the note already holds a line for this receiver. Leave
+the item as it is, closed, with `lane` and the kept answer. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
