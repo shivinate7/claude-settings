@@ -425,6 +425,10 @@ MUTATIONS = [
      '    except Exception:\n        return False',
      '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
      '    except Exception:\n        return True', "guard", 'a refspec source with a NUL byte'),
+    # The default base is origin/HEAD's target when it is set (`_push_main_refs`): a base of origin/main alone refuses a trunk merge.
+    ("push-needs-review-record: the default base is origin/main even when origin/HEAD names trunk",
+     '    return ["refs/remotes/" + (head or remote + "/main")]',
+     '    return ["refs/remotes/" + remote + "/main"]', "guard", 'a clean merge of trunk is allowed'),
     ("push-needs-review-record: a merge whose second parent is off main is read as clean",
      'if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):',
      'if len(parents) != 2 or not tree:', "merge",
