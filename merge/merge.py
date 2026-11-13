@@ -1561,11 +1561,14 @@ class Host:
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId,startedAt,updatedAt"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
             raise Stop("gh run list failed " + READ_CITE + ": " + out)
+        for r in runs:  # gh names no finish time; updatedAt is the finish of a completed run only, and job_minutes reads completedAt
+            if r.get("status") == "completed" and r.get("updatedAt"):
+                r["completedAt"] = r["updatedAt"]
         return [r for r in runs if r["name"] not in self.ignore]
 
     def run_state(self, sha):
@@ -4006,6 +4009,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if busy:
                 fail(busy)
             host.commit_message = lift_message(lifts)
+            refresh_measure(host, n, sha)
             merging = True
             commit, msg = host.merge(n, m["method"], sha)
             merging = False
@@ -4755,9 +4759,9 @@ def is_integration_pr(info):
 
 FROZEN_ONLY_DROP = "a frozen set never changes except by --batch-drop"
 
-def freeze_markers(lines):
+def freeze_markers(lines, begin_marker=BATCH_BEGIN, end_marker=BATCH_END):
     """-> (begin indexes, end indexes): the marker lines outside a fenced code block, which is an example and not a block.
-    A body edited on the web has CRLF line ends: the comparison ignores the CR."""
+    A body edited on the web has CRLF line ends: the comparison ignores the CR. The markers default to the frozen block's; the measure block passes its own."""
     begins, ends, fence = [], [], None
     for i, line in enumerate(lines):
         line = line.rstrip("\r")
@@ -4767,9 +4771,9 @@ def freeze_markers(lines):
                 fence = None
         elif m:
             fence = m.group(1)
-        elif line == BATCH_BEGIN:
+        elif line == begin_marker:
             begins.append(i)
-        elif line == BATCH_END:
+        elif line == end_marker:
             ends.append(i)
     return begins, ends
 
@@ -4822,6 +4826,51 @@ def freeze_rewrite(body, block, lines):
     """`body` with its block's lines replaced by `lines`. The text outside the markers is kept as it was."""
     old = body.split("\n")
     return "\n".join(old[:block["at"][0]] + lines + old[block["at"][1] + 1:])
+
+# The measure block of a batch pull request: what the batch cost, kept after the frozen block and outside it, so no freeze rewrite touches it.
+# Cost: per build and per merge, one workflow-runs read and at most one body write. No log, watcher, timer or new process.
+MEASURE_BEGIN, MEASURE_END = "<!-- batch-measure:begin -->", "<!-- batch-measure:end -->"
+
+def measure_lines(host, sha, lanes, drops):
+    """-> the measure block's lines, markers included. Lanes and Drops come from the caller's frozen block; CI runs and CI minutes from one read of the
+    runs of `sha`. A runs read that fails writes `unknown` for both: the block never stops a build or a merge. Minutes sum only runs that have finished."""
+    try:
+        runs = host.runs(sha)
+        used = [m for m in map(job_minutes, runs) if m is not None]
+        ci_runs, ci_minutes = str(len(runs)), str(round(sum(used)))
+    except RELEASE_READ_ERRORS:
+        ci_runs = ci_minutes = "unknown"
+    return [MEASURE_BEGIN, f"Lanes: {lanes}", f"Drops: {drops}", f"CI runs: {ci_runs}", f"CI minutes: {ci_minutes}", MEASURE_END]
+
+def measure_body(body, lines):
+    """-> `body` with the one measure block replaced by `lines`, or with `lines` appended when it holds none (a batch built before the block existed).
+    None when the markers outside code blocks are not exactly one pair: the body is left as it is."""
+    old = body.split("\n")
+    begins, ends = freeze_markers(old, MEASURE_BEGIN, MEASURE_END)
+    if not begins and not ends:
+        return body + ("\n" if body.endswith("\n") else "\n\n") + "\n".join(lines) + "\n"
+    if len(begins) != 1 or len(ends) != 1 or ends[0] < begins[0]:
+        return None
+    return "\n".join(old[:begins[0]] + lines + old[ends[0] + 1:])
+
+def refresh_measure(host, n, sha):
+    """Before the merge of #n: bring the measure block of an integration pull request up to the runs of `sha` and its frozen block's lane and drop counts.
+    A lane pull request is never read for it or written. Any failure prints one line and leaves the merge to go on."""
+    try:
+        info = host.pr(n)  # read again: the waits before the merge are long, and the write must not undo an edit made meanwhile
+        if not is_integration_pr(info):
+            return
+        block = parse_freeze(info["body"])
+        text = measure_body(info["body"], measure_lines(host, sha, len(block["lanes"]), len(block["dropped"])))
+        if text is None:
+            say(f"merge: #{n} the measure block was not refreshed: the body holds more or fewer than one begin and one end marker line outside a code block. Fix the body by hand.")
+        elif text != info["body"]:
+            try:
+                host.set_body(n, text)
+            except Stop as e:
+                say(f"merge: #{n} the measure block was not refreshed: the host refused the body write ({' '.join(str(e).split())})")
+    except RELEASE_READ_ERRORS as e:
+        say(f"merge: #{n} the measure block was not refreshed: {' '.join(str(e).split())}")
 
 def holds(root, head, ref):
     """True when `ref` holds commit `head`. A shallow clone cuts the history, so its plain non-ancestor reads unknown: the history is fetched in full once
@@ -5235,9 +5284,10 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
         stacked_without_base(root, h, base, heads, start if on else None)
-        build_integration_branch(root, name, start, sorted(heads.items()))
+        new = build_integration_branch(root, name, start, sorted(heads.items()))
+        body = "\n".join([*freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start), "", *measure_lines(h, new, len(heads), 0)]) + "\n"
         try:
-            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n", draft=True)
+            pr = h.create_pr(branch, base, f"Batch {name}", body, draft=True)
         except Stop as e:
             raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again. {FREEZE_CITE}")
         say(f"merge: batch {name} built: PR #{pr} draft, lanes {lane_list(heads)}")
