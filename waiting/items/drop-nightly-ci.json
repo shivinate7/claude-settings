@@ -4,6 +4,11 @@
   "home": "step ci-hygiene-refresh",
   "id": "drop-nightly-ci",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T04:19:00Z",
+    "choice": "a",
+    "note": "owner chat with the retrospective 22:19 CST"
+  },
   "n": 683,
   "options": [
     {
@@ -35,9 +40,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "a",
   "ref": "owner chat with the retrospective 22:11 CST Nov 12; retrospective 22:11 CST",
+  "reply": "Closed 23:13 CST Nov 12 by triage: you picked a in chat with the retrospective at 22:19 CST. Stored as ruling drop-nightly-schedule; step drop-nightly-schedule removes the nightly trigger, keeps a manual run, and rewrites the CI-upkeep skill's nightly advice.",
   "repo": "shivinate7/claude-settings",
   "short": "Drop the nightly CI run",
-  "status": "open",
+  "status": "closed",
   "title": "Should the nightly CI run be dropped?",
   "why": "It changes a CI schedule your R61 pick set."
 }

@@ -1,0 +1,11 @@
+{
+ "id": "drop-nightly-schedule",
+ "at": "2026-11-12T22:19:00-06:00",
+ "title": "Drop the nightly CI schedule; keep a manual run",
+ "ruling": "Owner 22:19 CST Nov 12, in chat with the retrospective, picked a on page item 683 (\"Should the nightly CI run be dropped?\"): drop the nightly schedule in claude-settings and in skill ci-hygiene's advice, and keep a manual run. Basis: 45 scheduled runs since 2026-09-30; each of the 8 failures was already red on its push run. Revisits R61's nightly skip-when-green. Home: step drop-nightly-schedule; plan restart-plan 352e35f1, R61 part 3.",
+ "quote": "a",
+ "source": "owner chat with the retrospective 22:19 CST Nov 12, relayed 22:20 CST",
+ "status": "open",
+ "supersedes": [{"kind": "ruling", "ref": "R61 nightly skip when main's newest commit is green (owner pick b, 15:29 CST Nov 12)"}, {"kind": "code", "ref": ".github/workflows/checks.yml schedule cron \"17 3 * * *\""}],
+ "step": "drop-nightly-schedule"
+}

@@ -4,11 +4,12 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJKzzqqpnCFLtG3BUNif",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 12:04 CST Nov 12, typed in batch runner 10: \"Yes raise that -- time waste for no output gain is just wasted time.\"",
  "source": "coordinator 12:06 CST Nov 12",
- "note": "`merge --batch-build N --blame PR --run URL` refuses while the run is still going (merge/merge.py about line 4921), so a batch waits for macOS and Windows after a finished red job already shows the cause (batch 104: red 11:55 CST, cause reproduced 11:57 CST). Fix: accept a blame once the named job has finished red; keep the refusal for a job still running. Red first.",
- "updatedAt": "2026-11-12T12:07:43-06:00"
+ "note": "`merge --batch-build N --blame PR --run URL` refuses while the run is still going (merge/merge.py about line 4921), so a batch waits for macOS and Windows after a finished red job already shows the cause (batch 104: red 11:55 CST, cause reproduced 11:57 CST). Fix: accept a blame once the named job has finished red; keep the refusal for a job still running. Red first. Coordinator 22:34 CST Nov 12: the fix is #2838 (built 18:36 CST, round 2 PASS); its lane was archived by mistake and is unarchived; #2838 is express. Retrospective 22:30 CST: batch 117 (#3067) went red about 21:56 CST; runner 10 woke at 22:02 and 22:07 CST and named the cause but waited about 30 min for the run to end, because `--blame` reads only a finished run. Red test: a run with one failed job and one in progress; blame names the lane.",
+ "updatedAt": "2026-11-12T23:14:45-06:00",
+ "pr": "#2838"
 }

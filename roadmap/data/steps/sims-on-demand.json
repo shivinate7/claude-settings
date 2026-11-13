@@ -1,0 +1,17 @@
+{
+ "id": "sims-on-demand",
+ "title": "Simulators come on demand, limited only by the load brake",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#2899",
+  "#3081"
+ ],
+ "why": "After #2899 and #3081 land, three limits remain beyond the load brake: the fixed device list (Duo 1, Duo 2, 18 Pro), one Mac-wide lock in bin/sim-test, and strict first-in-first-out across devices.",
+ "source": "coordinator 23:12 CST Nov 12, named by lane sim-lease-load-brake (session_013NEJL2ZeKyq7YpEAPgwaUm); ruling sims-load-brake-only (owner 21:59 CST)",
+ "note": "Build per-device queues and locks, then devices created on demand (clone), limited only by the load brake. The ruling settles it; no owner item. Blocked until #2899 and #3081 land.",
+ "updatedAt": "2026-11-12T23:14:45-06:00"
+}
