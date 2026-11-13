@@ -219,8 +219,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips only the steps behind a flag. A `*.md` path
     turns on a flag only where a directory arm sets one (`ci-scope.sh`, lines 43-104: for example
-    `hooks/`, `mods/`, `lint/`, the map skill). A docs path with no arm turns none (line 90). Read the
-    arms before you call a path docs-only. In the `checks` job (`checks.yml`, lines 75-667),
+    `hooks/`, `mods/`, `lint/`, the map skill). A docs path with no arm turns none (line 90). A `.md` file ADDED under a landed
+    directory turns on the Windows, shell, `code` and `guard` flags (lines 107-115, `landed-dirs.txt`).
+    Read the arms before you call a path docs-only. In the `checks` job (`checks.yml`, lines 75-667),
     149 of 167 steps have no `if:` and 5 more gate only on the event name, so 154 carry no scope
     `if:`. A docs-only PR runs at least those 154 and skips the 13 scope-gated steps. The Nov 13
     audit counts 149 ran in run 43466545532 (batch 133, docs only); this skill did not re-read that
@@ -231,7 +232,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     its inputs change. Never lengthen the wait to save runner work. Set no fixed time target. Measure wall
     time before and after on the same kind of batch (owner, 11:36 CST, R37). Cost here is wall time, macOS
     slots and shared-token calls. `ci-cut-in-steps.md` (line 13) says no Actions minutes are billed to
-    this repo, so step 13's saving does not apply here. Steps 13 and 19 still hold for a private repo.
+    this repo, so step 13's saving does not apply here. Step 13 holds for a private repo, and step 19 holds here too.
 21. **Gate a suite by what it reads.** In run 43466545532 (docs only), the `code` flag was off and
     the audit counts 149 flag-free steps that ran. `checks` set the wall time: 40.7 of 43.5 job minutes. A flag-free step runs
     on every docs change. Before you add a flag to one, grep its source for the tracked docs it reads.
@@ -246,8 +247,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     slots first. Then decide where to cut.
 23. **A push run repeats a tested tree.** Batch 132's merge commit and its PR head share tree `5c450efc`
     (run 43464896080 against PR run 43455790930). The push adds the full Windows guard and Windows
-    merge shards (`checks.yml`, lines 1527-1530 and 1607-1608) and the push-only Windows sweep mutation
-    step (lines 1767-1769). The audit says the rest repeats
+    merge shards (`checks.yml`, lines 1527-1530 and 1607-1608) the push-only Windows sweep mutation
+    step (lines 1767-1769) and the push-only macOS "Janitor sweep mutation test" (lines 1039-1040). The audit says the rest repeats
     (`test-strategy-reset.md`, line 29: a duplicate run costs minutes for no new verdict). Compare
     `git rev-parse <sha>^{tree}` before you add a job to the push run. Today a push turns every flag
     on (`ci-scope.sh`, line 117). Risk, if you skip jobs on a same-tree push: a tree that reaches main
@@ -293,15 +294,16 @@ On main (the record exists):
 - A draft PR skips CI (decision `draft-until-reviewed`). A merge needs a green run on the current base
   (decision `merge-needs-current-base`). Nothing merges while a batch's CI runs, unless the
   running batch's head already holds the PR's head (decision `no-merge-during-batch-ci`, line 5).
-- Time limits: decision `ci-job-caps` raises caps as a stopgap. R3 (`docs/plans/restart-plan.md`, lines
-  207-230, owner 14:09 CST Nov 10) is newer: stop on silence, a stop reads "hung" and never red, and a
-  total limit comes from measured green runs, never a stored number. R3's record also sets a new job's cap at its nearest similar job's runs times 1.5
-  (lines 223-230). R3 governs where it clashes with `ci-job-caps`.
+- Time limits: decision `ci-job-caps` and step 5 still govern (a new job's provisional cap is 60 min).
+  R3 (`docs/plans/restart-plan.md`, lines 207-230, owner 14:09 CST Nov 10) is a plan entry that will
+  replace the stored 60 min: stop on silence, a stop reads "hung" and never red, and a total limit comes
+  from measured green runs, never a stored number. A new job with no green run gets its nearest
+  similar job's computed limit x1.5 (line 223). Follow `ci-job-caps` until its record is rewritten.
 
-From the CI rulings list the retro session compiled on Nov 13 (it has no path in the repo). Item 521
-is on main:
-- Item 521: prose and code share a batch when that lands both sooner (`claude-md-scope-audit.md`,
-  line 189, "Prose wave").
+From the CI rulings list the retro session compiled on Nov 13 (it has no path in the repo). One
+item has a related note on main:
+- Item 521's "Prose wave" is named in `claude-md-scope-audit.md` (line 189). The ruling that prose and
+  code share a batch when that lands both sooner has no record on main: weigh it as an argument.
 
 These have no hit in `docs/` on main when this was written (a grep of `docs/`). Treat each as an
 argument to weigh, never as law, until its record lands. R4 (`restart-plan.md`, line 273) and R26
@@ -315,8 +317,8 @@ lint at join and on the batch head until their homes are rewritten. Follow step 
   batch, only where the OS differs. R62: Linux and Windows run each suite once per batch, on the batch
   PR. The push run does not re-test the PR's tree. R63: Windows full shards are dropped, held.
 - R64: update this skill now. Child repos comply when runners are free.
-- Drop the nightly schedule (owner, 22:19 CST Nov 12, step `drop-nightly-schedule`). Steps 17, 23 and
-  26 name the nightly run: re-read them when the drop lands.
+- Drop the nightly schedule (owner, 22:19 CST Nov 12, step `drop-nightly-schedule`). Steps 3, 6, 17, 19, 23
+  and 26 name the nightly run: re-read them when the drop lands.
 - R67 part 5: skip `checks` suites a docs-only change cannot affect (owner, 11:34 CST Nov 13, step
   `ci-jobs-skip-unread`). Step 21 is the same work. The retro list's R37 reads "no fixed number without a ruling;
   gold is measured before and after"; `restart-plan.md` line 813 retires or derives each fixed number
