@@ -44,8 +44,8 @@ tn("an items set to another artifact is allowed", "allow", tn_task(), url="https
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "stale-branch-deletes", "data": tn_task()}])
-add("task names its check: the refusal says to ask a session on the owner's computer and add the line", "deny",
-    "task-names-check", carries=("Why yours", "computer"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+add("task names its check: the refusal says to ask the owner, or hand the task on, and add the line", "deny",
+    "task-names-check", carries=("Why yours", "ask the owner"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
     action="set", collection="items", doc_id="stale-branch-deletes", data=tn_task())
 tn("a bare Why yours line with nothing after the colon is denied", "deny",
    tn_task(context=TN_CTX + "\nWhy yours:   "))

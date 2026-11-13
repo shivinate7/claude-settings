@@ -167,7 +167,7 @@ for _name, _call in (
         ("create_session with a triage tag", dict(tool=CREATE_SESSION_CALL, prompt="x", model="haiku",
                                                   tags=["cs-build:triage"]))):
     add("floor remedy: %s on haiku keeps the no-model remedy" % _name, "deny", "agent-model-floor",
-        carries="let the default apply", **_call)
+        carries="start the agent or session with model sonnet", **_call)
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
