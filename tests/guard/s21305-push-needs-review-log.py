@@ -201,6 +201,9 @@ PFR_ROUND_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")], n=PFR_FIX_PR
 PFR_STRAY_NO_CONTENT = json.dumps({"type": "system", "tool": "Agent", "message": {"role": "system"}})
 PFR_STRAY_NULL = json.dumps({"type": "system", "tool": "Agent", "message": None})
 PFR_STRAY_STRING = json.dumps({"type": "system", "tool": "Agent", "message": "Agent note"})
+# Valid JSON that is not an object. Each holds the mark `"Agent"`, so the reader parses it: a list, and a bare string.
+PFR_STRAY_LIST = json.dumps(["Agent", 1, 2])
+PFR_STRAY_BARE_STRING = json.dumps("Agent")
 
 
 def pfr_fix_after_round1(report_head):
@@ -430,6 +433,13 @@ PFR_LINES = {
     # The control: the same stray line, then the record posted at the reviewed head, head A.
     "stray-no-content-record-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING)) + [PFR_STRAY_NO_CONTENT]
+        + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
+    # A round 1 FAIL, then a line that is valid JSON but not an object: a list, then a bare string.
+    "stray-list": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + [PFR_STRAY_LIST],
+    "stray-bare-string": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + [PFR_STRAY_BARE_STRING],
+    # The control: the same list line, then the record posted at the reviewed head, head A.
+    "stray-list-record-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING)) + [PFR_STRAY_LIST]
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
     "empty": [],
 }
@@ -841,5 +851,14 @@ pfr_ask("a round 1 FAIL, then a system line whose message is a plain string, the
         pfr_path("stray-string"))
 pfr_allow("a round 1 FAIL at head A, then a system line with no message content, then the FAIL record at head A, "
           "then the push", PFR_PUSH, pfr_path("stray-no-content-record-head-a"))
+
+# A line that is valid JSON but not an object, after the round 1 FAIL: the reader steps over it, so the FAIL stays
+# unrecorded. Each line holds a mark, so the reader parses it; a line with no mark is skipped before the parse.
+pfr_ask("a round 1 FAIL, then a transcript line that is a JSON list, then the push", PFR_PUSH,
+        pfr_path("stray-list"))
+pfr_ask("a round 1 FAIL, then a transcript line that is a bare JSON string, then the push", PFR_PUSH,
+        pfr_path("stray-bare-string"))
+pfr_allow("a round 1 FAIL at head A, then a transcript line that is a JSON list, then the FAIL record at head A, "
+          "then the push", PFR_PUSH, pfr_path("stray-list-record-head-a"))
 
 LOG_CHECKS_EXTRA.append((PFR_COST_LABEL, pfr_held_cost_case))
