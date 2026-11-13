@@ -2,7 +2,8 @@
 # Tests for bin/sim-test. CI runs this under /bin/bash (3.2) and under bash on PATH (shell-macos job).
 # SIM_TEST=PATH picks the script under test; the default is bin/sim-test in this repo. A red run points it at a stub.
 # No real simulator or xcodebuild is touched. xcrun, xcodebuild, top and mkdir are PATH shims, and the tool runs under
-# a temp HOME with no CLAUDE_CONFIG_DIR. Temp files follow decisions/test-temp-standard.md: one run folder <pid>-<UUID>
+# a temp HOME with no CLAUDE_CONFIG_DIR. The brake's disk is the fake one in tests/sim_lease/sitecustomize.py, on PYTHONPATH.
+# Temp files follow decisions/test-temp-standard.md: one run folder <pid>-<UUID>
 # under one temp root, and the first request of a run sweeps siblings older than a day.
 # The tool's contract:
 #  - Flags first, all double-dash: --device duo|pro (default duo), --hold, --for S. The first argument it does not know
@@ -29,8 +30,8 @@
 #  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run, a hold included, and freed on
 #    every exit, SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
-#  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
-#    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
+#  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. On a busy disk
+#    (free under 15 GB of 926 GB) it waits, then exits 1 with no boot. The lease is released on every exit, INT and
 #    TERM too. The reuse path takes no lease.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
@@ -48,6 +49,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 script=${SIM_TEST:-$root/bin/sim-test}
 sim_lease=$(dirname "$script")/sim-lease
+shim=$root/tests/sim_lease # the brake's disk seam (sitecustomize.py), put on PYTHONPATH for every tool run
 REAL_SLEEP=$(command -v sleep)
 LIMIT=20 # hard timeout per run, in seconds: a red case cannot hang the suite
 fail=0; pass_n=0; fail_n=0; failed=
@@ -165,12 +167,11 @@ cat > "$stubs/top" <<'SH'
 echo "top $*" >> "$RUN/topcalls"
 echo "CPU usage: 30.00% user, 5.00% sys, 90.00% idle"
 SH
-# sysctl: the load line sim-lease reads (`sysctl -n vm.loadavg`). A case writes $RUN/loadavg; with none the load is idle.
-# Each read is logged to $RUN/load_reads, so a case can count the polls of a waiting take.
+# sysctl: sim-lease reads no load now. Any call is logged to $RUN/load_reads, so case 48 can prove that none is made.
 cat > "$stubs/sysctl" <<'SH'
 #!/bin/sh
 echo read >> "$RUN/load_reads"
-if [ -f "$RUN/loadavg" ]; then cat "$RUN/loadavg"; else echo "{ 0.50 0.50 0.50 }"; fi
+echo "{ 0.50 0.50 0.50 }"
 SH
 # uname: sim-lease reads `uname -s` and does nothing unless it is Darwin, so the suite runs on any host.
 cat > "$stubs/uname" <<'SH'
@@ -211,17 +212,20 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/load_reads" "$work/disk_reads" "$work/boot_started" "$work/boot_release"
+  printf '926 500\n' > "$work/disk"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
 # a 2 s lock wait, a 1 s lease poll, CI and GITHUB_ACTIONS unset (sim-lease does nothing under them), and reports that
-# name DUO1, the Duo of slot 1. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
+# name DUO1, the Duo of slot 1, and read a disk of 926 GB with 500 GB free unless a case writes $work/disk. Sets tool_pid
+# and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
   env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
     SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 \
+    PYTHONPATH="$shim" SIM_LEASE_TEST_DISK="$work/disk" SIM_LEASE_TEST_DISKLOG="$work/disk_reads" \
     STUB_CRASH_UDID="$DUO1" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
   tool_pid=$!
@@ -312,10 +316,14 @@ lease_not_held_at_xc() { ! lease_at_xc_holds; }
 # lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
 lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
 no_lease_file() { [ ! -e "$lease_file" ]; }
-# set_load LINE: the load line the sysctl stub prints, as `sysctl -n vm.loadavg` prints it.
-set_load() { printf '%s\n' "$1" > "$work/loadavg"; }
-# load_polls_at_least N: the sysctl stub logs each read, so a take that waits reads the load at least N times.
-load_polls_at_least() { [ "$(cat "$work/load_reads" 2>/dev/null | wc -l | tr -d ' ')" -ge "$1" ]; }
+# set_disk "TOTAL FREE": the disk the brake reads, in GB. The seam logs each read to $work/disk_reads.
+set_disk() { printf '%s\n' "$1" > "$work/disk"; }
+# brake_polls_at_least N: the seam logs each brake read, so a take that waits reads the brake at least N times.
+brake_polls_at_least() { [ "$(cat "$work/disk_reads" 2>/dev/null | wc -l | tr -d ' ')" -ge "$1" ]; }
+# sim_lease_run ARGS: bin/sim-lease run as start_tool runs it, with the same env and the brake's disk seam, so a real
+# disk never decides a direct take or status call of the suite.
+sim_lease_run() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" PYTHONPATH="$shim" \
+  SIM_LEASE_TEST_DISK="$work/disk" SIM_LEASE_TEST_DISKLOG="$work/disk_reads" "$sim_lease" "$@"; }
 # mkdir_lock_first: one mkdir of the lock folder (no -p) is in the call log, before the first simctl call.
 mkdir_lock_first() {
   local m s
@@ -343,8 +351,7 @@ slot_holder=
 hold_slot1() {
   sleep 600 > /dev/null 2>&1 &
   slot_holder=$!
-  need "the holder is granted Duo slot 1" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
-    "$sim_lease" take --device duo --pid "$slot_holder" --wait 1 2>/dev/null)" = 1
+  need "the holder is granted Duo slot 1" test "$(sim_lease_run take --device duo --pid "$slot_holder" --wait 1 2>/dev/null)" = 1
 }
 release_slot1() {
   if [[ -n $slot_holder ]]; then kill "$slot_holder" 2>/dev/null; wait "$slot_holder" 2>/dev/null; fi
@@ -682,14 +689,18 @@ need "steps are run only" steps_are "run "
 need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
-# A copy of the tool and its sim-lease, with a hooks folder that holds only what sim-lease imports: the record call finds no hook. It must print nothing, and the
-# run must still boot, test and shut down with xcodebuild's exit code.
+# A copy of the tool and its sim-lease, with a hooks folder that holds every guard module but the record hook: the brake loads, so the take boots, and the record
+# call finds no hook. The hooks come from the tool under test, as copy_tool in lint/test_sim_lease.py takes them. It must print nothing, and the run must still
+# boot, test and shut down with xcodebuild's exit code.
 fresh; ps_stub; devices_json "$DUO1"
 /bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
-/bin/mkdir -p "$work/nohooks/hooks"; cp "$root/hooks/_nowindow.py" "$work/nohooks/hooks/"
+/bin/mkdir -p "$work/nohooks/hooks"; cp "$(dirname "$script")/../hooks/"*.py "$work/nohooks/hooks/"; /bin/rm -f "$work/nohooks/hooks/sim_boot_record.py"
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
+need "scope: the copy has its brake's guard.py" test -e "$work/nohooks/hooks/guard.py"
+need "scope: the copy has no record hook" test ! -e "$work/nohooks/hooks/sim_boot_record.py"
+need "scope: the record call wrote no line" test "$(record_lines)" -eq 0
 need "exit code is xcodebuild's" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no hook message on stderr" no_hook_message
@@ -718,13 +729,14 @@ need "lease held at the boot" lease_at_boot_holds
 need "lease released after the run" lease_released
 end_case "47 own boot: the lease is held while simctl boot runs, and released after the run"
 
-fresh; set_load "{ 0.50 100.00 0.50 }"; run SIM_LEASE_WAIT=2
+fresh; set_disk "926 10"; run SIM_LEASE_WAIT=2
 need "no boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
 need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
-need "waited: the load was read at least twice" load_polls_at_least 2
+need "waited: the brake was read at least twice" brake_polls_at_least 2
+need "sim-lease reads no load: sysctl is not called" test ! -s "$work/load_reads"
 need "exit code is 1" rc_is 1
-need "stderr names the load" grep -Fq "5-min 100.00" "$work/run.err"
-end_case "48 own boot over a 5-minute load of 100: waits, exits 1, no boot, no xcodebuild"
+need "stderr names the disk reading" grep -Fq "10.0 GB" "$work/run.err"
+end_case "48 own boot on a busy disk (10 GB free of 926): waits, exits 1, no boot, no xcodebuild"
 
 sig_case TERM
 need "lease held during xcodebuild" lease_at_xc_holds
@@ -870,7 +882,7 @@ in_lease_file() { lease_holds "$lease_file" "$tool_pid"; }
 tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st || $st == Z* ]]; }
 # lease_freed_after_reap: a `sim-lease status` call drops the dead holders and places, as a later take does. Then the tool
 # holds neither a lease nor a place.
-lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
+lease_freed_after_reap() { sim_lease_run status > /dev/null 2>&1; lease_released; }
 
 # pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
 # BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
@@ -879,8 +891,7 @@ pro_dies_during_duo_wait() {
   fresh
   sleep 600 > /dev/null 2>&1 &
   local holder=$!
-  need "the pro holder is granted the pro lease" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
-    "$sim_lease" take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
+  need "the pro holder is granted the pro lease" test "$(sim_lease_run take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
   ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
   need "the duo run is queued behind the pro lease" poll_for 20 in_lease_file
   if [[ $1 = yes ]]; then
@@ -947,12 +958,12 @@ need "the stop line says it shut down the Duo it booted" crash_line_has "shut do
 need "shutdown of the Duo it booted" has_call "simctl shutdown $DUO1"
 end_case "74 crash loop during a hold with no CMD: exits 1, shuts the Duo down"
 
-# lease_wait_term TARGET: a duo run queues behind a 5-minute load of 100, then TERM arrives. TARGET tool sends it to the
-# tool's pid alone, as a caller's own kill does; TARGET group sends it to the whole process group, as a terminal does.
+# lease_wait_term TARGET: a duo run queues behind a busy disk (10 GB free of 926), then TERM arrives. TARGET tool sends it
+# to the tool's pid alone, as a caller's own kill does; TARGET group sends it to the whole process group, as a terminal does.
 lease_wait_term() {
-  fresh; set_load "{ 0.50 100.00 0.50 }"
+  fresh; set_disk "926 10"
   ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
-  need "the duo run is queued behind the load" poll_for 20 in_lease_file
+  need "the duo run is queued behind the busy disk" poll_for 20 in_lease_file
   if [[ $1 = group ]]; then kill -TERM -- "-$tool_pid" 2>/dev/null; else kill -TERM "$tool_pid" 2>/dev/null; fi
   need "the tool ends within 5 s of TERM (a ceiling of 10 polls, 0.5 s apart)" poll_for 10 tool_ended
   finish_tool

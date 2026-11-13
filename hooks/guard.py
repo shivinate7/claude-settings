@@ -3965,13 +3965,6 @@ def load_hit(tool: str, tool_input) -> tuple:
         return "", ""
     if not isinstance(reading, dict):
         return "", ""
-    memory = _load_value(reading, "memory_pct")
-    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
-    disk_text = None if disk is None or disk_total is None else "disk %.1f GB free of %.0f GB" % (disk, disk_total)
-
-    def disk_under(share, gb):
-        return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
-
     full = load_full(reading)
     if full:
         return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
@@ -3980,8 +3973,7 @@ def load_hit(tool: str, tool_input) -> tuple:
     if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and (
             "run_in_background" not in tool_input or tool_input["run_in_background"] is False)):
         return "", ""
-    busy = [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
-                        disk_under(LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB) and disk_text) if t]
+    busy = load_busy(reading)
     if busy:
         # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
         waits = [t for t in busy if not t.startswith("disk")]
@@ -4046,6 +4038,20 @@ def lane_session_hit(payload, tool: str) -> tuple:
     except Exception:
         return "", ""
     return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
+
+
+def load_busy(reading) -> list:
+    """The readings over the busy line, as text, or []: memory over LOAD_BUSY_MEMORY, or disk free under the smaller of
+    LOAD_BUSY_DISK_SHARE of the disk and LOAD_BUSY_DISK_GB. The one busy bar: load_hit and bin/sim-lease both call it.
+    An unread or malformed reading counts as normal."""
+    if not isinstance(reading, dict):
+        return []
+    memory = _load_value(reading, "memory_pct")
+    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
+    disk_busy = (disk is not None and disk_total is not None
+                 and disk < min(disk_total * LOAD_BUSY_DISK_SHARE / 100.0, LOAD_BUSY_DISK_GB))
+    return [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
+                        disk_busy and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
 
 
 def load_full(reading) -> list:

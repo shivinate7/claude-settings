@@ -12,15 +12,20 @@ take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
-status  prints one line per lease, one per waiter, and the load.
+status  prints one line per lease, one per waiter, and the brake's readings.
 
-Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
-  duo: slot 1 when it is free; slot 2 only while slot 1 is held and the 5-minute load is under 60.
+Limits on every grant: the machine-load brake is not busy (decision machine-load-brake): memory over 85%, or disk free
+  under the smaller of 10% of the disk and 15 GB, is busy. The brake's own functions decide: hooks/guard.py read_load
+  and load_busy. A reading that cannot be read counts as normal, so it grants. A brake that cannot be loaded (hooks/guard.py
+  or a family module is missing or broken) grants nothing: take exits 1 with one stderr line, "brake could not be loaded",
+  and leaves no lease and no queue place; status prints that line and exits 0 (decision guard-hooks-fail-closed).
+  The load average is never read.
+  duo: slot 1 when it is free; slot 2 only while slot 1 is held, under the same bar.
   pro: only while nothing else is leased. A held pro lease refuses every duo.
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
-Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
+Brake: hooks/guard.py, loaded by path on the first read of a call. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
 take prints `none` (with --udid too) and exits 0, give exits 0, and no file is written. On Darwin, a no-op take also prints one stderr
 line saying no lease was taken. Any other CI value, such as `false` or empty, is not a no-op.
 Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matches the same process read under another.
@@ -28,14 +33,19 @@ Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matche
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
-Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). Files written:
-leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
+Cost: per call, one `uname` and one `ps` per recorded pid. Per process, take and status load hooks/guard.py and its family
+modules once (about 0.2 s, measured on one machine); then each call, or each poll of a waiting take, adds one memory
+counter read (Mac, ctypes) and one statfs, with no `sysctl` and no child process. Files written:
+leases.json, only when its content changes, plus the empty lock file. No daemon, no timer, no log of its own. On a broken
+install (no loadable brake) each take and status costs about 5 s and appends one guard-crash line to guard.log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
 """
 import argparse
 import fcntl
+import importlib.machinery
+import importlib.util
 import json
 import os
 import signal
@@ -46,9 +56,6 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
-MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
-SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
 # The device each slot boots: the one home of the device IDs (skills/ios-apps/SKILL.md, Phone simulators). The guard
 # reads it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal); `take --udid` prints
 # it, so bin/sim-test keeps no UDID.
@@ -84,16 +91,62 @@ def start_time(pid):
     return out(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, TZ="UTC"))
 
 
+_guard = []
+
+NO_BRAKE = "brake could not be loaded"
+
+
+def brake():
+    """hooks/guard.py, the one home of the machine-load brake (decision machine-load-brake), loaded by path once per
+    run. None when it cannot be loaded (hooks/guard.py or one of its family modules): the brake is then absent, and a
+    take refuses (decision guard-hooks-fail-closed). No bytecode file is written."""
+    if not _guard:
+        keep = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks", "guard.py")
+            loader = importlib.machinery.SourceFileLoader("guard_for_sim_lease", path)
+            module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+            loader.exec_module(module)
+            _guard.append(module)
+        except Exception:
+            _guard.append(None)
+        finally:
+            sys.dont_write_bytecode = keep
+    return _guard[0]
+
+
 def read_load():
-    """(1-minute, 5-minute, 15-minute) as the raw strings of `sysctl -n vm.loadavg`, or None when unreadable."""
-    parts = out(["sysctl", "-n", "vm.loadavg"]).replace("{", " ").replace("}", " ").split()
-    if len(parts) < 3:
-        return None
+    """The brake's readings (guard.read_load: memory_pct, disk_free_gb, disk_total_gb), or None when they cannot be
+    read. One memory counter and one statfs, in this process."""
+    guard = brake()
     try:
-        [float(p) for p in parts[:3]]
-    except ValueError:
+        reading = guard.read_load() if guard else None
+    except Exception:
         return None
-    return tuple(parts[:3])
+    return reading if isinstance(reading, dict) else None
+
+
+def busy_now(load):
+    """The busy readings as text (guard.load_busy), or [] when the machine is not busy or its load is unread. An
+    absent brake is never normal: it reads as busy, so no path grants without a brake."""
+    guard = brake()
+    if guard is None:
+        return [NO_BRAKE]
+    try:
+        return guard.load_busy(load) if load is not None else []
+    except Exception:
+        return []
+
+
+def readings_text(load):
+    """The brake's readings as one phrase, such as `memory 41.0% in use, disk 73.6 GB free of 926 GB`; each unread
+    reading says `unread`."""
+    if load is None:
+        return "memory unread, disk unread"
+    memory, free, total = load.get("memory_pct"), load.get("disk_free_gb"), load.get("disk_total_gb")
+    return "%s, %s" % ("memory unread" if memory is None else "memory %.1f%% in use" % memory,
+                       "disk unread" if free is None or total is None else "disk %.1f GB free of %.0f GB" % (free, total))
 
 
 def is_live(entry):
@@ -173,11 +226,9 @@ class State:
 
 
 def decide(data, entry, load):
-    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None."""
-    if load is None or data["queue"][0]["pid"] != entry["pid"]:
-        return None
-    one, five = float(load[0]), float(load[1])
-    if five >= MAX_5MIN or one >= MAX_1MIN:
+    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None. A busy machine (the brake's
+    busy bar) grants nothing, slot 2 included; an unread reading counts as normal."""
+    if data["queue"][0]["pid"] != entry["pid"] or busy_now(load):
         return None
     held = {e["slot"] for e in data["leases"]}
     if entry["device"] == "pro":
@@ -186,7 +237,7 @@ def decide(data, entry, load):
         return None
     if "1" not in held:
         return "1"
-    if "2" not in held and five < SLOT2_5MIN:
+    if "2" not in held:
         return "2"
     return None
 
@@ -194,8 +245,9 @@ def decide(data, entry, load):
 def describe(data, load):
     holders = ", ".join("slot %s pid %s (%s)" % (e["slot"], e["pid"], e["device"]) for e in data["leases"]) or "none"
     waiters = ", ".join("pid %s (%s)" % (e["pid"], e["device"]) for e in data["queue"]) or "none"
-    shown = "unreadable" if load is None else "1-min %s 5-min %s 15-min %s" % load
-    return "holders: %s; waiting: %s; load %s" % (holders, waiters, shown)
+    busy = busy_now(load)
+    return "holders: %s; waiting: %s; brake: %s; busy: %s" % (holders, waiters, readings_text(load),
+                                                              ", ".join(busy) or "no")
 
 
 def shown(slot, args):
@@ -218,6 +270,9 @@ def cmd_take(args):
     if not started:
         print("sim-lease: pid %d is not alive" % pid, file=sys.stderr)
         return 2
+    if brake() is None:
+        print("sim-lease: no lease taken: %s (reinstall claude-settings)" % NO_BRAKE, file=sys.stderr)
+        return 1
     entry = {"pid": pid, "start": started, "device": args.device, "session": session}
     # A TERM or INT while waiting leaves through the finally block, which drops the queue place.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -273,8 +328,11 @@ def cmd_status(_args):
             print("lease slot %s pid %s device %s session %s" % (e["slot"], e["pid"], e["device"], e.get("session") or "-"))
         for e in st.data["queue"]:
             print("waiter pid %s device %s session %s" % (e["pid"], e["device"], e.get("session") or "-"))
+    if brake() is None:
+        print("brake: %s" % NO_BRAKE)
+        return 0
     load = read_load()
-    print("load %s" % ("unreadable" if load is None else "1-min %s 5-min %s 15-min %s" % load))
+    print("brake: %s; busy: %s" % (readings_text(load), ", ".join(busy_now(load)) or "no"))
     return 0
 
 
