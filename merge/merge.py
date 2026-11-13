@@ -4212,22 +4212,21 @@ def review_parse(text):
 REVIEW_CLOUD_POST = "post the lines above with the GitHub MCP tool add_issue_comment, then run again with --read-back"
 
 def review_read_back(h, pr, since, head):
-    """-> None when one of pull request `pr`'s review record comments parses as its own record at `head`, else why none does. A record for another
-    pull request is no record here. When several fail, the newest one gives the reason, since it is the one to fix."""
-    seen = []
+    """-> None when the newest review record comment of pull request `pr` parses as its own record at `head`, else why not. Only the newest counts, as
+    --reviewed reads it. A parsing record for another pull request is no record here."""
+    newest = None
     for body in h.review_comments(since).get(pr, []):
         rec, bad = review_parse(body)
-        if rec and rec["n"] != pr:
-            continue
-        if rec and rec["head"] == head:
-            return None
-        seen.append((rec, bad))
-    if not seen:
+        if not (rec and rec["n"] != pr):
+            newest = (rec, bad)
+    if newest is None:
         return f"no record comment found on pull request #{pr}"
-    rec, bad = seen[-1]
-    if rec:
-        return f"the newest record that parses is for head {rec['head'][:9]}, not the head {head[:9]}"
-    return f"the newest record does not parse; its first bad line is: {bad[:200]}"
+    rec, bad = newest
+    if rec is None:
+        return f"the newest record does not parse; its first bad line is: {bad[:200]}"
+    if rec["head"] != head:
+        return f"the newest record is for head {rec['head'][:9]}, not the head {head[:9]}"
+    return None
 
 def review_verdict(h, pr, since, head):
     """Read the record back for `review_read_back` and print one verdict line, PASS on stdout and FAILED on stderr. -> the exit code."""
