@@ -51,7 +51,7 @@ MERGE_HEAD page read or first-parent read refuses the commit. A failed merge-bas
 other than 0 or 1, gives no pass from two and falls through to one. Every other failed read stays no hit. The guard runs before the chain, so it reads the page as
 it stands at the hook.
 Cost: three more git reads, `rev-parse MERGE_HEAD MERGE_HEAD:docs/records.md`, `merge-base --all HEAD MERGE_HEAD` and
-`rev-list --first-parent origin/<base>`, plus one `merge-base --is-ancestor <merge base> origin/<base>` per best merge base. They run only
+`rev-list --first-parent origin/<base>`, plus one `merge-base --is-ancestor <merge base> origin/<base>` per best merge base (unmeasured). They run only
 on a commit the guard would otherwise refuse, so an allowed commit and a commit with no records page make the
 reads they made before. The rev-list prints one id per base tip, under the 10 s read limit, and a timeout is a
 refusal. No file, no timer, no new process beyond those git calls. Measure: the `records-page` family has 92
