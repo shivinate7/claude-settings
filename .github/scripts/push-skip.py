@@ -16,7 +16,7 @@ fails on a skipped needed job, but a job can succeed while a flag skipped the te
 the only guard is the all-flags arm in ci-scope.sh. So all-jobs-passed is not enough alone: a reused run counts for a suite only if that
 suite's job ran and concluded success on that tree. The checks are the jobs all-jobs-passed needs, minus the bookkeeping jobs. They are
 derived from checks.yml by lint/all_jobs_passed_rules.py (split_jobs, the one reader), never copied here. The head record's conclusion
-is success only when both hold; else it names the checks that did not succeed.
+is success only when both hold. Else it names the checks that did not succeed, or holds the raw conclusion when all-jobs-passed itself failed or is missing.
 
 Input (env): PUSH_TREE (the push commit's tree sha), REPO (owner/name), GH_TOKEN, HEAD_SHA (the push commit). PRS_JSON is a stand-in
 for the read: a JSON list of integration PR heads, each {"head_branch", "tree", "status", "conclusion"}
