@@ -100,6 +100,8 @@ from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as f
 SHOOT_CONFIG = ".claude/shoot.json"
 # The pinned CI image of the iOS standard (skills/ios-apps). The starter writes the same name; its test pins the two equal.
 IOS_RUNNER = "macos-26"
+# The one CI exemption form of the iOS standard (skills/ios-apps): an app that needs a newer SDK than any macOS image holds.
+IOS_CI_EXEMPTION = "tools/ios-ci-exemption.json"
 # The account values bin/ios-ship reads from ~/.config/ios-ship/account.json. A test pins them to bin/ios-ship.
 ACCOUNT_KEYS = ("team_id", "device_udid", "asc_key_path", "asc_key_id", "asc_issuer_id")
 # Claude Code's own folders in .claude. Claude Code fixes their names, so no repo chooses them.
@@ -925,6 +927,23 @@ def runs_ui_tests(text, specs):
         TEST_ACTIONS & set(run) and runs_ui_bundle(run, specs) for run in xcodebuild_runs(text))
 
 
+def ci_exemption(root):
+    """The CI exemption form of an iOS repo, as (sdk, problem). (None, None): no form. (sdk, None): valid. (None, text): broken."""
+    raw = read(root, IOS_CI_EXEMPTION)
+    if raw is None:
+        return None, None
+    try:
+        form = json.loads(raw)
+    except ValueError:
+        return None, "%s is not valid JSON" % IOS_CI_EXEMPTION
+    if not isinstance(form, dict):
+        return None, "%s is not a JSON object" % IOS_CI_EXEMPTION
+    bad = [k for k in ("sdk", "reason") if not (isinstance(form.get(k), str) and form[k].strip())]
+    if bad:
+        return None, "%s: %s must be a non-empty string" % (IOS_CI_EXEMPTION, ", ".join(bad))
+    return form["sdk"].strip(), None
+
+
 def probe_ios(root):
     files = tracked(root)
     pbx = [f for f in files if PBXPROJ.search(f)]
@@ -974,16 +993,26 @@ def probe_ios(root):
     floating = ["%s: %s" % (f, r) for f in flows for r in sorted(set(MACOS_IMAGE.findall(text[f])))
                 if r != IOS_RUNNER and not r.startswith(IOS_RUNNER + "-")]
     pinned = any(RUNS_ON.search(text[f]) and MACOS_IMAGE.search(text[f]) for f in flows)
-    if floating:
+    exempt_sdk, exempt_problem = ci_exemption(root)
+    if exempt_problem:
+        item("ci runner", "gap", exempt_problem)
+    elif floating:
         item("ci runner", "gap", "; ".join(floating) + " (want %s)" % IOS_RUNNER)
+    elif exempt_sdk:
+        item("ci runner", "pass", "exempt: %s" % exempt_sdk)
     else:
         item("ci runner", "pass" if pinned else "gap", IOS_RUNNER if pinned else "no workflow runs on macOS")
     wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages) + (("compiles the app", compiles_app),)
     on_pr = [f for f in flows if PULL_REQUEST.search(text[f])]
     lacks = ([] if on_pr else ["no pull_request workflow"]) + [
         "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
-    item("ci checks", "gap" if lacks else "pass",
-         "; ".join(lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
+    if exempt_problem:
+        item("ci checks", "gap", exempt_problem)
+    elif exempt_sdk:
+        item("ci checks", "pass", "exempt: %s" % exempt_sdk)
+    else:
+        item("ci checks", "gap" if lacks else "pass",
+             "; ".join(lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
     projects = [xcodegen_tests(text[f]) for f in specs]
     slow = [f for f in flows if runs_ui_tests(text[f], projects)]
     item("slow tests", "gap" if slow else "pass",
