@@ -28,8 +28,10 @@ it named one. Together they cover the work since the handoff's last write.
 
 After a compaction, also send one Explore agent on Sonnet to audit the handoff. Its brief's
 first line is `Audit:`. It reads the session transcript from the previous
-"This session is being continued" marker to the end, and compares it with the handoff. It
-reports three lists in 40 lines or fewer: MISSING (rulings, facts and work in the transcript
+"This session is being continued" marker to the end (with no earlier marker, from the start),
+and compares it with the handoff. The transcript is
+`<config dir>/projects/<project>/<session_id>.jsonl`; the session id is in the handoff's
+path. It reports three lists in 40 lines or fewer: MISSING (rulings, facts and work in the transcript
 that the handoff lacks), STALE (handoff lines the transcript replaced) and DONE (handoff
 lines whose work landed). Then rewrite the handoff whole (step 4) from that report. One
 agent per compaction, never per Stop checkpoint.

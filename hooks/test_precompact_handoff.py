@@ -2304,7 +2304,11 @@ def case_prompt_names_audit_agent():
     with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
         prompt = " ".join(f.read().split())
     for name, needle in (
+            ("the compaction trigger, not a Stop checkpoint",
+             "After a compaction, also send one Explore agent"),
             ("one Explore agent on Sonnet", "one Explore agent on Sonnet"),
+            ("no earlier marker reads from the start", "with no earlier marker, from the start"),
+            ("the transcript's path", "<session_id>.jsonl"),
             ("the Audit: marker on the brief's first line", "first line is `Audit:`"),
             ("reads from the previous continuation marker", "This session is being continued"),
             ("the missing list", "MISSING"), ("the stale list", "STALE"), ("the done list", "DONE"),
