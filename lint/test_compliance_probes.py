@@ -1811,7 +1811,7 @@ class LiveHooks(unittest.TestCase):
     SOURCE = os.path.join(os.path.dirname(HERE), "settings.json")
     NEW_COMMAND = "python3 hooks/changed.py"
     # The SessionStart entry a cloud install writes, shortened. Its command text is unique to this class.
-    REFRESH = {"matcher": "startup|resume",
+    REFRESH = {"matcher": "startup|resume|compact",
                "hooks": [{"type": "command", "command": "i=$(cat); bash -s -- --cloud", "timeout": 60}]}
 
     def source(self):
