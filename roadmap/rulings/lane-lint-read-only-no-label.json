@@ -1,0 +1,10 @@
+{
+ "id": "lane-lint-read-only-no-label",
+ "at": "2026-11-10T01:07:00-06:00",
+ "title": "merge --lane-lint stays read-only: the batch label write is its own part-4 build, not a lane-lint flag",
+ "ruling": "Coordinator 01:07 CST Nov 10 (not the owner), filed only as a bullet in docs/decisions/pr-ledger.md in the diff of #1561 (unmerged): \"`merge --lane-lint` stays read-only, so the `batch` label write moves out of part 1. Part 4 builds it as its own write, with its target check.\" Rules out `--lane-lint --integration`, which #2871 builds (its only job is a label write on a lint PASS). Main pr-ledger.md:26 still holds the older opposite line (coordinator 13:54 CST Nov 7); the later line replaces it. Main lane lint already posts a PASS comment (lanes-run-no-full-ci-job.md:25): read-only means no label write. Triage read 11:50 CST Nov 13; audit by Explore agent; sent to runner 10 and lane batch-label-setter 11:55 CST.",
+ "quote": "merge --lane-lint stays read-only, so the batch label write moves out of part 1.",
+ "source": "docs/decisions/pr-ledger.md in #1561 diff; coordinator 2026-11-10 01:07 CST",
+ "status": "open",
+ "step": "backlog-drain"
+}

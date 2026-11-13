@@ -32,7 +32,9 @@
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
   "ref": "coordinator 11:26 CST Nov 13",
+  "reply": "Answered in runner 11's chat 11:27 CST Nov 13: \"use the mac runner where u can (my mac)\". Reading: a, re-dispatch on degen-mac. Runner 11 dispatched it (coordinator 11:28 CST). Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Degen #702: re-run the dead leg?",
   "shown": [
@@ -52,7 +54,7 @@
       "label": "Hold #702"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Re-run degen #702's dead milestone-proof leg, and on which runner?",
   "why": "The re-run spends money, so it needs your word."
 }

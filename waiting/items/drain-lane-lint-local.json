@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:52:00Z",
+  "context": "Goal: a lane's lint result means the same as CI's.\nProblem (rule): five PRs wait on this (#1938, #1813, #1916, #2017, #1760). Your 2026-10-26 decision says the pin moves, not the prose; `--lint` ignores `--pinned` today. The pinned design is a coordinator step with no owner ruling after Oct 26, and R44 (2026-11-11 14:05 CST) says child repos should not stick on old pinned rules.\nBased on (ruling): decision action-pins-follow-sessions; R44.\nDeparts from: main \u2014 lane lint is local today; choosing b changes it to follow pins.",
+  "home": "decision action-pins-follow-sessions; step lane-lint-runs-local-tools",
+  "id": "drain-lane-lint-local",
+  "kind": "decision",
+  "n": 714,
+  "options": [
+    {
+      "gain": "Matches your Oct 26 decision and R44.",
+      "how": "Lane lint keeps using the checkout's own tools; #1938 keeps only its small fixes and #1813 reuses main's pin_tree.",
+      "id": "local",
+      "key": "a",
+      "label": "Stay local (triage's pick; main today)",
+      "lose": "A lane can pass lint on a tree CI pins differently."
+    },
+    {
+      "gain": "Same answer as CI.",
+      "how": "Lane lint reads the pinned trees, as #1938 builds.",
+      "id": "pinned",
+      "key": "b",
+      "label": "Follow pinned trees",
+      "lose": "Child repos stick on old pinned rules (against R44)."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "backlog-drain lane, #3154",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane lint: pinned or local?",
+  "shown": [
+    {
+      "id": "local",
+      "key": "a",
+      "label": "Stay local (triage's pick; main today)"
+    },
+    {
+      "id": "pinned",
+      "key": "b",
+      "label": "Follow pinned trees"
+    }
+  ],
+  "status": "open",
+  "title": "Should lane lint follow the pinned trees, or stay local to the checkout?",
+  "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:42 CST Nov 13). #1916 and #2017 turn on a second question, whether lane lint runs other jobs' suites; decision lanes-run-no-full-ci-job says touched suites only, and they wait on this answer."
+}

@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:52:00Z",
+  "context": "Goal: an Explore agent never writes a file.\nProblem (rule): the lane says close, because main's guard readonly-shell-write already stops the named mistake. But that guard judges only redirect, tee, touch and mktemp; a brief ordering a write by cp, sed -i or python -c still passes on main. Closing also closes #2693.\nBased on (code): guard readonly-shell-write, hooks/guard.py.\nDeparts from: main \u2014 main has no spawn-time check on the brief; this adds one.",
+  "home": "step brief-write-needs-writer",
+  "id": "drain-2886-keep-or-close",
+  "kind": "decision",
+  "n": 712,
+  "options": [
+    {
+      "gain": "Catches writes by cp, sed -i and python -c.",
+      "how": "The five debts of rule brief-write-needs-writer stay; #2693 stays too.",
+      "id": "keep",
+      "key": "a",
+      "label": "Keep #2886 (triage's pick)",
+      "lose": "Two more PRs stay open in the drain."
+    },
+    {
+      "gain": "Two fewer PRs.",
+      "how": "Rely on readonly-shell-write only.",
+      "id": "close",
+      "key": "b",
+      "label": "Close #2886 and #2693 (the lane's verdict)",
+      "lose": "A brief ordering a write by cp or sed -i still passes."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "backlog-drain lane, #3154; coordinator 11:22 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2886: keep or close?",
+  "shown": [
+    {
+      "id": "keep",
+      "key": "a",
+      "label": "Keep #2886 (triage's pick)"
+    },
+    {
+      "id": "close",
+      "key": "b",
+      "label": "Close #2886 and #2693 (the lane's verdict)"
+    }
+  ],
+  "status": "open",
+  "title": "Keep PR #2886 (a spawn-time check on a brief that orders a file write), or close it?",
+  "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:42 CST Nov 13)."
+}

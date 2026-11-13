@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:48:00Z",
+  "context": "Goal: an old PR closes only with proof and a recorded reason.\nProblem (rule): main names no closer; on 11:27 CST Nov 13 an agent closed 35 PRs with no comment.\nBased on (measure): 35 PRs closed with no comment, all reopened 11:30 CST.\nDeparts from: main \u2014 main names no closer; this adds the batch runner as the one closer.",
+  "home": "step bulk-close-needs-ledger",
+  "id": "pick-pr-closer-runner",
+  "kind": "decision",
+  "n": 711,
+  "options": [
+    {
+      "gain": "One closer, one record, every close explained.",
+      "how": "Runner 10 closes an old PR only from backlog-drain's final evidence ledger, with a comment naming where its ruling now lives. Triage files any ruling with no home first.",
+      "id": "runner-closes",
+      "key": "a",
+      "label": "Batch runner 10 closes old PRs (coordinator's pick)",
+      "lose": "Closes wait for the ledger and for runner 10."
+    },
+    {
+      "gain": "Closes start sooner.",
+      "how": "Triage or the backlog-drain lane closes the PRs.",
+      "id": "other-closer",
+      "key": "b",
+      "label": "Another session closes",
+      "lose": "More than one closer; the 11:27 CST bulk close by an agent is the kind of slip this repeats."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "coordinator 11:29 CST Nov 13 (the retrospective is reading your earlier words on who closes; if they differ, they govern)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Runner 10 is the PR closer",
+  "shown": [
+    {
+      "id": "runner-closes",
+      "key": "a",
+      "label": "Batch runner 10 closes old PRs (coordinator's pick)"
+    },
+    {
+      "id": "other-closer",
+      "key": "b",
+      "label": "Another session closes"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Let batch runner 10 be the one session that closes old PRs, from the evidence ledger only?",
+  "why": "The coordinator took this pick; it stands unless you choose b. Nothing closes until the ledger is final."
+}

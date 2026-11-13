@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:52:00Z",
+  "context": "Goal: a notes-only commit after review does not force a new review round.\nProblem (rule): the step is still ready (incident #1515) but your R1 words (2026-11-10 14:07 CST) cover clean merges of main only, and the filed text on main says \"Any other difference keeps today's rules\". No other PR carries the slice; closing #1616 loses it.\nBased on (incident): #1515.\nDeparts from: main \u2014 main has no notes-only handling; this adds it.",
+  "home": "step fix-check-after-notes-commit",
+  "id": "drain-1616-slice",
+  "kind": "decision",
+  "n": 717,
+  "options": [
+    {
+      "gain": "Fixes the #1515 case.",
+      "how": "A small lane builds just the slice.",
+      "id": "keep",
+      "key": "a",
+      "label": "Wanted; carry the slice in a new lane (triage's pick)",
+      "lose": "Goes beyond your R1 words about clean merges of main."
+    },
+    {
+      "gain": "Matches the filed text.",
+      "how": "Today's rules stand: any other difference gets a new review.",
+      "id": "close",
+      "key": "b",
+      "label": "Not wanted; close #1616",
+      "lose": "The #1515 case recurs."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "backlog-drain lane, #3154",
+  "repo": "shivinate7/claude-settings",
+  "short": "#1616: is its one slice wanted?",
+  "shown": [
+    {
+      "id": "keep",
+      "key": "a",
+      "label": "Wanted; carry the slice in a new lane (triage's pick)"
+    },
+    {
+      "id": "close",
+      "key": "b",
+      "label": "Not wanted; close #1616"
+    }
+  ],
+  "status": "open",
+  "title": "Is the one slice of PR #1616 wanted: a fix-check head that differs from the reviewed head only by notes files?",
+  "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:42 CST Nov 13)."
+}
