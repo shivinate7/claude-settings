@@ -1,0 +1,15 @@
+#!/bin/sh
+# The cloud refresh that `mail` runs for a "main moved to <sha>" notice (decision session-messages, "Refresh mail"). It does
+# what the SessionStart hook does on a resume: fetches install.sh from GitHub main and runs it with --cloud, with the session
+# source "resume" so the startup entries run once. It takes no argument and reads no mail text, so a notice never reaches
+# a command. A failed fetch or install exits non-zero with one stderr line, and mail then records no sha and retries on the
+# next move. `mail` bounds the run to 20 s. CLAUDE_SETTINGS_RAW overrides the source, as cloud-setup.sh reads it.
+RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/shivinate7/claude-settings/main}"
+dir=$(mktemp -d 2>/dev/null) || { echo "refresh-from-main: mktemp failed" >&2; exit 1; }
+trap 'rm -rf "$dir"' EXIT
+# The install runs from a file in its own folder, as cloud-setup.sh runs it, so a failed fetch is an exit code here:
+# `curl | bash` would run an empty script and exit 0.
+curl -fsS --max-time 10 "$RAW/install.sh" -o "$dir/install.sh" 2>/dev/null && [ -s "$dir/install.sh" ] \
+  || { echo "refresh-from-main: could not fetch $RAW/install.sh" >&2; exit 1; }
+CS_HOOK_INPUT='{"source":"resume"}' bash "$dir/install.sh" --cloud </dev/null >/dev/null 2>"$dir/err" \
+  || { echo "refresh-from-main: install.sh failed: $(tail -n 1 "$dir/err")" >&2; exit 1; }

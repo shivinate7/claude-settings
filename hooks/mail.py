@@ -56,7 +56,7 @@ REFRESH_DIR = "mail/refresh/"  # one folder per repo: <owner>-<repo>/main.md hol
 NOTICE = re.compile(r"main moved to ([0-9a-f]{40,64})")
 NOTICE_HIT = re.compile(r"^mail/refresh/([A-Za-z0-9._-]+)/main\.md$")
 REFRESH_STATE = "refresh-installed"  # in the cache: one "<slug> <sha>" line per notice the last good install covered
-REFRESH_BOUND = 15  # seconds the install may run; with the 10 s of git bounds a turn start stays inside the hook's 30 s
+REFRESH_BOUND = 20  # seconds the install may run; unmeasured. The git bounds add up to 10 s and the prompt hook ends at 30 s
 REFRESH_DEFAULT = ("bin", "refresh-from-main")  # under the config dir: the cloud install, copied there by install.sh
 TRIES = 6  # a send's first push and at most 5 retries, each only after a non-fast-forward
 
