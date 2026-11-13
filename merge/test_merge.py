@@ -15937,6 +15937,27 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
         self.assertNotIn("Traceback", err)
 
+class RenamedFilesHost(PullsHost):
+    """PullsHost whose commits/<sha> answer also lists the `files` in `files_json` (sha -> the entries, a rename's previous_filename included).
+    Its commit_files is the real Host read, through Host.api and this gh, so the walk reads a rename's old path as the Host reads it."""
+
+    def __init__(self, *args, files_json, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.files_json = files_json
+
+    def commit_files(self, sha):
+        return merge.Host.commit_files(self, sha)
+
+    def gh(self, args, cwd=None):
+        code, out = super().gh(args, cwd)
+        m = re.search(r"/commits/([0-9a-f]{40})$", args[1] if args[:1] == ["api"] else "")
+        if code == 0 and m and m.group(1) in self.files_json:
+            got = json.loads(out)
+            got["files"] = self.files_json[m.group(1)]
+            out = json.dumps(got)
+        return code, out
+
+
 class ReviewFixNotesGap(ReviewEnv):
     """A fix check whose reviewed head is not the newest earlier record's Head (decision pr-review-record, the --fix-check order). The gap is the
     commits from that Head to the reviewed head, fix_check[0], walked by first parent. A gap of record or notes commits only keeps the fix check: the
@@ -15958,7 +15979,7 @@ class ReviewFixNotesGap(ReviewEnv):
         """A file under the i-th record folder the layout names, so the cases reach each record kind."""
         return f"{self.RECORD_DIRS[i % len(self.RECORD_DIRS)]}/gap-{i}.md"
 
-    def gap_host(self, gap, *, fix_record=(), unreadable=(), fail_files=()):
+    def gap_host(self, gap, *, fix_record=(), unreadable=(), fail_files=(), files_json=None):
         """-> (host, fix). `gap` is one (sha, files) or (sha, files, parents) per commit, oldest first: the first commit's parent is REVIEW_OLD_HEAD,
         the Head, and each later one's is the commit before it. `unreadable` names the gap shas whose commit read has no answer; `fail_files` names
         the shas whose files read fails. `fix` is the last gap commit, the reviewed head of the fix check, or the Head for an empty gap. REVIEW_HEAD
@@ -15971,7 +15992,10 @@ class ReviewFixNotesGap(ReviewEnv):
             prev = sha
         commits[REVIEW_HEAD] = [prev]
         comment = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=fix_record))
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[comment], commits=commits, commit_paths=paths, commit_files_fail=fail_files)
+        if files_json is None:
+            host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[comment], commits=commits, commit_paths=paths, commit_files_fail=fail_files)
+        else:  # the files of the gap come from files_json, read through the real Host read: the entries as the commits endpoint lists them
+            host = RenamedFilesHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[comment], commits=commits, files_json=files_json)
         return host, prev
 
     def fix_from(self, host, fix):
@@ -16074,6 +16098,44 @@ class ReviewFixNotesGap(ReviewEnv):
         self.assertIn(fix, host.commit_reads, "scope: the walk did not read the reviewed head's parents, so the refusal below tests nothing")
         self.assert_refused(rc, out, err, f"a fix check over {merge.REVIEW_MERGE_WALK + 1} gap commits, one past the walk's cap, was accepted")
 
+    def test_a_gap_commit_on_a_guard_path_is_refused(self):
+        # the model record sits in a record folder and is a guard path: a gap that changes it is a guard change, so the gap refuses
+        self.assertEqual(merge.guard_hits([MODEL_RECORD]), [MODEL_RECORD], "fixture: the model record is not a guard path, so the case tests nothing")
+        host, fix = self.gap_host([(self.GAP[0], [MODEL_RECORD])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not judge the guard commit, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap commit changes a guard path was accepted")
+
+    def test_a_non_markdown_file_under_a_record_folder_is_refused(self):
+        # a record is a markdown file under docs/: a script under a record folder is no record, so a gap that changes one refuses
+        host, fix = self.gap_host([(self.GAP[0], [f"{self.RECORD_DIRS[0]}/foo.md"])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assert_recorded(rc, out, err, "control: a plain markdown record in a record folder was refused")
+        for path in (f"{self.RECORD_DIRS[0]}/x.py", f"{self.RECORD_DIRS[-1]}/run.sh"):
+            with self.subTest(path=path):
+                host, fix = self.gap_host([(self.GAP[0], [path])])
+                rc, out, err = self.fix_from(host, fix)
+                self.assertIn(self.GAP[0], host.file_reads, "scope: the walk did not judge the gap commit, so the refusal below tests nothing")
+                self.assert_refused(rc, out, err, f"a fix check whose gap commit changes {path}, which is no markdown record, was accepted")
+
+    def test_the_debt_notes_file_still_records(self):
+        host, fix = self.gap_host([(self.GAP[0], [self.NOTES_FILE])])
+        rc, out, err = self.fix_from(host, fix)
+        self.assert_recorded(rc, out, err, "a fix check whose gap commit changes the debt notes file was refused: it is a notes file")
+
+    def test_a_rename_from_a_code_path_refuses_a_gap_of_record_commits(self):
+        self.assertTrue(hasattr(merge.Host, "commit_files"), "Host has no commit_files: the read of a commit's paths is not built")
+        # control: a gap commit whose only file is a record records, through the same real read
+        host, fix = self.gap_host([(self.GAP[0], [])], files_json={self.GAP[0]: [{"filename": self.record_file(0)}]})
+        rc, out, err = self.fix_from(host, fix)
+        self.assert_recorded(rc, out, err, "control: a gap commit whose only file is a record was refused on the real read")
+        # the rename moved a file from the code path: its old path is one of the commit's paths, so the gap changes code and refuses
+        renamed = {"filename": f"{self.RECORD_DIRS[-1]}/moved.md", "status": "renamed", "previous_filename": self.CODE}
+        host, fix = self.gap_host([(self.GAP[0], [])], files_json={self.GAP[0]: [renamed]})
+        rc, out, err = self.fix_from(host, fix)
+        self.assertIn(self.GAP[0], host.commit_reads, "scope: the walk did not read the renamed commit, so the refusal below tests nothing")
+        self.assert_refused(rc, out, err, "a fix check whose gap commit renames a code path into a record folder was accepted")
+
 
 class CommitFilesHost(merge.Host):
     """Host whose one gh call, the REST read of commits/<sha>, returns `answer`, a (code, output) pair. The gh seam is faked as ProtectionHost
@@ -16145,6 +16207,13 @@ class HostCommitFiles(unittest.TestCase):
         host = CommitFilesHost(self.reply(files=[{"filename": p} for p in paths]))
         with self.assertRaises(merge.Stop):
             host.commit_files(self.SHA)
+
+    def test_a_rename_lists_its_old_path_as_well_as_its_new_one(self):
+        # a rename changes its old path too: the files list gives both, in the entry's filename and previous_filename
+        self.assert_has_method()
+        moved = f"{os.path.dirname(self.RECORD)}/moved.md"
+        host = CommitFilesHost(self.reply(files=[{"filename": moved, "status": "renamed", "previous_filename": self.CODE}]))
+        self.assertCountEqual(host.commit_files(self.SHA), [moved, self.CODE], "a rename's old path is missing from the commit's paths")
 
 
 class ReviewRoundModel(ReviewEnv):
