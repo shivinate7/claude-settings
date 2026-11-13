@@ -148,6 +148,20 @@ class DerivedStatus(DriftFixture):
             out = self.out_with_live(expect=(0,))
             self.assert_drift(out, [("p3", "doing", "done")], "a live file with no pulls list flags no pull drift")
 
+    def test_no_live_file_and_no_proof_leaves_the_drift_row_empty(self):
+        self.commit_step("c8", status="doing", order=8)  # hand doing, nothing proves it
+        self.commit_step("c9", status="ready", order=9)  # hand ready, nothing proves it
+        _, out = self.build_from_main(expect=(0,))
+        self.assertEqual(self.row(out, DRIFT_ROW), (0, ""),
+                         "with no --live file and no proof, the status drift row reads no entries")
+
+    def test_no_live_file_and_no_proof_prints_no_drift_line(self):
+        # Green on the old code: no drift is derived from pulls, so none is printed. It must stay green.
+        self.commit_step("c8", status="doing", order=8)  # hand doing, nothing proves it
+        self.commit_step("c9", status="ready", order=9)  # hand ready, nothing proves it
+        _, out = self.build_from_main(expect=(0,))
+        self.assertEqual(self.printed(out), [], "no drift line is printed with no --live file and no proof")
+
 
 if __name__ == "__main__":
     unittest.main()
