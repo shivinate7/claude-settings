@@ -3001,6 +3001,51 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
                 self.assertNotEqual(rc, 0, "a record with a PASS round printed past a lint FAIL: " + out + err)
                 self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed past a lint FAIL: " + out)
 
+    def test_a_docs_only_record_with_no_round_lints_once_and_prints(self):  # all() over no rounds is True, so only bool(a.round) keeps it on the lint path
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags("--kind", "docs-only", rounds=()))
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        rec = tm.parse_text(self, tm.posted_body(self, out))
+        self.assertEqual((rec["kind"], rec["head"]), ("docs-only", head), out + err)
+
+    def test_a_partial_only_record_lints_once_and_prints(self):  # PARTIAL is no FAIL, so a PARTIAL-only record takes the lint like a PASS one
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags(rounds=("1:reviewer:sonnet:PARTIAL",)))
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+
+    def test_a_lowercase_round_verdict_is_a_usage_error_that_runs_no_lint(self):  # round_arg reads capitals only, so no verdict reaches fail_only in lowercase
+        self.use_ci_job(PASSING, 0)
+        for verdict in ("fail", "pass", "partial"):
+            with self.subTest(verdict=verdict):
+                self.clear_lint_log()
+                rc, out, err = self.record("7", "--review-record", *self.flags(rounds=(f"1:reviewer:sonnet:{verdict}",)))
+                self.assertEqual(self.lint_calls(), [], "a lowercase verdict %r ran the lint: %s" % (verdict, out + err))
+                self.assertEqual(rc, 2, "a lowercase verdict %r is not a usage error: %s" % (verdict, out + err))
+                self.assertIn("is not N:ROLE:MODEL:VERDICT", err, "a lowercase verdict %r is refused for another cause: %s" % (verdict, err))
+                self.assertNotIn("Traceback", err, "a lowercase verdict %r crashed: %s" % (verdict, err))
+                self.assertNotIn(tm.REVIEW_MARKER, out, "a lowercase verdict %r printed a record: %s" % (verdict, out))
+
+    def test_a_fix_verdict_other_than_capital_PASS_or_FAIL_is_a_usage_error_that_runs_no_lint(self):  # fix_verifier_arg reads PASS and FAIL in capitals, so only those reach fail_only
+        self.use_ci_job(PASSING, 0)
+        reviewed = self.head()
+        self.commit_feat({"fix-step.txt": "the fix after the FAIL round\n"})
+        self.host.review_comments = lambda since: {7: [tm.record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), head=reviewed)]}  # a valid earlier record, so the verdict is the only thing the refusal can read
+        for verdict in ("PARTIAL", "fail", "pass"):
+            with self.subTest(verdict=verdict):
+                self.clear_lint_log()
+                fix = f"{reviewed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:{verdict}"
+                rc, out, err = self.record("7", "--review-record", *self.flags("--fix-check", fix, rounds=("1:reviewer:sonnet:FAIL",)))
+                self.assertEqual(self.lint_calls(), [], "a fix verdict %r ran the lint: %s" % (verdict, out + err))
+                self.assertEqual(rc, 2, "a fix verdict %r is not a usage error: %s" % (verdict, out + err))
+                self.assertIn("with a full 40-hex head and VERDICT PASS|FAIL", err, "a fix verdict %r is refused for another cause: %s" % (verdict, err))
+                self.assertNotIn("Traceback", err, "a fix verdict %r crashed: %s" % (verdict, err))
+                self.assertNotIn(tm.REVIEW_MARKER, out, "a fix verdict %r printed a record: %s" % (verdict, out))
+
     def test_a_fix_verifier_pass_on_fail_only_rounds_still_lints_once_as_it_does_today(self):  # pins today's tool, not a ruling
         # A fix verifier's PASS line still reaches the lint today, so the lint's FAIL refuses. The FAIL-only ruling names no fix verifier line.
         self.use_ci_job(FAILING, 1)
