@@ -1774,10 +1774,10 @@ def A10_full_size_each_quiet_agent_is_listed_once():
 
 
 # ---- The CI-wait check of this mode (decision ci-wait-reads-run-status, "The fallback") ----
-# A wait opens at the newest ready call and closes at a green or cancelled verdict, or a merge of its own PR. A
-# red verdict keeps it open. A check-in after the anchor (the newest ready call or red verdict) passes it, unless
-# its result is an error. An unknown verdict closes nothing. The check reads the records in file order, so no
-# fixture carries a time.
+# A wait opens at the newest ready call and closes at a green or cancelled verdict, or a merge or close of its own
+# PR. A wait that a bare ready call opens (no PR number) closes at a merge or close of any PR. A red verdict keeps
+# it open. A check-in after the anchor (the newest ready call or red verdict) passes it, unless its result is an
+# error. An unknown verdict closes nothing. The check reads the records in file order, so no fixture carries a time.
 
 CI_PR = "4217"  # no sha, path or fixture id holds this number as a whole token, so \b4217\b names the PR alone
 CI_OTHER_PR = "1111"
@@ -1907,16 +1907,18 @@ def block_reason(out, problems):
 
 
 def expect_block(source, pr=CI_PR, not_named=(), base=None, stop_hook_active=False):
-    """The check prints one block that tells the session to set a send_later check-in and names pr. No
-    number in not_named appears in the reason."""
+    """The check prints one block that tells the session to set a send_later check-in and names pr. pr None: the
+    wait names no PR number, so the reason is not checked for one. No number in not_named appears in the reason."""
     problems, out = ci_run(source, stop_hook_active, base)
     if out.strip() == "":
-        return problems + [f"no CI block printed, want one naming PR {pr}"]
+        return problems + ["no CI block printed, want one%s" % ("" if pr is None else f" naming PR {pr}")]
     reason = block_reason(out, problems)
     if reason is None:
         return problems
     problems += expect("send_later" in reason, f"block reason does not say to set a send_later check-in: {reason!r}")
-    problems += expect(re.search(r"\b%s\b" % pr, reason) is not None, f"block reason does not name PR {pr}: {reason!r}")
+    if pr is not None:
+        problems += expect(re.search(r"\b%s\b" % pr, reason) is not None,
+                           f"block reason does not name PR {pr}: {reason!r}")
     for other in not_named:
         problems += expect(re.search(r"\b%s\b" % other, reason) is None,
                            f"block reason names PR {other}, which has a closed wait: {reason!r}")
@@ -1929,11 +1931,11 @@ def expect_silent(source, stop_hook_active=False, base=None):
     return problems + expect(out.strip() == "", f"the CI check printed where it should be silent: {out[:200]!r}")
 
 
-def silent_with_control(source, control, stop_hook_active=False):
+def silent_with_control(source, control, stop_hook_active=False, pr=CI_PR):
     """source prints nothing about the CI wait. control, the same session with the closer left out or a ready
-    call added, must block. The control shows the check is live, so a mode that is absent or silent everywhere
-    fails here too."""
-    return expect_silent(source, stop_hook_active) + ["control: " + p for p in expect_block(control)]
+    call added, must block, and name pr. The control shows the check is live, so a mode that is absent or silent
+    everywhere fails here too."""
+    return expect_silent(source, stop_hook_active) + ["control: " + p for p in expect_block(control, pr=pr)]
 
 
 @case
@@ -2443,6 +2445,108 @@ def CI63_full_size_named_merges_close_their_own_prs():
     items.append(ready())
     closed = [str(1000 + i) for i in range(30)]
     return expect_block(items, not_named=closed) + ["control: " + p for p in expect_silent(items[:-1])]
+
+
+def bare_wait_closed_by(closer, label):
+    """A bare gh pr ready, which names no PR, opens a wait. A merge or close of any PR closes it, so the check is
+    silent. Control: the bare wait alone blocks, and its reason names no PR number"""
+    bare = [ready(command="gh pr ready")]
+    return ["%s: %s" % (label, p) for p in silent_with_control(bare + [closer], bare, pr=None)]
+
+
+def numbered_wait_closed_by(command, label):
+    """A gh pr ready of PR 5 opens a wait. command closes it, so the check is silent. Control: the wait alone
+    blocks on PR 5"""
+    wait = [ready("5")]
+    return ["%s: %s" % (label, p) for p in silent_with_control(wait + [shell(command)], wait, pr="5")]
+
+
+@case
+def CI64_bare_ready_closed_by_bin_merge_of_any_pr():
+    """CI64. a bare gh pr ready opens a wait with no PR number, and bin/merge of PR 5 closes it: passes. Control:
+    the bare wait alone blocks"""
+    return bare_wait_closed_by(merge_bin("5"), "bin/merge of PR 5")
+
+
+@case
+def CI65_bare_ready_closed_by_gh_pr_merge_of_any_pr():
+    """CI65. a bare gh pr ready opens a wait with no PR number, and gh pr merge of PR 5 closes it: passes. Control:
+    the bare wait alone blocks"""
+    return bare_wait_closed_by(shell("gh pr merge 5"), "gh pr merge of PR 5")
+
+
+@case
+def CI66_bare_ready_closed_by_gh_pr_close_of_any_pr():
+    """CI66. a bare gh pr ready opens a wait with no PR number, and gh pr close of PR 5 closes it: passes. Control:
+    the bare wait alone blocks"""
+    return bare_wait_closed_by(shell("gh pr close 5"), "gh pr close of PR 5")
+
+
+@case
+def CI67_bare_ready_closed_by_mcp_merge_of_any_pr():
+    """CI67. a bare gh pr ready opens a wait with no PR number, and a GitHub MCP merge_pull_request of PR 5 closes
+    it: passes. Control: the bare wait alone blocks"""
+    return bare_wait_closed_by(mcp_pr(MCP_MERGE, "5"), "GitHub MCP merge of PR 5")
+
+
+@case
+def CI68_merge_tool_with_repo_flag_closes_its_own_pr():
+    """CI68. the merge tool called by path, with -C <repo> before the PR number, closes the wait on PR 5: passes.
+    Control: the wait alone blocks"""
+    return numbered_wait_closed_by("~/.claude/bin/merge -C /repo 5 --confirm", "merge tool with -C")
+
+
+@case
+def CI69_merge_tool_with_session_flag_closes_its_own_pr():
+    """CI69. the merge tool with --session <name> before the PR number closes the wait on PR 5: passes. Control:
+    the wait alone blocks"""
+    return numbered_wait_closed_by("merge --session lane 5 --confirm", "merge tool with --session")
+
+
+@case
+def CI70_gh_pr_merge_with_body_flag_closes_its_own_pr():
+    """CI70. gh pr merge with a --body value before the PR number closes the wait on PR 5: passes. Control: the
+    wait alone blocks"""
+    return numbered_wait_closed_by('gh pr merge --body "x" 5', "gh pr merge with --body")
+
+
+@case
+def CI71_gh_pr_merge_with_repo_flag_closes_its_own_pr():
+    """CI71. gh pr merge with -R <owner/repo> before the PR number closes the wait on PR 5: passes. Control: the
+    wait alone blocks"""
+    return numbered_wait_closed_by("gh pr merge -R o/r 5", "gh pr merge with -R")
+
+
+@case
+def CI72_gh_pr_merge_by_url_closes_its_own_pr():
+    """CI72. gh pr merge given a pull request URL closes the wait on the PR number in it, PR 5: passes. Control: the
+    wait alone blocks"""
+    return numbered_wait_closed_by("gh pr merge https://github.com/o/r/pull/5", "gh pr merge by URL")
+
+
+@case
+def CI73_gh_pr_merge_with_body_flag_of_another_pr_blocks():
+    """CI73. gh pr merge with a --body value, then PR 6, does not close the wait on PR 5, so it blocks and the reason
+    names only PR 5. Control: gh pr merge of PR 5 passes"""
+    wait = [ready("5")]
+    return (expect_block(wait + [shell('gh pr merge --body "x" 6')], pr="5", not_named=["6"])
+            + ["control: " + p for p in expect_silent(wait + [shell("gh pr merge 5 --squash")])])
+
+
+@case
+def CI74_two_space_gh_pr_close_closes_its_own_pr():
+    """CI74. gh  pr  close with two spaces between the words, then PR 5, closes the wait on PR 5: passes. Control:
+    the wait alone blocks"""
+    return numbered_wait_closed_by("gh  pr  close 5", "gh  pr  close with two spaces")
+
+
+@case
+def CI75_full_size_bare_wait_closed_by_a_merge_of_any_pr():
+    """CI75. full size: 2000 text records, then a bare gh pr ready, then gh pr merge of PR 5. The merge closes the
+    wait: passes. Control: the same session without the merge blocks, and its reason names no PR number"""
+    items = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    items.append(ready(command="gh pr ready"))
+    return silent_with_control(items + [shell("gh pr merge 5 --squash")], items, pr=None)
 
 
 if __name__ == "__main__":
