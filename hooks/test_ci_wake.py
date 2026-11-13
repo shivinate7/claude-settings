@@ -1079,12 +1079,22 @@ def status_reply(status):
     return (0, json.dumps({"status": status}) + "\n", "")
 
 
-def watch_run_on_fakes(replies, budget):
+def header_block(headers):
+    """What `gh api -i` prints before a body: the status line, the headers under GitHub's names, a blank line. The shape of
+    merge/test_merge.py's gh_i, written out here because this file runs standalone and importing test_merge would set the git
+    environment for every case in the process."""
+    lines = ["HTTP/2.0 200 OK", "Content-Type: application/json; charset=utf-8", *(f"{k}: {v}" for k, v in headers.items())]
+    return "\r\n".join(lines) + "\r\n\r\n"
+
+
+def watch_run_on_fakes(replies, budget, quota=None):
     """Run watch_run(7, cwd, deadline) in process. The module's `gh` is scripted: one
     (rc, stdout, stderr) per call, the last repeats, or a function of the clock's time that
     returns one. Its `time` is the fake clock. Its `subprocess`
     and `shutil` are fakes that record a direct call (the old `gh run watch` path) and start nothing.
     budget: seconds from the clock's start to the deadline.
+    quota: None, or a function of the clock's time giving the X-RateLimit headers a `gh api -i` call prints before its body
+    (`gh run view` takes no -i, so a read without it carries no headers).
     -> (module, exception or None, clock, gh calls [(time, args)], direct subprocess calls)."""
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
@@ -1096,8 +1106,12 @@ def watch_run_on_fakes(replies, budget):
         if len(calls) > 400:
             raise AssertionError("runaway reads: 400 gh calls")
         if callable(replies):
-            return replies(clock.now)
-        return replies[min(len(calls), len(replies)) - 1]
+            rc, out, err = replies(clock.now)
+        else:
+            rc, out, err = replies[min(len(calls), len(replies)) - 1]
+        if quota is not None and "-i" in args:
+            out = header_block(quota(clock.now)) + out
+        return rc, out, err
 
     class Proc:
         returncode, args = 0, []
@@ -1338,6 +1352,68 @@ def case_watch_run_completed_wakes_on_the_next_read():
               rel == baseline[:len(rel)], detail)
         check("%s: wakes no later than %d s after the flip" % (label, BACKOFF_CAP),
               rel != [] and rel[-1] - flip <= BACKOFF_CAP, detail)
+
+
+# The GitHub quota during a watch (step gh-quota-budget). The reset is 900 s after the first read, inside the 900 s rate cap,
+# and the run completes 300 s after that reset. A quota read rides on a `gh api -i` call, so the watch sees the quota only through it.
+QUOTA_RESET = T0 + 900
+RUN_ENDS = T0 + 1200
+
+
+def quota_empty_until(reset):
+    """Remaining 0 until `reset` (the header block of a `gh api -i` read), then a full quota in the next window."""
+    def quota(now):
+        if now < reset:
+            return {"X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(reset))}
+        return {"X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "5000", "X-RateLimit-Reset": str(int(reset + 3600))}
+    return quota
+
+
+def quota_full(now):
+    """A full quota (Remaining equal to Limit) in a window that resets an hour on."""
+    return {"X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "5000", "X-RateLimit-Reset": str(int(T0 + 3600))}
+
+
+def completes_at(ends):
+    """The status: in_progress until `ends` on the fake clock, then completed."""
+    return lambda now: status_reply("completed" if now >= ends else "in_progress")
+
+
+def case_watch_run_makes_no_read_while_the_quota_is_low():
+    """The quota reads empty until 900 s after the first read, and the run completes 300 s after that reset. While the quota is
+    low the watch makes no status read: the first read is the only one before the reset."""
+    label = "watch_run, quota empty until 900 s, run completes at 1200 s"
+    mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(RUN_ENDS), WATCH_BUDGET, quota=quota_empty_until(QUOTA_RESET))
+    detail = watch_detail(raised, clock, calls, direct)
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: the watch ran past the reset" % label, clock.now >= QUOTA_RESET, detail)
+    window = [round(t - T0, 6) for t, _ in calls if T0 < t < QUOTA_RESET]
+    check("%s: no read while the quota was low" % label, window == [],
+          "%d reads between the first read and the reset, at %r s after the first" % (len(window), window[:5]))
+
+
+def case_watch_run_with_the_quota_full_keeps_its_cadence():  # control: green on main
+    """The quota is full: the reads keep the schedule of a never-ending run, 30 s apart for the first four minutes."""
+    label = "watch_run, quota full, run completes at 1200 s"
+    mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(RUN_ENDS), WATCH_BUDGET, quota=quota_full)
+    detail = watch_detail(raised, clock, calls, direct)
+    times = [t for t, _ in calls]
+    gaps = [round(b - a, 6) for a, b in zip(times, times[1:])]
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: the first four gaps between reads are 30 s" % label, gaps[:4] == [30, 30, 30, 30], detail + " gaps=%r" % gaps[:6])
+
+
+def case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline():  # control: green on main
+    """The quota reads empty with no reset header, so no reset is known: the watch holds no wait past the rate cap, and
+    it still ends at its deadline."""
+    label = "watch_run, quota empty with no reset header, run never completes, 30 min budget"
+    budget = 1800
+    no_reset = lambda now: {"X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "0"}
+    mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(10 ** 9), budget, quota=no_reset)
+    detail = watch_detail(raised, clock, calls, direct)
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: no wait past 900 s" % label, all(s <= 900 for s in clock.sleeps), detail)
+    check("%s: no read past the deadline" % label, clock.now <= T0 + budget + 1e-6, detail)
 
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
@@ -2106,6 +2182,11 @@ def main():
     case_watch_run_gaps_grow_to_a_cap()
     case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads()
     case_watch_run_completed_wakes_on_the_next_read()
+
+    # The GitHub quota during a watch: no read while it is low, the cadence and the deadline kept while it is full or unreadable.
+    case_watch_run_makes_no_read_while_the_quota_is_low()
+    case_watch_run_with_the_quota_full_keeps_its_cadence()
+    case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline()
 
     # A draft run that skips, then the real run.
     case_draft_run_then_real_run()
