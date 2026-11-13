@@ -543,7 +543,7 @@ def debt_check(wt, base_ref, host, info, store_blame=False):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR.
-    store_blame: a confirm path passes True so a refusal of a batch integration PR stores its closing lane; a preview presses nothing."""
+    store_blame: a confirm path passes True so a refusal of a batch integration PR stores its closing lane; a preview stores nothing."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
@@ -571,7 +571,7 @@ def blame_debt_lane(wt, base_ref, host, info, debt, found):
             return
         record_in_block(host, info["branch"], add_blamed=[lane])
     except (Stop, debt.Unknown) as e:
-        say(f"merge: no blame was stored for the debt refusal: {e}")
+        say(f"merge: no blame was stored for the debt refusal: {e} {DEBT_CITE}")
         return
     say(f"merge: blame stored: #{lane} is the one lane that closes each debt refused below. To take it off the batch, run: merge --batch-drop {block['name']} {lane}")
 
