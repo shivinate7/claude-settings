@@ -67,9 +67,12 @@ Stop: stall_watch.py --stop
   CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
   --undo; or MCP update_pull_request with draft false) opens a wait. A later user or queued message with a
-  `CI green|cancelled|unknown on <sha>` line, or a merge call (bin/merge, merge_pull_request), closes it. A
+  `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
+  names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
+  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). A bare gh pr merge or
+  close, with no number, closes any open wait; an MCP merge with no pullNumber closes none. A
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
-  CronCreate or ScheduleWakeup call covers it. An open wait with no check-in prints
+  CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
   {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
   line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero process starts, zero
   files written, zero timers, no network. Any error prints nothing.
@@ -520,7 +523,7 @@ def stopped_ids(content):
 
 CI_VERDICT = re.compile(r"^CI (green|red|cancelled|unknown) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
-           b"ScheduleWakeup", b"CI ")
+           b"ScheduleWakeup", b"CI ", b"pr close", b'"is_error":true', b'"is_error": true')
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
 CI_SEGMENT = re.compile(r"[;&|\n]+")
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
@@ -561,9 +564,11 @@ def shell_calls(command):
 
 
 def ci_events(rec):
-    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin',), ('merge',),
-    ('verdict', word). A user or queued message holds a verdict line; only an assistant call holds the rest.
-    A tool result is no message, so a verdict it prints is not one."""
+    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
+    ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
+    verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
+    is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
+    pr; ('mergeany',) is a bare gh pr merge or close, which aims at the current branch's PR."""
     kind = rec.get("type")
     if kind == "attachment":
         att = rec.get("attachment")
@@ -571,8 +576,10 @@ def ci_events(rec):
         return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(text)] if isinstance(text, str) else []
     content = rec["message"]["content"]
     if kind == "user":
-        if "toolUseResult" in rec:
-            return []
+        failed = [("failed", b.get("tool_use_id")) for b in (content if isinstance(content, list) else ())
+                  if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True]
+        if failed or "toolUseResult" in rec:
+            return failed
         if isinstance(content, list):
             content = "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
                                 and isinstance(b.get("text"), str))
@@ -584,9 +591,10 @@ def ci_events(rec):
         name, inp = str(b.get("name")), b["input"]
         tool = name.rsplit("__", 1)[-1]
         if tool in CI_CHECKIN_TOOLS:
-            events.append(("checkin",))
+            events.append(("checkin", b.get("id")))
         elif tool == "merge_pull_request":
-            events.append(("merge",))
+            if inp.get("pullNumber"):
+                events.append(("merge", str(inp["pullNumber"])))
         elif tool == "update_pull_request" and inp.get("draft") is False:
             events.append(("ready", str(inp.get("pullNumber") or "")))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
@@ -594,17 +602,23 @@ def ci_events(rec):
                 if words[:3] == ["gh", "pr", "ready"] and "--undo" not in words:
                     refs = [w for w in words[3:] if not w.startswith("-")]
                     events.append(("ready", refs[0] if refs else ""))
-                elif words[0].replace("\\", "/").endswith("bin/merge"):
-                    events.append(("merge",))
+                elif words[:3] in (["gh", "pr", "merge"], ["gh", "pr", "close"]):
+                    refs = [w for w in words[3:] if not w.startswith("-")]
+                    events.append(("merge", refs[0]) if refs else ("mergeany",))
+                elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
+                    refs = [w for w in words[1:] if not w.startswith("-")]
+                    if refs:
+                        events.append(("merge", refs[0]))
     return events
 
 
 def open_ci_wait(transcript):
     """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
-    None. The newest ready call opens a wait. A verdict other than red, or a merge call, closes it. A red
-    verdict keeps it open and voids the check-ins before it. A check-in after the anchor covers it. One
-    streamed read, records in file order."""
-    wait = None  # [pr, has a check-in since the anchor]
+    None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
+    leaves it open. A merge or close closes it only when it names the waited PR, or is a bare gh pr merge
+    or close. A red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
+    covers it, unless its result was an error. One streamed read, records in file order."""
+    wait = None  # [pr, ids of the check-ins since the anchor]
     with open(transcript, "rb") as f:
         for line in f:
             if not any(k in line for k in CI_KEYS):
@@ -615,15 +629,20 @@ def open_ci_wait(transcript):
                 continue
             for ev in events:
                 if ev[0] == "ready":
-                    wait = [ev[1], False]
+                    wait = [ev[1], set()]
                 elif wait is None:
                     continue
                 elif ev[0] == "checkin":
-                    wait[1] = True
-                elif ev[0] == "merge" or ev[1] != "red":
+                    wait[1].add(ev[1])
+                elif ev[0] == "failed":
+                    wait[1].discard(ev[1])
+                elif ev[0] == "mergeany" or (ev[0] == "merge" and ev[1] == wait[0]):
                     wait = None
-                else:
-                    wait[1] = False
+                elif ev[0] == "verdict":
+                    if ev[1] == "red":
+                        wait[1].clear()
+                    elif ev[1] != "unknown":
+                        wait = None
     return wait[0] if wait and not wait[1] else None
 
 
