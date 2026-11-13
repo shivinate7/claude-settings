@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-13T17:11:00Z",
+  "context": "Goal: no session works from a stale or missing copy of a repo it needs.\nProblem (rule): your 11:06 CST note asked runner 11 to keep its checkouts fresh \"on all those repos\"; runner 11 then tried to clone 7 sweep repos (session-mailbox, inbox-engine, advisor, brewer-kyc, mailaudit-data, frag-head-beta, note-scrape), and the auto-mode check refused it as relayed.\nBased on (read): the gather lane (outbox-aggregate-plan) already attached these 7 read-only at 11:08 CST; runner 11 merges in q_max, home, banchi, joyous, ios-adblock and mailaudit, and all six were fresh at 11:10 CST.\nDeparts from: main, where runner 11 holds its six merge repos \u2014 b adds read-only clones of 7 more.",
+  "home": "step outbox-aggregate-plan",
+  "id": "runner11-sweep-clones",
+  "kind": "decision",
+  "n": 704,
+  "options": [
+    {
+      "gain": "No second session holds copies of repos it does not merge in.",
+      "how": "Runner 11 drops the clones. The gather lane already attached these repos read-only under item 660 and reads them for the sweep.",
+      "id": "no-runner-clones",
+      "key": "a",
+      "label": "No: only the gather lane reads them (Recommended)",
+      "lose": "If you meant runner 11 to merge in these repos too, that waits for a new ask."
+    },
+    {
+      "gain": "Runner 11 has fresh copies of every repo in the sweep.",
+      "how": "Type \"yes, clone the 7 sweep repos read-only\" in runner 11's session (link below); the cloud refuses the act on a relayed word.",
+      "id": "yes-runner-clones",
+      "key": "b",
+      "label": "Yes: runner 11 clones the 7 read-only",
+      "links": [
+        {
+          "label": "Batch runner 11 session",
+          "url": "https://claude.ai/code/session_013NEJKzRugXqBZrZ8xwXmW7"
+        }
+      ],
+      "lose": "A second session holds copies it has no merge job in yet."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 11:12 CST Nov 13; your 11:06 CST note on item 660",
+  "repo": "shivinate7/claude-settings",
+  "short": "Runner 11: clone 7 sweep repos?",
+  "shown": [
+    {
+      "id": "no-runner-clones",
+      "key": "a",
+      "label": "No: only the gather lane reads them (Recommended)"
+    },
+    {
+      "id": "yes-runner-clones",
+      "key": "b",
+      "label": "Yes: runner 11 clones the 7 read-only"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Should batch runner 11 also clone the 7 sweep repos read-only?",
+  "why": "The cloud refused runner 11's clone on a relayed word, so only you can say yes, in its session."
+}
