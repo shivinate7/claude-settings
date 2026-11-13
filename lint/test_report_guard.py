@@ -5203,8 +5203,8 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
     UNDERSCORE_PAIRS = (  # (a claim, its cited twin): underscore emphasis is stripped like `*`
         ("This is _not a regression_.", "This is _not a regression_; see lint/report_guard.py:12."),
         ("__No regression__.", "__No regression__; see lint/report_guard.py:12."),
-        ("The _pre-existing on main_ flag is set.",
-         "The _pre-existing on main_ flag is set; see lint/report_guard.py:12."),
+        ("The flag is _pre-existing on main_.",
+         "The flag is _pre-existing on main_; see lint/report_guard.py:12."),
     )
     # No claim: _ joins words. Stripping every underscore would make "pre_existing on main" a claim ("preexisting").
     SNAKE_NAMES = ("The no_regression_test is green.", "The no_regression_flag is set.",
