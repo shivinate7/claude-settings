@@ -12,15 +12,20 @@ Pinned here:
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
      Scope.test_unreadable_diff_runs_everything, and Scope.test_merge_change_turns_the_merge_job_on (a .py change sets code).
   5. the entry file of each gated step names no tracked .md file, unless ALLOWED lists that name with a reason.
+  6. no file a gated step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
+     (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
-The pure-parse guard reads the entry file only, and a name split across arguments is not seen.
+Item 5 reads the entry file only, and a name split across arguments is not seen. Item 6 follows imports and read
+calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
 """
+import ast
 import os
 import re
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -64,7 +69,6 @@ NO_MD = [
     'Stall watch fixture suite',
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
-    'Guard wrappers fixture suite',
     'Deny checks never raise suite',
     'Session start notice suite',
     'Directory before a segment suite',
@@ -78,7 +82,6 @@ NO_MD = [
     'Clause parser suite',
     'Stop-hook landing fixture suite',
     'Ruling home fixture suite',
-    'Scratchpad owner fixture suite',
     'Ruling census fixture suite',
     'Ruled store fixture suite',
     'Guard log report fixture suite',
@@ -117,7 +120,6 @@ NO_MD = [
     'CLAUDE.md size fixture suite',
     'ios-apps skill starter suite',
     'Unknown-read contract fixture suite',
-    'Skill model rows fixture suite',
     'Python 3.9 floor check',
     'Playwright setup action suite',
     'Record stamp engine fixture suite',
@@ -191,6 +193,9 @@ MUST_STAY_UNGATED = [
     'Comment narration fixture suite',
     'Ruling kind fixture suite',
     'Checks step scope suite',  # names tracked .md files as data; a docs-only rename would turn main red if it were gated
+    'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
+    'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
+    'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
 ]
 
 # The steps that run only on a pull request, each with its own `if:`. The scope gate does not touch them.
@@ -416,6 +421,21 @@ ALLOWED = {
 
 ENTRY = re.compile(r"(?:^|[\s;&|(])(?:python3?|bash|node)\s+(?!-)([^\s'\"]+)", re.M)
 MD_TOKEN = re.compile(r"[\w.\-/]*\.md\b")
+CODE_TOKEN = re.compile(r"[\w.\-/]*\.(?:py|sh|mjs)\b")
+# A read a step's run makes: a call that runs a process, opens a file or joins a path. A name in its arguments is a read.
+READ_CALLS = {"run", "call", "check_call", "check_output", "Popen", "system", "join", "open", "read_text", "read_bytes"}
+TRANSITIVE_DEPTH = 3  # hops from a gated entry; the entry is hop 0
+TRANSITIVE_CAP = 200  # files one walk may reach; past it the reach is unknown, which fails
+# A reader: a name for a read of a tracked .md file, or of test_guard.py. test_guard.py loads tests/guard/*.py, and one
+# of those reads skills/impeccable/SKILL.md, so a step that reaches the runner reads a .md file at run time.
+TRANSITIVE_MD_READERS = ["skills/impeccable/SKILL.md", "test_guard.py", "drive_test_guard", "tests/guard"]
+# A reader named in a file that does not read it at run time, with one reason. The ALLOWED rule, for these names.
+TRANSITIVE_ALLOWED = {
+    "lint/test_ci_scope.py": (["test_guard.py"], "a changed path the scope detector is given; no file is run"),
+    "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
+}
+# A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read.
+INVOKE = re.compile(r"\b(python3?|node|bash|sh|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b")
 
 
 def read_repo(rel):
@@ -469,6 +489,124 @@ def md_names_reached(text, tracked):
                 reached.add(tok)
                 break
     return reached
+
+
+def tracked_code():
+    """The tracked .py, .sh and .mjs files: what a read can name."""
+    out = subprocess.run(["git", "ls-files", "*.py", "*.sh", "*.mjs"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    return out.split()
+
+
+def name_index(code):
+    """{base name: [paths]} of the code files."""
+    index = {}
+    for path in code:
+        index.setdefault(os.path.basename(path), []).append(path)
+    return index
+
+
+def named_files(name, here, index):
+    """The code files a name can mean: a path, or a path that ends in it (`name` has a `/`), else a file of that base name,
+    the one in folder `here` first."""
+    if "/" in name:
+        return {p for paths in index.values() for p in paths if p == name or p.endswith("/" + name)}
+    same = index.get(name, [])
+    return set([p for p in same if os.path.dirname(p) == here] or same)
+
+
+def callee(node):
+    f = node.func
+    return f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+
+
+def read_strings(arg):
+    """The strings inside one argument of a read call. An os.path.join of constants also counts as one string, so
+    join(HERE, "tests", "guard") reads as tests/guard."""
+    out = []
+    for sub in ast.walk(arg):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            out.append(sub.value)
+        elif isinstance(sub, ast.Call) and callee(sub) == "join":
+            out.append("/".join(a.value for a in sub.args if isinstance(getattr(a, "value", None), str)))
+    return out
+
+
+def scan_file(rel, text, index):
+    """(files reached, names read) for one file. A Python file is read with ast: its imports, and the strings and names
+    of its read calls, so a comment or a docstring names nothing. Any other file, or a Python file that does not parse,
+    is read line by line: an INVOKE line, not a comment. A name ALLOWED for the file reaches no file either."""
+    here = os.path.dirname(rel)
+    allowed = TRANSITIVE_ALLOWED.get(rel, ([], ""))[0]
+
+    def targets(name):
+        return set() if any(a in name for a in allowed) else named_files(name, here, index)
+
+    tree = None
+    if rel.endswith(".py"):
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            tree = None
+    reaches, names = set(), []
+    if tree is None:
+        names = [ln for ln in text.splitlines() if INVOKE.search(ln) and not ln.lstrip().startswith(("#", "//"))]
+    else:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    reaches |= targets(alias.name.split(".")[-1] + ".py")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                reaches |= targets(node.module.split(".")[-1] + ".py")
+            elif isinstance(node, ast.Name):
+                names.append(node.id)
+            elif isinstance(node, ast.FunctionDef):
+                names.append(node.name)
+            elif isinstance(node, ast.Call) and callee(node) in READ_CALLS:
+                for arg in node.args + [k.value for k in node.keywords]:
+                    names.extend(read_strings(arg))
+    for name in names:
+        for token in CODE_TOKEN.findall(name):
+            reaches |= targets(token)
+    return reaches, names
+
+
+def readers_in(rel, names):
+    """The TRANSITIVE_MD_READERS names a file reads: its own path holds one, or one of its names does and TRANSITIVE_ALLOWED
+    does not list it for the file."""
+    allowed = TRANSITIVE_ALLOWED.get(rel, ([], ""))[0]
+    return [m for m in TRANSITIVE_MD_READERS if m in rel or (m not in allowed and any(m in n for n in names))]
+
+
+def walk_readers(entry, read_text, index, memo):
+    """(hits, cut). hits holds (reader, file, chain) for each reader the entry reaches within TRANSITIVE_DEPTH hops, and
+    cut is True when the walk stopped at TRANSITIVE_CAP files. read_text(rel) gives a file's text, or None when it is absent.
+    memo caches each file's scan across the walks that share it."""
+    chains = {entry: (entry,)}
+    queue, hits = [entry], []
+    while queue:
+        rel = queue.pop(0)
+        if rel not in memo:
+            memo[rel] = scan_file(rel, read_text(rel) or "", index)
+        reaches, names = memo[rel]
+        hits += [(m, rel, chains[rel]) for m in readers_in(rel, names)]
+        if len(chains[rel]) > TRANSITIVE_DEPTH:
+            continue
+        for nxt in sorted(reaches):
+            if nxt not in chains:
+                chains[nxt] = chains[rel] + (nxt,)
+                queue.append(nxt)
+        if len(chains) > TRANSITIVE_CAP:
+            return hits, True
+    return hits, False
+
+
+def repo_text(rel):
+    """A tracked file's text, or None when the file is absent."""
+    return read_repo(rel) if os.path.isfile(os.path.join(ROOT, rel)) else None
+
+
+def describe_hits(hits):
+    return "; ".join("%s in %s, reached as %s" % (m, rel, " > ".join(chain)) for m, rel, chain in hits)
 
 
 def gated_steps(steps):
@@ -615,8 +753,88 @@ class GatedEntriesNameNoUnlistedMd(ChecksStepBase):
         for entry, (names, reason) in ALLOWED.items():
             with self.subTest(entry=entry):
                 self.assertIn(entry, gated, "%s is allowed, but no gated step runs it" % entry)
-                stale = sorted(set(names) - md_names_reached(read_repo(entry), tracked))
+                # A listed name no longer tracked was renamed or removed by the change; only names still in the repo are checked.
+                listed = [n for n in names if n in tracked]
+                stale = sorted(set(listed) - md_names_reached(read_repo(entry), tracked))
                 self.assertEqual(stale, [], "%s no longer names %s: drop those names from ALLOWED" % (entry, stale))
+
+
+class AllowanceNamesAfterAMove(unittest.TestCase):
+    ENTRY = "lint/test_check_claude_md_size.py"  # a gated entry that ALLOWED lists with its names
+    GONE = "docs/renamed-away-for-test.md"  # not tracked, as after a rename
+
+    def failures_with(self, names):
+        with mock.patch.dict(ALLOWED, {self.ENTRY: (names, "fixture")}):
+            result = unittest.TestResult()
+            GatedEntriesNameNoUnlistedMd("test_each_allowance_is_gated_and_still_names_its_file").run(result)
+        return result.failures + result.errors
+
+    def test_a_listed_name_no_longer_tracked_is_not_red(self):
+        self.assertEqual(self.failures_with(ALLOWED[self.ENTRY][0] + [self.GONE]), [])
+
+    def test_a_listed_name_still_tracked_but_unnamed_is_red(self):
+        tracked = tracked_md()
+        named = md_names_reached(read_repo(self.ENTRY), tracked)
+        still = next(n for n in tracked if n not in named)
+        failures = self.failures_with(ALLOWED[self.ENTRY][0] + [still])
+        self.assertTrue(any(repr(still) in err for _, err in failures), "a tracked name the entry does not name is not red")
+
+
+class TransitiveReaders(ChecksStepBase):
+    def test_no_gated_step_reaches_a_reader_of_a_md_file(self):
+        steps = self.steps()
+        index, memo = name_index(tracked_code()), {}
+        for name, st in gated_steps(steps):
+            for entry in entries(st):
+                with self.subTest(step=name, entry=entry):
+                    hits, cut = walk_readers(entry, repo_text, index, memo)
+                    self.assertFalse(cut, "the walk from %s passed %d files, so its reach is unknown" % (entry, TRANSITIVE_CAP))
+                    self.assertEqual(hits, [], "step %r reads at run time: %s" % (name, describe_hits(hits)))
+
+    def test_the_walk_sees_the_scratchpad_owner_reader(self):
+        # A control: the walk is not blind to a reader it must catch (hooks/test_scratchpad_owner.py runs test_guard.py).
+        hits, _ = walk_readers("hooks/test_scratchpad_owner.py", repo_text, name_index(tracked_code()), {})
+        self.assertIn("test_guard.py", [m for m, _, _ in hits], "the walk does not see test_guard.py from its runner")
+
+
+class TransitiveWalkFixtures(unittest.TestCase):
+    def walk(self, files, entry="a/entry.py"):
+        return walk_readers(entry, files.get, name_index(list(files)), {})
+
+    def test_a_read_reached_through_an_import_is_a_hit(self):
+        files = {"a/entry.py": "import helper\n",
+                 "a/helper.py": "import os, subprocess\nsubprocess.run(['python3', os.path.join(HERE, 'test_guard.py')])\n",
+                 "hooks/test_guard.py": "x = 1\n"}
+        hits, _ = self.walk(files)
+        self.assertIn("a/helper.py", [rel for _, rel, _ in hits], "the read in the imported file is not seen")
+
+    def test_a_read_three_hops_out_is_a_hit(self):
+        files = {"a/entry.py": "import one\n", "a/one.py": "import two\n", "a/two.py": "import three\n",
+                 "a/three.py": "import subprocess\nsubprocess.run(['python3', 'test_guard.py'])\n"}
+        hits, _ = self.walk(files)
+        self.assertIn("a/three.py", [rel for _, rel, _ in hits], "a read at the depth limit is not seen")
+
+    def test_a_name_only_in_a_comment_is_not_a_read(self):
+        files = {"a/entry.py": "# Do not run hooks/test_guard.py here, it's slow\nX = '#'\n"}
+        self.assertEqual(self.walk(files)[0], [], "a comment that names the runner counts as a read")
+
+    def test_a_comment_opener_inside_a_string_does_not_hide_a_read(self):
+        files = {"a/entry.py": "LABEL = '# not a comment'\nsubprocess.run(['python3', 'hooks/test_guard.py'])\n"}
+        self.assertEqual([m for m, _, _ in self.walk(files)[0]], ["test_guard.py"], "a read after a '#' string is not seen")
+
+    def test_a_js_template_line_and_a_lone_quote_do_not_hide_a_read(self):
+        files = {"a/entry.mjs": "const t = `\nspawnSync('node', ['hooks/test_guard.py'])\n`;\necho Don't run it; python3 hooks/test_guard.py\n"}
+        self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.mjs")[0]], ["test_guard.py"],
+                         "a read on a template or a quoted line is not seen")
+
+    def test_an_empty_file_reaches_and_reads_nothing(self):
+        self.assertEqual(self.walk({"a/entry.py": ""}), ([], False))
+
+    def test_a_walk_past_the_cap_says_its_reach_is_unknown(self):
+        files = {"a/entry.py": "\n".join("import m%d" % i for i in range(TRANSITIVE_CAP + 1)) + "\n"}
+        for i in range(TRANSITIVE_CAP + 1):
+            files["a/m%d.py" % i] = "x = 1\n"
+        self.assertTrue(self.walk(files)[1], "a walk past TRANSITIVE_CAP files reports no cut")
 
 
 if __name__ == "__main__":
