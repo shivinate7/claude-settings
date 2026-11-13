@@ -35,8 +35,10 @@ uses (one home). Every reader takes the body (ruling `drops-lines-body-411a`).
 
 A bare path excuses nothing, and no reason excuses nothing. Each use
 prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every reason. No switch turns
-the check off. Cost: one string read of the body per check run. No process starts. `bin/ci-job` writes one
-event file per step, and the merge tool one body file per ci-job run, each removed after.
+the check off. Cost, measured with `strace` on 2026-11-13 (not pinned: no test counts it): the check opens the event
+file once per run, and no process start reads it. `bin/ci-job` writes one event file per step (not pinned: a
+three-step job gave three files, each removed), and the merge tool one body file per ci-job run (not pinned: read
+from `ci_job_env`, not measured), removed after.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
