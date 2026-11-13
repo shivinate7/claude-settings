@@ -138,7 +138,7 @@ pq("redesign with no Departs from line is denied", "deny",
 pq("a task about a port with no Departs from line is denied", "deny",
    pq_item(kind="task", holds=None))
 pq("a record that is neither a decision nor a task is allowed", "allow", pq_item(kind="note"))
-pq("a set to another collection is allowed", "allow", pq_item(), collection="answers")
+pq("a set to another collection is allowed", "allow", pq_item(), collection="receipts")
 pq("an update that adds holds on a port is denied", "deny", {"port": True, "holds": PQ_HOLDS},
    action="update")
 pq("an update that changes a status only is allowed", "allow", {"status": "closed"},
@@ -147,7 +147,7 @@ pq("an update that carries no port fields is allowed on today's item", "allow",
    {"rank": 3}, action="update")
 add("port question: a batch with today's item among the sets is denied", "deny", "port-question",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "receipts", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
 add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",

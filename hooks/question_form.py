@@ -1116,6 +1116,64 @@ def is_waiting_page(tool_input, cwd) -> bool:
     return waiting_page_root(tool_input, cwd) is not None
 
 
+# Rule `answers-session-write` (decision answers-session-write, pick 2 of waiting-page-one-store). An answer on the
+# waiting page is the owner's own reply, so no session writes one: the guard reads the same path and the same ArtifactData
+# fields here, for all three tools it judges (ArtifactData, Write and Edit, the shell). The collection's name is
+# lint/layout.py WAITING_ANSWERS, never a copy. A read and a delete pass; any other op is judged.
+ANSWERS_READ_OPS = ("get", "list", "query")
+# A delete removes a grant and forges none, and skills/waiting-page/SKILL.md "Route and close" orders it.
+ANSWERS_PASSED_OPS = ANSWERS_READ_OPS + ("delete",)
+
+
+def _names_answers(value) -> bool:
+    """True when `value` (a collection, a doc_id or a path) is the answers collection or lies under it."""
+    if not isinstance(value, str):
+        return False
+    answers = _layout().WAITING_ANSWERS
+    head = value.replace("\\", "/").lstrip("/")
+    return head == answers or head.startswith(answers + "/")
+
+
+def answers_write_hit(tool_input) -> str:
+    """What the ArtifactData call writes into the answers collection, else "".
+    The call, or each write of a batch, may name the collection. It may also name a doc_id or path under answers/.
+    Any op but a read or a delete counts, so a new write op is judged too.
+    The page does not matter: a session may not forge an answer on any waiting page."""
+    if not isinstance(tool_input, dict):
+        return ""
+    if tool_input.get("action") == "batch":
+        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
+    else:
+        entries = [(tool_input.get("action"), tool_input)]
+    for op, entry in entries:
+        if op in ANSWERS_PASSED_OPS:
+            continue
+        for field in ("collection", "doc_id", "path"):
+            if _names_answers(entry.get(field)):
+                return "%s %s %s" % (op, field, str(entry.get(field))[:80])
+    return ""
+
+
+def is_answers_path(path, cwd="") -> bool:
+    """True when `path` lies in the answers folder of a waiting folder.
+    The waiting folders are `waiting`, `waiting-data` and the layout's own (lint/layout.py path).
+    A sibling file, or a file only named answers, passes."""
+    if not isinstance(path, str) or not path:
+        return False
+    layout = _layout()
+    # "waiting-data" is the layout's kind name. The writer's export step copies into it (--out waiting-data).
+    folders = {"waiting", "waiting-data", layout.layout()["kinds"]["waiting-data"]["path"], layout.legacy("waiting-data")}
+    root = _git_root_of(cwd or os.getcwd())
+    try:
+        if root:
+            folders.add(layout.path(root, "waiting-data"))
+    except Exception:
+        pass  # an unreadable repo layout leaves the layout's own folders, which still refuse
+    where = os.path.join(cwd or "", os.path.expanduser(path)).replace("\\", "/")
+    posix = "/" + os.path.normpath(where).strip("/") + "/"
+    return any("/" + f.strip("/") + "/" + layout.WAITING_ANSWERS + "/" in posix for f in folders)
+
+
 def page_item_hit(tool_input, cwd="", session_id=None):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
