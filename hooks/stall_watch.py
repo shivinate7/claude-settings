@@ -71,8 +71,9 @@ Stop: stall_watch.py --stop
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
   PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The number is the call's
   first all-digit word or the N of a /pull/N URL, so flag values such as -R o/r, -C /repo, --body "x" or
-  --session lane are skipped. A gh pr merge or close with no number closes any open wait; an MCP merge with
-  no pullNumber closes none. A wait whose ready call named no number (bare gh pr ready) closes on a merge or
+  --session lane are skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr
+  merge or close that names no PR at all, only flags, closes any open wait; an MCP merge with no pullNumber
+  closes none. A wait whose ready call named no number (bare gh pr ready) closes on a merge or
   close of any PR. A
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
   CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
@@ -568,16 +569,17 @@ def shell_calls(command):
     return [seg.split() for seg in CI_SEGMENT.split(unquoted(command)) if seg.strip()]
 
 
-def pr_number(words):
+def pr_ref(words):
     """The PR a merge or close call names: its first all-digit word, or the number in a /pull/<N> URL, so a
-    flag value before it (-R o/r, -C /repo, --body "x", --session lane) is skipped. '' when it names none."""
+    flag value before it (-R o/r, -C /repo, --body "x", --session lane) is skipped. With no number, its first
+    non-dash word (a branch name), which matches no numbered wait. '' when every word is a flag."""
     for w in words:
         if PR_NUMBER.match(w):
             return w
         m = PR_URL.search(w)
         if m:
             return m.group(1)
-    return ""
+    return next((w for w in words if not w.startswith("-")), "")
 
 
 def ci_events(rec):
@@ -585,8 +587,8 @@ def ci_events(rec):
     ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
     verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
     is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
-    pr (pr_number); ('mergeany',) is a gh pr merge or close that names no number, which aims at the current
-    branch's PR."""
+    pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
+    the current branch's PR."""
     kind = rec.get("type")
     if kind == "attachment":
         att = rec.get("attachment")
@@ -621,10 +623,10 @@ def ci_events(rec):
                     refs = [w for w in words[3:] if not w.startswith("-")]
                     events.append(("ready", refs[0] if refs else ""))
                 elif words[:3] in (["gh", "pr", "merge"], ["gh", "pr", "close"]):
-                    pr = pr_number(words[3:])
+                    pr = pr_ref(words[3:])
                     events.append(("merge", pr) if pr else ("mergeany",))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
-                    pr = pr_number(words[1:])
+                    pr = pr_ref(words[1:])
                     if pr:
                         events.append(("merge", pr))
     return events
@@ -634,7 +636,8 @@ def open_ci_wait(transcript):
     """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
     None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
     leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
-    or close with no number; it closes a wait whose ready call named no PR when it names any PR or none. A
+    or close that names no PR at all; it closes a wait whose ready call named no PR when it names any PR or
+    none. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
     covers it, unless its result was an error. One streamed read, records in file order."""
     wait = None  # [pr, ids of the check-ins since the anchor]
