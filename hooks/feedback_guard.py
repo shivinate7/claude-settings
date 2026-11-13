@@ -52,8 +52,8 @@ a turn end in these cases:
     (layout.artifact_id), with no out_dir, whose tool_result is no error and returns a document whose data n
     equals the number (Pages.read_back; local_time._documents reads the result). A read-back skips the copy
     read. A number in neither blocks. The remedy says to ask the page writer to export the waiting copy and
-    to fetch the record branch, or to read the item back, and says the copy is read as of the last fetch: the
-    hook fetches nothing. A copy that cannot be read (no record branch ref, no items
+    to fetch the record branch, or to read the item back, and says the copy is read as of the last fetch: this
+    check fetches nothing (the repeats read of the same Stop may fetch it first, lint/roadmap_ref.py). A copy that cannot be read (no record branch ref, no items
     folder, an item file that is not a JSON object, the read fails) blocks nothing: a systemMessage "Feedback
     guard: page filing not checked" says so, and the send check decides alone. The check runs only after a
     proved send: a send the check stood down on skips it. Risk kind: likely risk. Rulings fb-1312-1 and
@@ -135,7 +135,9 @@ state file that predates the key counts every item there as judged. One model ca
 all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
 compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
 source) of REPEAT_CUT
-characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
+characters: roadmap steps at the local ref (one `git grep`; the ref is first fetched when older than
+roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT, else read as of its last fetch, and a repeat flag on a roadmap step
+then ends "(roadmap read as of HH:MM TZ)"), the layout's backlog files
 in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INBOXES newest other
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
 appends ` repeats <ref>` to the item line (one rewrite of the inbox) and is named in the block reason,
@@ -162,6 +164,7 @@ import _transcript  # noqa: E402  the one home of the transcript readers and the
 import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
+import roadmap_ref  # noqa: E402  the one home of the roadmap fetch (lint/roadmap_ref.py)
 import precompact_handoff  # noqa: E402  the one home of the handoff path
 from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
@@ -1065,10 +1068,15 @@ def new_items(blocks, judged):
     return out
 
 
-def roadmap_candidates(root):
+def roadmap_candidates(root, notes=None):
     """[(ref, label, text)] for each step record at the local roadmap ref, from one `git grep` that
     prints every line of every step. Steps whose status is not `done` come first, so the share keeps
-    every open step. No ref, no hit or a git error: none."""
+    every open step. No ref, no hit or a git error: none. The ref is fetched first when it is older than
+    roadmap_ref.MAX_AGE (step roadmap-ref-fresh-before-verdict); when that fails the note
+    "read as of HH:MM TZ" is appended to `notes`, if given."""
+    note = roadmap_ref.fresh_ref(root)
+    if note and notes is not None:
+        notes.append(note)
     run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", override.STEP_REF, "--", override.STEP_DIR])
     if run.returncode != 0:
         return []
@@ -1171,9 +1179,9 @@ def other_inbox_candidates(inbox, root):
     return out
 
 
-def candidates(homes, inbox, blocks, skip):
+def candidates(homes, inbox, blocks, skip, notes=None):
     """The (ref, label, text) of every older item to compare with, at most REPEAT_SHARES per source and
-    REPEAT_MAX in all, roadmap first.
+    REPEAT_MAX in all, roadmap first. A stale roadmap read leaves its note in `notes`.
     Each source fails open. Outside a git repo only this inbox's earlier blocks count."""
     found, root = [], None
     try:
@@ -1183,7 +1191,7 @@ def candidates(homes, inbox, blocks, skip):
     own = os.path.basename(inbox)[:-len(INBOX_SUFFIX)]
     sources = [("inbox", lambda: inbox_candidates(blocks, own, skip))]
     if root is not None:
-        sources = [("roadmap", lambda: roadmap_candidates(root)), ("backlog", lambda: backlog_candidates(root)),
+        sources = [("roadmap", lambda: roadmap_candidates(root, notes)), ("backlog", lambda: backlog_candidates(root)),
                    ("inbox", lambda: inbox_candidates(blocks, own, skip) + other_inbox_candidates(inbox, root))]
     for share, source in sources:
         try:
@@ -1193,10 +1201,10 @@ def candidates(homes, inbox, blocks, skip):
     return found[:REPEAT_MAX]
 
 
-def judge(homes, inbox, blocks, new):
+def judge(homes, inbox, blocks, new, notes=None):
     """Asks the model once which candidate each new item repeats. Returns ([(item id, ref, label)], why):
     `why` is None, or the reason the check could not run. Nothing to compare with: ([], None), no call."""
-    found = candidates(homes, inbox, blocks, {n for _, n in new})
+    found = candidates(homes, inbox, blocks, {n for _, n in new}, notes)
     if not found:
         return [], None
     labels = {ref: label for ref, label, _ in found}
@@ -1252,10 +1260,11 @@ def mark_items(inbox, blocks, hits):
     return placed
 
 
-def flag_text(item_id, ref, label, placed=True):
+def flag_text(item_id, ref, label, placed=True, note=""):
     what = "marked on the item" if placed else "not marked: its line was not found"
-    return "%s may repeat %s (\"%s\"); %s. Merge the work, or drop the mark if it is not a repeat." % (
+    text = "%s may repeat %s (\"%s\"); %s. Merge the work, or drop the mark if it is not a repeat." % (
         item_id, ref, label, what)
+    return text + (" (roadmap %s)" % note if note and ref.startswith("roadmap:") else "")
 
 
 def not_checked(why):
@@ -1269,12 +1278,13 @@ def judge_stop(homes, inbox, blocks, judged):
     new = [] if judged is None else new_items(blocks, judged)
     if not new:
         return [], None
+    notes = []
     try:
-        hits, why = judge(homes, inbox, blocks, new)
+        hits, why = judge(homes, inbox, blocks, new, notes)
         placed = mark_items(inbox, blocks, hits) if hits else set()
     except Exception as e:
         return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
-    return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
+    return [flag_text(*h, h[0] in placed, notes[0] if notes else "") for h in hits], (None if why is None else not_checked(why))
 
 
 def _ts(rec):

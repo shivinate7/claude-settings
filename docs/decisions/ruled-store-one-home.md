@@ -12,7 +12,7 @@ An entry whose `supersedes_none` starts with "unread" is unchecked: triage has n
 
 Protected by `lint/test_ruled_store.py` (the reader, the close rule, the switch, the guard lookup and its line, the session lines, two git starts for one read), `hooks/test_session_start.py` (the hook prints the block, and prints nothing when no entry is open) and `hooks/test_question_form.py` (the entry is the first candidate, a closed one is none, an unrelated one is left out, no more than eight are listed, an absent store is only an unknown source). `python3 lint/ruled_store.py check REPO` exits 1 on an entry that lacks `id`, `at`, `ruling` or `source`. It also exits 1 on an `at` with no zone, a `status` outside `open` and `closed`, or an entry with neither `supersedes` nor `supersedes_none`. It also exits 1 on the flags above. `lint/test_ruled_store.py` runs each.
 
-Cost: the hook starts one python and up to three read-only git processes per session start, with no fetch, file or timer of its own.
+Cost: the hook starts one python and up to three read-only git processes per session start, and no file or timer of its own. A stale `origin/roadmap` (last fetch older than 60 seconds) adds one `git fetch` of at most 2 seconds through `lint/roadmap_ref.py`; when it fails, the session block's header ends "read as of HH:MM TZ".
 
 This record is dated by one fact: the store lives on `origin/roadmap`. If the entries move to main, rewrite the record.
 

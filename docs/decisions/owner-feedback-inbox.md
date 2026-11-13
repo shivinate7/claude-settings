@@ -137,8 +137,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
   100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
-  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
-  never fetched); the layout's debt, todo and notes files in the working tree; this inbox's other
+  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`; the ref is
+  fetched first when older than 60 seconds, bounded at 2 seconds, else read as of its last fetch, and a repeat flag on a step then ends "(roadmap read as of HH:MM TZ)": lint/roadmap_ref.py, step roadmap-ref-fresh-before-verdict); the layout's debt, todo and notes files in the working tree; this inbox's other
   blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
   `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
   session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model names
