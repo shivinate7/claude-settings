@@ -806,8 +806,8 @@ def case_checkpoint_ladder():
 
 def case_late_checkpoint():
     """A late checkpoint sits NUDGE_LATE_MARGIN (20k) under the room, after the top one, whenever it
-    sits 25k or more past the top. Measured 2026-11-12 on a cloud lane: 88,069 tokens of start-up load,
-    threshold 384,000, so room 295,931 gave one checkpoint, [245931], 50k before the line."""
+    sits 25k or more past the top. A cloud lane with 88,069 tokens of start-up load and a 384,000
+    threshold has room 295,931. The top alone gave one checkpoint, [245931], 50k before the line."""
     for room, want in (
             (295931, [245931, 275931]),  # the measured cloud lane: the late one is 20k under the room
             (384000, [200000, 334000, 364000]),
