@@ -1,0 +1,14 @@
+{
+ "id": "skip-record-repost-refused",
+ "title": "A lane can repost its skip record after a batch conflict",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "False alarm, found by PR #3131's round 2 reviewer on a scratch probe; no incident yet. In merge/merge.py --review-record (the 'skips round 2 with no fix verifier' refusal): after a skip record [Round 1 FAIL, Round 3, PASS fix check] reads done and main then conflicts, the lane's repost of the same rounds with a PASS fix verifier (ci-hygiene step 8.3 form) is refused (rc 2). Only a made-up round 2 line passes, which invites a false record. Likely only after a batch merge conflict on a PR that used the new skip.",
+ "source": "lane fix-verifier-stands-for-round-2 09:37 CST Nov 13 (PR #3131)",
+ "note": "File as a debt on main when the lane next touches merge.py (rule roles-findings-are-debts-or-notes); build only after an incident or when #3131's skip is in use. Likely fix: run the skip check only when no earlier record holds round 3, or accept a repeat of an earlier skip record's own rounds. Red first. Notes, same PR: no test pins a round 1 PARTIAL (mutant == 'FAIL' leaves 60 tests green); the decision cites 'line 51' by number twice (rule git-cite-by-id); test names say 'fix check' where the glossary says 'fix verifier'.",
+ "updatedAt": "2026-11-13T09:38:02-06:00"
+}
