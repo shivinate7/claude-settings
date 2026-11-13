@@ -50,6 +50,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sendmessage_state.py")
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of the roadmap-ref fixtures (lint/test_ruled_store.py)
 ROOT = _test_temp.run_folder()  # every temp file of this run, fixture repos included, lives under it
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -757,6 +758,7 @@ def make_repo(name, rulings=None, ref="roadmap", origin_extra=None):
     git_out(repo, "add", "README.md")
     main = git_out(repo, "commit-tree", git_out(repo, "write-tree").stdout.strip(), "-m", "main").stdout.strip()
     git_out(repo, "update-ref", "refs/heads/main", main)
+    fixture.write_fetch_head(repo, "roadmap")  # a fresh roadmap fetch, so the store read does not fetch
     store = main
     if rulings is not None:
         folder = os.path.join(repo, "roadmap", "rulings")

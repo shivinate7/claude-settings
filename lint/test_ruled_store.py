@@ -77,12 +77,21 @@ def fetch_head(repo):
     return os.path.join(repo, git(repo, "rev-parse", "--git-path", "FETCH_HEAD"))
 
 
-def set_fetch_head(repo, when=None):
-    """Makes the repo's FETCH_HEAD with its mtime at `when` (an epoch second), or now when `when` is None."""
+FETCH_ORIGIN = "fixture-origin"  # the URL git names in a FETCH_HEAD line; the helper reads only the branch name
+
+
+def write_fetch_head(repo, branch="roadmap", when=None):
+    """Writes the repo's FETCH_HEAD as one fetch of `branch`, with its mtime at `when` (an epoch second) or now. Git
+    writes one such line per fetched branch; the roadmap ref is fresh only when the line names the roadmap."""
     path = fetch_head(repo)
-    with open(path, "a", encoding="utf-8"):
-        pass
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("%s\t\tbranch '%s' of %s\n" % ("0" * 40, branch, FETCH_ORIGIN))
     os.utime(path, None if when is None else (when, when))
+
+
+def set_fetch_head(repo, when=None):
+    """The repo's FETCH_HEAD as a fetch of the roadmap branch, its mtime at `when` or now."""
+    write_fetch_head(repo, "roadmap", when)
 
 
 def without_fetch_head(repo):
