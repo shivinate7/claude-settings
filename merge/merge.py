@@ -3233,7 +3233,7 @@ def unprovable_close_fails(wt, base, head):
         found = debt.unprovable_closes(wt, f"origin/{base}", head)
     except debt.Unknown as e:
         raise Stop(f"the debt-close read of {head[:9]} against {base} is unknown, not a pass: {e}\n{LANE_LINT_REMEDY}")
-    return [f"{f.text}\nName the test file in backticks in the Retire line, and touch it in this PR (edit the file, even a comment) so `touched` runs it: a `Retire-run:` cite cannot prove this close before the batch. {DEBT_CITE}"
+    return [f"{f.text}\nThe Retire is read at base, so this PR cannot change it. First name a test file in backticks in that Retire line, in its own PR on main. Then this PR deletes the debt and must touch that test (edit the file, even a comment) so `touched` runs it. A `Retire-run:` cite cannot prove this close before the batch. {DEBT_CITE}"
             for f in found]
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
