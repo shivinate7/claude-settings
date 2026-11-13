@@ -4,7 +4,7 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
-    python3 lint/ruled_store.py stale [REPO]          one line per open entry whose step is done, dropped or doing with no lane; exit 0
+    python3 lint/ruled_store.py stale [REPO]          one line per open entry whose step is done, dropped or doing with no lane; exit 0, or 2 on an internal error
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -419,7 +419,8 @@ def _stale_reason(steps, slug):
 def stale_entries(repo_dir):
     """[(entry id, reason)] for each open entry that sits open too long, oldest first: every step it names has a step
     file on STORE_REF, and each is done, dropped, or doing with no `lane`, while main lacks the ruling. An entry with no step, or one
-    whose step file is missing (unknown), is not listed. No age limit. [] when the store is absent or unreadable."""
+    whose step file is missing (unknown), is not listed. A `lane` that is empty or only whitespace counts as no lane.
+    No age limit. [] when the store is absent or unreadable."""
     opened = open_entries(ruled_entries(repo_dir), repo_dir)
     steps = _step_files(repo_dir, [slug for e in opened for slug in _steps_of(e)])
     listed = []
