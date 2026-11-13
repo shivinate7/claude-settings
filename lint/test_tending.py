@@ -688,6 +688,50 @@ class ResolverAgreementTests(unittest.TestCase):
         self.assertEqual(got, {"H2": "true"}, "a bare path the resolver holds read as %r" % got)
 
 
+class RuleHomeTests(unittest.TestCase):
+    """Triage ruling (rule git-cite-by-id, the rules store): `Home: rule:<id>` is a home when the anchor
+    `<!-- rule:<id> -->` is in CLAUDE.md. lint/check_ruling_kind.py home_problem accepts that form. The runner reads it
+    as a file path, so every rule home reads stale. hooks/ruling_home.py value_resolves has no rule form, so these
+    cases do not compare with it: the oracle is the anchor's presence in the fixture's CLAUDE.md."""
+
+    ANCHOR = "<!-- rule:some-id -->"
+    FORMS = ("Home: rule:some-id", "- Home: rule:some-id", "home: rule:some-id", "- home: rule:some-id")
+
+    def test_rule_home_with_its_anchor_in_claude_md_reads_true(self):
+        text = "# Rules\n\n## A rule\n\n%s\n" % self.ANCHOR
+        root = make_git_repo({"CLAUDE.md": text, "lint/held.py": "x\n"})
+        self.assertIn(self.ANCHOR, text, "scope: the fixture CLAUDE.md does not hold the anchor")
+        got = verdicts_of(load_runner(), entry("home-held"), "- R1 a rule. Home: rule:some-id\n", root)
+        self.assertEqual(got, {"R1": "true"}, "Home: rule:some-id with its anchor in CLAUDE.md read as %r, not true"
+                         % got)
+
+    def test_rule_home_is_held_when_its_anchor_is_the_last_of_many(self):
+        text = "".join("<!-- rule:r%03d -->\n" % i for i in range(300)) + self.ANCHOR + "\n"
+        root = make_git_repo({"CLAUDE.md": text, "lint/held.py": "x\n"})
+        self.assertIn(self.ANCHOR, text, "scope: the fixture CLAUDE.md does not hold the anchor")
+        got = verdicts_of(load_runner(), entry("home-held"), "- R2 a rule. Home: rule:some-id\n", root)
+        self.assertEqual(got, {"R2": "true"}, "Home: rule:some-id, the last of 301 anchors, read as %r, not true" % got)
+
+    def test_rule_home_with_no_anchor_in_claude_md_reads_stale(self):
+        text = "# Rules\n\n<!-- rule:other-id -->\n"
+        root = make_git_repo({"CLAUDE.md": text, "lint/held.py": "x\n"})
+        self.assertNotIn(self.ANCHOR, text, "scope: the fixture CLAUDE.md holds the anchor")
+        got = verdicts_of(load_runner(), entry("home-held"), "- R3 a rule. Home: rule:some-id\n", root)
+        self.assertEqual(got, {"R3": "stale"}, "Home: rule:some-id with no anchor in CLAUDE.md read as %r, not stale"
+                         % got)
+
+    def test_each_rule_home_line_shape_reads_true_with_its_anchor(self):
+        decisions, runner = layout_data()["tending"]["decisions"], load_runner()
+        root = make_git_repo({"CLAUDE.md": "# Rules\n\n%s\n" % self.ANCHOR, "lint/held.py": "x\n"})
+        for line in self.FORMS:
+            with self.subTest(line=line):
+                rows = line_rows(runner, decisions, line + "\n", root)
+                self.assertEqual(len(rows), 1, "the decisions store gave %d row(s) for %r, not one: the line is silent"
+                                 % (len(rows), line))
+                self.assertEqual([(ident, verdict) for _, ident, verdict in rows], [("rule:some-id", "true")],
+                                 "%r with its anchor in CLAUDE.md is not read as held" % line)
+
+
 # ---- The import route per line, skipped stores, and a byte-order mark. Each case asserts its rule, except
 # ---- the controls, which hold a rule's positive side.
 
