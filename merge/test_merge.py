@@ -12448,7 +12448,7 @@ class RepoDirFlag(RepoDirRuns, Env):
         so the case reads only what main hands the check: the real check's reads run in that root and through that host."""
         calls = []
 
-        def fake(root, h, numbers, lints, root_why=None):
+        def fake(root, h, numbers, lints, root_why=None, cfgrel=None):  # cfgrel: the config file main passes as the sixth argument; the case does not read it
             calls.append((root, h, list(numbers)))
             return ["#7 PASS"], True
 
