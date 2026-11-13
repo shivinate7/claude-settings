@@ -20,12 +20,23 @@ workflow is never read for it. Step two reads the workflow, once step one finds 
 A job name maps to a job when exactly one job has it as `name:` or key. Two matches, or none, map to no job, and the job is kept. A plain
 `if:` that goes on over later lines is read whole; a quoted one over several lines is not read, and the job is kept.
 
+The empty-run rule (decision no-merge-onto-red-main). A push can run no suite: push-skip skips the whole run, or a docs-only push turns every
+scope flag off. That run concludes `success` and must not hide an older red run of its group. A completed `success` run of the push
+group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it concluded
+`success` except the bookkeeping jobs `scope` and `push-skip`. An empty run is a verdict only when it carries evidence: its `push-skip`
+job is `success` and its `scope` job is `skipped`, which is the path where push-skip.py found the push tree equal to a `batch-*` pull
+request head whose `all-jobs-passed` passed (checks.yml, jobs push-skip and scope). Only a `push` run carries evidence: a dispatch runs no
+push-skip job. `empty_without_evidence` is that test; a caller walks past such a run to the group's newest run that is not, and when the
+group has none keeps the newest run. A schedule run is left as it is.
+
 Command (alarm.sh): clear_rule.py --event EVENT --workflow FILE R_JOBS_JSON N_JOBS_JSON. Each jobs file is a JSON array of job objects
 from the jobs API. Exit 0 when N clears R, 1 when it does not, 2 on an unreadable input. With --red-stays (no --event or --workflow):
-exit 0 when step one finds a certain red, else 1.
+exit 0 when step one finds a certain red, else 1. With --rule-events: print the events the empty-run rule judges, as a JSON array. With
+--empty-run --event EVENT JOBS_JSON: exit 0 when the run is empty without evidence, else 1.
 """
 import argparse
 import json
+import os
 import re
 import sys
 
@@ -33,6 +44,8 @@ PASS_OR_QUIET = ("success", "skipped", "neutral", "cancelled")  # a completed jo
 EVENT_TEST = re.compile(r"^github\.event_name\s*==\s*'([^']*)'$")
 EVENT_TEST_REVERSED = re.compile(r"^'([^']*)'\s*==\s*github\.event_name$")
 MATRIX_SUFFIX = re.compile(r"\s+\(.*\)$")
+BOOKKEEPING = ("scope", "push-skip")  # the jobs of a push-group run that run no suite
+EVENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.json")  # event -> group, the one home merge.py and alarm.sh read
 
 
 def top_level_split(expr, op):
@@ -200,10 +213,31 @@ def is_red(job):
     return job.get("status") == "completed" and job.get("conclusion") not in PASS_OR_QUIET
 
 
+def concluded(name, jobs, want):
+    """True when `jobs` has the job name and every entry of that name is completed with conclusion `want`."""
+    got = [j.get("conclusion") if j.get("status") == "completed" else None for j in jobs if j["name"] == name]
+    return bool(got) and all(c == want for c in got)
+
+
 def passed_in(name, n_jobs):
     """True when N has the job name and every entry of that name is a success."""
-    got = [j.get("conclusion") if j.get("status") == "completed" else None for j in n_jobs if j["name"] == name]
-    return bool(got) and all(c == "success" for c in got)
+    return concluded(name, n_jobs, "success")
+
+
+def rule_events():
+    """The events the empty-run rule judges: those of events.json in the same group as `push`."""
+    with open(EVENTS_FILE, encoding="utf-8") as f:
+        events = json.load(f)
+    return sorted(e for e, group in events.items() if group == events["push"])
+
+
+def empty_without_evidence(jobs, event):
+    """True when a completed `success` run of `event` (a push-group event) ran no check and carries no evidence (the module docstring).
+    Empty: no job but `scope` and `push-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
+    Callers check the run-level conditions (the event is in rule_events, the run concluded success) before they read the jobs."""
+    if any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs):
+        return False
+    return not (event == "push" and concluded("push-skip", jobs, "success") and concluded("scope", jobs, "skipped"))
 
 
 def red_stays(r_jobs, n_jobs):
@@ -239,10 +273,22 @@ def main(argv):
     p.add_argument("--event")
     p.add_argument("--workflow")
     p.add_argument("--red-stays", action="store_true", help="step one only: exit 0 when a red job of R is missing from N or not passed in N, else 1; reads no workflow")
-    p.add_argument("r_jobs")
-    p.add_argument("n_jobs")
+    p.add_argument("--rule-events", action="store_true", help="print the events the empty-run rule judges, as a JSON array")
+    p.add_argument("--empty-run", action="store_true", help="exit 0 when the one jobs file is an empty run without evidence (needs --event), else 1")
+    p.add_argument("r_jobs", nargs="?")
+    p.add_argument("n_jobs", nargs="?")
     a = p.parse_args(argv)
     try:
+        if a.rule_events:
+            print(json.dumps(rule_events()))
+            return 0
+        if a.empty_run:
+            if not a.event or not a.r_jobs or a.n_jobs:
+                raise ValueError("--empty-run needs --event and one jobs file")
+            with open(a.r_jobs, encoding="utf-8") as f:
+                return 0 if empty_without_evidence(json.load(f), a.event) else 1
+        if not a.r_jobs or not a.n_jobs:
+            raise ValueError("two jobs files are needed")
         with open(a.r_jobs, encoding="utf-8") as f:
             r_jobs = json.load(f)
         with open(a.n_jobs, encoding="utf-8") as f:
