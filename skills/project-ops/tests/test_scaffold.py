@@ -318,7 +318,7 @@ class Scaffold(TempDest):
                 any(re.search(SHARING, s, re.I) and denies_sharing(s) for s in sents),
                 "no sentence says the test-author and the builder never share a worktree")
 
-    def test_brief_runs_the_lane_lint_before_the_fix_check(self):
+    def test_brief_runs_the_lane_lint_before_the_fix_verifier(self):
         sents = self.brief_sentences()
         with self.subTest(claim="lane lint runs before the fix check"):
             self.assertTrue(
