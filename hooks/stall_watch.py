@@ -3,9 +3,8 @@
 
 Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
-  300 seconds with no new output, no growth of a log the command names, and no CPU time in a
-  process under the job. The job keeps running. The hook never refuses a command. For a background call
-  with an agent_id in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
+  300 seconds with no new output. The job keeps running. For a background call with an agent_id
+  in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age.
 
