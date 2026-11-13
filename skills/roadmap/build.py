@@ -1563,8 +1563,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
     record branch nor named by a Step trailer on main (that reason ends `; also tagged <tags>` when the lane carries
     another repo's cs-repo tag), or a record-branch step whose `lane` is this session and that is still doing or active
-    and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done,
-    open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
+    and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done, open pull, open
+    item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
