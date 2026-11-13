@@ -215,6 +215,20 @@ class ClearRuleNightly(unittest.TestCase):
         self.assertFalse(clear_rule.clears(r, n, PUSH, text),
                          "a green push run cleared a red macOS nightly: the != push job was left out, so its skip read as passed")
 
+    def test_a_push_run_whose_only_running_job_is_push_skip_does_not_clear_a_red_macos_nightly(self):
+        # The red nightly failed checks-macos. The newer push run's push-skip job said skip, so push-skip is the one job that ran,
+        # and it passed; checks-macos, checks and nightly-skip were skipped. The run reads green, but the red job did not pass.
+        # Named failure: the green push-skip job reads as a passed run, and the push run clears the red nightly.
+        push_skip_if = "if: ${{ github.event_name == 'push' }}"
+        r = [job("checks-macos", "failure"), job("checks", "success"), job("nightly-skip", "success")]
+        n = [job("push-skip", "success"), job("checks-macos", "skipped"), job("checks", "skipped"), job("nightly-skip", "skipped")]
+        text = workflow(("nightly-skip", ["runs-on: ubuntu-latest", self.SKIP_IF, *STEPS]),
+                        ("push-skip", ["runs-on: ubuntu-latest", push_skip_if, *STEPS]),
+                        ("checks", [RUNS_ON, *STEPS]),
+                        ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, PUSH, text),
+                         "a push run with only push-skip running cleared a red macOS nightly: the skipped red job read as passed")
+
 
 if __name__ == "__main__":
     unittest.main()
