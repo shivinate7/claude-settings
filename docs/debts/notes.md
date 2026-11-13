@@ -2271,3 +2271,5 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- start-main-fetch-drops-roadmap: the session start's main fetch rewrites FETCH_HEAD and drops its roadmap line, so the roadmap is fetched again at nearly every start, resume and compaction (hooks/session_start.sh `bounded_fetch`; lint/roadmap_ref.py `fresh_ref`). Decision: step roadmap-ref-fresh-before-verdict (the freshness step). Cost unmeasured.
+- noted-line-readers-unchecked: no reader of the new `noted` guard.log line ("step grant read as of", hooks/override.py ~751) was checked. Decision: step roadmap-ref-fresh-before-verdict (the freshness step).

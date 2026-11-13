@@ -1,0 +1,6 @@
+# Two readers outside the roadmap helper fetch or read the roadmap on their own
+
+- **What.** Two readers do not go through the one home of the roadmap fetch, `lint/roadmap_ref.py`. (a) The page-filing read in `hooks/feedback_guard.py` judges from origin's record branch with no fetch, and its note gives no time, so a reader cannot tell how old the copy is. (b) `merge/merge.py` runs its own roadmap fetch (`fetch_branch(root, "roadmap", ...)`) for the express ruling read. Incident class: stale ref refusal (incident fb-0950-4, a refusal at 09:53 CST Nov 13). Harm: a fix to the helper's bound or restore does not reach either reader.
+- **Where.** `hooks/feedback_guard.py` (the page-filing read, ~605-640; the note, ~807). `merge/merge.py` (the express ruling read, ~3557-3578). The helper's docstring says no other file runs a fetch of the roadmap branch.
+- **Decision.** Rule `building-one-home-per-capability` (give each capability one home, and call it from everywhere). Step `roadmap-ref-fresh-before-verdict` (the step that set the helper as the one fetch).
+- **Retire.** A case in `hooks/test_roadmap_readers.py` shows the page-filing read fetches a stale record branch through `lint/roadmap_ref.py`, and its note gives a time. A case in `merge/test_merge.py` shows the express ruling read calls `lint/roadmap_ref.py` and runs no fetch of its own.
