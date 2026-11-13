@@ -1,0 +1,14 @@
+{
+ "id": "records-page-stacked-base-false-alarm",
+ "title": "The records-page rule refused a merge of a stacked base; judge whether it is a false alarm",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 12:28 CST Nov 13: #2801 stacked base.",
+ "source": "coordinator 12:28 CST Nov 13",
+ "note": "Todo. The records-page rule refused a merge of a stacked base because a base commit (a24e2ccaf0) edits docs/records.md; the rule has no stacked-base case. Possible false alarm (verification-cry-wolf-guard-is-spent). Read the guard record first; the lane reports the exact refusal text. Unconfirmed until read. Also: #2801 tree fails the Cost line pin suites at docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md:66 (main passes); the lane on #2801 is not known (lane session_013NEJL3cewDruVFEQKC8Nu1 is inactive).",
+ "updatedAt": "2026-11-13T12:24:19-06:00"
+}
