@@ -20,7 +20,6 @@ DESTINATIONS = (
     "skills/fresh-prose/SKILL.md",
     "skills/design-review/SKILL.md",
     ".claude/rules/hooks.md",
-    ".claude/rules/guards.md",
 )
 
 # The RULE_FILES entries that are not destinations: CLAUDE.md (above), and the output style, which holds the

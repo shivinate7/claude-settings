@@ -26,6 +26,7 @@ import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt l
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
+import rule_audit  # noqa: E402  the rule file list, one home (lint/rule_audit.py RULE_FILES)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
