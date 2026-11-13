@@ -575,7 +575,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, ROLE_DEFAULT, role_key, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, ROLE_DEFAULT, role_key, role_bare, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -3594,7 +3594,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
     read_only = {role.lower() for role in READ_ONLY}
     for spawn in _brief_spawns(tool, tool_input):
         prompt = spawn.get("prompt")
-        role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]   # plugin prefix: my-plugin:reviewer
+        role = role_bare(spawn.get("subagent_type"))
         if not isinstance(prompt, str) or role in read_only:
             continue
         for command, before, covered in _brief_commands(prompt):

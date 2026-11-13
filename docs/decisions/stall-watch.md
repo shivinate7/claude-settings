@@ -114,8 +114,11 @@ A background agent is a job too. Its launch record is a `toolUseResult` with `is
 `async_launched` and an `agentId`. `scan_jobs` reads it beside the shells, and the same notice and TaskStop
 parsing closes it. Its transcript is `<dir of the session file>/<file stem>/subagents/agent-<id>.jsonl`,
 built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
-the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
-(`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
+the agent id and the remedy (`roles-resume-by-name`). The remedy reads the launch's Agent input: for a reviewer
+role, or an `isolation` of worktree or remote, it is stop it, then send a fresh agent of the same role the prior
+report (the resume guard refuses a resume of a finished one). For any other agent it is stop it, then resume it by
+name, with the caveat that an agent that ran in its own worktree (a role file may pin one, which this check does
+not read) has none and gets a fresh agent. The listing rules are the shell's: once per crossing, against the previous Stop.
 A transcript found in neither place is listed as unknown, once. An agent is not listed while any tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
 record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be

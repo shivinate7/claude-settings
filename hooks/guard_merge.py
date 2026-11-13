@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, role_key, segment_tokens, split_segments,
+    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, role_key, is_reviewer_role, RECORD_REVIEWER_ROLES, RESUME_ISOLATIONS, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -2232,7 +2232,6 @@ def hook_bypass_hit(texts):
 
 # ---- the review log after a round (rule review-log-after-round, decision pr-review-record)
 RECORD_SPAWN_TOOLS = ("Agent", "Task")
-RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these is a round
 RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
 RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
 # The remedy's merge call takes the flags merge/merge.py's --review-record takes (its usage line and argparse), each as a placeholder.
@@ -2425,9 +2424,8 @@ def review_log_hit(tool: str, tool_input, transcript: str, agent: bool = False):
 # ---- a resume of a finished agent (rule resume-finished-reviewer, rule roles-resume-by-name)
 RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
 RESUME_MAIN = "main"
-# The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
 # The Agent input's isolation wins when it is set (the binary reads input ?? the role file's pin); else the role file's pin.
-RESUME_ISOLATIONS = ("worktree", "remote")
+# RESUME_ISOLATIONS, the values that leave no tree, is in guard_core.
 # One reason for every role: it names the role, so the remedy names a fresh agent of that same role.
 RESUME_REASON = (
     "this %(role)s has finished, and the worktree of a finished agent is gone or reaped with its finish, so a resume runs with no "
@@ -2478,13 +2476,14 @@ def _workflow_resume_hit(reader, tool, transcript, target, isolation_pin):
     # The meta's spawnedWithWorktree is the agent's effective isolation: a Workflow spawn has no Agent input, so it
     # counts beside the role file's pin.
     worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))
+    reviewer = is_reviewer_role(agent_type)
     if state == reader.FINISHED and (agent_type or worktree):
-        if agent_type not in RECORD_REVIEWER_ROLES and not worktree:
+        if not reviewer and not worktree:
             return "", "", "", ""
-        model = RESUME_MODEL_CLAUSE if agent_type in RECORD_REVIEWER_ROLES else ""
+        model = RESUME_MODEL_CLAUSE if reviewer else ""
         return ("deny", RESUME_REASON % {"role": agent_type or "agent", "model": model},
                 "%s to a finished %s" % (tool, agent_type or "agent"), "")
-    if agent_type and agent_type not in RECORD_REVIEWER_ROLES and not worktree:
+    if agent_type and not reviewer and not worktree:
         return "", "", "", ""
     role = agent_type or "agent"
     return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
@@ -2542,7 +2541,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
             return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)
         spawn = named[-1]["input"]
         role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
-        reviewer = role_key(role) in RECORD_REVIEWER_ROLES  # `Reviewer` is the reviewer role, as in review_log_hit
+        reviewer = is_reviewer_role(role)
         if not reviewer and not _resume_worktree(spawn, role, isolation_pin):
             return "", "", "", ""
         state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)

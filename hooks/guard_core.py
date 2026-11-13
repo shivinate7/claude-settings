@@ -2150,6 +2150,22 @@ def role_key(subagent_type) -> str:
     return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
+def role_bare(subagent_type) -> str:
+    """role_key without a plugin prefix (`my-plugin:reviewer` reads `reviewer`): the role a role file or a rule names."""
+    return role_key(subagent_type).rsplit(":", 1)[-1]
+
+
+# A spawn of one of these is a review round (guard_merge review_log_hit) and is never resumed once finished (resume_finished_hit).
+RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")
+# The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
+RESUME_ISOLATIONS = ("worktree", "remote")
+
+
+def is_reviewer_role(subagent_type) -> bool:
+    """True for a reviewer or design-reviewer spawn, in any case and with any plugin prefix."""
+    return role_bare(subagent_type) in RECORD_REVIEWER_ROLES
+
+
 def agent_role(payload) -> str:
     """BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE or DESIGNER_ROLE for an agent of that type, else ''."""
     role = payload.get("agent_type")

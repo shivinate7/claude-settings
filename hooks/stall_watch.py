@@ -100,6 +100,13 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
+    from guard_core import RESUME_ISOLATIONS, is_reviewer_role  # the homes of "a finished agent has no tree to resume"
+except ImportError:  # without them every quiet agent gets the resume remedy, which names its own worktree caveat
+    RESUME_ISOLATIONS = ()
+
+    def is_reviewer_role(subagent_type) -> bool:
+        return False
+try:
     sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import _transcript  # the one reader of a job's finish: notices, TaskStop results (lint/_transcript.py)
 except ImportError:  # without it no notice can close a job: Stop prints nothing on stdout and names it on stderr
@@ -402,7 +409,7 @@ def parse_time(text):
 
 def scan_jobs(transcript):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None,
-    is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
+    is an agent, the Agent call's input or None)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
     result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
@@ -410,7 +417,7 @@ def scan_jobs(transcript):
     Stop run that this check ran in (see below); None when there is none or its timestamp is unreadable.
     A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
     nothing: the summary of that run lists nothing, so it is not a Stop."""
-    jobs, done, stops, notes, job_call, logs, began, agents = {}, set(), set(), {}, {}, {}, {}, set()
+    jobs, done, stops, notes, job_call, logs, began, agents, spawns = {}, set(), set(), {}, {}, {}, {}, set(), {}
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
@@ -458,6 +465,8 @@ def scan_jobs(transcript):
                 for b in content:  # a Bash or PowerShell call: its description may hold the note
                     if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("input"), dict):
                         notes[b.get("id")] = until_note(b["input"].get("description"))
+                        if b.get("name") in ("Agent", "Task"):
+                            spawns[b.get("id")] = b["input"]
                         cmd = b["input"].get("command")
                         if isinstance(cmd, str):
                             cwd = rec.get("cwd")
@@ -472,14 +481,26 @@ def scan_jobs(transcript):
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(_transcript.stopped_ids(b.get("content")))
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
-                k in agents)
+                k in agents, spawns.get(job_call.get(k)))
              for k, v in jobs.items() if k not in done}, prev_stop)
 
 
 AGENT_ID = re.compile(r"[\w-]+\Z")
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
-AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
+# A finished agent has no tree to resume when it is a reviewer or ran in its own worktree (rule roles-resume-by-name).
+# The Agent input shows both; a role file's isolation pin is not read here, so the resume remedy names that caveat.
+AGENT_REMEDY = ("Stop it, then resume it by name; if it ran in its own worktree, its tree is gone, so send a fresh "
+                "agent of the same role the prior report.")
+AGENT_REMEDY_FRESH = "Stop it, then send a fresh agent of the same role the prior report; a finished reviewer or worktree agent is not resumed."
+
+
+def agent_remedy(spawn):
+    """AGENT_REMEDY_FRESH for an agent whose Agent input names a reviewer role or an isolation that leaves no tree,
+    else AGENT_REMEDY."""
+    if isinstance(spawn, dict) and (is_reviewer_role(spawn.get("subagent_type")) or spawn.get("isolation") in RESUME_ISOLATIONS):
+        return AGENT_REMEDY_FRESH
+    return AGENT_REMEDY
 
 
 def agent_transcripts(session, agent, output):
@@ -545,7 +566,7 @@ def stop():
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows = []
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
+        for job, (path, note, (named, cwd), began, agent, spawn) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
@@ -562,7 +583,7 @@ def stop():
                     continue  # started before the previous Stop, which listed it
                 what = "transcript" if agent else "output file"
                 rows.append("%s: unknown, %s not found: %s%s%s" % (
-                    job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
+                    job, what, path or "(path not recorded)", until, " " + agent_remedy(spawn) if agent else ""))
                 continue
             idle = now - st.st_mtime
             if agent:  # a transcript has no named logs; one long tool call is not a stall
@@ -573,7 +594,7 @@ def stop():
                         busy = False
                     if not busy:
                         rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY))
+                            job, idle, real, until, agent_remedy(spawn)))
                 continue
             for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
