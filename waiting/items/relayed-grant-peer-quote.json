@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-13T00:50:00Z",
+  "context": "Goal: a grant you type once reaches every session it names, without you typing it again.\nProblem (risk): today auto mode never lets a session act on a grant that another session passes on; the change would trust a quoted grant, checked only by the sending session's new guard.\nBased on (read): the \"Relayed Grant\" entry in settings.json never covers an act named in a peer session's message.\nBased on (read): the sending session's guard that checks the quoted words against its own log of your messages has not yet been shown to refuse a wrong quote.\nDeparts from: main never acts on a grant a peer session passes on \u2014 a session may do the one act a peer's message names in a line Grant: \"<your exact words>\" (owner, <time>) covers <act>.\nWhy yours: a settings change in the cloud is refused by auto mode, so on a yes it goes to your Windows session by mail (measured 2026-11-12, coordinator create_session refused by auto mode as Self-Modification at 17:13 CST).",
+  "home": "step page-wakes-and-relays",
+  "id": "relayed-grant-peer-quote",
+  "kind": "decision",
+  "n": 671,
+  "options": [
+    {
+      "gain": "Your grants reach every session they name without you typing them again.",
+      "how": "Your Windows session adds the line to the \"Relayed Grant\" entry and its test; a session then acts on a grant another session quotes.",
+      "id": "trust-peer-quote",
+      "key": "a",
+      "label": "Yes, as written",
+      "lose": "Auto mode trusts a quote from another session, guarded only by a check not yet proven to refuse a wrong quote.",
+      "widens": true
+    },
+    {
+      "gain": "No session acts on a grant you did not type to it until the guard is proven.",
+      "how": "Relays stay as today; ask again once the sending guard has refused a wrong quote in a test.",
+      "id": "keep-owner-typed",
+      "key": "b",
+      "label": "Not yet (recommended)",
+      "lose": "You type a grant again in each session that needs it."
+    }
+  ],
+  "owner": "lane page-wakes-and-relays (session_013NEJL2bhraKVrHgFRGTdBk), via coordinator",
+  "pick": "b",
+  "ref": "coordinator 18:49 CST Nov 12; lane draft PR #3038",
+  "repo": "shivinate7/claude-settings",
+  "short": "Grants quoted by a peer session",
+  "status": "open",
+  "title": "May a session act on your grant when another session quotes your exact words to it?",
+  "why": "It loosens a permission gate in auto mode, which only you can change."
+}
