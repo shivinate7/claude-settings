@@ -120,24 +120,44 @@ def pauses():
 
 
 def watch_run(run_id, cwd, deadline, repo=""):
-    """Read `gh run view <id> --json status` until the status is `completed` or the deadline
-    passes. Reads follow `pauses`, and the last pause ends at the deadline. No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read
-    gets one retry after the pause (never past the deadline); a second failure raises Unknown."""
+    """Read the run's status until it is `completed` or the deadline passes. Reads follow `pauses`, and the last pause ends at the deadline.
+    No `gh run watch` (decision ci-wait-reads-run-status). A failed or non-JSON read gets one retry after the pause (never past the deadline);
+    a second failure raises Unknown. The read is `gh api -i` on the run, because `gh run view` takes no -i: its reply carries the GitHub quota
+    headers. While the quota is low the next read waits for the reset (gh_quota.read), in the pause the schedule already takes."""
+    import gh_quota  # the one home of the quota read, shared with merge/merge.py
+    route = "repos/%s/actions/runs/%s" % (repo or "{owner}/{repo}", run_id)
+
     def read():
-        args = ["run", "view", str(run_id), *(["-R", repo] if repo else []), "--json", "status"]
-        try:
-            return gh_json(args, cwd)
-        except Unknown:
-            time.sleep(max(0, min(STATUS_PAUSE, deadline - time.monotonic())))
-            if deadline - time.monotonic() <= 0:
-                raise
-            return gh_json(args, cwd)
-    gaps = pauses()
+        """-> (status, quota headers)."""
+        for attempt in (0, 1):
+            try:
+                rc, out, err = gh(["api", "-i", route], cwd)
+                headers, body = gh_quota.split_headers(out)
+                if rc != 0:
+                    raise Unknown("gh api %s exited %d: %s" % (route, rc, (err or body).strip()))
+                try:
+                    return json.loads(body).get("status"), headers
+                except (ValueError, AttributeError):
+                    raise Unknown("gh api %s printed non-JSON" % route)
+            except Unknown:
+                if attempt:
+                    raise
+                time.sleep(max(0, min(STATUS_PAUSE, deadline - time.monotonic())))
+                if deadline - time.monotonic() <= 0:
+                    raise
+    gaps, was_low = pauses(), False
     while deadline - time.monotonic() > 0:  # at or past the deadline: no read, no pause
-        if read().get("status") == "completed":
+        status, headers = read()
+        if status == "completed":
             return
         left = deadline - time.monotonic()
         gap = next(gaps)
+        low = gh_quota.read(headers, time.time(), STATUS_PAUSE)
+        if low:
+            gap = max(gap, low[2])  # the reset, at most gh_quota.WAIT_CAP; the deadline still clamps it below
+            if not was_low:
+                emit(["CI wait: the GitHub quota is low (%d of %d left); the next read waits for the reset." % low[:2]])
+        was_low = bool(low)
         if left <= gap:  # the last pause is clamped to the deadline, and the wait ends there
             time.sleep(max(0, left))
             return

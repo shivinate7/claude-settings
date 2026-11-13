@@ -175,6 +175,7 @@ git push there (default_lock). Its proxy refuses a ref delete: the lock is relea
 """
 import argparse, ast, collections, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import gh_quota  # noqa: E402  the one home of the quota read and of split_headers (hooks/gh_quota.py), shared with hooks/ci_wake.py
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
@@ -350,7 +351,7 @@ RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
 PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
-RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
+RATE_LADDER = (60, 300, gh_quota.WAIT_CAP)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
@@ -384,16 +385,7 @@ def is_net(c, out):
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
 
-_HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*(?:\n(.*?\r?\n)?\r?\n|\n?.*\Z)", re.S)  # what `gh api -i` prints first: the status line, the headers, a blank line. An empty body leaves no blank line: the block then runs to the end
-
-def split_headers(out):
-    """-> (headers, body). A reply that starts with a status line has a header block: its names are lower case in `headers`, and `body` has no block.
-    A header-like line anywhere else is text, and the body is the whole reply."""
-    m = _HEAD_BLOCK.match(out)
-    if not m:
-        return {}, out
-    pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
-    return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+split_headers = gh_quota.split_headers  # `gh api -i` reply -> (lower-case headers, body)
 
 def has_next_link(link):
     """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
@@ -993,15 +985,41 @@ class Host:
         `self.pause`; after that NetStop. Any other write is sent once on a 5xx or network error, unless the caller gives `landed` (retry_net checks it first); a rate limit retries any method. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
         raw = []
+        asked = "-i" in args  # the caller reads the header block itself; any other caller gets the body only
+        sent = args if asked or args[:1] != ["api"] else [*args, "-i"]  # every `gh api` read carries its quota headers: no extra call
+        self.quota_pause()
 
         def call():
-            c, out = sh(["gh", *args], cwd=cwd)
+            c, out = sh(["gh", *sent], cwd=cwd)
             raw[:] = [out]
             return c, out
         c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-        return c, raw[0] if "-i" in args else out
+        self.quota_note(split_headers(raw[0])[0])
+        return c, raw[0] if asked else split_headers(raw[0])[1]
+
+    quota_until = None  # the epoch a low quota resets at, set by quota_note; the next gh call waits for it
+
+    def quota_note(self, headers):
+        """Read the quota from a reply's headers. When it is low, say so in one line and hold the next call until the reset. Inside `shared_deadline`
+        the line is all it does: the guard's hook budget has no room for a pause."""
+        low = gh_quota.read(headers, self.now(), SETTLE_SECONDS)
+        if not low:
+            return
+        left, limit, wait = low
+        say(f"merge: the GitHub quota is low ({left} of {limit} left); " + ("not waiting inside the guard's time budget." if _READ_DEADLINE is not None else f"the next call waits {wait} s for the reset."))
+        if _READ_DEADLINE is None:
+            self.quota_until = self.now() + wait
+
+    def quota_pause(self):
+        """Wait out a low quota noted by the last reply, then clear it. The lock is extended first, as before a rate wait; NetStop stops the call."""
+        until, self.quota_until = self.quota_until, None
+        wait = math.ceil(until - self.now()) if until else 0
+        if wait > 0:
+            if self.before_wait:
+                self.before_wait(wait)
+            self.pause(wait)
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
