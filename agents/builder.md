@@ -28,8 +28,9 @@ If the repo has screens, load `frontend-design` by name before styling a new scr
 
 Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing grant of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try with the marker `Round N of 3`. The guard reads it at a line start, or as the leftmost marker in a first line that starts with none. A build that started on Opus by the owner's grant has no step left.
 
-Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
-and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
+Builders do not edit tests or test config. The one allowance is a change to the comments of an
+existing python, JS or TS test file, which the guard proves with the language's tokenizer. The guard
+refuses any other Edit or Write on a test path, and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
 path another way, such as with a shell command or a script. A test-author writes the new cases
 first and shows them red. Report any other test change you need. On a test conflict in a merge,
 run `git merge --abort` and report it, so the orchestrator hands the whole merge to a test-author.
