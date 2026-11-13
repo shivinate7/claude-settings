@@ -28,5 +28,5 @@ Lane briefs name these ids. Triage rewrites a line when a role changes hands.
 - Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
 - Triage: "cs triage: claude-settings (7)", session_013NEJKzCzoWhfP8FMCPtQU6, since 2026-11-11 22:38 CST.
 - Batch runner: "claude-settings batch runner 10", session_013NEJL2f1YCYsvLdpFqtWP3, since 2026-11-11 22:38 CST.
-- Batch runner, child repos: "batch runner 11 (child repos)", session_013NEJKzRugXqBZrZ8xwXmW7, since 2026-11-11 22:46 CST; scope q_max, home, banchi, joyous, ios-adblock, mailaudit since 23:50 CST (coordinator).
+- Batch runner, child repos: "batch runner 11 (child repos)", session_013NEJKzRugXqBZrZ8xwXmW7, since 2026-11-11 22:46 CST; scope every child repo under shivinate7 and ssemwal-cdc except degen (owner 11:13 CST Nov 13, item 704 b: "they're all children of claude-settings"); it fast-forwards each repo before every batch.
 - Batch runner, degen: its own runner outside the cloud session list (it merged #641 at 23:04 CST and opened #647); session not named yet.

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:15:00Z",
+  "context": "Goal: fixes that track or land work reach main first.\nProblem (rule): your 10:54 and 10:56 CST rulings put every such fix on the express lane; these three were not named.\nBased on (ruling): drain-first-hold part 4 (owner 10:54 and 10:56 CST Nov 13), as the retrospective read it at 11:12 CST.\nDeparts from: main, where these PRs wait in the drain \u2014 they go ahead of it.",
+  "home": "ruling drain-first-hold part 4",
+  "id": "pick-express-3020-3141-3071",
+  "kind": "decision",
+  "n": 705,
+  "options": [
+    {
+      "gain": "Three fixes that land or track work reach main ahead of the drain.",
+      "how": "#3020 and #3141 go express after a fresh Sonnet round 1 review; #3071 goes express as it is.",
+      "id": "express-three",
+      "key": "a",
+      "label": "Express all three (coordinator's pick)",
+      "lose": "They take express slots ahead of drain batches."
+    },
+    {
+      "gain": "Express slots stay for the four fixes you named.",
+      "how": "All three wait in the drain batches with the other done PRs.",
+      "id": "drain-queue",
+      "key": "b",
+      "label": "Send them through the drain",
+      "lose": "These fixes land later."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 11:13 CST Nov 13; retrospective 11:12 CST reading of R67 part 4",
+  "repo": "shivinate7/claude-settings",
+  "short": "Express: #3020, #3141, #3071",
+  "shown": [
+    {
+      "id": "express-three",
+      "key": "a",
+      "label": "Express all three (coordinator's pick)"
+    },
+    {
+      "id": "drain-queue",
+      "key": "b",
+      "label": "Send them through the drain"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Send #3020, #3141 and #3071 on the express lane?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

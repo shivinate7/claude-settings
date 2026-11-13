@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner picked item 699 b at 11:08 CST Nov 13 after naming the incident: an audit in a repo that pulls in claude-settings found two decision records crediting him with picks a Claude session made (the closed-front-window rule and the Clear Board refill).",
  "source": "owner 11:08 CST Nov 13, item 699 b; coordinator yes 11:12 CST",
- "note": "The check refuses a record that says \"owner\" (or the owner's name) picked or ruled unless it cites answers/<id> on a page or an owner quote with its time. Red case: the two misattributed records. Starts after #2971 is handed in (699 b also merges #2971 as built). Guard fix that tracks who decided: express under ruling drain-first-hold part 4.",
- "updatedAt": "2026-11-13T11:12:48-06:00"
+ "note": "The check refuses a record that says \"owner\" (or the owner's name) picked or ruled unless it cites answers/<id> on a page or an owner quote with its time. Red case: the two misattributed records. Starts after #2971 is handed in (699 b also merges #2971 as built). Guard fix that tracks who decided: express under ruling drain-first-hold part 4. Not express (lane 11:13 CST Nov 13; the coordinator's yes did not say express): it changes a guard's verdict, so it takes the normal process: red cases, builder, three review rounds, net-value test.",
+ "updatedAt": "2026-11-13T11:15:47-06:00"
 }
