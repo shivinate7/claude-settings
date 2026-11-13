@@ -3,8 +3,9 @@
 # issue. A green run of another group clears it only when that run is newer, is the newest of its group,
 # succeeded, and passed every job of the red run. Runs of an event not in events.json, and of a deleted
 # or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
-# The dropped-start cases (dropped.sh, the alarm for a pull request whose all-jobs-passed run never started)
-# come last. They use their own fake routes and fixtures, so the cases above read nothing new.
+# The revert-clear cases (a red run that a revert on the branch clears, read through search/commits and compare) come after
+# the cross-group cases. The dropped-start cases (dropped.sh, the alarm for a pull request whose all-jobs-passed run never
+# started) come last. They use their own fake routes and fixtures, so the cases above read nothing new.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -82,8 +83,32 @@ contents_api() {
   if printf '%s\n' "$@" | grep -q 'vnd.github.raw'; then cat "$file"; else printf '{"encoding":"base64","content":"%s"}\n' "$(base64 -w0 < "$file")"; fi
   exit 0
 }
+# revert_api: the revert reads, dispatched on $apiroute. search/commits takes GET: `search/commits?q=...`, or
+# `-X GET search/commits -f q=...` (a -f field alone makes gh send a POST, which search refuses). The query names one head
+# sha, the 40-hex in the args; the read answers $REVERTS/search/<sha>, and a missing file is an empty reply, {"items": []}.
+# repos/<repo>/compare/<rev>...<branch> answers $REVERTS/compare/<rev>...<branch>; a missing file fails the read. Each
+# read is logged to $VREADS as `search <sha>` or `compare <rev>...<branch>`.
+revert_api() {
+  local key file
+  case "$apiroute" in
+    search/*)
+      key="$(printf '%s\n' "$@" | grep -oE '[0-9a-f]{40}' | head -1)"
+      echo "search $key" >> "${VREADS:-/dev/null}"
+      file="${REVERTS:-/nonexistent}/search/$key"
+      if [ -f "$file" ]; then cat "$file"; else echo '{"items": []}'; fi ;;
+    *)
+      key="${apiroute#*compare/}"; key="${key%%\?*}"
+      echo "compare $key" >> "${VREADS:-/dev/null}"
+      file="${REVERTS:-/nonexistent}/compare/$key"
+      [ -f "$file" ] || { echo "gh: no compare fixture for $key (fake)" >&2; exit 1; }
+      cat "$file" ;;
+  esac
+  exit 0
+}
 if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
-if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
+# The first route argument, so a flag before the route does not hide it from FAIL or from the dispatch.
+apiroute="$(printf '%s\n' "$@" | sed -n '/^\(repos\/\|search\/\)/{p;q;}')"
+if [ -n "${FAIL:-}" ] && { [[ "$1 $2" == $FAIL ]] || [[ "$1 $apiroute" == $FAIL ]]; }; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
 case "$1 $2" in
   "run list")
@@ -91,6 +116,7 @@ case "$1 $2" in
     status="$(printf '%s\n' "$@" | sed -n '/^--status$/{n;p;}')"
     jq --arg want "$want" --arg status "$status" '[.[] | select($status == "" or .status == $status) | with_entries(select(.key as $k | $want | split(",") | any(. == $k)))]' "$RUNS" 2>/dev/null || cat "$RUNS" ;;
   api*)
+    case "$apiroute" in search/*|repos/*/compare/*) revert_api "$@" ;; esac
     case "$2" in
       */actions/runs/*/jobs*)
         id="${2#*actions/runs/}"; id="${id%%/*}"
@@ -119,8 +145,9 @@ gh_run() {
   printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":"%040x"}\n' \
     "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6"
 }
-# A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
-runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
+# A case starts with its runs: runs_are clears the jobs and the revert fixtures of the case before, then the jobs_of and
+# revert fixture lines that follow it.
+runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; rm -rf "$tmp/revert"; mkdir -p "$tmp/revert/search" "$tmp/revert/compare"; }
 # jobs_of <run id> [job:conclusion]...: the jobs of one run as `gh api .../actions/runs/<id>/jobs` lists them.
 jobs_of() {
   local id="$1"; shift
@@ -152,26 +179,38 @@ jobs:
       - run: echo ok
 YML
 bad=0
-t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
-  : > "$tmp/log"; : > "$tmp/reads"
+t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name, or !text it must not] [jobs reads: "none", or the run paths read, in any order] [revert reads: "none", "any", or the reads exactly, ';'-separated]
+  : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/vreads"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
+    REVERTS="$tmp/revert" VREADS="$tmp/vreads" \
     FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
-  ok=0
-  case "$1" in
-    green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
-    red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
-    unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
-  esac
-  [ "$code" = 0 ] || ok=0
-  if [ -n "${5:-}" ] && ! grep -qF -- "$5" "$tmp/log"; then ok=0; fi
-  if [ -n "${6:-}" ]; then
+  why=""  # the first cause that fails
+  if [ "$code" != 0 ]; then why="exit $code, want 0"
+  elif [ "$shown" != "$1" ]; then why="verdict '$shown', want '$1'"
+  elif [ "$1" = red ] && ! grep -q ISSUE "$tmp/log"; then why="no issue written"
+  elif [ "$1" != red ] && [ -s "$tmp/log" ]; then why="an issue was written"
+  elif [ "$1" = unknown ] && ! grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")"; then why="no ::warning:: line"
+  elif [ -n "${5:-}" ]; then
+    case "$5" in
+      !*) grep -qF -- "${5#!}" "$tmp/log" && why="the issue names '${5#!}', which it must not" ;;
+      *) grep -qF -- "$5" "$tmp/log" || why="the issue lacks '$5'" ;;
+    esac
+  fi
+  if [ -z "$why" ] && [ -n "${6:-}" ]; then
     expect_reads="$(tr ' ' '\n' <<<"$6" | grep -v '^none$' | sort | tr '\n' ' ')"
     got_reads="$(grep -o 'actions/runs/[0-9]*/jobs' "$tmp/reads" | sort | tr '\n' ' ')"
-    [ "$expect_reads" = "$got_reads" ] || ok=0
+    [ "$expect_reads" = "$got_reads" ] || why="jobs reads '$got_reads', want '$expect_reads'"
   fi
-  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
+  if [ -z "$why" ] && [ -n "${7:-}" ]; then
+    case "$7" in
+      none) [ -s "$tmp/vreads" ] && why="revert reads '$(tr '\n' ';' < "$tmp/vreads")', want none" ;;
+      any) [ -s "$tmp/vreads" ] || why="no revert read, want one" ;;
+      *) [ "$(sort "$tmp/vreads")" = "$(tr ';' '\n' <<<"$7" | sort)" ] || why="revert reads '$(tr '\n' ';' < "$tmp/vreads")', want '$7'" ;;
+    esac
+  fi
+  if [ -z "$why" ]; then echo "ok   $2"; else echo "FAIL $2: $why"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
@@ -326,6 +365,130 @@ runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/skipped-push
 jobs_of 62 checks-windows-merge-3:failure all-jobs-passed:skipped
 jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
 t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
+
+# --- revert clear: a red run that a revert on the branch clears (merge/merge.py, the revert clear) ---
+# The alarm has no checkout, so it reads reverts through the API. Per red run head: one search/commits read, filtered
+# client-side to the 40-hex `This reverts commit <head>` line. Per link: one compare read, `repos/o/r/compare/<rev>...main`;
+# status ahead or identical means reachable, diverged or behind does not. A revert of a revert is followed the same way:
+# an odd chain clears, an even chain does not. The fixtures are files: $tmp/revert/search/<head> is the search reply, and
+# $tmp/revert/compare/<rev>...main is the compare reply. runs_are empties both for each case.
+H1=$(printf '%040x' 1); H2=$(printf '%040x' 2)                                          # the heads of runs 1 and 2 (gh_run's headSha)
+V1=aaaa$(printf '%036x' 1); V2=bbbb$(printf '%036x' 2); V3=cccc$(printf '%036x' 3)      # revert commits
+D1="${H1:0:20}f${H1:21}"                                                                 # head 1 with one digit off, in the middle
+SHORT="${H1:0:7}"                                                                        # the first 7 digits of head 1
+# hit <sha> <message>: one search/commits hit, {"sha": ..., "commit": {"message": ...}}.
+hit() { jq -cn --arg s "$1" --arg m "$2" '{sha: $s, commit: {message: $m}}'; }
+# reverts <sha>: the message of a commit that reverts <sha>, as git writes it.
+reverts() { printf 'Revert "change"\n\nThis reverts commit %s.\n' "$1"; }
+# search_is <head> [hit]...: the search reply for one head, {"items": [...]}; with no hit, an empty list.
+search_is() { local h="$1"; shift; printf '%s\n' "$@" | jq -s '{items: .}' > "$tmp/revert/search/$h"; }
+# cmp_is <rev> <status>: the compare reply for <rev>...main.
+cmp_is() { printf '{"status": "%s"}\n' "$2" > "$tmp/revert/compare/$1...main"; }
+# red_jobs <run id>...: one failed job for each red run, so a jobs read never fails here. The alarm judges a red run without them.
+red_jobs() { local i; for i in "$@"; do jobs_of "$i" checks:failure; done; }
+# Scope first: the red run with no revert alarms, so a green below is a clear and not a run the alarm never judged.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1"
+t red revert-control-no-revert-still-alarms "" "" https://runs/red-1
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" ahead
+t green revert-on-the-branch-clears-the-red-run
+for st in ahead identical; do
+  runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+  search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" "$st"
+  t green "revert-reachable-by-status-$st-clears-the-red-run"
+done
+for st in diverged behind; do
+  runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+  search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" "$st"
+  t red "revert-not-reachable-by-status-$st-does-not-clear" "" "" https://runs/red-1
+done
+# The search reply is filtered client-side: a sha one digit off, a short sha, the red run's own commit, and a hit that names
+# the head without the revert line all leave the red run red. Each decoy's compare is `ahead`, so a loose filter would clear it.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$D1")")"; cmp_is "$V1" ahead
+t red revert-naming-a-head-one-digit-off-does-not-clear "" "" https://runs/red-1
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$SHORT")")"; cmp_is "$V1" ahead
+t red revert-naming-a-short-sha-does-not-clear "" "" https://runs/red-1
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$H1" "$(reverts "$H1")")"; cmp_is "$H1" ahead
+t red the-red-run-own-commit-is-not-its-revert "" "" https://runs/red-1
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "Fix the change that $H1 made")"; cmp_is "$V1" ahead
+t red a-hit-that-names-the-head-without-the-revert-line-does-not-clear "" "" https://runs/red-1
+# A full page of other hits: the revert is the last of 31 items in one reply, and it still clears.
+decoys=(); for i in $(seq 1 30); do decoys+=("$(hit "$(printf '%040x' $((1000 + i)))" "unrelated change $i")"); done
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "${decoys[@]}" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" ahead
+t green revert-after-a-full-page-of-other-hits-clears-the-red-run
+# Chains: an even chain leaves the red run red, an odd chain clears it, and a revert of a revert not on the branch does not count.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; search_is "$V1" "$(hit "$V2" "$(reverts "$V1")")"; search_is "$V2"
+cmp_is "$V1" ahead; cmp_is "$V2" ahead
+t red revert-of-a-revert-is-an-even-chain-and-leaves-the-red-run-red "" "" https://runs/red-1
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; search_is "$V1" "$(hit "$V2" "$(reverts "$V1")")"
+search_is "$V2" "$(hit "$V3" "$(reverts "$V2")")"; search_is "$V3"
+cmp_is "$V1" ahead; cmp_is "$V2" ahead; cmp_is "$V3" ahead
+t green revert-of-a-revert-of-a-revert-is-an-odd-chain-and-clears-the-red-run
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; search_is "$V1" "$(hit "$V2" "$(reverts "$V1")")"; search_is "$V2"
+cmp_is "$V1" ahead; cmp_is "$V2" diverged
+t green revert-of-a-revert-not-on-the-branch-does-not-undo-the-clear
+# Two red runs in two workflows, each judged. The revert of the newer one clears only that one.
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)" "$(gh_run deploy failure 2026-01-02 https://runs/red-2 push 2)"
+red_jobs 1 2
+search_is "$H1"; search_is "$H2" "$(hit "$V2" "$(reverts "$H2")")"; cmp_is "$V2" ahead
+t red revert-of-the-newer-run-leaves-the-older-red-run-red "" "" https://runs/red-1
+t red revert-of-the-newer-run-does-not-name-the-run-it-clears "" "" "!https://runs/red-2"
+# A read that fails or gives a malformed reply is unknown: never green, and no issue.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+t unknown revert-search-fails-is-unknown-and-opens-no-issue "api *search/commits*"
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"
+t unknown revert-compare-fails-is-unknown-and-opens-no-issue "api *compare/*"
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+printf 'not json' > "$tmp/revert/search/$H1"
+t unknown revert-search-reply-that-is-not-json-is-unknown-and-opens-no-issue
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; printf '{}\n' > "$tmp/revert/compare/$V1...main"
+t unknown revert-compare-reply-with-no-status-is-unknown-and-opens-no-issue
+# A hit whose commit is a string: its message cannot be read, so the read is unknown. An uncaught exception would exit 1, which
+# alarm.sh reads as no revert and alarms red.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"; red_jobs 1
+search_is "$H1" "{\"sha\": \"$V1\", \"commit\": \"Revert of the head\"}"
+t unknown revert-search-hit-whose-commit-is-a-string-is-unknown-and-opens-no-issue
+# Cost: revert reads only for a red run. None when every run is green, a cancelled run is the only failure, or a re-run is in flight.
+runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy success 2026-01-01 u0 push 2)"
+t green cost-all-green-makes-no-revert-read "" "" "" "" none
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancelled-1 push 1)"
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" ahead
+t green cost-cancelled-run-makes-no-revert-read "" "" "" "" none
+runs_are "$(gh_run ci null 2026-01-02 https://runs/rerun-1 push 1 in_progress)"
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" ahead
+t green cost-re-run-in-flight-makes-no-revert-read "" "" "" "" none
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 schedule 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:failure scope:success
+jobs_of 2 checks:success scope:success
+t green cost-red-run-cleared-across-groups-makes-no-revert-read "" "" "" "" none
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)" "$(gh_run deploy success 2026-01-03 https://runs/green-2 push 2)"; red_jobs 1
+t red cost-one-red-run-reads-one-search-for-its-own-head "" "" https://runs/red-1 "" "search $H1"
+# A failed run with no red job: a startup_failure with no jobs. A newer green run of the same workflow in another group is a
+# candidate, so the alarm reads the failed run's jobs and finds no red job. No candidate clears it, so only a live revert can.
+# Scope first: with no revert it alarms, so the green below is the revert's doing. Each case reads the failed run's jobs.
+runs_are "$(gh_run ci startup_failure 2026-01-02 https://runs/startup-1 push 1)" "$(gh_run ci success 2026-01-03 https://runs/green-2 schedule 2)"
+jobs_of 1
+search_is "$H1"
+t red startup-failure-with-no-red-job-and-no-revert-still-alarms "" "" https://runs/startup-1 "actions/runs/1/jobs"
+runs_are "$(gh_run ci startup_failure 2026-01-02 https://runs/startup-1 push 1)" "$(gh_run ci success 2026-01-03 https://runs/green-2 schedule 2)"
+jobs_of 1
+search_is "$H1" "$(hit "$V1" "$(reverts "$H1")")"; cmp_is "$V1" ahead
+t green startup-failure-with-no-red-job-is-lifted-by-a-live-revert "" "" "" "actions/runs/1/jobs" any
+runs_are "$(gh_run ci startup_failure 2026-01-02 https://runs/startup-1 push 1)" "$(gh_run ci success 2026-01-03 https://runs/green-2 schedule 2)"
+jobs_of 1
+search_is "$H1" "$(hit "$V2" "$(reverts "$H2")")"; cmp_is "$V2" ahead
+t red a-revert-of-another-head-in-the-search-reply-does-not-lift-the-startup-failure "" "" https://runs/startup-1 "actions/runs/1/jobs"
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
