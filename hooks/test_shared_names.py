@@ -287,6 +287,49 @@ def case_local_time_fails_open_on_bad_shared_names():
     return not bad, "bad states: %s" % (bad or "none")
 
 
+def _local_time_run(hooks, cfg, session, prompt):
+    """Runs the local_time.py of `hooks` on one prompt. Returns (exit code, stdout, the inbox text or None)."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, LOCAL_TIME_NOW=CLOCK)
+    done = subprocess.run([sys.executable, os.path.join(hooks, "local_time.py")],
+                          input=json.dumps({"session_id": session, "prompt": prompt}),
+                          capture_output=True, text=True, env=env)
+    inbox = os.path.join(cfg, "handoffs", session + ".inbox.md")
+    saved = open(inbox, encoding="utf-8").read() if os.path.isfile(inbox) else None
+    return done.returncode, done.stdout, saved
+
+
+def case_local_time_stale_shared_names_keep_each_skip():
+    """A stale shared_names.py turns off only the skip of the name it lacks. Without BASH_INPUT_TAG (MACHINE_TAGS
+    kept), a notice is still never saved. Without BASH_OUTPUT_TAGS (the two input names kept), a bare echo is still
+    never saved, and an echo with a stdout block is saved: the output-block skip is the one that is off."""
+    shared = _shared()
+    notice, echo = "<system-reminder>fb x", "<bash-input>ls</bash-input>"
+    echo_out = echo + "\n<bash-stdout>a</bash-stdout>"
+    variants = (
+        ("no BASH_INPUT_TAG", "MACHINE_TAGS = %r\n" % (shared.MACHINE_TAGS,),
+         ((notice, False),)),
+        ("no BASH_OUTPUT_TAGS",
+         "MACHINE_TAGS = %r\nBASH_INPUT_TAG = %r\n" % (shared.MACHINE_TAGS, shared.BASH_INPUT_TAG),
+         ((notice, False), (echo, False), (echo_out, True))),
+    )
+    printed = _printed_line()
+    bad = []
+    for label, text, shapes in variants:
+        with tempfile.TemporaryDirectory(dir=RUN) as scratch:
+            hooks = _hooks_with_shared_names(scratch, text)
+            cfg = os.path.join(scratch, "cfg")
+            os.mkdir(cfg)
+            for n, (prompt, want_saved) in enumerate(shapes, 1):
+                code, out, saved = _local_time_run(hooks, cfg, "s%d" % n, prompt)
+                if code != 0 or not out.startswith(printed):
+                    bad.append("%s: the time line is wrong for %r" % (label, prompt[:24]))
+                    continue
+                want, got = ("saved" if want_saved else "skipped"), ("saved" if saved is not None else "skipped")
+                if got != want:
+                    bad.append("%s: %r %s, want %s" % (label, prompt[:24], got, want))
+    return not bad, "; ".join(bad) or "each stale variant skips the shapes its names cover"
+
+
 def case_lane_head_refs_pinned():
     """lane_head_refs(slug) is the one home of the head refs a lane's pull request may carry: the bare step slug and
     `lane/<slug>`. Both forms are real (a pull request on `lane/reviewer-spawn-model` exists). A missing name is a
@@ -323,12 +366,24 @@ def case_one_home_for_lane_heads():
     return not problems, "; ".join(problems) or "both read the one home"
 
 
-def _hooks_without_shared_names(scratch):
-    """A copy of hooks/ under `scratch` with shared_names.py removed: the install that lands a hook before its sibling."""
+def _hooks_with_shared_names(scratch, text=None):
+    """A copy of hooks/ under `scratch`. `text` becomes its shared_names.py; None removes the file, the install that
+    lands a hook before its sibling."""
     hooks = os.path.join(scratch, "hooks")
     shutil.copytree(HERE, hooks, ignore=shutil.ignore_patterns("__pycache__"))
-    os.remove(os.path.join(hooks, "shared_names.py"))
+    target = os.path.join(hooks, "shared_names.py")
+    if text is None:
+        os.remove(target)
+    else:
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(text)
     return hooks
+
+
+def _hooks_without_shared_names(scratch):
+    """A copy of hooks/ under `scratch` with shared_names.py removed: the install that lands a hook
+    before its sibling."""
+    return _hooks_with_shared_names(scratch)
 
 
 def case_sim_boot_record_exits_zero_without_shared_names():
@@ -551,6 +606,8 @@ CASES = [
      case_local_time_output_unchanged),
     ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
      case_local_time_fails_open_on_bad_shared_names),
+    ("(j2) local_time skips each shape its names cover when shared_names.py lacks BASH_INPUT_TAG or BASH_OUTPUT_TAGS",
+     case_local_time_stale_shared_names_keep_each_skip),
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
