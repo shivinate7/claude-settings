@@ -1899,36 +1899,20 @@ class LintSuitesChainTests(unittest.TestCase):
 
 
 # GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) gives a guard module its family suites, hooks/test_guard.py::<family>,
-# and the import walk's suites come with them. WALK_SUITES holds those walk suites for each row: the walk of the tracked
-# tree with the row left out, minus the whole hooks/test_guard.py. A row with no entry fails by name. A name these cases
-# read from mutate_guard has a default, so a case fails on the row it lacks, not on a missing name.
-WALK_SUITES = {
-    "hooks/guard_kill.py": ["hooks/test_checks_never_raise.py"],
-    "hooks/guard_env.py": ["janitor/test_session_end_sweep.py"],
-    "hooks/guard_frozen.py": ["hooks/test_dir_before_segment.py", "hooks/test_shared_names.py"],
-    "hooks/guard_pointer.py": [],
-    "hooks/guard_rm_var.py": [],
-    "hooks/guard_shared_tree.py": ["hooks/test_checks_never_raise.py"],
-    "hooks/guard_stream.py": [],
-    "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    # hooks/test_shared_names.py opens guard_merge.py by its path (a path read, so it is a walk suite since the path forms).
-    "hooks/guard_merge.py": ["hooks/test_shared_names.py", "lint/test_hook_catalog.py", "lint/test_report_guard_review.py",
-                             "lint/test_settings_matcher.py"],
-    "hooks/guard_mask_script.py": [],
-    "hooks/guard_argv.py": [],
-    # hooks/guard.py: the walk of the tracked tree, minus the whole hooks/test_guard.py and GUARD_MODULE_DROPPED_SUITES
-    # (merge/test_merge.py times out; three suites assert on guard.py's own text, which the ast.unparse copy changes).
-    "hooks/guard.py": [
-        "hooks/test_agent_brief.py", "hooks/test_call_judge.py", "hooks/test_checks_never_raise.py",
-        "hooks/test_config_watch.py", "hooks/test_guard_beat.py", "hooks/test_guard_load_os.py",
-        "hooks/test_precompact_handoff.py", "hooks/test_probe.py", "hooks/test_question_form.py",
-        "hooks/test_question_form_option_labels.py", "hooks/test_shared_names.py",
-        "janitor/test_install_launchd.py", "janitor/test_install_schtasks.py", "janitor/test_session_end_sweep.py",
-        "janitor/test_sweep.py", "lint/test_ci_scope.py", "lint/test_now_central.py",
-        "lint/test_report_guard.py", "lint/test_rule_audit.py",
-        "lint/test_settings_matcher.py", "lint/test_stale_cites.py"],
-}
+# and the import walk's suites come with them. walk_suites reads those walk suites for a row from the tracked tree, so a
+# suite that starts to load a module is counted with no list to update (rule building-allow-list-is-the-constant).
+def walk_suites(module):
+    """The import walk's suites for a table row: `suites_for_paths` over this repository's tracked tree, minus the whole
+    hooks/test_guard.py (its family lines stand in for it) and the row's GUARD_MODULE_DROPPED_SUITES."""
+    tracked = git(REPO, "ls-files").splitlines()
+    here = os.getcwd()
+    os.chdir(REPO)  # the walk opens each tracked path relative to the working folder
+    try:
+        found = mutate_guard.suites_for_paths([module], tracked, union=False)
+    finally:
+        os.chdir(here)
+    dropped = getattr(mutate_guard, "GUARD_MODULE_DROPPED_SUITES", {}).get(module, ())
+    return found - {"hooks/test_guard.py"} - set(dropped)
 
 
 def guard_table():
@@ -2035,11 +2019,9 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
         for module, families in sorted(table.items()):
             with self.subTest(module=module):
-                self.assertIn(module, WALK_SUITES, "%s has a row but no WALK_SUITES entry: name its import-walk suites"
-                              % module)
                 code, out, err = run_cli(["--tests-for", module])
                 self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-                expected = {"hooks/test_guard.py::%s" % family for family in families} | set(WALK_SUITES[module])
+                expected = {"hooks/test_guard.py::%s" % family for family in families} | walk_suites(module)
                 self.assertEqual(out.splitlines(), sorted(expected),
                                  "%s prints its family lines and its import-walk suites, each once, sorted" % module)
 
@@ -2077,7 +2059,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         the print."""
         target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
         self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
-        self.assertIn(suite, WALK_SUITES[target], "the fixture: WALK_SUITES names %s for %s" % (suite, target))
+        self.assertIn(suite, walk_suites(target), "the fixture: the import walk reaches %s for %s" % (suite, target))
         tree = ast.parse(show(REPO, "HEAD", suite))
         module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
         self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
@@ -2087,7 +2069,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | set(WALK_SUITES[target])
+        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | walk_suites(target)
         self.assertEqual(out.splitlines(), sorted(expected),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
