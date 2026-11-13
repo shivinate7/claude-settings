@@ -5227,6 +5227,56 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         line = "CI is red and the failure is pre-existing - OK to merge?"
         self.assert_blocked(line, line, "pre-existing-needs-main-run")
 
+    def test_pe_red_as_premise_in_a_can_question_is_refused(self):
+        # Catches: a question that opens with "can" is exempt whole, so a claim given as "as" premise passes.
+        line = "Can I merge, as the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_since_premise_in_a_should_question_is_refused(self):
+        # Catches: a question that opens with "should" is exempt whole, so a claim given as "since" premise passes.
+        line = "Should I merge, since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_in_a_can_question_is_refused(self):
+        # Catches: a "because" premise after a "can" question opener is exempt whole, so the claim passes.
+        line = "Can I merge because the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_given_that_premise_in_a_should_question_is_refused(self):
+        # Catches: a "given that" premise after a "should" question opener is exempt whole, so the claim passes.
+        line = "Should I merge anyway, given that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_in_an_is_question_is_refused(self):
+        # Catches: a "because" premise after an "is" question opener is exempt whole, so the claim passes.
+        line = "Is it OK to merge, because the red lint is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_since_premise_in_a_do_question_is_refused(self):
+        # Catches: a "since" premise after a "do" question opener is exempt whole, so the claim passes.
+        line = "Do you want me to merge, since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_claim_before_a_so_question_is_refused(self):
+        # Catches: an "is" question opener exempts the claim before its "so" clause, so the claim passes.
+        line = "Is the failure pre-existing, so should I merge anyway?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_because_premise_before_a_can_clause_is_refused(self):
+        # Catches: an "is" question opener exempts a claim given as a "because" premise before a "can" clause.
+        line = "Is CI red because the failure is pre-existing, and can I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_question_is_refused(self):
+        # Catches: a claim followed by "so" and a question, with no comma, passes.
+        line = "The failure is pre-existing so should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_and_question_is_refused(self):
+        # Catches: a claim followed by "and" and a question, with no comma, passes.
+        line = "The failure is pre-existing and should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
     def test_pe_red_bare_base_ref_is_no_run_and_is_refused(self):
         # A bare "on origin/main" with no sha or run URL is not a run.
         rows = [
@@ -5418,6 +5468,10 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         for line in ("Is the failure pre-existing?", "Did the failure fail on main too?"):
             with self.subTest(line=line):
                 self.assert_allowed(line)
+
+    def test_pe_green_a_question_with_a_run_on_main_passes(self):
+        # Step base-hash-on-base: the sha is a fixture commit on main, newer than the merge base, so the run is real.
+        self.assert_allowed("Is the failure on main at %s pre-existing?" % self.C)
 
     def test_pe_green_lines_with_no_pre_existing_claim_pass(self):
         rows = [
