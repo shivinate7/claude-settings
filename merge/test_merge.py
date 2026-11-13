@@ -20946,17 +20946,46 @@ class BatchFreeze(CloudSession):
             self.frozen_batch(on_name, on_lanes)
         return self.frozen_batch("nightly", numbers, on=f"batch-{on_name}" if on_name else None, blamed=blamed)
 
-    def assert_debt_refusal_stores_nothing(self, pr, argv, slugs):
+    @contextlib.contextmanager
+    def blame_store_raises(self, err):
+        """batch_start raises `err` when the debt blame calls it, and only then: any other caller gets the real batch_start. With `err` None,
+        nothing is patched. Yields the list of the blame's calls that raised."""
+        raised = []
+        if err is None:
+            yield raised
+            return
+        real = merge.batch_start
+
+        def batch_start(*args, **kwargs):
+            if sys._getframe(1).f_code.co_name == "blame_debt_lane":
+                raised.append(args)
+                raise err
+            return real(*args, **kwargs)
+        with unittest.mock.patch.object(merge, "batch_start", batch_start):
+            yield raised
+
+    def assert_debt_refusal_stores_nothing(self, pr, argv, slugs, store_error=None):
         """The run `argv` is refused by the debt check on each of `slugs`, and it writes nothing: set_body is never called, and pull request pr
-        keeps its body."""
+        keeps its body. With `store_error`, the blame's batch_start call raises it: the refusal still prints, one line says no blame was
+        stored, and nothing is written. -> the run's output."""
         snap = self.body(pr)
-        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as set_body:
-            rc, out = self.run_batch(*argv)
+        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as set_body, self.blame_store_raises(store_error) as raised:
+            try:
+                rc, out = self.run_batch(*argv)
+            except (subprocess.TimeoutExpired, OSError) as e:  # the store's error escaped the refusal: name it, so the case fails by assert
+                self.fail("the debt blame's store let %r escape in place of the debt refusal of %s" % (e, argv))
+        if store_error is not None:
+            self.assertEqual(len(raised), 1, "the debt blame's batch_start call was reached %d times, want 1: the case did not hit its seam" % len(raised))
         self.assertEqual(rc, 1, "the debt refusal of %s exited %s, not 1: %s" % (argv, rc, out))
         for slug in slugs:
             names_kind(self, out, slug, "prose")
+        if store_error is not None:
+            self.assertIn("closes a debt without proof that its Retire check holds", out, "the debt refusal's own text is not printed: %s" % out)
+            self.assertEqual(sum("no blame was stored" in line for line in out.splitlines()), 1,
+                             "the store's error %r does not print one no-blame line: %s" % (store_error, out))
         self.assertEqual(set_body.call_count, 0, "the debt refusal of %s wrote a pull request body, so it stored a blame: %s" % (argv, out))
         self.assertEqual(self.body(pr), snap, "the debt refusal of %s changed the body of #%s: %s" % (argv, pr, out))
+        return out
 
     def test_a_debt_refusal_of_the_integration_pr_stores_the_one_lane_that_closes_the_debt_as_blamed(self):
         pr = self.debt_batch({101: "retire-a"}, [101, 102])
@@ -21061,6 +21090,20 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
         self.assertEqual(self.stored_blamed(pr), [101, 103],
                          "the refusal stores #101 after another session stored #103 in the body, but the block holds %s: %s" % (self.stored_blamed(pr), out))
+
+    def test_a_debt_refusal_whose_blame_batch_start_times_out_still_prints_the_refusal_and_stores_nothing(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr), "--confirm"), ["retire-a"],
+                                                store_error=subprocess.TimeoutExpired(["git", "fetch", "-q", "origin"], 60))
+        self.assertEqual(self.stored_blamed(pr), [], "the timed-out store of the debt blame stored a blame")
+
+    def test_a_debt_refusal_whose_blame_batch_start_fails_with_an_os_error_still_prints_the_refusal_and_stores_nothing(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr), "--confirm"), ["retire-a"],
+                                                store_error=OSError("git could not be started"))
+        self.assertEqual(self.stored_blamed(pr), [], "the failed store of the debt blame stored a blame")
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
