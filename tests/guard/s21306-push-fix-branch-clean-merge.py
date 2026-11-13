@@ -2,8 +2,8 @@
 # =========================================================================== a fix branch takes clean merges of main
 #
 # The fix-branch refusal (guard_push_delete.py review_log_hit, step 2) refuses a push to the head branch of a PR whose
-# posted review log holds a `Fix check:` line. A clean merge of main keeps the record (decision pr-review-record, owner
-# ruling 2026-11-10 14:07 CST). So a push whose new commits, walked on first parents from the pushed source down to the
+# posted review log holds a `Fix check:` line. A clean merge of main keeps the record (decision pr-review-record, the
+# rule on a clean merge). So a push whose new commits, walked on first parents from the pushed source down to the
 # record's Head, are only clean merges of main is allowed: each commit has two parents, its second parent is on the
 # default base (origin/HEAD's target, else origin/main), and its tree is git's clean merge of its parents. Any other
 # push keeps the refusal, with the same reason.
