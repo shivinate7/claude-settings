@@ -47,8 +47,9 @@
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; one xcrun spawn per label of the list on an own boot, writing nothing; a waiting take costs one sysctl and one ps per poll there, and writes
-# leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
+# processes (take, give) and one more simctl list; one xcrun bootstatus and one xcrun spawn per label of the list on an
+# own boot, writing nothing; a waiting take costs one sysctl and one ps per poll there, and writes leases.json (see the
+# header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
 # the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
@@ -109,12 +110,14 @@ record_boot() {
   python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
 }
 
-# noise_off: disable each label of bin/sim-noise-services on the device this run booted. Every label is tried; a failed
-# spawn, or a missing list file, is silent and changes nothing.
+# noise_off: wait for the device this run booted to finish booting, then disable each label of bin/sim-noise-services on
+# it. Every label is tried; a failed bootstatus or spawn, or a missing list file, is silent and changes nothing. The
+# caller runs it as a background child and waits, so INT and TERM act at once (see stop_child).
 noise_off() {
   local label list
   list="$(dirname "$0")/sim-noise-services"
   [ -f "$list" ] || return 0
+  xcrun simctl bootstatus "$booted_by_me" >/dev/null 2>&1 </dev/null || true
   while IFS= read -r label || [ -n "$label" ]; do
     label=${label#"${label%%[![:space:]]*}"}
     label=${label%%[[:space:]]*}
@@ -237,7 +240,10 @@ if [ -z "$udid" ]; then
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
-    noise_off
+    noise_off &
+    child=$!
+    wait "$child"
+    child=
   fi
 fi
 echo "sim-test: using $udid"
