@@ -427,5 +427,12 @@ nm_case("linked-nm: workspace: cd packages/a, then npm version patch --dry-run, 
 nm_case("linked-nm: workspace: npm version -w a --dry-run, under a linked workspace root is allowed",
         "npm version -w a --dry-run", "allow", NMWS)
 
+# THE NO-WORKSPACES FLAG. With `--no-workspaces`, npm's prefix is the member itself (npm 10.9.9: `npm prefix
+# --no-workspaces` run in the member prints the member), so the install writes the member's own folder and never the
+# root's link. The deny at the top of this block is the scope check on this folder: without the flag, the same
+# command walks up to the linked root and is refused.
+nm_case("linked-nm: workspace: npm ci --no-workspaces in a member under a linked workspace root is allowed",
+        "npm ci --no-workspaces", "allow", NM_WS_PKG)
+
 
 # =========================================================================== 4. environment files
