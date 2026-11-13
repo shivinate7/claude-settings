@@ -221,6 +221,7 @@
         "lint/check_layout.py",
         "lint/check_record_slugs.py",
         "lint/check_debt_retire.py",
+        "lint/check_cost_pins.py",
         "skills/fresh-prose",
         "skills/plain-english-map"
       ]
