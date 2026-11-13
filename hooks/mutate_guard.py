@@ -2944,7 +2944,7 @@ MUTATIONS = [
      'LANE_REPO_TAG_REASON % (REPO_TAG + "<owner>/<name>")',
      "guard", "lane-repo-tag: a denied lane names the expected repo tag in its reason"),
     # ---- lane-start-settings. Each mutant breaks one clause of the rule in guard.py: the model and source_url
-    # reads, the empty and whitespace-only reads, the lane tag condition, or the refusal itself.
+    # reads, the empty and whitespace-only reads, the lane tag condition, the model family compare, or the refusal itself.
     ("lane-start-settings: the model is not checked, so a lane with no model is allowed",
      'missing = [k for k in ("model", "source_url")',
      'missing = [k for k in ("source_url",)',
@@ -2975,6 +2975,10 @@ MUTATIONS = [
      'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
      'if not (k in tool_input and str(tool_input[k]).strip())]',
      "guard", "lane-start-settings: lane tag with a non-text"),
+    ("lane-start-settings: the model family compare never refuses, so a lane on an opus model is allowed under the real decision file",
+     'role_model_rank(model) != role_model_rank(row)',
+     'False',
+     "guard", "lane-start-settings: lane tag with an opus model is denied, under the real decision file"),
     # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
     # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
     # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.

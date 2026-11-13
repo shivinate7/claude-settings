@@ -160,10 +160,11 @@ the roadmap page, because the live check matches the full tag.
 **The lane start settings.** Guard rule `lane-start-settings` refuses a `create_session` call tagged `cs-build:lane`
 whose input has no `model` or no `source_url`; an empty or whitespace-only value counts as missing. A lane with no
 repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
-passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
+passes both on every lane start. The rule also refuses a `model` whose family differs from the family of the lane row
+above (the guard reads the row, never a copy; a name with no family differs). An unreadable record or no lane row
+passes the family, as the agent-role rule does. The rule runs after `lane-repo-tag`. An owner override lifts it.
 Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
-judged (both inherited from the lane effort pin and the lane repo tag). The rule checks that a model is
-present, not which model.
+judged (both inherited from the lane effort pin and the lane repo tag).
 Kind of risk: likely. Landed 2026-11-08.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in

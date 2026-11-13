@@ -365,9 +365,12 @@ Other tools, in `judge` order:
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
-                       `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
-                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
-                       fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
+                       `model` or no `source_url`, or whose `model` is not of the family of the lane row of decision
+                       agent-model-cap (read by role_model_table, compared by role_model_rank, so a name with no
+                       family differs); a value that is not text, or is empty or only whitespace once stripped,
+                       counts as missing. A call with no lane tag passes. An unreadable record or no lane row passes
+                       the family. The deny reason names both fields, or the row's family. Runs after lane-repo-tag.
+                       An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -2935,6 +2938,11 @@ LANE_START_SETTINGS_REASON = (
     "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
+# A lane's model must be of the family its row names. %s is the row's family, read from the decision's table.
+LANE_MODEL_ROW_REASON = (
+    "A lane runs the model its row in decision agent-model-cap names: %s. Start the lane with `model` set to that "
+    "family, or ask the owner to change the row."
+)
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -3112,6 +3120,23 @@ def lane_start_settings_hit(tool: str, tool_input) -> str:
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
     return ", ".join(missing)
+
+
+def lane_model_row_hit(tool: str, tool_input):
+    """(model, row) of a lane `create_session` call whose model's family is not the family of the lane row of decision
+    agent-model-cap, else ("", ""). A lane tag is judged as in lane_effort_hit; a call that leaves out its model is
+    left to lane_start_settings_hit. The row is read through role_model_table and compared through role_model_rank,
+    the one reader and the one normaliser: a model that names no family differs from the row. With no pointer
+    checkout, an unreadable record or no lane row, the family is not judged and the call passes (fail-open, as
+    role_model_one does for agent roles; a lane pick is undoable)."""
+    if not is_lane_create_session(tool, tool_input):
+        return "", ""
+    model = tool_input.get("model")
+    pointer = pointer_checkout()
+    row = (role_model_table(pointer) or {}).get("lane") if pointer else None
+    if isinstance(model, str) and model.strip() and row and role_model_rank(model) != role_model_rank(row):
+        return model.strip(), row
+    return "", ""
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -6847,17 +6872,20 @@ def judge(payload) -> None:
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
-    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # 9b2b. The lane repo tag: a lane carries the full `cs-repo` tag of the checkout that starts it.
     # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
     repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
     if repo_tag_hit_tags:
         refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
 
-    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
-    # override lifts it.
+    # 9b2c. The lane start settings: a lane names its model, of its row's family, and its source_url. After the
+    # repo tag. An override lifts it.
     lane_missing = lane_start_settings_hit(tool, tool_input)
     if lane_missing:
         refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
+    lane_model, lane_row = lane_model_row_hit(tool, tool_input)
+    if lane_model:
+        refuse(tool, "deny", "lane-start-settings", LANE_MODEL_ROW_REASON % lane_row, lane_model)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).

@@ -211,6 +211,9 @@ def main(argv) -> int:
     )
     bad = 0
     table = _guard.role_model_table(ROOT)  # None when unread: role_list_problems reports that, this rule stands down
+    if table is not None and "lane" not in table:  # a renamed row leaves the guard's lane family check judging nothing
+        print("%s: the role table has no `lane` row. The guard reads the lane model from it by its first cell." % LANE_RECORD)
+        bad = 1
     for path in files:
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
