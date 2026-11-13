@@ -29,8 +29,11 @@ def warn(text):
     print("::warning::mac-runner: %s; falling back to macos-latest" % text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a", encoding="utf-8") as f:
-            f.write("mac-runner: %s; falling back to macos-latest\n" % text)
+        try:
+            with open(summary, "a", encoding="utf-8") as f:
+                f.write("mac-runner: %s; falling back to macos-latest\n" % text)
+        except OSError as e:  # the summary is a courtesy; a bad path must not fail the pick
+            print("mac-runner: job summary not written (%s)" % e)
 
 
 def runners_json():
@@ -49,7 +52,10 @@ def runners_json():
 
 
 def mac_online(text):
-    for runner in json.loads(text).get("runners", []):
+    runners = json.loads(text).get("runners")
+    if not isinstance(runners, list):
+        raise ValueError("the answer has no runners list")
+    for runner in runners:
         names = {label.get("name") for label in runner.get("labels", [])}
         if runner.get("status") == "online" and "claude-settings-mac" in names:
             return True
@@ -69,7 +75,7 @@ def pick():
     except NoToken as e:
         return FALLBACK, "runners list unknown (%s)" % e
     except urllib.error.HTTPError as e:  # 403 means the token lacks Administration: read
-        warn("runners read status %d (the token needs Administration: read)" % e.code)
+        warn("runners read status %d%s" % (e.code, " (the token needs Administration: read)" if e.code == 403 else ""))
         return FALLBACK, "runners list unknown (status %d)" % e.code
     except Exception as e:  # an unknown read falls back, and says why
         warn("runners read failed (%s)" % e)
