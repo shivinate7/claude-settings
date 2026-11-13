@@ -510,7 +510,8 @@ class ScriptMain(ScriptCase):
 
 
 class ParserControl(unittest.TestCase):
-    """Green on main: the readers above on text that exists. A red WorkflowShape case then names the new workflow."""
+    """Checks the readers WorkflowShape uses, on lane-touched-tests.yml. So a red WorkflowShape case points at
+    cancel-on-close.yml, never at a reader."""
 
     def test_reads_the_triggers_of_lane_touched_tests(self):
         self.assertEqual(triggers(read_text(CONTROL_WORKFLOW)),
@@ -541,7 +542,8 @@ class ParserControl(unittest.TestCase):
 
 
 class ScannerTraps(unittest.TestCase):
-    """Green on main: the comment and quote rows of the shell and trigger readers."""
+    """The shell and trigger readers must tell a comment from text. An opener inside quotes is text, a real comment is
+    dropped, and a lone quote hides nothing. WorkflowShape relies on each of these."""
 
     def test_a_comment_opener_inside_double_quotes_is_text(self):
         self.assertIn(SCRIPT_CALL, shell_code('echo "# x" && python3 ' + SCRIPT_CALL))
