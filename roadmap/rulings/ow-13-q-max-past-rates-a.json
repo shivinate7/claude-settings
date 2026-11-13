@@ -1,17 +1,12 @@
 {
  "id": "ow-13-q-max-past-rates-a",
  "at": "2026-11-12T12:40:00-06:00",
- "ruling": "12:40 CST, in chat, relayed by the coordinator: page item 593 pick a: \"the artifact is never operated upon by two accounts at the same time ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay ... if ... the setup with all the lanes + triage is causing some sorta internal lag, then we should still be open to the switchr otue\". The page database is the one store; git gets a timely export as backup. Home: decision waiting-page-one-store (lane page-data-one-store, #2829). Route B steps parked as the fallback; item 592 closed as moot.",
+ "ruling": "12:40 CST Nov 12, in chat, relayed by the coordinator: page item 593 pick a. The owner's words (quote) say the artifact is never operated on by two accounts at once, so a timely export of the artifact's data to git (not real time) is fine, and the setup stays open to a switch if lag shows. Reading kept after the coordinator's 13:27 CST Nov 13 rewrite (decision page-one-store, PR #3212, replaces #2829): git is the home of the page's data, the page database is the live view, and a timely export keeps git current. The earlier \"one store\" and \"backup\" wording is dropped. Route B steps stay parked as the fallback; item 592 closed as moot.",
  "quote": "the artifact is never operated upon by two accounts at the same time ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay ... if ... the setup with all the lanes + triage is causing some sorta internal lag, then we should still be open to the switchr otue",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 13",
  "status": "open",
- "supersedes": [
-  {
-   "kind": "main-sentence",
-   "ref": "docs/decisions/waiting-data-in-repo.md:5: \"Git is each artifact's home. The claude.ai link is one account's view of it.\" (for the waiting page's data)"
-  }
- ],
  "at_estimated": true,
  "step": "page-data-one-store",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Item 593 pick a, 12:40 CST: page database is the one store, git gets a timely (not real-time) export, route B stays the fallback. Overrides the git-first route D in step page-data-one-store (R28). Decision waiting-page-one-store is not on main (lane page-data-one-store, #2829). Supersedes entry ow-1"
+ "audit": "Rewritten in place 13:27 CST Nov 13 at the coordinator's request (13:27): the old text said \"the one store\" and \"backup\" and treated docs/decisions/waiting-data-in-repo.md:5 as superseded. Under #3212 git is the home, which agrees with that sentence, so the supersedes entry is gone.",
+ "home": "decision page-one-store (PR #3212, replaces #2829; lane page-data-one-store)"
 }

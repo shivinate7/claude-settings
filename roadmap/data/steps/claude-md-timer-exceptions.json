@@ -1,7 +1,7 @@
 {
  "id": "claude-md-timer-exceptions",
  "title": "Root CLAUDE.md names the three watcher exceptions the owner ruled (item 180 a)",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane watcher-builtin-hook-survey read root CLAUDE.md as barring the stall watcher and ci_wake, but the owner ruled on Nov 6 that they stay as named exceptions.",
  "source": "triage read of item 180, 13:2x CST Nov 13",
- "note": "Todo. Rule outcomes-mechanize-rules says a timer \"starts no new long-lived process\". Ruling stall-watch-exceptions-180a (item 180 a) names three exceptions: the stall watcher, ci_wake and the daily job, each with a stated cost and a cost test. The rule should say so, in the fewest words. A record-writer edit to the owner's CLAUDE.md, so the owner confirms the wording: a CLAUDE.md rule edit needs his word on the exact text.",
- "updatedAt": "2026-11-13T13:23:55-06:00"
+ "note": "Todo. Rule outcomes-mechanize-rules says a timer \"starts no new long-lived process\". Ruling stall-watch-exceptions-180a (item 180 a) names three exceptions: the stall watcher, ci_wake and the daily job, each with a stated cost and a cost test. The rule should say so, in the fewest words. A record-writer edit to the owner's CLAUDE.md, so the owner confirms the wording: a CLAUDE.md rule edit needs his word on the exact text. RE-CHECKED 13:27 CST Nov 13 (coordinator 13:26): main's outcomes-mechanize-rules says a timer \"starts no new long-lived process\". The stall watcher (a python process per background call) and ci_wake (a process held up to 3300 s) ARE long-lived, but they exist already, so \"new\" does not bar them, and item 180 a names them as exceptions. So no CLAUDE.md edit and no owner question is needed. The real gap is smaller: each exception's record needs its cost line and cost test (item 180 a), tracked on watchers-plan-lanes. Folded there.",
+ "updatedAt": "2026-11-13T13:27:39-06:00"
 }
