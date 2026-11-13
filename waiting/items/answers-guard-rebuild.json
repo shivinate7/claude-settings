@@ -30,10 +30,10 @@
   ],
   "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
   "ref": "lane answers-session-write-guard, head 53e065d31, via coordinator 14:11 CST Nov 12",
-  "reply": "Reworded 14:18 CST on your question: no incident is on record; option a keeps only the likely slip.",
+  "reply": "Closed 11:01 CST Nov 13 by triage: you answered \"none of these\" and named the real mistake (records crediting you with a session's picks). Item 699 replaces this one. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Answer guard: how much to keep",
-  "status": "open",
+  "status": "closed",
   "title": "How much of the answer guard to keep, with no incident on record",
   "why": "No session has forged an answer; the guard rests on a premise."
 }

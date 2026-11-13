@@ -1,0 +1,60 @@
+{
+  "added": "2026-11-13T17:01:00Z",
+  "context": "Goal: no record credits you with something a session decided.\nProblem (rule): #2971 guards an act with no incident; the real incident is a mislabelled record, which needs a different guard, and which one to build is your call.\nBased on (rule): guard-guards-mistakes-only and building-guard-needs-incident (a guard needs a named mistake).\nBased on (measured): an audit in a repo that pulls in claude-settings found two records crediting you with session picks (the closed-front-window rule and the Clear Board refill).\nDeparts from: main has neither guard \u2014 adds a credit check (a record that credits \"owner\" cites your page answer or your quote with its time) and parks or merges #2971.",
+  "home": "step answers-session-write-guard",
+  "id": "owner-credit-guard",
+  "kind": "decision",
+  "n": 699,
+  "options": [
+    {
+      "gain": "The guard matches the mistake that really happened.",
+      "how": "A new lane builds a check: a record that credits you (\"owner\") must cite your page answer or your quoted words with their time. #2971 stays unmerged and parked.",
+      "id": "credit-guard-park",
+      "key": "a",
+      "label": "Build the credit guard; park #2971 (Recommended)",
+      "lose": "The page-answer protection waits; it has had no incident."
+    },
+    {
+      "gain": "Both mistakes are covered.",
+      "how": "The new lane builds the credit check, and #2971 merges as built.",
+      "id": "credit-guard-plus-2971",
+      "key": "b",
+      "label": "Build the credit guard and merge #2971",
+      "lose": "#2971 guards a mistake with no incident, and it refuses the rebuild that restores your answers."
+    },
+    {
+      "gain": "Nothing new to build.",
+      "how": "#2971 merges; no credit check is built.",
+      "id": "merge-2971-only",
+      "key": "c",
+      "label": "Merge #2971 only",
+      "lose": "Records can still credit you with a session's picks."
+    }
+  ],
+  "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
+  "pick": "a",
+  "ref": "your 10:57 CST answer on item 636; lane 10:59 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard: records crediting you",
+  "shown": [
+    {
+      "id": "credit-guard-park",
+      "key": "a",
+      "label": "Build the credit guard; park #2971 (Recommended)"
+    },
+    {
+      "id": "credit-guard-plus-2971",
+      "key": "b",
+      "label": "Build the credit guard and merge #2971"
+    },
+    {
+      "id": "merge-2971-only",
+      "key": "c",
+      "label": "Merge #2971 only"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Build a guard so no record credits you with a pick a session made?",
+  "why": "You answered 636 \"none of these\" and named the real mistake: records credited you with picks a session made. This replaces 636."
+}
