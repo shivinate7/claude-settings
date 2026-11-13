@@ -41,10 +41,12 @@ def stepdup_noise():
     return [role_use("b1", "Bash", {"command": "git status"}), role_result("b1", "ok")]
 
 
-def stepdup_failed_create(tool_id, tags):
-    """One create_session call whose result is an error: the call started no session, and its result names none."""
-    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
-            role_result(tool_id, "Error: the session could not be created.")]
+def stepdup_failed_create(tool_id, tags, body="Error: the session could not be created.", is_error=False):
+    """One create_session call whose result is `body`: the call started no session, and its result names none. With
+    `is_error`, the result carries is_error true, as a tool error does."""
+    result = (role_result_block(tool_id, content=[{"type": "text", "text": body}], is_error=True) if is_error
+              else role_result(tool_id, body))
+    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}), result]
 
 
 STEPDUP_CARRIER_ROW = stepdup_row(STEPDUP_CARRIER, STEPDUP_LIVE, STEPDUP_CARRIER_TAGS)
@@ -92,6 +94,20 @@ STEPDUP_LINES = {
     "stepdup-chain-failed": stepdup_list("l1", stepdup_fill(40)) + stepdup_failed_create("c1", STEP_CREATE_TAGS),
     "stepdup-chain-archived": stepdup_list("l1", stepdup_fill(40)) + role_create_call("c1", STEP_CREATE_TAGS, session=STEPDUP_MADE)
                               + [role_use("a1", ARCHIVE_TOOL, {"session_id": STEPDUP_MADE}), role_result("a1", "ok")],
+    # An errored create whose text holds a session_ word, or a null session_id. The call started no session.
+    "stepdup-error-session-limit": stepdup_list("l1", stepdup_fill(40))
+                                   + stepdup_failed_create("c1", STEP_CREATE_TAGS, body="Error: session_limit reached", is_error=True),
+    "stepdup-error-bad-parent": stepdup_list("l1", stepdup_fill(40))
+                                + stepdup_failed_create("c1", STEP_CREATE_TAGS,
+                                                        body="Error: invalid parent_session_id session_PARENT01", is_error=True),
+    "stepdup-error-null-id": stepdup_list("l1", stepdup_fill(40))
+                             + stepdup_failed_create("c1", STEP_CREATE_TAGS, body='{"error":"boom","session_id":null}', is_error=True),
+    # A successful create whose result names its session in one shape: an id key, a created-session line, a session_id key.
+    "stepdup-ok-id": stepdup_list("l1", stepdup_fill(40)) + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK01"),
+    "stepdup-ok-plain": stepdup_list("l1", stepdup_fill(40))
+                        + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK02", plain=True),
+    "stepdup-ok-session-id": stepdup_list("l1", stepdup_fill(40))
+                             + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK03", key="session_id"),
 }
 
 
@@ -200,6 +216,22 @@ stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the s
 # Allowed: the session the earlier create started carries dup-step-a, not dup-step-c, so a create for dup-step-c is not held.
 stepdup_create("a create_session tagged cs-step:dup-step-c is allowed when the session an earlier create started carries only dup-step-a",
                "allow", role_path("stepdup-chain-made"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+
+# Allowed: an errored create names no session, even when its text holds a session_ word, so a retry of the step is not
+# held by a session that was never started.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with session_limit and named no session",
+               "allow", role_path("stepdup-error-session-limit"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with an invalid parent_session_id and named no session",
+               "allow", role_path("stepdup-error-bad-parent"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with a null session_id and named no session",
+               "allow", role_path("stepdup-error-null-id"), STEP_CREATE_TAGS)
+# Refused: a successful create names its session in each shape its result takes, and the retry names that session.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned an id, and names that session",
+               "deny", role_path("stepdup-ok-id"), STEP_CREATE_TAGS, carries="session_OK01")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned a created-session line, and names that session",
+               "deny", role_path("stepdup-ok-plain"), STEP_CREATE_TAGS, carries="session_OK02")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned a session_id, and names that session",
+               "deny", role_path("stepdup-ok-session-id"), STEP_CREATE_TAGS, carries="session_OK03")
 
 # Refused, pinned as it is now: a brief to a triage target with no whole list read is refused as unproved. The target is
 # no lane, so lane-one-topic passes the brief, and this rule alone judges it.

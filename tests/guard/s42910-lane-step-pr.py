@@ -31,6 +31,24 @@ def build_archopen_five():
 
 lazy_fixture([ARCHOPEN_FIVE], build_archopen_five)
 
+# Two open pull requests on the step, one per head form: #5 on the slug, #7 on lane/<slug>. GitHub allows one open pull
+# request per head and base, so the two take different heads. #9 is open on another step. The two folders list the same
+# rows in opposite orders, so a case reads the step's pull requests in both orders.
+ARCHOPEN_TWO_5 = os.path.join(ROOT, "archopen-two-5-first")  # the list reads #5, then #7, then #9
+ARCHOPEN_TWO_7 = os.path.join(ROOT, "archopen-two-7-first")  # the list reads #7, then #5, then #9
+
+
+def build_archopen_two():
+    """The step's open pull requests #5 and #7, and #9 open on another step, listed in two orders."""
+    five = {"number": 5, "head": "5" * 40, "ref": STEPPR_SLUG}
+    seven = {"number": 7, "head": "7" * 40, "ref": "lane/" + STEPPR_SLUG}
+    nine = {"number": 9, "head": "9" * 40, "ref": "dup-step-c"}
+    make_fake_gh(ARCHOPEN_TWO_5, "main", need=["o/r"], others=[five, seven, nine])
+    make_fake_gh(ARCHOPEN_TWO_7, "main", need=["o/r"], others=[seven, five, nine])
+
+
+lazy_fixture([ARCHOPEN_TWO_5, ARCHOPEN_TWO_7], build_archopen_two)
+
 
 def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS, carries=()):
     """A create_session the pull request rule judges, over a whole read with no live session on the step. The call is a
@@ -100,3 +118,17 @@ steppr_create("a create_session whose brief says continues #5 is allowed while o
               "allow", ARCHOPEN_FIVE, prompt=LANE_PROMPT + " It continues #5.")
 steppr_create("a create_session whose brief says replaces #5 is allowed while open pull request #5 holds the step",
               "allow", ARCHOPEN_FIVE, prompt=LANE_PROMPT + " It replaces #5.")
+
+# Allowed: a continues #5 names one of two open pull requests on the step, whichever the list reads first.
+steppr_create("a create_session whose brief says continues #5 is allowed while open pull requests #5 and #7 hold the step, #5 listed first",
+              "allow", ARCHOPEN_TWO_5, prompt=LANE_PROMPT + " It continues #5.")
+steppr_create("a create_session whose brief says continues #5 is allowed while open pull requests #5 and #7 hold the step, #7 listed first",
+              "allow", ARCHOPEN_TWO_7, prompt=LANE_PROMPT + " It continues #5.")
+steppr_send("a brief whose body says continues #5 is allowed while open pull requests #5 and #7 hold the step, #5 listed first",
+            "allow", ARCHOPEN_TWO_5, STEPPR_BRIEF + "\n\nThis continues #5.")
+steppr_send("a brief whose body says continues #5 is allowed while open pull requests #5 and #7 hold the step, #7 listed first",
+            "allow", ARCHOPEN_TWO_7, STEPPR_BRIEF + "\n\nThis continues #5.")
+# Refused: continues #9 names no open pull request of the step, since #9 is open on another step. The refusal names one of
+# the step's open pull requests, whichever the list reads first. A tuple in carries is any-of.
+steppr_create("a create_session whose brief says continues #9 is refused while open pull requests #5 and #7 hold the step, and names one of them",
+              "deny", ARCHOPEN_TWO_7, prompt=LANE_PROMPT + " It continues #9.", carries=(("#5", "#7"),))
