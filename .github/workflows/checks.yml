@@ -219,6 +219,9 @@ jobs:
       - name: Git mailbox suite
         run: python3 hooks/test_mail.py
 
+      - name: Git mailbox wait suite
+        run: python3 hooks/test_mail_wait.py
+
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
@@ -1889,6 +1892,10 @@ jobs:
       - name: Git mailbox suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_mail.py
+
+      - name: Git mailbox wait suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_mail_wait.py
 
       - name: Guard wrappers fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
