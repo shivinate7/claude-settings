@@ -35,6 +35,7 @@ session transcripts, not a repo.
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
 | Parallelism | `$PY $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
+| Shared trees | `$PY $P/lint/compliance_probes.py hooks $P` prints the diff of the live `settings.json` hooks (`$CLAUDE_CONFIG_DIR/settings.json` when set and not empty, else `~/.claude/settings.json`) against the parent clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy and the live file read: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked`, or `live (<dir>/settings.json)` when the variable is set | exit 0. The live hooks equal the clone's, less `SessionStart` |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
@@ -206,6 +207,15 @@ An item names the file, the line and the record. It never prints record text.
 | 2 | `restates: unknown`: the records folder cannot be read or holds no record, a tracked file of the child cannot be read, or a code fence is still open at the end of a file |
 
 Child CI runs the same probe through the action `actions/claude-md-cites`, after `actions/checkout`.
+
+## Hooks
+
+`$PY $P/lint/compliance_probes.py hooks $P` compares the `.hooks` of the parent clone's `settings.json` with the `.hooks`
+of the live file. The live file is the one `install.sh` writes: `$CLAUDE_CONFIG_DIR/settings.json` when that
+variable is set and not empty, else `~/.claude/settings.json`. `SessionStart` is dropped on
+both sides, since a cloud install rewrites it. Both sides print as key-sorted JSON, so key order is no
+difference. A difference prints as a unified diff, each line indented two spaces: `clone` is `-`, `live` is `+`.
+For in shape and out, the first line after the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where `<live>` is `~/.claude/settings.json` or `<dir>/settings.json`, the file read. The clone is the trusted side, since `install.sh` writes the live file from it. A clone with no `settings.json` is n/a. The probe is `unknown` when the live file is missing, or when either file cannot be read, is not UTF-8 or is not JSON. It is also `unknown` when either file is not a JSON object, or its `hooks` is not an object. A file with no `hooks` key compares as empty hooks.
 
 ## Copies
 
