@@ -1,10 +1,10 @@
 {
  "id": "mail-mac-unhold",
  "title": "Remove \"darwin\" from the held platforms in the mail hook once the Mac round trip passes",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL1mo3vMGtUDPwE29rN",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [
   "session-mailbox-followups"
@@ -12,5 +12,5 @@
  "why": "Owner item 556 a (Nov 12 11:59 CST): the mailbox goes on for cloud and Windows now, the Mac after its check; stands item 590.",
  "source": "coordinator 12:50 CST Nov 12",
  "note": "Remove \"darwin\" from HELD_PLATFORMS in hooks/mail.py once the owner's Mac mail round trip passes. Lane session-mailbox-followups 13:44 CST Nov 12: the Mac test commands are ready (send with MAILBOX_HOLD_OFF=1, then read without it, expect exit 2). The var does nothing until #2849 merges and the Mac clone pulls it; post the owner card then. Text kept in triage's scratchpad mac_card_2849.txt. Retro 20:20 CST Nov 12: the owner has his Mac now and wants to run the round trip. Triage 20:22 CST sent the card text, read against main and the #2849 branch. The send works before the merge (bin/mail is on main; MAILBOX_HOLD_OFF is ignored there). The hold test (read exits 2 with \"mail is held\") works only after #2849 merges. The card's target, session_013NEJL1YBVqsXRPBac7nRcz, is archived, so the send goes to a live reader instead (the retro's own address), and the retro reads it back. Results come back to triage. Coordinator 20:21 CST Nov 12: #2849 (branch lane/mailbox-repo-default) had no review record and no lane. A carry lane, session_013NEJL1mo3vMGtUDPwE29rN, has started it as an express lane. It heads the batch after batch 115 (#3046). The hold test waits on that merge. Retro 20:23 CST Nov 12: the owner has the send command to the retro's address (cloud/session_013NEJKz5AWFJhGvmCUoi6wQ). Results to come. Coordinator pick a, 20:31 CST Nov 12 (process-only): the #2849 carry lane drops \"darwin\" from HELD_PLATFORMS before #2849 merges, so the Mac hold never ships. The step closes when #2849 merges that way.",
- "updatedAt": "2026-11-12T21:34:49-06:00"
+ "updatedAt": "2026-11-12T23:45:19-06:00"
 }
