@@ -4532,6 +4532,9 @@ DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
 FENCED_Q = "```\nkeep the apps?\n```\n> **Done** OTHER read the audit\n> **Next** wait"
 UNVETTED = "Unvetted: the model review could not run, so the owner reads this question unchecked."
 REFUSE_APPS = json.dumps({"ok": False, "reason": "past-ruling: %s, 2026-10-28, already decides this." % tcj.APPS_SLUG})
+# A refusal that names no record: the model ran and refused. Its own literal, so this file's red run needs no new symbol of
+# hooks/test_call_judge.py.
+REFUSE_UNCITED = json.dumps({"ok": False, "reason": "Already settled: the owner decided this before, so he is not asked again."})
 KEYS_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
 KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
                  "> 2a) about 2x\n> 2b) under 80%")
@@ -4666,6 +4669,21 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
+
+    def test_an_uncited_refusal_is_not_passed_by_an_unvetted_line(self):
+        # The Stop check judges item 8 alone. A refusal that names no record is a refusal from a check that ran, so the
+        # Unvetted line in the reply does not pass it (question-form: the marker decides only when the check cannot run).
+        # to_writer: the question went to the page writer in its turn, so the Pick guard stays quiet.
+        out, _ = self.stop(self.decided, RELAY + "\n" + UNVETTED, answer=REFUSE_UNCITED, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1)  # scope: the relay's one model call judged the question
+        self.assertIn("Unvetted guard", self.reason(out), out)
+
+    def test_an_uncited_refusal_without_a_marker_prints_the_unvetted_text(self):
+        # Control: the relay's printed text starts with the constant's text, byte for byte. A second
+        # rule may append its own label after it, so the test reads a prefix.
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_UNCITED, to_writer=True)
+        self.assertTrue(self.reason(out).startswith(RG.UNVETTED_REASON % "the review cited a record that was not in the list"),
+                        out)
 
     # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
     def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):

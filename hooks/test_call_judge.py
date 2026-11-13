@@ -2087,6 +2087,100 @@ def case_page_batch_reaches_the_dedicated_call_whole():
     check("page batch: the second write's text reaches the dedicated call", PAGE_MARK_B in prompt, detail(r))
 
 
+# ------------------------------------------------------------------ an uncited refusal and the Unvetted marker
+#
+# question-form: the Unvetted marker decides only when the check cannot run. A refusal from a check that ran stays a
+# refusal with or without the marker. An uncited refusal names no listed record: the model ran and refused, so the
+# marker must not pass it on a PreToolUse path (a send, a page write). The controls pin what the marker does decide: a
+# check that cannot run, and a refusal with no usable verdict (a record the index did not show).
+UNCITED_REASON = "Already settled: the owner decided this before, so he is not asked again."
+UNCITED = json.dumps({"ok": False, "reason": UNCITED_REASON})
+# A refusal that opens with a record the index did not show: no usable verdict, so the Unvetted path (question-form).
+UNSHOWN_CITE = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
+DECISION_DOC = os.path.join(REPO, "docs", "decisions", "question-form.md")
+MARKER_RULE = "The line decides only when the check cannot run"
+
+
+def marked_page_item():
+    return dict(WT_PAGE_ITEM, context=WT_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
+
+
+def scope_judged(r, name):
+    # Scope before subject (P7): the message or item reached the dedicated call, so the verdict read below judged it.
+    check(name + ": scope, the dedicated call judges it first", r.seq[:1] == ["past"], "seq=%s :: %s" % (r.seq, detail(r)))
+
+
+def case_uncited_refusal_is_not_passed_by_the_marker():
+    # The dedicated call's uncited refusal is allowed when the text carries its marker.
+    page_item_passes_the_form("E")
+    for tool in SEND_TOOL_NAMES:
+        name = "uncited refusal, send with an Unvetted line via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT + "\n" + UNVETTED_LINE), past=UNCITED)
+        scope_judged(r, name)
+        check(name + ": refused as past-ruling, not sent", (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), "seq=%s :: %s" % (r.seq, detail(r)))
+    # Full size: past ASK_TEXT_MAX, with the marker at the end, where the cap cuts the text the call reads.
+    long = INCIDENT + "\n" + SEND_LOG_FILLER + UNVETTED_LINE
+    name = "uncited refusal, send past the cap with an Unvetted line"
+    r = run_hook(send_input(SEND_TOOL_NAMES[0], long), past=UNCITED)
+    scope_judged(r, name)
+    check(name + ": refused as past-ruling, not sent", (r.deny() or {}).get("permissionDecision") == "deny"
+          and r.reason().startswith("past-ruling: "), "seq=%s :: %s" % (r.seq, detail(r)))
+    r = run_hook(page_input("set", marked_page_item(), cwd=SEND_REPO), answer=ALLOW, past=UNCITED)
+    scope_judged(r, "uncited refusal, page item with an Unvetted line")
+    check("uncited refusal, page item with an Unvetted line: refused by the dedicated call, no form call follows",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.seq == ["past"], "seq=%s :: %s" % (r.seq, detail(r)))
+
+
+def case_uncited_refusal_without_a_marker_takes_the_unvetted_remedy():
+    # Control: without the marker, an uncited refusal is refused with the Unvetted remedy.
+    page_item_passes_the_form("F")
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    for tool in SEND_TOOL_NAMES:
+        name = "uncited refusal, send without an Unvetted line via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT), past=UNCITED)
+        scope_judged(r, name)
+        check(name + ": refused, and the refusal names the Unvetted marker", (r.deny() or {}).get("permissionDecision")
+              == "deny" and bool(marker) and marker in r.reason(), detail(r))
+    r = run_hook(page_input("set", WT_PAGE_ITEM, cwd=SEND_REPO), answer=ALLOW, past=UNCITED)
+    scope_judged(r, "uncited refusal, page item without an Unvetted line")
+    check("uncited refusal, page item without an Unvetted line: refused, and the refusal names the Unvetted marker",
+          (r.deny() or {}).get("permissionDecision") == "deny" and bool(marker) and marker in r.reason(), detail(r))
+
+
+def case_unshown_cite_with_a_marker_takes_the_unvetted_path():
+    # Control: a refusal that opens with a record not shown has no usable verdict, so it takes the
+    # Unvetted path, and the marker passes it (question-form, "has no usable verdict").
+    name = "unshown cite, send with an Unvetted line"
+    r = run_hook(send_input(SEND_TOOL_NAMES[0], INCIDENT + "\n" + UNVETTED_LINE), past=UNSHOWN_CITE)
+    scope_judged(r, name)
+    check(name + ": not refused (no usable verdict takes the Unvetted path)", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_check_that_cannot_run_is_passed_by_the_marker():
+    # Control: a check that cannot run (report_guard blocked) lets a marked question through. The
+    # stderr line names the check that could not run, so the allow is read from the marker and not from a skipped check.
+    could_not_run = "the past-ruling check could not run"
+    r = run_hook(send_input(SEND_TOOL_NAMES[0], INCIDENT + "\n" + UNVETTED_LINE), block="report_guard")
+    check("cannot run, send: the stderr line says the check could not run", could_not_run in r.err, detail(r))
+    check("cannot run, send with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
+    page_item_passes_the_form("G")
+    r = run_hook(page_input("set", marked_page_item(), cwd=SEND_REPO), answer=ALLOW, block="report_guard")
+    check("cannot run, page item: the stderr line says the check could not run", could_not_run in r.err, detail(r))
+    check("cannot run, page item with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_question_form_doc_states_the_marker_rule():
+    # Pin: the decision says the marker decides only when the check cannot run.
+    try:
+        with open(DECISION_DOC, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    check("marker rule: the question-form decision says the marker decides only when the check cannot run",
+          MARKER_RULE in text, DECISION_DOC)
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2125,7 +2219,12 @@ def main():
                  case_page_item_refused_by_the_dedicated_call_is_denied_before_the_form_judge,
                  case_page_item_dedicated_call_error_is_unvetted_unless_marked,
                  case_page_check_that_cannot_run_is_refused_as_unvetted,
-                 case_page_batch_reaches_the_dedicated_call_whole):
+                 case_page_batch_reaches_the_dedicated_call_whole,
+                 case_uncited_refusal_is_not_passed_by_the_marker,
+                 case_uncited_refusal_without_a_marker_takes_the_unvetted_remedy,
+                 case_unshown_cite_with_a_marker_takes_the_unvetted_path,
+                 case_check_that_cannot_run_is_passed_by_the_marker,
+                 case_question_form_doc_states_the_marker_rule):
         try:
             case()
         except Exception as exc:
