@@ -17,6 +17,7 @@ sys.path.insert(0, HERE)
 import merge  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
+import override  # noqa: E402  remote_session_id, the one home of the record id a session's role is filed under (hooks/override.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -49,10 +50,12 @@ def run_folder():
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
-# CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
+# CI sets none of these, and a cloud session sets the first two (the third is a local session's id). A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
-    os.environ.pop(_name, None)
+# A child run (the --child and --sigchild dispatches at the end) inherits the environment its case set, so the scrub leaves it alone.
+if not (len(sys.argv) == 3 and sys.argv[1] in ("--child", "--sigchild")):
+    for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
+        os.environ.pop(_name, None)
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -313,6 +316,10 @@ class RepoDirRuns:
             seen["hosts"].append(RepoHost(self.b_co, self.b_other, **kw))
             return seen["hosts"][-1]
 
+        class NamedHost:  # merge.Host for this run: a call builds the RepoHost. No host is an instance of it, so lint_check's isinstance(h, Host) reads no lint, as for every scripted host
+            def __new__(cls, **kw):
+                return make_host(**kw)
+
         def make_lock(root):
             seen["locks"].append(root)
             return merge.GitLock(root, now=lambda: self.now, pause=lambda s: None)
@@ -330,7 +337,7 @@ class RepoDirRuns:
             with contextlib.ExitStack() as stack:
                 stack.enter_context(contextlib.redirect_stdout(out))
                 stack.enter_context(contextlib.redirect_stderr(err))
-                stack.enter_context(unittest.mock.patch.object(merge, "Host", make_host))
+                stack.enter_context(unittest.mock.patch.object(merge, "Host", NamedHost))
                 stack.enter_context(unittest.mock.patch.object(merge, "default_lock", make_lock))
                 stack.enter_context(unittest.mock.patch.object(merge, "add_worktree", open_tree))
                 try:
@@ -434,6 +441,15 @@ class Env(unittest.TestCase):
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        # One local role fixture for every case (the role check runs on every session): a local session, its id in CLAUDE_CODE_SESSION_ID,
+        # recorded as batch-runner in this case's own config dir. CloudSession re-points the config dir and the id for its cloud cases,
+        # and its cases that need no role (the refusals) run with an empty one.
+        self.local_role = os.path.join(self.t, "config", "state", "merge-role.json")
+        local = unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": os.path.dirname(os.path.dirname(self.local_role)),
+                                                      "CLAUDE_CODE_SESSION_ID": LOCAL_SESSION})
+        local.start()
+        self.addCleanup(local.stop)
+        put(self.local_role, json.dumps({"session": LOCAL_SESSION, "role": "batch-runner"}))
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
@@ -443,12 +459,22 @@ class Env(unittest.TestCase):
         prior = os.getcwd()
         os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
+        argv = self.with_live_head(args)
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
+                rc = merge.main(argv, host=host or self.host, lock=lock or self.lock, **seam)
         finally:
             os.chdir(prior)
         return rc, out.getvalue() + err.getvalue()
+
+    def with_live_head(self, args):
+        """The argv for merge.main. The local role fixture records a batch runner, and a batch runner's `--confirm` names the head its CI ran on
+        (decision auto-mode-owner-acts; runner_confirm passes it the same way). So a local `--confirm` that names no --head gets the live head
+        of feat, the head a Flow case always meant. A case that names a --head keeps it, and a cloud run (CLAUDE_CODE_REMOTE=true) keeps its own argv."""
+        args = list(args)
+        if "--confirm" not in args or "--head" in args or os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+            return args
+        return args + ["--head", self.head()]
 
     def refs(self):
         return sh(self.co, "git", "ls-remote", "origin")
@@ -4284,6 +4310,10 @@ try:
         raise Refused(S["comments_fail"])
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
+    elif method == "GET" and rel == "issues/comments" and S.get("lint_pass"):  # a case that names a lane-lint PASS: the live feat head's, as lint_check reads it
+        answer_list([{"id": 507, "created_at": "2026-10-02T00:00:00Z", "issue_url": "https://api.github.com/repos/o/r/issues/7",
+                      "body": "<!-- lane-lint -->\nPR: #7\nHead: %s\nResult: PASS\n" % ref("refs/heads/feat"),
+                      "user": {"login": "o"}, "author_association": "OWNER"}], None)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -4446,7 +4476,7 @@ def gh_case_setup(test):
     """What every fake-gh case starts with: the shim on PATH, the wait's clock at zero, and a head whose one check is green. GhHalf, RestRoutes and SupersededRuns share it."""
     install_gh_shim(test)
     test.ticks, test.paused, test.at_pause = 0, [], []
-    GhHalf.set(test, checks_seq=[[("checks", "pass", "")]])
+    GhHalf.set(test, checks_seq=[[("checks", "pass", "")]], lint_pass=True)  # a local confirm reads the live head's lane-lint PASS (lint_check); a case that seeds its own comments overrides it
 
 WS_PROBE = " \t\n\r\f\v"  # the whitespace characters a \s repeat can take
 
@@ -8930,20 +8960,19 @@ class SilentWait(Env):
 
     def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
         Env.setUp(self)
-        install_gh_shim(self)
-        self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("checks", "pass", "")]])
+        gh_case_setup(self)
 
     def hold_run(self, on, seconds, host):
         """Run the merge in a thread, hold the first `on` call, and read stdout while it is held.
         -> (text printed while held, rc or the thread's error, text printed in all)."""
         out, err, result = io.StringIO(), io.StringIO(), {}
         self.set(hold={"on": on, "seconds": seconds})
+        argv = self.with_live_head(["7", "--confirm"])
 
         def go():
             try:
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                    result["rc"] = merge.main(["7", "--confirm"], host=host, lock=self.lock)
+                    result["rc"] = merge.main(argv, host=host, lock=self.lock)
             except BaseException as e:  # a crash in the thread must fail the test, not vanish
                 result["error"] = repr(e)
 
@@ -11829,6 +11858,9 @@ class MainRunsHost(FakeHost, merge.Host):
 
     def pages(self, rel, key=None, fields=None):
         self.reads.append(rel)
+        if rel == "issues/comments":  # a local confirm reads the lane-lint PASS of the live head (lint_check): the one read it names, answered as a PASS
+            head = merge.origin_head(self.root, self.branch)
+            return [lint_comment(507, head, n=7)]
         m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
         assert m and key == "jobs", rel
         fail = self.jobs_fail_of.get(int(m.group(1)), self.jobs_fail)
@@ -12510,7 +12542,7 @@ class PinnedMismatchStopsMain(Env):
             os.chdir(self.co)
             try:
                 with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err):
-                    rc = merge.main(["7", "--confirm"], lock=self.lock)
+                    rc = merge.main(self.with_live_head(["7", "--confirm"]), lock=self.lock)
             finally:
                 os.chdir(cwd)
         self.assertEqual(rc, 1, out_buf.getvalue() + err.getvalue())
@@ -12934,10 +12966,15 @@ class BatchBrake(Env):
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
+# The record form of ROLE_SESSION: override.remote_session_id maps the env's cse_<x> to the record's session_<x>, and the role file holds that form.
+ROLE_RECORD = "session_" + ROLE_SESSION[len("cse_"):]
+# A local session: no remote, and its id in CLAUDE_CODE_SESSION_ID (a bare UUID, measured in a cloud container and read by hooks/guard_shared_tree.py).
+LOCAL_SESSION = "068041d2-4843-5f9b-81a7-84fdb1accc9f"
+LOCAL_ENV = {"CLAUDE_CODE_REMOTE": None, "CLAUDE_CODE_REMOTE_SESSION_ID": None, "CLAUDE_CODE_SESSION_ID": LOCAL_SESSION}
 
 class CloudSession(Env):
-    """The cloud-session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
-    cloud() and run_main() to run merge as a cloud session. Every case runs with CLAUDE_CONFIG_DIR in this run's folder, so no case
+    """The session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
+    cloud(), local(), run_main() and run_local() to run merge as a cloud or a local session. Every case runs with CLAUDE_CONFIG_DIR in this run's folder, so no case
     touches the live role file. No test lives here."""
 
     @classmethod
@@ -12956,7 +12993,8 @@ class CloudSession(Env):
     @contextlib.contextmanager
     def cloud(self, **env):
         """A cloud session's environment: remote, a session id and this case's config dir. A keyword is an env name; None unsets it."""
-        values = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": ROLE_SESSION, "CLAUDE_CONFIG_DIR": self.cfg, **env}
+        values = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": ROLE_SESSION, "CLAUDE_CONFIG_DIR": self.cfg,
+                  "CLAUDE_CODE_SESSION_ID": None, **env}
         with unittest.mock.patch.dict(os.environ):
             for name, value in values.items():
                 if value is None:
@@ -12965,8 +13003,19 @@ class CloudSession(Env):
                     os.environ[name] = value
             yield
 
-    def put_role(self, role, session=ROLE_SESSION):
+    @contextlib.contextmanager
+    def local(self, **env):
+        """A local session's environment: no remote, its id in CLAUDE_CODE_SESSION_ID, and this case's config dir. A keyword overrides one name; None unsets it."""
+        with self.cloud(**{**LOCAL_ENV, **env}):
+            yield
+
+    def put_role(self, role, session=ROLE_RECORD):
         put(self.role_file, json.dumps({"session": session, "role": role}))
+
+    def clear_role(self):
+        """This case's session holds no merge role: its role file is gone. A refusal case that needs no role runs after this."""
+        if os.path.exists(self.role_file):
+            os.remove(self.role_file)
 
     def put_bytes(self, data):
         os.makedirs(os.path.dirname(self.role_file), exist_ok=True)
@@ -12997,15 +13046,20 @@ class CloudSession(Env):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def run_local(self, *argv, **env):
+        """-> run_main in a local session: the same run with LOCAL_ENV (no remote, the id in CLAUDE_CODE_SESSION_ID)."""
+        return self.run_main(*argv, **{**LOCAL_ENV, **env})
+
     def runner_confirm(self):
         """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
         (decision auto-mode-owner-acts). The head is read when the call is made, so a case that moves feat first reads the moved head."""
         return self.run_main("7", "--confirm", "--head", self.head())
 
 class MergeRoleCheck(CloudSession):
-    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).
+    """A `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges),
+    in the cloud and on a local session alike: one proof on both platforms, and the role file is kept on both.
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
-    The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked."""
+    The role check refuses before any host read and before the lock. Preview and --unlock are not checked."""
 
     def assert_refused(self, **env):
         """`merge 7 --confirm` stopped at the role check: rc 1, a line on stderr, no host read, no lock or push, no crash."""
@@ -13123,7 +13177,7 @@ class MergeRoleCheck(CloudSession):
 
     def test_no_session_id_in_the_environment_refuses(self):
         # The last three pair an absent or empty id with an equal-looking recorded one: absent never equals absent.
-        for session, recorded in ((None, ROLE_SESSION), ("", ""), (None, None), (None, "")):
+        for session, recorded in ((None, ROLE_RECORD), ("", ""), (None, None), (None, "")):
             with self.subTest(session=session, recorded=recorded):
                 # decision session-tiers: re-pointed to batch-runner, so the refusal is for the missing session id
                 self.put_role("batch-runner", session=recorded)
@@ -13181,21 +13235,56 @@ class MergeRoleCheck(CloudSession):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.host.pr_calls, [])
 
-    def test_a_confirm_outside_the_cloud_needs_no_role(self):
-        # Only the exact value "true" is cloud, as in default_lock and install.sh.
+    def test_a_confirm_outside_the_cloud_needs_a_role(self):
+        # One proof on both platforms: a local confirm with no recorded role is refused as a cloud one is. Only the exact value "true" is cloud, as in default_lock and install.sh.
         for remote in (None, "", "false", "1", "TRUE"):
             with self.subTest(remote=remote):
-                self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_REMOTE=remote)
+                self.assert_refused(**{**LOCAL_ENV, "CLAUDE_CODE_REMOTE": remote})
+
+    def test_a_confirm_with_no_session_id_and_no_claude_code_env_is_not_refused_by_the_role_check(self):
+        # An owner at a terminal runs merge with no session id and no CLAUDE_CODE* env. The role check is for a session, so it does not refuse
+        # this run, and the standing grant (absent here, so on) does not refuse it. The control runs first: the same run with a session id and no
+        # role is refused, and it reads feat's head, which the owner's merge then deletes.
+        self.assert_refused(**LOCAL_ENV)
+        with unittest.mock.patch.dict(os.environ):
+            for name in [n for n in os.environ if n.startswith("CLAUDE_CODE")]:
+                os.environ.pop(name)
+            rc, out, err = self.run_local("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+        text = out + err
+        self.assertNotIn("this session may not merge", text,
+                         "the role check refused an owner's run with no session id and no CLAUDE_CODE env: %s" % text)
+        self.assertNotIn("standing merge grant is off", text,
+                         "the standing grant refused an owner's run with no session id: %s" % text)
+        self.assertEqual(rc, 0, "the owner's run with no session id did not merge (rc %r): %s" % (rc, text))
+        self.assertTrue(getattr(self.host, "merged", False), "the owner's run with no session id did not reach the merge: %s" % text)
 
     # ---- the writer: merge --role <tier>
     def test_role_writes_this_sessions_role_and_makes_the_state_folder(self):
         self.assertEqual(self.role_files(), {})
         rc, out, err = self.run_main("--role", "batch-runner")  # decision session-tiers: re-pointed; the coordinator is refused below
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
+        self.assertEqual(self.read_role_file(), (ROLE_RECORD, "batch-runner"))
         with self.cloud():
             self.assertEqual(merge.read_merge_role(), "batch-runner")
         self.assertEqual(self.host.pr_calls, [])  # the writer reads no host
+
+    # ---- one proof on both platforms (the role file is kept on a local session too)
+    def test_the_role_file_holds_the_id_the_guard_reads_for_this_session(self):
+        # The file's id and the guard's id for the session must be one form: override.remote_session_id maps cse_<x> to session_<x>.
+        rc, out, err = self.run_main("--role", "batch-runner")
+        self.assertEqual(rc, 0, out + err)
+        with self.cloud():
+            want = override.remote_session_id()
+        self.assertEqual(self.read_role_file()[0], want,
+                         "the role file holds %r, but the guard reads this session as %r" % (self.read_role_file()[0], want))
+
+    def test_a_local_session_records_its_role_and_reads_it_back(self):
+        # The writer must take a local session's id from CLAUDE_CODE_SESSION_ID: a refusal here means no local role can be recorded at all.
+        rc, out, err = self.run_local("--role", "batch-runner")
+        self.assertEqual(rc, 0, "the local writer refused --role, so a local session cannot record its role: " + out + err)
+        self.assertTrue(os.path.exists(self.role_file), "the local --role call wrote no role file")
+        with self.local():
+            self.assertEqual(merge.read_merge_role(), "batch-runner", "the local role file does not read back as the local session's role")
 
     # decision session-tiers: the writer refuses the coordinator tier as it refuses any non-merge tier, and names no tier
     def test_role_refuses_the_coordinator_tier_and_names_no_tier(self):
@@ -13207,10 +13296,10 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(self.role_files(), {}, "the refused call wrote a role file")
 
     def test_role_replaces_the_role_of_an_earlier_session(self):
-        self.put_role("batch-runner", session="cse_an_earlier_session")
+        self.put_role("batch-runner", session="session_an_earlier_session")
         rc, out, err = self.run_main("--role", "batch-runner")
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
+        self.assertEqual(self.read_role_file(), (ROLE_RECORD, "batch-runner"))
 
     def test_a_role_the_writer_recorded_passes_the_check(self):
         # decision session-tiers: re-pointed from coordinator to batch-runner
@@ -13247,11 +13336,15 @@ class MergeRoleCheck(CloudSession):
         with self.cloud():
             self.assertEqual(merge.read_merge_role(), "batch-runner")
 
-    def test_role_refuses_outside_the_cloud_and_writes_nothing(self):
+    def test_role_writes_outside_the_cloud(self):
+        # The role file is kept on both platforms: a local session records its role as a cloud one does, for every value that is not "true".
         for remote in (None, "", "false", "1", "TRUE"):
             with self.subTest(remote=remote):
-                self.assert_writer_refused("--role", "batch-runner", CLAUDE_CODE_REMOTE=remote)
-                self.assertEqual(self.role_files(), {})
+                shutil.rmtree(os.path.dirname(self.role_file), ignore_errors=True)
+                rc, out, err = self.run_local("--role", "batch-runner", CLAUDE_CODE_REMOTE=remote)
+                self.assertEqual(rc, 0, "the local writer refused --role for CLAUDE_CODE_REMOTE=%r: %s" % (remote, out + err))
+                with self.local(CLAUDE_CODE_REMOTE=remote):
+                    self.assertEqual(merge.read_merge_role(), "batch-runner")
 
     def test_role_refuses_with_no_session_id_and_writes_nothing(self):
         for session in (None, ""):
@@ -13270,8 +13363,8 @@ class MergeRoleCheck(CloudSession):
 class StandingGrantSwitch(CloudSession):
     """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
     The value is read from origin's base with the rest of the merge block, never from the PR tree. Absent or true: `--confirm` runs as
-    before. False: `--confirm` in a cloud session whose recorded role is batch-runner is refused with the owner-ask line,
-    after the PR read and before the lock or any claim. Outside the cloud, and for every preview, false changes nothing. A value that
+    before. False: `--confirm` whose recorded role is batch-runner is refused with the owner-ask line, in the cloud and on a local
+    session alike, after the PR read and before the lock or any claim. For every preview, false changes nothing. A value that
     is not a bool stops the config load, as the other fields do."""
 
     def grant_text(self, **fields):
@@ -13354,9 +13447,11 @@ class StandingGrantSwitch(CloudSession):
         rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
 
-    def test_true_proceeds_outside_the_cloud(self):
+    def test_true_proceeds_for_a_batch_runner_outside_the_cloud(self):
         self.grant_config(standingGrant=True)
-        rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_REMOTE=None)
+        rc, out, err = self.run_local("--role", "batch-runner")
+        self.assertEqual(rc, 0, "the local writer refused --role, so the local runner has no role to confirm with: " + out + err)
+        rc, out, err = self.run_local("7", "--confirm", "--head", self.head())  # decision auto-mode-owner-acts: a confirm names the head it runs on
         self.assert_merged(rc, out, err)
 
     # ---- false: a cloud batch runner may not confirm, and a coordinator never may
@@ -13377,10 +13472,14 @@ class StandingGrantSwitch(CloudSession):
         self.grant_config(standingGrant=False)
         self.refused_as("batch-runner")
 
-    def test_false_proceeds_outside_the_cloud(self):
+    def test_false_refuses_a_batch_runner_outside_the_cloud(self):
+        # The grant is enforced on a local session too. The role comes first, so the local runner records it, and the refusal is the grant's own.
         self.grant_config(standingGrant=False)
-        rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_REMOTE=None)
-        self.assert_merged(rc, out, err)
+        rc, out, err = self.run_local("--role", "batch-runner")
+        self.assertEqual(rc, 0, "the local writer refused --role, so the local runner has no role to be refused as: " + out + err)
+        refs = self.refs()
+        rc, out, err = self.run_local("7", "--confirm", "--head", self.head())
+        self.assert_grant_refused(rc, out, err, refs)
 
     def test_false_changes_no_preview_in_the_cloud(self):
         self.grant_config(standingGrant=False)
@@ -13398,10 +13497,14 @@ class StandingGrantSwitch(CloudSession):
         for bad in ("false", 0, None):
             with self.subTest(bad=bad):
                 self.grant_config(standingGrant=bad)  # one commit per value: a second write of the same text is an empty commit
-                for args in (("7",), ("7", "--confirm")):
+                for args in (("7",), ("7", "--confirm", "--head", self.head())):
                     with self.subTest(args=args):
                         refs = self.refs()
-                        rc, out, err = self.run_main(*args, CLAUDE_CODE_REMOTE=None)
+                        if "--confirm" in args:  # the cloud runner's confirm: its role passes first, so the config check is what refuses
+                            self.put_role("batch-runner")
+                            rc, out, err = self.run_main(*args)
+                        else:
+                            rc, out, err = self.run_local(*args)
                         lines = [l for l in (out + err).splitlines() if l.strip()]
                         self.assertEqual(rc, 1, out + err)
                         self.assertEqual(len(lines), 1, out + err)
@@ -13460,19 +13563,25 @@ class RepoDirFlag(RepoDirRuns, Env):
                 self.assertEqual(seen["hosts"][0].required, [MAILAUDIT_CHECK],
                                  "the stamp config was read from another checkout: %r" % (seen["hosts"][0].required,))
 
+    def named_confirm(self, *spelling):
+        """The argv of a confirm that names its checkout by `spelling`, with the --head a batch runner's confirm names: the head of feat on the
+        named checkout's own origin, which is not the process directory's."""
+        head = sh(self.b_co, "git", "ls-remote", "origin", "refs/heads/feat").split("\t")[0]
+        return [*spelling, "7", "--confirm", "--head", head]
+
     def assert_merged_in_named(self, rc, out):
         self.assertEqual(rc, 0, "the confirm did not merge: " + out)
         self.assertIn("merge #7", self.main_subjects(self.b_co), "the merge did not land in the named checkout")
         self.assertNotIn("merge #7", self.main_subjects(self.co), "the merge landed in the process directory's checkout")
 
     def test_a_confirm_with_repo_dir_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.run_from(self.co, self.named_confirm("--repo-dir", self.b_co))[:2])
 
     def test_a_confirm_with_repo_dir_equals_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.run_from(self.co, self.named_confirm("--repo-dir=" + self.b_co))[:2])
 
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.run_from(self.co, self.named_confirm("-C", self.b_co))[:2])
 
     def test_c_alone_with_reviewed_reads_the_named_checkout(self):
         """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
@@ -18279,6 +18388,7 @@ class BatchFreeze(CloudSession):
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
         self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
         self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
+        self.put_role("batch-runner")  # the batch commands are role-checked on every session, and these cases run as a batch runner
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -18917,6 +19027,7 @@ class BatchFreeze(CloudSession):
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
         snap = self.snapshot(pr)
         self.record_pushes()
+        self.clear_role()
         with self.cloud(), self.no_lint_or_ready_check(ready_state="pass") as mocks:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertIn("may not", out, "the cloud refusal of --ready does not say the session may not merge: %s" % out)
@@ -19488,6 +19599,7 @@ class BatchFreeze(CloudSession):
         pr = self.frozen_batch("nightly", [101, 102])
         snap = self.snapshot(pr)
         self.record_pushes()
+        self.clear_role()
         with self.cloud():
             rc_build, out_build = self.run_batch("--batch-build", "nightly", "101", "102")
             rc_drop, out_drop = self.run_batch("--batch-drop", "nightly", "102")
@@ -20698,7 +20810,8 @@ if __name__ == "__main__":
                 return True, ""
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        # A batch runner's --confirm names the head its CI ran on: the live head of feat, as origin holds it.
+        sys.exit(merge.main(["7", "--confirm", "--head", merge.origin_head(sys.argv[2], "feat")], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
         class Die(FakeHost):
@@ -20708,7 +20821,8 @@ if __name__ == "__main__":
                 return True, ""
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        # A batch runner's --confirm names the head its CI ran on: the live head of feat, as origin holds it.
+        sys.exit(merge.main(["7", "--confirm", "--head", merge.origin_head(sys.argv[2], "feat")], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
