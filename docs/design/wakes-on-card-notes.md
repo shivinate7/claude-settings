@@ -107,8 +107,8 @@ with page.html's own `<style>` at 2f738dabf, plus the new rules in `#newcss`.
   `h("span", { class: "onwakes", id: "wakes-" + it.id }, words)` and
   `h("details", { class: "cmd-more wk", id: "wk-" + it.id }, h("summary", {}, which), h("ul", { class: "wk-ids" }, ids.map((x) => h("li", {}, x))))`.
   When it is `"bad"`, append the span with the not-valid copy and no `details`. Never set `open`.
-- `buildRuling`: its top row draws the same two runs after the `ruled` span, or after the Answered pill on a
-  saved ruling. An Overturn wakes the same sessions. Not drawn in the mockup.
+- `buildRuling`: no change. `buildCard` hands a ruling card to `buildRuling` before it builds the top row, so a
+  ruling card draws no wakes line (§7).
 - CSS, after the `.onlane` rules, all on page tokens, no new token:
   `.onwakes { min-width: 0; overflow-wrap: anywhere; }`,
   `.top > .wk { min-width: 0; }`, `.top > .wk[open] { flex-basis: 100%; padding-bottom: 4px; }`,
@@ -142,10 +142,14 @@ with page.html's own `<style>` at 2f738dabf, plus the new rules in `#newcss`.
   disclosure, and the three-line wrap at 390 is gone.
 - Detector (`impeccable detect`): no finding. It reads the harness markup only; the cards are drawn by script.
 
-Questions from the critique, not blocking:
+Ruling card, decided: not drawn. A ruling card shows no wakes line. Owner pick via the lane's coordinator-lane
+pick, reversible, recorded 2026-11-13 12:26 CST.
+
+Open items from the critique, not blocking:
 - Should the writer store a plain session name beside each id (triage, coordinator), so the list reads in
   the owner's words? That is a change to the item fields, outside this lane.
-- Should a ruling card show the line too (item 5 says yes; not drawn)?
+- Copy fix for a later touch: the not-valid line "wake list not valid: <owner> is asked to fix it when you
+  answer" also draws on saved, by-wait and sunk cards (page.html ~1747), where "when you answer" is the wrong tense.
 
 No item needs an owner grant. Item 1's pick follows the house guidance; item 3 departs from the brief's wording
 in weight only.
