@@ -680,6 +680,8 @@ ROLE_LINES = {
     # trust-card-in-build shapes: an own record with no cs-build tag, and foreign records beside or in place of it.
     # The allow shapes below carry no parent: a plain session. A session with a parent is a lane (R13 point 4).
     "untagged": role_call("g1", ["cs-repo:o/r"], parent=None),
+    # R13 point 4: the same record with a parent is a lane. Only the parent differs from "untagged".
+    "lane-untagged": role_call("g1", ["cs-repo:o/r"]),
     "other-untagged": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER),
     "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"], parent=None) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
     # A session reads its record untagged at start, then tags itself: the untagged read is stale from then on.
@@ -1313,6 +1315,9 @@ for _trust_tool in TRUST_TOOLS:
     trust_refuse(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
     trust_allow(_trust_word + " in a session whose record has no cs-build tag and no parent allows", _trust_tool,
                 role_path("untagged"))
+    # R13 point 4 (lane-no-popup): the same record with a parent is a lane. Its card is refused, routed to the parent.
+    trust_refuse(_trust_word + " in a session with a parent and no cs-build tag is refused, routed to @parent", _trust_tool,
+                 role_path("lane-untagged"), carries=("@parent",))
     # No own record to read is a refusal, and the reason steers to get_session alone, then a retry.
     for _trust_why, _trust_file in (
         ("no get_session record", "no-record"),
