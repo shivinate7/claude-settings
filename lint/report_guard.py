@@ -1183,12 +1183,15 @@ def _own_lane_read(path, own_id):
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
+
+
 def _is_page_writer(path):
     """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
-    repo's page writer, whatever parent id its record names (the one triage reader, guard_merge._own_tier_proved)."""
+    repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
     _hooks_on_path()
-    from guard_merge import _own_tier_proved
-    return _own_tier_proved(path, HOLD_TIER)
+    from guard_merge import _own_tier_proved as session_role_proved  # glossary-ok: the name guard_merge exports
+    return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
 def _turn_acts(records, turn, acks):
