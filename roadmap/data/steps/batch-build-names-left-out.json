@@ -1,14 +1,14 @@
 {
  "id": "batch-build-names-left-out",
  "title": "merge --batch-build lists each reviewed-done PR that no batch holds, with its reason",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzLWyyEafsGfsXUwzG",
  "owner": "triage",
  "blockedBy": [],
  "why": "Runner 10 left #2990 out of batch 120 by omission (00:46 CST Nov 13): merge --reviewed reads it done (round 3, net value zero) and nothing holds it, but the batch was built from the coordinator's ordered list and the runner's own 21:44 CST list, which lost it. Rule building-never-drop-item-silently.",
  "source": "retrospective 00:45 CST Nov 13",
  "note": "merge --batch-build prints each PR that merge --reviewed reads done and no batch holds, with its reason (prose, conflict, held, or none). Red test first with #2990's shape. #2990 goes in the next code batch.",
- "updatedAt": "2026-11-13T00:45:45-06:00"
+ "updatedAt": "2026-11-13T00:46:40-06:00"
 }

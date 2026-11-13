@@ -1,14 +1,14 @@
 {
  "id": "merge-runs-idle-lanes",
  "title": "After a batch merge, merge --confirm prints the idle-lanes report, or says the pass is owed",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL4FB8BtH7dCW8fakp5",
  "owner": "triage",
  "blockedBy": [],
  "why": "Runner 10 has never run the archive pass after a merge (decision session-tiers, archiving lanes), because it had no live file. The pass rests on the runner remembering a second command.",
  "source": "retrospective 00:44 CST Nov 13; runner 10 00:44 CST",
  "note": "After a successful batch merge, merge --confirm reads the live file from origin/roadmap:roadmap/live/live.json. If its readAt is after the merge base's time, it prints the --idle-lanes report; if not, it prints one line saying the pass is owed and the file is stale. Red test first. Sibling of step batch-runner-start-names-idle-lanes (doing), which only names the command in the start text. Triage commits the live file at that path at each batch merge (from 00:44 CST Nov 13).",
- "updatedAt": "2026-11-13T00:45:11-06:00"
+ "updatedAt": "2026-11-13T00:46:40-06:00"
 }
