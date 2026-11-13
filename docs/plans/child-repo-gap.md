@@ -110,7 +110,7 @@ Refuter: refuter opus, 2026-11-12, revise (all eight points answered in this rev
 
 | Area | Main has | ios-adblock has | Gap |
 |---|---|---|---|
-| CLAUDE.md | Cites records | 8 lines. AGENTS.md is an identical copy. Cites `standing-merge-grant`. Line 6 says protection enforces `all-jobs-passed` for admins too (owner 2026-10-10). | Line 6 restates a protection fact. It matches the classic protection main runs today, per the record (enforce_admins true; no live setting was read), so it is no contradiction now. It goes into the ruleset sweep. |
+| CLAUDE.md | Cites records | 8 lines. AGENTS.md is a symlink to CLAUDE.md (mode 120000; coordinator, 21:43 CST), so it is no duplicate. Cites `standing-merge-grant`. Line 6 says protection enforces `all-jobs-passed` for admins too (owner 2026-10-10). | Line 6 restates a protection fact. It matches the classic protection main runs today, per the record (enforce_admins true; no live setting was read), so it is no contradiction now. It goes into the ruleset sweep. |
 | project-ops | Roster, record branch, briefs, handoffs | None. 49 heads, no roadmap branch. | Absent. |
 | CI form | One `all-jobs-passed` check; stable-branch actions (R44, not built) | `all-jobs-passed` at checks.yml:204. Pins: da8d8073 (checks.yml:108, :173, :204; doc-links.yml:17) behind (counts above), mutation-report a48189d0 (:195) behind (counts above), ci-alarm 59bff081 (:213) behind (counts above). Sparse pin of `bin/verdict` and `hooks/_nowindow.py` at da8d8073. Not wired: claude-md-cites, ste-lint, silent-undo, ruling-kind, ci-done-comment. | Pins, and five unused shared actions. |
 | Once per batch | PR only for the batch (R61-R63, not built) | checks.yml:4-6 runs on PR and push to main, nightly at :9. | R64: when runners are free. |
@@ -143,10 +143,11 @@ are the ones that are not pin moves.
 Ordered by the count of acts that can start now (not pin moves, not R64 items), fewest first; a tie keeps the order shown.
 Each lane lands in its own repo through that repo's batch runner. Every lane also moves its pins when the stable branch lands.
 
-1. **joyous** (2 acts). Add a record naming the shared pieces joyous uses. Add project-ops (roster, roadmap branch). R64: when runners are free: drop the push-to-main re-run.
-2. **ios-adblock** (3 acts). Add `claude-md-cites`, `ste-lint` and `silent-undo` under `all-jobs-passed`. Add project-ops. Collapse AGENTS.md to a pointer. R64: when runners are free: once-per-batch trim.
+1. **ios-adblock** (1 act now). Add project-ops. Then, once the stable branch lands: add `claude-md-cites`, `ste-lint` and `silent-undo` under `all-jobs-passed` (none exists at the child's pin da8d8073, so wiring them waits on the stable branch, coordinator 21:43 CST). R64: when runners are free: once-per-batch trim.
+2. **joyous** (2 acts). Add a record naming the shared pieces joyous uses. Add project-ops (roster, roadmap branch). R64: when runners are free: drop the push-to-main re-run.
 3. **mailaudit** (3 acts). Add `claude-md-cites`, `code-check`, `ruling-kind` and `silent-undo`. Fix the mislabel. Cut AGENTS.md to a pointer. R64: when runners are free: drop the push-to-main trigger.
 4. **banchi** (3 acts). Add `claude-md-cites` and `ste-lint`. Cut the restated rules in CLAUDE.md to cites. Read the roadmap branch and add roster and handoff pointers. R64: when runners are free: once-per-batch trim.
+5. **q_max** (4 acts). Rewrite D-705 to name `git-never-merge-failing-ci` and replace "primary orchestrator". Add an R44 exemption for D-499 and D-833, or retire them after the pins move. Add `claude-md-cites`. Fill the roadmap data and roster. R64: when runners are free: drop the push-to-main re-run.
 5. **q_max** (4 acts). Rewrite D-705 to name `git-never-merge-failing-ci` and replace "primary orchestrator". Add an R44 exemption for D-499 and D-833, or retire them after the pins move. Add `claude-md-cites`. Fill the roadmap data and roster. R64: when runners are free: drop the push-to-main re-run.
 
 For the owner (degen and home, no lane started):
