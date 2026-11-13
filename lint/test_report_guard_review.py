@@ -456,21 +456,22 @@ class ReviewRecordTests(unittest.TestCase):
 
     def test_guard_yes_record_that_reads_open_blocks_a_pass_claim_with_its_why(self):
         # Catches: a PASS claim on an open record refused with the no-record remedy, which tells the lane to post a record already on the PR.
-        # Each record reads open: a final round FAIL owes its net value, and a design reviewer FAIL keeps a first-round PASS open, fix verifier or not.
+        # Each record reads open: a fix check PASS after a failed round 1 or 2 owes round 3 and its net value (owner ruling r9, 14:01 CST), a final
+        # round FAIL owes its net value, and a design reviewer FAIL keeps a first-round PASS open, fix verifier or not.
         fix = (OLD, "reviewer", "sonnet", "PASS")
-        cases = (([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL")], None),
+        cases = (([(1, "reviewer", "sonnet", "FAIL")], fix),
+                 ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL")], fix),
+                 ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL")], None),
                  ([(1, "reviewer", "sonnet", "PASS"), (1, "design-reviewer", "opus", "FAIL")], fix))
         for rounds, fix_line in cases:
             with self.subTest(rounds=rounds, fix=fix_line):
                 self.assert_open_guard_record_blocks_with_its_why(record(rounds=rounds, guard="yes", net="not owed", fix=fix_line))
 
     def test_guard_yes_record_with_a_passing_fix_verifier_or_round_three_is_not_refused(self):
-        # A passing fix verifier ends a guard or check change whatever round it follows. A passing final round does too, with no net value
-        # owed, so each PASS claim here is satisfied and not refused
+        # A passing fix verifier after a passed round ends a guard or check change (owner ruling r9, 14:01 CST). A passing final round does too,
+        # with no net value owed, so each PASS claim here is satisfied and not refused
         fix = (OLD, "reviewer", "sonnet", "PASS")
-        cases = (([(1, "reviewer", "sonnet", "FAIL")], fix),
-                 ([(1, "reviewer", "sonnet", "PASS")], fix),
-                 ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL")], fix),
+        cases = (([(1, "reviewer", "sonnet", "PASS")], fix),
                  ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")], None))
         for rounds, fix_line in cases:
             with self.subTest(rounds=rounds, fix=fix_line):
