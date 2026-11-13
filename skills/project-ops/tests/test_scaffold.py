@@ -318,6 +318,17 @@ class Scaffold(TempDest):
                 any(re.search(SHARING, s, re.I) and denies_sharing(s) for s in sents),
                 "no sentence says the test-author and the builder never share a worktree")
 
+    def test_brief_runs_the_lane_lint_before_the_fix_verifier(self):
+        sents = self.brief_sentences()
+        with self.subTest(claim="lane lint runs before the fix check"):
+            self.assertTrue(
+                has_sentence(sents, r"^Run the lane lint before the fix check\.$"),
+                "no sentence reads: Run the lane lint before the fix check.")
+        with self.subTest(claim="names the fix verifier"):
+            self.assertTrue(
+                has_sentence(sents, r"\bfix verifiers?\b"),
+                "no sentence names the fix verifier")
+
     def test_brief_lands_test_commits_before_builder_starts(self):
         sents = self.brief_sentences()
         with self.subTest(claim="test commit lands first"):

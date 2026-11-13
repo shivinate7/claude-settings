@@ -24,7 +24,7 @@
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
+                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line (or a notes-only gap: each commit from that Head to HEAD has one parent and changes record or notes files only), read from the
                           PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
                           parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           MODEL must be sonnet on every record (exit 2 otherwise).
@@ -1307,6 +1307,26 @@ class Host:
             return [p["sha"] for p in got["parents"]], got.get("commit", {}).get("tree", {}).get("sha")
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             raise Stop(f"cannot read the parents of {sha[:9]} {READ_CITE}: {e}")
+
+    COMMIT_FILES_CAP = 30  # GitHub gave 30 `files` for a 49-file commit (measured), so a list of 30 or more may be cut short
+
+    def commit_files(self, sha):
+        """-> the paths of the files the commit `sha` changes, in order: the `filename` of each entry of the `files` list of one read of commits/<sha>,
+        and after a renamed entry its `previous_filename` too, as pr_files lists it.
+        An empty list is a commit with no files. A failed read, a reply whose `files` is absent or no list, and a list of COMMIT_FILES_CAP or more
+        (maybe cut short) raise Stop: unknown, never read as an empty or complete list."""
+        c, out = self.api(f"commits/{sha}")
+        try:
+            if c:
+                raise ValueError(out)
+            files = json.loads(out)["files"]
+            if not isinstance(files, list):
+                raise ValueError("the files value is not a list")
+            if len(files) >= self.COMMIT_FILES_CAP:
+                raise ValueError(f"{len(files)} files, so the list may be cut short")
+            return [p for f in files for p in ((f["filename"], f["previous_filename"]) if f.get("previous_filename") else (f["filename"],))]
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            raise Stop(f"cannot read the files of {sha[:9]}, so whether they are all records is unknown {READ_CITE}: {e}")
 
     def commit_parents(self, sha):
         """-> the parent shas of the commit `sha`, in order (first parent first): one read of commits/<sha> (commit_read). Any failed read raises Stop."""
@@ -4306,6 +4326,31 @@ def clean_merges_after(h, head, live, base=None):
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
+def record_only_after(h, head, live):
+    """True when every commit after `head`, up to `live`, is a one-parent commit that changes record or notes files only. Record or notes files are
+    the paths under a layout kind marked "record" and the debt-notes file. The walk follows first parents from `live`, judges `live` and each commit
+    below it, never `head`, and must reach `head` within REVIEW_MERGE_WALK commits. A merge, a root commit, a commit with no files, a commit with
+    any other path (a guard record, guard_hits, and a path that is no doc, is_doc, included), a longer walk and a head that is never reached are all False.
+    A failed read raises Stop: unknown, never False. Cost: one commit read and one files read per commit walked."""
+    import layout  # lint/layout.py: where the record folders and the notes file are
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    folders = tuple(layout.path(root, name) + "/" for name, kind in layout.kinds().items() if kind.get("record"))
+    notes = layout.path(root, "debt-notes")
+    sha = live
+    for _ in range(REVIEW_MERGE_WALK):
+        if sha == head:
+            return True
+        parents = h.commit_parents(sha)
+        if len(parents) != 1:
+            return False
+        paths = h.commit_files(sha)
+        if not paths or not all(p == notes or p.startswith(folders) for p in paths):
+            return False
+        if guard_hits(paths) or not all(is_doc(p) for p in paths):  # a guard record or a non-.md file in a record folder is no record-only commit
+            return False
+        sha = parents[0]
+    return sha == head  # the head after the last commit the walk may read, as clean_merges_after ends
+
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main):
@@ -5511,7 +5556,7 @@ def build_parser():
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
+    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a gap of record or notes commits between the newest log's Head and HEAD also qualifies, and so does a fix after a merge of main: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
@@ -5733,6 +5778,12 @@ def main(argv, host=None, lock=None, hosts=None):
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
+                    if last and not last["fix"]:  # record or notes commits may sit between that Head and the reviewed head: the review still covers the code
+                        try:
+                            ok = record_only_after(h, last["head"], a.fix_check[0])
+                        except (Stop, subprocess.TimeoutExpired, OSError) as e:
+                            print(f"merge: --fix-check: whether only record or notes commits sit between {last['head'][:9]} and {a.fix_check[0][:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
+                            return 2
                 elif not last["fix"]:
                     ok = True
                 else:  # a fix never follows a fix, but a fix after a merge of main is allowed: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
@@ -5757,7 +5808,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. Two exceptions. A gap of record or notes commits: each commit from that Head to the reviewed head has one parent and changes record or notes files only. And a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
