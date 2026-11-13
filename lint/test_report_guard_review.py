@@ -435,10 +435,10 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_record_blocks_claim(record(rounds=[(1, "reviewer", "sonnet", "PASS"),
                                                        (2, "reviewer", "sonnet", "FAIL")]))
 
-    def test_fix_pass_with_no_round_blocks(self):
-        # Catches: a fix check PASS passing a record with no round recorded. The fix re-reviews a round, so it needs
-        # one. The fix names an earlier head, so its diff is not empty.
-        self.assert_record_blocks_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
+    def test_fix_pass_with_no_round_is_done(self):
+        # owner, page item 741, 14:01 CST: a fix check that passes with no round recorded reads done, as the first passing check. The fix
+        # names an earlier head, so its diff is not empty.
+        self.assert_record_satisfies_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
 
     def test_guard_yes_record_with_a_passing_fix_check_or_round_three_is_not_refused(self):
         # owner, page item 741: a passing fix check ends a guard or check change whatever round it follows, and a passing round 3 ends it with no
