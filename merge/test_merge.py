@@ -5610,6 +5610,61 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)
 
+    def assert_pending_run_refused_at_once(self, runs_name, required=("checks",)):
+        """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
+        and nothing claimed or pushed. The required names pass, so only the run holds the head."""
+        before = self.head()
+        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
+        rc, out = self.go(required=required)
+        self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"a check is pending: workflow {runs_name}", out)
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
+
+    def test_a_pending_run_with_no_workflow_folder_on_main_refuses_at_once(self):
+        # No file on main shows the run to be outside the required names, so the run holds.
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_run_whose_name_matches_no_workflow_file_refuses_at_once(self):
+        # The head renamed the workflow's `name:`, so the run's name maps to no file. A name no file maps to is unknown, and it holds over a stale pass.
+        push_base(self, {".github/workflows/checks.yml": workflow_text("checks-renamed", "checks")})
+        self.assert_pending_run_refused_at_once("checks")
+
+    def test_a_pending_run_of_the_file_that_defines_a_pinned_required_job_refuses_at_once(self):
+        push_base(self, {".github/workflows/lint.yml": workflow_text("lint", "lint")})
+        self.assert_pending_run_refused_at_once("lint", required=("lint",))
+
+    def test_a_pending_run_whose_file_has_a_four_space_indent_refuses_at_once(self):
+        # The line scan finds no job under a 4-space indent, so the file is unknown and its run holds.
+        push_base(self, {".github/workflows/docs.yml": "name: docs\non: push\njobs:\n    docs:\n        runs-on: ubuntu-latest\n"})
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_run_whose_file_has_a_flow_style_jobs_line_refuses_at_once(self):
+        push_base(self, {".github/workflows/docs.yml": "name: docs\non: push\njobs: {docs: {runs-on: ubuntu-latest}}\n"})
+        self.assert_pending_run_refused_at_once("docs")
+
+    def test_a_pending_check_that_is_not_required_does_not_clear_a_no_job_ran_refusal(self):
+        # The required job was skipped, so no job ran. A pending check that is not required must not stop that refusal, nor make the head wait.
+        before = self.head()
+        self.set(checks_seq=[[("lint", "skipping", ""), ("design", "pending", "")]], runs_seq=[[("lint", "completed", "skipped")]])
+        rc, out = self.go(required=("lint",))
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(s in out for s in ("no job ran", "no check ran")), out)
+        self.assertEqual(self.paused, [], "a pending check that is not required waited before the no-job-ran refusal")
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.head(), before)
+
+    def test_known_limit_a_required_check_red_after_the_head_read_still_gets_the_merge_call(self):
+        # KNOWN LIMIT, not a goal: the head is read once, before the claim and the merge call. A required check that turns red after that
+        # read is not seen again, so the merge call still goes out. GitHub's own required-check gate is the only check after the read.
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "fail", "https://x/checks")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.paused, [], out)
+
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
         self.set(runs_seq=[[("ci", "completed", "failure")]])
