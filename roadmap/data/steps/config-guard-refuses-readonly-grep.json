@@ -1,0 +1,14 @@
+{
+ "id": "config-guard-refuses-readonly-grep",
+ "title": "The config-file guard refused a read-only grep that named install.sh; judge whether it is a false alarm",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro 12:29 CST Nov 13: at 11:44 CST the config-file guard refused its read-only search (a grep that named install.sh). A read changes nothing.",
+ "source": "retrospective 12:29 CST Nov 13",
+ "note": "Todo. Possible false alarm (verification-cry-wolf-guard-is-spent). Read the guard record first; the retro supplies the exact refusal text. Related: step lint-config-guard-paths. Unconfirmed until the refusal text is read.",
+ "updatedAt": "2026-11-13T12:30:01-06:00"
+}

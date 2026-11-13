@@ -1,0 +1,14 @@
+{
+ "id": "agent-model-cap-names-closes-lint",
+ "title": "Decision agent-model-cap names a role and model for an agent that runs closes or a lint run",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro feedback fb-1132-2, 12:29 CST Nov 13: the decision names no role or model for an agent that runs closes or a lint run.",
+ "source": "retrospective 12:29 CST Nov 13, fb-1132-2",
+ "note": "Todo. The decision agent-model-cap has no row for an agent that runs a batch of PR closes or a lint run. Add a row or say which existing row governs (a general-purpose agent defaults to Sonnet, the ceiling). Record-writer lane; check past rulings first. Related: step agent-model-cap-string-false-alarm.",
+ "updatedAt": "2026-11-13T12:30:01-06:00"
+}
