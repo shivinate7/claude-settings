@@ -155,7 +155,7 @@ class FakeHost:
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
         self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
-        self.run_rows, self.runs_error, self.runs_calls = [], None, []  # run_rows: the workflow run rows runs() returns for any sha (Host.runs' shape); runs_error: raised by runs instead; runs_calls: each sha a runs read named
+        self.run_rows, self.runs_error, self.runs_calls = [], None, []  # run_rows: the runs runs() returns for any sha, each with startedAt and completedAt (the fields job_minutes reads; gh names the finish updatedAt, so Host.runs maps it); runs_error: raised by runs instead; runs_calls: each sha a runs read named
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -4115,7 +4115,7 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/feat")
-RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
+RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url", "startedAt", "updatedAt")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
@@ -4128,8 +4128,10 @@ def run_list_json(runs, sha, argv):
     if bad:
         print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
     def obj(name, status, conclusion, rid, wf):
+        start, finish = S.get("run_times", {}).get(str(rid), ["", ""])  # a case scripts a run's start and finish as gh gives them: startedAt, updatedAt
         full = {"databaseId": rid, "name": name, "workflowName": name, "workflowDatabaseId": wf, "status": status, "conclusion": conclusion,
-                "headSha": sha, "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
+                "headSha": sha, "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid,
+                "startedAt": start, "updatedAt": finish}
         return {f: full[f] for f in fields}
     return json.dumps([obj(*r) for r in runs])
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
@@ -6378,6 +6380,21 @@ class SupersededRuns(Env):
         self.set(runs_fail="failed to get runs: HTTP 500")
         c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertNotEqual(c4, 0)
+
+    def test_measure_block_host_runs_rows_carry_each_runs_start_and_finish(self):
+        """Host.runs returns each run with its start and its finish, which the measure block turns into CI minutes. gh names a run's finish
+        `updatedAt`, so either name counts here; the minutes are this test's own arithmetic, not a call into merge.py."""
+        import datetime  # the one read of a timestamp in this case; merge.py's own reader is not the subject
+        self.set(runs_seq=[[("ci", "completed", "success", 201, 7), ("lint", "completed", "success", 202, 8)]],
+                 run_times={"201": ["2026-11-13T10:00:00Z", "2026-11-13T10:03:00Z"], "202": ["2026-11-13T11:00:00Z", "2026-11-13T11:05:00Z"]})
+        rows = sorted(self.gh_host().runs(self.head()), key=lambda r: r["databaseId"])
+        self.assertEqual([r["databaseId"] for r in rows], [201, 202], "Host.runs did not return the two runs of the head: %s" % rows)
+        self.assertTrue(all("startedAt" in r for r in rows), "Host.runs rows carry no startedAt, so the measure cannot read a run's start: %s" % rows)
+        finishes = [r.get("completedAt") or r.get("updatedAt") for r in rows]
+        self.assertTrue(all(finishes), "Host.runs rows carry no finish time (completedAt or updatedAt), so the measure cannot read a run's end: %s" % rows)
+        parse = lambda text: datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        minutes = [(parse(f) - parse(r["startedAt"])).total_seconds() / 60 for r, f in zip(rows, finishes)]
+        self.assertEqual(minutes, [3, 5], "the two runs' minutes from Host.runs rows are not 3 and 5: %s" % rows)
 
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
@@ -21094,7 +21111,8 @@ class BatchFreeze(CloudSession):
         rc, out, err = self.run_args(str(pr), "--confirm")
         self.assertEqual(rc, 0, "the refused measure write exited the merge with %s: %s" % (rc, out + err))
         self.assertTrue(getattr(self.host, "merged", False), "the refused measure write stopped the merge: " + out + err)
-        self.assertTrue(printed(out + err, "measure"), "the refused measure write printed no line naming the measure block: " + out + err)
+        line = printed(out + err, "measure")  # the line must name the block and carry the host's refusal, so a line that only says the block was refreshed fails
+        self.assertIn("the host refused the body write", line, "the refused measure write printed no line that names the measure block and the refusal: " + out + err)
 
     def test_measure_block_merge_refreshes_a_crlf_body_and_keeps_the_frozen_block_readable(self):
         pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS, crlf=True)
