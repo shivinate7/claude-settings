@@ -2237,7 +2237,7 @@ MUTATIONS = [
      '        if merging is None or "--auto" in segment:\n            continue\n        verdict, detail = merge_check(',
      "guard", 'merge-checks: --auto is guarded like any merge'),
     ("merge-checks: a head that reports nothing is green in a repo with workflows",
-     'nothing_is_green=not has_workflows(where), batch_ignore=ignore)', 'nothing_is_green=True, batch_ignore=ignore)', "guard",
+     'nothing_is_green=not has_workflows(where))', 'nothing_is_green=True)', "guard",
      'merge-checks: a head that reports nothing yet is not settled'),
     ("merge-checks: a repo with no workflow folder reads as having workflows",
      '    except FileNotFoundError:\n        return False', '    except FileNotFoundError:\n        return True',
