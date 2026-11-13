@@ -2525,6 +2525,11 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 # rebase step that is no plain pick. A plain cherry-pick, rebase pick or `am` copies a commit someone
 # else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
 ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
+ENTRY_AMEND = re.compile(r"^commit \(amend\):")
+# A HEAD move that writes a commit: the commit it lands is the agent's own change, or a copy of one under a
+# new sha. A fast-forward writes none, and a reset, checkout, clone or branch creation only moves HEAD, so a
+# commit only those reached is someone else's.
+ENTRY_WRITES = re.compile(r"^(?:commit|cherry-pick|revert|am|merge|pull|rebase)\b(?!.*: Fast-forward$)")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
@@ -2655,6 +2660,7 @@ def own_changes(root: str, top: str = ""):
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
     people's commits, and are not read.
+    A message-only amend of a commit no writing entry landed is not read either.
     `top` is the checkout's top, where untracked files are listed. A caller that already read it passes
     it, so no git call is added; it defaults to `root`."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
@@ -2664,10 +2670,13 @@ def own_changes(root: str, top: str = ""):
         return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
     kinds = {}
-    for sha, subject in entries:
+    replaced = {}
+    for index, (sha, subject) in enumerate(entries):
         kind = entry_kind(subject)
         if kind in (OWN, NOTED):
             kinds.setdefault(sha, kind)
+            if index and ENTRY_AMEND.match(subject):
+                replaced.setdefault(sha, entries[index - 1][0])
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
@@ -2675,8 +2684,24 @@ def own_changes(root: str, top: str = ""):
         if answer is None or answer.returncode != 0:
             return None
         lost = set(answer.stdout.split())
+    # Every sha a writing entry of this reflog landed: the agent's own commits and its replays of them.
+    written = {sha for sha, subject in entries if ENTRY_WRITES.match(subject)}
     changes = []
+    inherited = set()
     for sha, kind in kinds.items():
+        before = replaced.get(sha, "")
+        if before and (before in inherited or before not in written):
+            # An amend of a commit no writing entry landed: someone else wrote it, however HEAD reached it.
+            # With the same tree it is a message-only amend, and the test lines in it are the other author's.
+            # An amend of a commit the agent wrote, or one a replay copied, is read in full, even when a
+            # checkout, reset or fast-forward reached it again. A message-only amend is marked before the
+            # lost check, so a later amend of it is judged the same way.
+            trees = [guard_core._git(root, "rev-parse", c + "^{tree}") for c in (sha, before)]
+            if any(t is None or t.returncode != 0 for t in trees):
+                return None
+            if trees[0].stdout == trees[1].stdout:
+                inherited.add(sha)
+                continue
         if sha in lost:
             continue
         parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
