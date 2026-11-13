@@ -1,0 +1,14 @@
+{
+ "id": "registry-every-artifact",
+ "title": "Every repo registers every artifact with its account label; export per account",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Git-home plan item 4.",
+ "source": "coordinator 12:14 CST Nov 13, retrospective git-home plan",
+ "note": "Todo, under page-data-one-store (git is home, ruling page-git-is-home). Every repo registers every artifact with its account label; the export takes `--all --account`. Gaps: home has no registry, q_max has no waiting-page entry, degen's 26 gmail mockups are export:false. Degen and Home copies refresh last (owner 12:12 CST Nov 13).",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
+}

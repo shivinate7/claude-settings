@@ -11,6 +11,6 @@
  ],
  "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
  "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
- "note": "settings.json Relayed Grant entry reads answers fetched from the page database today; it moves to git. Needs the owner's word. Superseded 12:17 CST Nov 12: owner ruling 12:10 CST, \"Custom connectors are not allowed -- so we can do route B\" (page item 558 closed). The page-data lane re-cuts route B steps through the coordinator. Back for route B (coordinator 12:28 CST Nov 12): owner grant to re-point the settings.json Relayed Grant entry (line 54) from page-database answers to git. Parked 12:42 CST Nov 12: fallback only if same-account lag is measured (owner item 593 a, coordinator 12:52 CST).",
- "updatedAt": "2026-11-12T12:43:41-06:00"
+ "note": "settings.json Relayed Grant entry reads answers fetched from the page database today; it moves to git. Needs the owner's word. Superseded 12:17 CST Nov 12: owner ruling 12:10 CST, \"Custom connectors are not allowed -- so we can do route B\" (page item 558 closed). The page-data lane re-cuts route B steps through the coordinator. Back for route B (coordinator 12:28 CST Nov 12): owner grant to re-point the settings.json Relayed Grant entry (line 54) from page-database answers to git. Parked 12:42 CST Nov 12: fallback only if same-account lag is measured (owner item 593 a, coordinator 12:52 CST). Owner item 734 (pick-readers-move-to-git), 12:16 CST Nov 13: move page_grant.py and the Relayed Grant entry to read git. Blocked until he answers.",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
 }

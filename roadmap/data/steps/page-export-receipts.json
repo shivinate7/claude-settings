@@ -1,0 +1,14 @@
+{
+ "id": "page-export-receipts",
+ "title": "The page export includes the receipts collection",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Git-home plan item 2.",
+ "source": "coordinator 12:14 CST Nov 13, retrospective git-home plan",
+ "note": "Todo, under page-data-one-store (git is home, ruling page-git-is-home). Add `receipts` to the exported collections (lint/layout.py:275).",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
+}

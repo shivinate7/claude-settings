@@ -1,0 +1,14 @@
+{
+ "id": "wave-88-rebuilds",
+ "title": "Rebuild the reopened wave: 2718 2722 2809 2822 2784 2705 2673 2685, and pick 2711 or 3182",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3kA8HbgXsjRdKMb5n",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Backlog-drain's wave sort (ledger #3154 at 75a8be348): 88 reopened PRs read.",
+ "source": "coordinator 12:15 CST Nov 13",
+ "note": "Doing, lane session_013NEJL3kA8HbgXsjRdKMb5n. Rebuilds 2718 2722 2809 2822 2784 2705 2673 2685 and picks 2711 vs 3182. #2884 is parked (round 3 net negative); #2889 is held on items 522-525. Backlog-drain's 33 needs-home rulings go to triage.",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
+}

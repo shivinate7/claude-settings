@@ -1,0 +1,14 @@
+{
+ "id": "page-writer-commits-same-turn",
+ "title": "The page writer commits a changed doc to git in the same turn; land #2865",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Git-home plan item 1.",
+ "source": "coordinator 12:14 CST Nov 13, retrospective git-home plan",
+ "note": "Todo, under page-data-one-store (git is home, ruling page-git-is-home). The writer commits the same doc in the same turn it writes it. Land #2865 (see step waiting-lag-read).",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
+}

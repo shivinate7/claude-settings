@@ -1,0 +1,14 @@
+{
+ "id": "cite-check-covers-handoffs",
+ "title": "The artifact cite check covers handoffs and CLAUDE.md, or they resolve through layout.py",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Git-home plan item 5.",
+ "source": "coordinator 12:14 CST Nov 13, retrospective git-home plan",
+ "note": "Todo, under page-data-one-store (git is home, ruling page-git-is-home). check_artifact_cites.py also reads handoffs and CLAUDE.md, or those links resolve through layout.py. Related: step artifact-lane.",
+ "updatedAt": "2026-11-13T12:16:54-06:00"
+}
