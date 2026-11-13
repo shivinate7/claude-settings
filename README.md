@@ -113,6 +113,8 @@ install.sh also writes a `SessionStart` hook that re-runs it, so each new, resum
 session re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 `CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
 
+A session started before this change keeps the old matcher until its next start, because settings are read at start. A `CLAUDE_SETTINGS_REF` pin keeps the old matcher until the pin moves. The refresh runs on each compaction, not once per session.
+
 A repo's own `.claude/settings.json` hooks, deny rules, and `SessionStart` hooks do not run in a
 project's cloud thread. The docs say repo hooks run "outside a project thread" in
 [Setup scripts vs. SessionStart hooks](https://code.claude.com/docs/en/cloud-environments#setup-scripts-vs-sessionstart-hooks).
@@ -153,6 +155,7 @@ Once merged:
   changed files after your next `git pull` on `main`, and re-runs `install.ps1` itself if
   `install.ps1` changed.
 * Cloud: the next new session runs the setup script; a new, resumed or compacted one runs the `SessionStart` refresh hook; both pick up the change.
+  A session started before this change keeps the old matcher until its next start (see Cloud sessions above).
 
 ## The `merge` command
 

@@ -2271,3 +2271,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- compact-refresh-edges: docs/decisions/cloud-start-hooks-run-fresh.md lines 16, 37 and 38 are stale after the matcher change to startup|resume|compact. Line 16 says hooks fire after the refresh, but on compact settings.json:160 runs in parallel with it. Line 37 says the repo has no resume-only entry, and line 38 says startup hooks run once per session start. Each compaction now runs a curl, a git fetch and session_start.sh under the 60 s timeout, with stdout entering the compacted context: unmeasured. Decision: cloud-start-hooks-run-fresh.
