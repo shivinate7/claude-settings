@@ -12011,6 +12011,41 @@ class SkippedPushRun(unittest.TestCase):
         self.assertEqual(verdict, "red", f"a push run that ran its suites and failed keeps its red verdict, not {verdict}: {detail}")
         self.assertIn("run 2001 ", detail, "the red read must name the push run that ran its suites")
 
+    def suites_of(self, jobs):
+        """The suite jobs of a run: each job other than `scope` that did not skip, as the gate judges a run from its job conclusions."""
+        return [j["name"] for j in jobs if j["conclusion"] != "skipped" and j["name"] != "scope"]
+
+    def test_a_zero_job_green_push_run_over_a_red_run_that_ran_its_suites_is_unknown_not_green(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: [], 2001: ran_suites_jobs("failure")}  # the newest run lists no jobs, so nothing shows that a suite ran
+        self.assertEqual(jobs[2002], [], "the scope: the newest push run lists no jobs")
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "unknown", f"a green push run that lists no jobs gives no evidence its suites ran, so main is unknown, not green: got {verdict}: {detail}")
+
+    def test_a_zero_job_green_push_run_on_a_full_page_with_no_earlier_run_that_ran_its_suites_is_unknown_not_green(self):
+        runs = [main_run(2100 - i, "success", tree=f"{2100 - i:040x}", path=CHECKS_PATH) for i in range(PAGE_RUNS)]  # a full page
+        jobs = {r["id"]: skipped_suites_jobs() for r in runs}
+        jobs[runs[0]["id"]] = []  # the newest run lists no jobs; every run behind it on the page ran only scope
+        self.assertEqual(jobs[runs[0]["id"]], [], "the scope: the newest push run lists no jobs")
+        self.assertEqual([r["id"] for r in runs[1:] if self.suites_of(jobs[r["id"]])], [], "the scope: no run behind it on the page ran its suites")
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "unknown", f"a green push run that lists no jobs, with no earlier run on the page that ran its suites, is unknown, not green: got {verdict}: {detail}")
+
+    def test_a_green_pull_request_run_whose_suites_were_all_skipped_does_not_cover_a_skipped_push_run(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: skipped_suites_jobs()}
+        self.assertEqual(self.suites_of(jobs[3001]), [], "the scope: the green pull-request run of the tree ran no suite, only scope")
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_PUSHED)])
+        self.assertEqual(verdict, "red", f"a green pull-request run whose suites were all skipped does not cover a skipped push run, so the read must walk back to the red run that ran its suites, not read {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the older run that ran its suites")
+
+    def test_a_green_pull_request_run_that_ran_its_suites_covers_a_skipped_push_run_past_a_scope_only_one(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs(), 3002: skipped_suites_jobs()}
+        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the green pull-request run of the tree ran a suite")
+        verdict, detail = self.read(runs, jobs, [pr_run(3002, "success", TREE_PUSHED), pr_run(3001, "success", TREE_PUSHED)])
+        self.assertEqual(verdict, "green", f"a green pull-request run of the same tree that ran its suites covers a skipped push run, even past a scope-only run of that tree, not {verdict}: {detail}")
+
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
