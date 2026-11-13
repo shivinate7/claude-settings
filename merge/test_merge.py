@@ -8746,6 +8746,92 @@ class RecordsEnv(Env):
                "done\nexit $status\n")
         os.chmod(os.path.join(self.bare, "hooks", "pre-receive"), 0o755)
 
+class TwoStepConfirm(RecordsEnv):
+    """Two-step confirm (the owner's ruling, Nov 12 2026: the claim stays a commit). A confirm that must push its claim commit pushes it and
+    stops: no merge call, no wait, and one stop line that says the claim is pushed and to confirm again. The next confirm, on the claim head,
+    merges it. A confirm that needs no claim merges in one run. Each case names its cause in its first assert."""
+
+    def claim_pushed_line(self, out):
+        """The stop line: the one line that says the claim is pushed and to confirm again. '' when there is none."""
+        return next((l for l in out.splitlines() if "claim" in l and "pushed" in l and "confirm" in l), "")
+
+    def test_the_first_confirm_calls_no_merge_put(self):
+        asked = []
+        real_merge = self.host.merge
+        def spy(n, method, sha):
+            asked.append(sha)
+            return real_merge(n, method, sha)
+        self.host.merge = spy
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(asked, [], "the first confirm called the merge PUT, so it did not stop at the claim: %s" % out)
+
+    def test_the_first_confirm_stops_with_a_line_that_says_the_claim_is_pushed(self):
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.claim_pushed_line(out), "no stop line says the claim is pushed and to confirm again: %s" % out)
+
+    def test_the_first_confirm_leaves_its_claim_commit_on_the_lane_head(self):
+        before = self.head("feat")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "the first confirm merged, so the lane head is gone: %s" % out)  # scope first
+        claim = self.head("feat")
+        self.assertNotEqual(claim, before, "the first confirm pushed no claim commit: %s" % out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", claim), "Claim record numbers", "the lane head is not the claim commit")
+
+    def test_a_confirm_that_needs_no_claim_merges_in_one_run(self):
+        self.leave_no_pending_record()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "a confirm with nothing to claim did not merge in one run: %s" % out)
+
+    def test_the_second_confirm_merges_the_claim_head(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit the first confirm pushes, on the relayed head
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the second confirm did not merge the claim head: %s" % out)
+
+    def test_the_second_confirm_on_a_pending_claim_head_refuses_before_any_push(self):
+        relayed = self.head("feat")
+        self.claim_head()
+        self.host.state = "pending: checks: running"  # the claim head's required check has not reported
+        self.host.checks = (None, "a required check is pending")
+        before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), before, "a push landed on a claim head whose check is pending")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_the_second_confirm_on_a_red_claim_head_refuses(self):
+        relayed = self.head("feat")
+        self.claim_head()
+        self.host.state = "red: checks: fail"  # the claim head's required check is red
+        self.host.checks = (False, "a check is red: checks: fail")
+        before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), before, "a push landed on a claim head whose check is red")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_the_relayed_yes_binds_across_the_claim_commit(self):
+        relayed = self.head("feat")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "the first confirm merged instead of stopping at the claim: %s" % out)
+        self.assertTrue(self.claim_pushed_line(out), "no stop line after the claim push: %s" % out)
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)  # the relayed head is the parent of the claim commit
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the relayed yes did not carry over the claim commit: %s" % out)
+
+    def test_a_rival_commit_on_the_claim_head_refuses_the_relayed_yes(self):
+        relayed = self.head("feat")
+        self.claim_head()  # the claim commit on the relayed head
+        self.competitor_push()  # a rival commit lands on top of the claim: the relayed head is no longer the parent of the live head
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("moved", out, "the refusal does not say the head moved: %s" % out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
 class RecordsRebuild(RecordsEnv):
     """The records index is rebuilt at merge time, the way record numbers are claimed
     from the slug form at merge: merge.py runs a records generator.
