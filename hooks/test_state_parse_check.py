@@ -1093,6 +1093,50 @@ class InPlaceForms(unittest.TestCase):
                                 "sed -i '' with the BSD empty suffix, that leaves a json broken")
 
 
+    @SHELL_ONLY
+    def test_sed_dash_n_dash_e_with_dash_i_only_in_the_script_text_is_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed -n -e 's/x/-i/' bad.json"
+        self.assertEqual(home.sh(command), 0, "scope: the sed must run")
+        self.assertEqual(read_text(path), self.BROKEN, "scope: the sed must write nothing to bad.json")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_silent(self, ctx, "sed -n -e with -i only in the script text, which writes nothing")
+
+    @SHELL_ONLY
+    def test_sed_dash_e_whose_script_word_is_dash_i_is_silent(self):
+        # -e takes the next word as its script, so this -i is the script and the file is bad.json. The word after -e
+        # is skipped only when the skip is set, so this case is the one that tells a skipped script from a flag.
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed -n -e -i bad.json"
+        home.sh(command)  # sed rejects the script and writes nothing
+        self.assertEqual(read_text(path), self.BROKEN, "scope: the sed must write nothing to bad.json")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_silent(self, ctx, "sed -n -e -i, where -i is the script that -e takes")
+
+    @SHELL_ONLY
+    def test_sed_double_dash_then_dash_i_is_an_operand_and_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        command = "sed p -- -i bad.json"
+        home.sh(command)  # sed reads the missing file -i, prints bad.json, and writes nothing
+        self.assertEqual(read_text(path), self.BROKEN, "scope: the sed must write nothing to bad.json")
+        codes, ctx = home.dispatch("Bash", {"command": command})
+        assert_silent(self, ctx, "sed p -- -i, where -i after -- is an operand, not a flag")
+
+    @SHELL_ONLY
+    def test_sed_dash_i_before_bad_json_names_control(self):
+        # The state the call leaves is written, not run: a sed -i with no script leaves bad.json as the script.
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, self.BROKEN)
+        self.assert_named_after(home, path, "sed -i bad.json", "sed -i bad.json, the flag that names the file")
+
+
 class FenceHelperPins(unittest.TestCase):
     """feedback_guard.unfenced() and is_grant() keep their main results. The handoff check reads the same fence
     rule through a shared loop (decision state-file-parse-check), so these pins sit beside the check's cases.
