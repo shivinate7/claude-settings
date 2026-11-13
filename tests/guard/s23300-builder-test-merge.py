@@ -1,6 +1,5 @@
 # section 23300
-# A builder's merge that resolves a conflict in a test file (owner ruling 2026-11-11 11:02 CST; decision
-# builders-cannot-edit-tests). The resolution is allowed when every test case of both parents survives. Each
+# A builder's merge that resolves a conflict in a test file (decision builders-cannot-edit-tests). The resolution is allowed when every test case of both parents survives. Each
 # refusal names its class of loss in the reason: each refused case carries one class's words, and lacks the
 # other classes' words and any path, so one generic reason listing every class fails.
 # The conflict steps are the builder-refuse section's (s23264): _test_author_lane, _put_commit, _must,
@@ -128,7 +127,7 @@ def _mt_allow(name, repo):
     add(name + ", at stop", "allow", event="SubagentStop", cwd=repo, agent_id="bld1", agent_type="builder")
 
 
-# ---- ALLOWED (red on main: today a builder's test-file merge resolution is refused) ----
+# ---- ALLOWED: a builder's test-file merge resolution that keeps every case of both parents ----
 MT_OPEN = _mt_case("mt-allow-open", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A], resolve=[(TEST_A, MT_BOTH)], stage=True)
 _mt_allow("builder-refuse: a builder's open merge that keeps both sides' test cases, staged", MT_OPEN)
 
@@ -178,7 +177,7 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's clean merge of main's test
                          "with no conflict, is allowed and logs no builder-diff line", clean_builder_case("mt-clean-merge")))
 
 
-# ---- REFUSED: each class's reason names the class (red on main: the reason names no class) ----
+# ---- REFUSED: each class's reason names that class and none of the other classes' words ----
 # Case 1: a test case of either parent is lost, renamed or moved to another file.
 MT_LOST_MAIN = _mt_case("mt-lost-main", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A],
                         resolve=[(TEST_A, MT_BASE + MT_LANE)], stage=True)
@@ -236,7 +235,7 @@ _mt_refuse("builder-refuse: a merge that adds a test function neither parent had
            (MT_CARRY["new"],))
 
 # Case 5: test config beyond one parent's version. A blend that disables no test is refused here only by the
-# merge rule, so this row is red on main, which allows it.
+# merge rule, so this row pins that rule alone.
 MT_BLEND = _mt_case("mt-cfg-blend", MT_INI_LANE, MT_INI_MAIN, [MT_INI],
                     resolve=[(MT_INI, "[pytest]\naddopts = -q -x --tb=short\n")], stage=True, files=MT_INI_FILES)
 _mt_refuse("builder-refuse: a merge of pytest.ini that keeps neither parent's version is refused", MT_BLEND,
@@ -289,7 +288,7 @@ MT_HASH_REPO = _mt_case("mt-hash-in-string", [(TEST_A, MT_BASE + 'X = """\n# not
 _mt_refuse("builder-refuse: a merge that drops a case after a string holding a comment opener is refused",
            MT_HASH_REPO, "lost", (MT_CARRY["lost"],))
 
-# ---- CONTROLS (green on main and after the build; labelled) ----
+# ---- CONTROLS: each case pins a result the merge rule must keep ----
 # A builder's own test edit to a file that merged no conflict stays refused beside a clean resolution.
 MT_SCOPE = _mt_case("mt-scope-b", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A],
                     resolve=[(TEST_A, MT_BOTH), (MT_B, "def test_b():\n    assert 2\n")], stage=True,

@@ -1,6 +1,6 @@
 # section 23301
-# A builder's merge that resolves a conflict in a test file, for three gaps the reader still lets through (owner
-# ruling 2026-11-11 11:02 CST; decision builders-cannot-edit-tests; plan R31: a lost test is a silent accuracy hole).
+# A builder's merge that resolves a conflict in a test file, for three gaps the reader still lets through (decision builders-cannot-edit-tests;
+# plan R31: a lost test is a silent accuracy hole).
 #   1. A parent's top-level node that holds no test case (a loop, an if or with block, an assert, an assignment, a
 #      check_* method, an autouse fixture, the __main__ block) is dropped from the result. The reader checks the other
 #      top-level nodes the result adds, never the ones it drops, so a drop reads as nothing lost. It must read as lost.
