@@ -79,12 +79,25 @@ def ruling_line(entry):
                                    PARAPHRASE, when)
 
 
+def unreadable_files(repo, ref, read):
+    """How many ruling files the folder lists that read_store did not return: read_store skips a file that is not a
+    JSON object, so the folder's names less the entries read is the count."""
+    code, listing = ruled_store._git(repo, ["ls-tree", "-z", "--name-only", ref, ruled_store.STORE_DIR])
+    names = [n for n in listing.split(b"\0") if n.endswith(b".json")] if code == 0 else []
+    return max(len(names) - read, 0)
+
+
 def rulings_block(slug, step, repo, ref):
     entries, state = ruled_store.read_store(repo, ref)
     if state != "ok":
         return "Rulings: unknown (store %s)" % state
+    lines = []
+    bad = unreadable_files(repo, ref, len(entries))
+    if bad:
+        lines.append("Rulings: unknown (%d unreadable ruling file%s)" % (bad, "" if bad == 1 else "s"))
     found = governing(entries, slug, str(step.get("note") or ""))
-    return "\n".join(ruling_line(e) for e in found) if found else "None names this step in the store."
+    lines += [ruling_line(e) for e in found]
+    return "\n".join(lines) if lines else "None names this step in the store."
 
 
 def files_block(step):
@@ -104,7 +117,7 @@ def build(slug, repo=".", ref=ruled_store.STORE_REF, topic=None, cap=DEFAULT_CAP
     text = lambda key: str(step.get(key) or "").strip()  # noqa: E731
     values = {
         "slug": slug, "topic": topic or text("topic") or TOPIC_MARKER, "title": text("title"), "why": text("why"),
-        "source": text("source"), "files": files_block(step), "rulings": rulings_block(slug, step, repo, ref),
+        "source": text("source") or "unknown", "files": files_block(step), "rulings": rulings_block(slug, step, repo, ref),
         "check": CHECK_MARKER, "cap": str(cap),
     }
     # One pass, so a quote that holds `{{x}}` is never filled again.
