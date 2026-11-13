@@ -434,6 +434,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ps-typed-var-assign` | `[string]$D = 'T'; Set-Content $D x`, `[string]$D='T'` and `[System.IO.FileInfo]$D = 'T'` set `$D` in PowerShell, but the resolver reads only a bare `$D` word, so the write to the frozen path `T` is allowed. | [`docs/debts/ps-typed-var-assign.md`](../docs/debts/ps-typed-var-assign.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`docs/debts/push-report-before-checks.md`](../docs/debts/push-report-before-checks.md) |
 | `pycache-rm-false-alarm` | `rm -rf tests/__pycache__` and `rm -rf tests/.pytest_cache` are refused for a builder, because the path sits in a test folder. | [`docs/debts/pycache-rm-false-alarm.md`](../docs/debts/pycache-rm-false-alarm.md) |
+| `readonly-write-paren-redirect` | A read-only agent's shell call (a reviewer or Explore, for example) is refused though it writes nothing when a `)` follows a descriptor duplicate, as in `x=$(git status 2>&1)`, `out=$(python3 -c "print(1)" 2>&1)`, `(ls 2>&1)` and `(cd /tmp && ls >&2)`. | [`docs/debts/readonly-write-paren-redirect.md`](../docs/debts/readonly-write-paren-redirect.md) |
 | `ready-checks-skipped-by-mcp` | A session that marks a draft ready by MCP `update_pull_request draft=false` or by `gh pr ready`, without running `merge <pr> --confirm` on the draft, skips `merge.readyChecks`. | [`docs/debts/ready-checks-skipped-by-mcp.md`](../docs/debts/ready-checks-skipped-by-mcp.md) |
 | `record-code-spans-unindexed` | The restates check strips code spans from the record side too, so owner words that a record keeps in backticks are never indexed. | [`docs/debts/record-code-spans-unindexed.md`](../docs/debts/record-code-spans-unindexed.md) |
 | `red-run-amend-push-unconditional` | Any `git commit --amend` followed by a push in the same call is refused as a red-run chain, even when the amend is docs-only. | [`docs/debts/red-run-amend-push-unconditional.md`](../docs/debts/red-run-amend-push-unconditional.md) |
@@ -485,6 +486,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
 | `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
+| `r42-part2-design` | R42 part 2: per-lane merges, test after merge, stable branch | [`docs/plans/r42-part2-design.md`](../docs/plans/r42-part2-design.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `restart-plan` | Restart plan: how claude-settings lands work after the freeze | [`docs/plans/restart-plan.md`](../docs/plans/restart-plan.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
