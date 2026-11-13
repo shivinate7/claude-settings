@@ -43,6 +43,12 @@
 #    without CMD.
 #  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
 #    lock freed. TERM during a simctl boot: the device still comes up, so it is shut down and recorded.
+#  - Wallpaper store (step sim-wallpaper-store-drop): on its own-boot path, after the lease and the re-scan and before
+#    `simctl boot`, the tool deletes the device's PRBPosterExtensionDataStore folder while the device is shut down. The
+#    devices root is $HOME/Library/Developer/CoreSimulator/Devices, or SIM_TEST_DEVICES_DIR when that is set. Only that
+#    folder goes: its siblings and another device's store stay. Reuse (also a reuse the re-scan finds after the lease), a
+#    refusal and a no-op lease never touch it. An absent or empty folder is no error. A symlink at that path: its target
+#    is never deleted.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -96,6 +102,11 @@ export STUB_PRO_UDID=$PRO # the boot stub names the 18 Pro by this UDID, and a D
 DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination platform=iOS Simulator,id="
 crashdir=$work/crash
 lockdir=$work/home/.claude/state/sim-test.lock
+# The devices root of the wallpaper-store cases: start_tool passes it as SIM_TEST_DEVICES_DIR. devroot is the root those
+# cases fill and read; a case that tests the default root sets no_devices_seam and devroot to the default under its HOME.
+devdir=$work/devices
+devroot=$devdir
+link_target=$work/store_target
 
 # xcodebuild: logs its call. When the lock folder exists it records the lock (lock_during, lock_alive, lock_pid_seen).
 # With STUB_CRASH=N it waits 1 s, then writes N <STUB_CRASH_PREFIX or SpringBoard>-<i>.ips reports into SIM_TEST_CRASH_DIR,
@@ -132,6 +143,8 @@ SH
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
 # STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
 # then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
+# At each boot it appends "<UDID> present" or "<UDID> absent" to $RUN/store_at_boot: whether that device's
+# PRBPosterExtensionDataStore folder is there at that moment, under SIM_TEST_DEVICES_DIR or the default root.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
 [ "$1" = simctl ] || exit 99
@@ -146,7 +159,10 @@ case "$1" in
     *--json*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
-  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null
+    s="${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$2/data/Library/Application Support/PRBPosterExtensionDataStore"
+    if [ -e "$s" ] || [ -L "$s" ]; then echo "$2 present"; else echo "$2 absent"; fi >> "$RUN/store_at_boot"
+    [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
@@ -210,17 +226,22 @@ fresh() {
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
-  rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -rf "$work/home/.claude" "$work/home/Library" "$crashdir" "$work/sweep_root" "$devdir" "$link_target"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" \
+    "$work/store_at_boot"
+  devroot=$devdir; no_devices_seam=
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
 # a 2 s lock wait, a 1 s lease poll, CI and GITHUB_ACTIONS unset (sim-lease does nothing under them), and reports that
-# name DUO1, the Duo of slot 1. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
+# name DUO1, the Duo of slot 1. SIM_TEST_DEVICES_DIR is devdir, unless no_devices_seam is set (then it is unset, so the
+# tool uses its default root). Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
-  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
+  devices_env=(SIM_TEST_DEVICES_DIR="$devdir")
+  [[ -n ${no_devices_seam:-} ]] && devices_env=(-u SIM_TEST_DEVICES_DIR)
+  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS "${devices_env[@]}" HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
     SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 \
     STUB_CRASH_UDID="$DUO1" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
@@ -874,7 +895,8 @@ lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME
 
 # pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
 # BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
-# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant.
+# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant. A second argument
+# store, with duo, also gives that Duo a store folder before the holder dies.
 pro_dies_during_duo_wait() {
   fresh
   sleep 600 > /dev/null 2>&1 &
@@ -888,6 +910,10 @@ pro_dies_during_duo_wait() {
     need "the 18 Pro is booted when the holder dies" grep -Fq "iPhone 18 Pro" "$booted_file"
   elif [[ $1 = duo ]]; then
     booted "iPhone Duo" $DUO2
+    if [[ ${2:-} = store ]]; then
+      mkstore "$DUO2"
+      need "fixture: the Duo's store is there before the holder dies" store_kept "$DUO2"
+    fi
   fi
   kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
   finish_tool
@@ -1009,6 +1035,164 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# Wallpaper store: step sim-wallpaper-store-drop. On the own-boot path, before simctl boot, the tool deletes the device's
+# PRBPosterExtensionDataStore folder under devroot (devdir, or the default root in case 89). The xcrun stub records at
+# each boot whether that folder is there (store_at_boot). The reuse, refusal, failed-boot and symlink cases hold on the
+# old code too: they guard against a build that deletes too much.
+# support_of UDID: the Application Support folder of UDID under devroot.
+support_of() { echo "$devroot/$1/data/Library/Application Support"; }
+# store_of UDID: the store folder of UDID.
+store_of() { echo "$(support_of "$1")/PRBPosterExtensionDataStore"; }
+# store_there UDID: the store is a folder, not a link.
+store_there() { [[ -d $(store_of "$1") && ! -L $(store_of "$1") ]]; }
+# store_gone UDID: no store folder and no link at the store path.
+store_gone() { local s; s=$(store_of "$1"); [[ ! -e $s && ! -L $s ]]; }
+# store_kept UDID: the store's marker file is still there.
+store_kept() { [[ -f $(store_of "$1")/store.sqlite ]]; }
+# store_at_boot_is UDID STATE: the xcrun stub saw the store of UDID as STATE ("present" or "absent") at that boot.
+store_at_boot_is() { grep -Fxq "$1 $2" "$work/store_at_boot" 2>/dev/null; }
+# mkstore UDID [full|empty]: a store folder as a device of UDID left it. full: nested folders with 11 files, the marker
+# file among them; empty: the folder with no entry.
+mkstore() {
+  local s n
+  s=$(store_of "$1")
+  /bin/mkdir -p "$s" || return 1
+  [[ ${2:-full} == empty ]] && return 0
+  /bin/mkdir -p "$s/tiles/a" "$s/tiles/b" || return 1
+  for n in 1 2 3 4 5; do
+    printf 'x\n' > "$s/tiles/a/t$n.dat" && printf 'x\n' > "$s/tiles/b/t$n.dat" || return 1
+  done
+  printf 'x\n' > "$s/store.sqlite"
+}
+# siblings_of UDID: the files beside the store that must stay: device.plist, a file in a sibling folder under Application
+# Support, and a file under Containers.
+siblings_of() {
+  local d=$devroot/$1
+  /bin/mkdir -p "$(support_of "$1")/Other" "$d/data/Containers/app" || return 1
+  printf 'x\n' > "$d/device.plist" && printf 'x\n' > "$(support_of "$1")/Other/keep.txt" && printf 'x\n' > "$d/data/Containers/app/keep.txt"
+}
+# siblings_there UDID: the three files of siblings_of are there.
+siblings_there() {
+  local d=$devroot/$1
+  [[ -f $d/device.plist && -f $(support_of "$1")/Other/keep.txt && -f $d/data/Containers/app/keep.txt ]]
+}
+# mklink_store UDID: the store path is a symlink to link_target, a folder outside the devices root, with files in it.
+mklink_store() {
+  /bin/mkdir -p "$link_target/tiles" "$(support_of "$1")" || return 1
+  printf 'x\n' > "$link_target/store.sqlite" && printf 'x\n' > "$link_target/tiles/t1.dat" && ln -s "$link_target" "$(store_of "$1")"
+}
+# refusal_keeps_store LABEL [VAR=value...]: one refused run with the Duo's store in place. Its needs name LABEL.
+refusal_keeps_store() {
+  local label=$1; shift
+  need "$label: the store is there before the run" store_there "$DUO1"
+  run "$@"
+  need "$label: exit 1" rc_is 1
+  need "$label: no boot" no_boot
+  need "$label: the Duo's store is kept" store_kept "$DUO1"
+}
+
+# Case 81: own boot. The store goes before simctl boot: the stub sees it absent at the boot, and the boot and xcodebuild
+# still run.
+fresh; mkstore "$DUO1"
+need "fixture: the store is there before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the store was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exit code" rc_is 0
+end_case "81 own boot: the store folder is gone before simctl boot, and the boot and xcodebuild still happen"
+
+# Case 82: only that one folder goes. Its siblings under Application Support and Containers, device.plist, and another
+# device's store stay.
+fresh; mkstore "$DUO1"; siblings_of "$DUO1"; mkstore "$DUO2"
+need "fixture: the store is there before the run" store_there "$DUO1"
+need "fixture: the siblings are there before the run" siblings_there "$DUO1"
+need "fixture: the other device's store is there before the run" store_there "$DUO2"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the Duo's store was not deleted" store_gone "$DUO1"
+need "the sibling folder under Application Support stays" test -f "$(support_of "$DUO1")/Other/keep.txt"
+need "the Containers file stays" test -f "$devroot/$DUO1/data/Containers/app/keep.txt"
+need "device.plist stays" test -f "$devroot/$DUO1/device.plist"
+need "another device's store stays" store_kept "$DUO2"
+end_case "82 only the Duo's store goes: its siblings and another device's store stay"
+
+# Case 83: reuse path. A booted Duo keeps its store: no boot, no delete.
+fresh; booted "iPhone Duo" $DUO1; mkstore "$DUO1"
+need "fixture: the store is there before the run" store_there "$DUO1"
+run
+need "exit code" rc_is 0
+need "no boot" no_boot
+need "steps are run only" steps_are "run "
+need "the Duo's store is kept" store_kept "$DUO1"
+end_case "83 reuse path: a booted Duo keeps its store: no boot, no delete"
+
+# Case 84: refusal paths. Each refusal is its own run with its own fixture; the Duo's store is kept in each.
+fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; mkstore "$DUO1"
+refusal_keeps_store cap
+fresh; booted "iPhone 18 Pro" $PRO; mkstore "$DUO1"
+refusal_keeps_store cross-role
+fresh; mkstore "$DUO1"
+refusal_keeps_store "simctl list failure" STUB_LIST_RC=1
+fresh; mkstore "$DUO1"
+refusal_keeps_store "no-op lease" CI=true
+end_case "84 refusal paths (cap, cross-role, simctl list failure, no-op lease): the Duo's store is kept"
+
+# Case 85: store absent. The boot proceeds, and nothing is printed to stderr.
+fresh
+need "fixture: no store folder before the run" store_gone "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exit code" rc_is 0
+need "no error output on stderr" test ! -s "$work/run.err"
+end_case "85 store absent: the boot proceeds, and no error is printed"
+
+# Case 86: failed boot. Exit 1, and no xcodebuild.
+fresh; mkstore "$DUO1"; run STUB_BOOT_RC=1
+need "boot was tried on the Duo's UDID" has_call "simctl boot $DUO1"
+need "exit 1" rc_is 1
+need "no xcodebuild call" no_xcodebuild
+end_case "86 failed boot: exit 1, no xcodebuild"
+
+# Case 87: symlink at the store path. The link is never followed: its target keeps its folder and files.
+fresh
+need "fixture: the store path is a symlink to a folder with files" mklink_store "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the link's target folder stays" test -d "$link_target"
+need "the link's target keeps its file" test -f "$link_target/store.sqlite"
+need "the link's target keeps its nested file" test -f "$link_target/tiles/t1.dat"
+end_case "87 symlink at the store path: its target is never deleted"
+
+# Case 88: empty store folder. It goes too, and the boot proceeds.
+fresh; mkstore "$DUO1" empty
+need "fixture: the empty store folder is there before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the empty store folder was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "exit code" rc_is 0
+end_case "88 empty store folder: it goes too, and the boot proceeds"
+
+# Case 89: no SIM_TEST_DEVICES_DIR. The devices root is the default under HOME, and the store there goes too.
+fresh; no_devices_seam=1; devroot=$work/home/Library/Developer/CoreSimulator/Devices; mkstore "$DUO1"
+need "fixture: the store is under the default root before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the default-root store was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "exit code" rc_is 0
+end_case "89 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
+
+# Case 90: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
+# stays, and the lease goes back before xcodebuild. The old code reuses it too, so this case is a green control.
+pro_dies_during_duo_wait duo store
+need "destination is the booted Duo" dest_is "$DUO2"
+need "the Duo's store is kept" store_kept "$DUO2"
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "lease not held during xcodebuild" lease_not_held_at_xc
+end_case "90 re-scan after the lease reuses a booted Duo: no boot, its store is kept, the lease goes back"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
