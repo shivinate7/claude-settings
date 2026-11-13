@@ -470,6 +470,30 @@ class LaneLint(LaneFixture):
                 self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record that does not parse:\n" + out)
                 self.assertEqual(self.host.posted, [], "a record that does not parse posted a lane-lint comment:\n" + out)
 
+    def test_a_newest_review_record_that_parses_passes_after_an_older_one_that_does_not(self):  # the newest governs
+        head = self.head("feat")
+        older = tm.record_text(head=head).replace(tm.REVIEW_CI_LINE + "\n", "")  # does not parse: no CI line
+        newest = tm.record_text(head=head)
+        self.assertIsNone(merge.parse_review(older), "precondition: the older record parses, so the case probes nothing")
+        self.assertIsNotNone(merge.parse_review(newest), "precondition: the newest record does not parse, so the case probes nothing")
+        self.host.records = {7: [older, newest]}
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, "an older record that does not parse refused the lint, though the newest record parses:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_record_with_text_after_its_ci_line_and_no_rule_fails_naming_the_pull_request(self):  # the common real cause (lint/report_guard.py _text_after_ci_line)
+        head = self.head("feat")
+        text = tm.record_text(head=head) + "Posted from a lane session.\n"  # no `---` line: the text is not cut off
+        self.assertIsNone(merge.parse_review(text), "precondition: the record parses, so the case probes nothing")
+        self.host.records = {7: [text]}
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a record with text after its CI line passed the lint:\n" + out)
+        assert_record_refusal(self, out)
+        self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record with text after its CI line:\n" + out)
+        self.assertEqual(self.host.posted, [], "a record with text after its CI line posted a lane-lint comment:\n" + out)
+
     def test_a_newest_review_record_that_names_another_pull_request_fails(self):
         other = tm.record_text(n=8, head=self.head("feat"))  # parses, and names #8 on #7's thread
         parsed = merge.parse_review(other)
@@ -499,6 +523,8 @@ class LaneLint(LaneFixture):
         self.assertEqual(rc, 1, "a comment list that could not be read passed the lint:\n" + out)
         self.assertEqual(pass_lines(out), [], "a comment list that could not be read printed a PASS line:\n" + out)
         self.assertEqual(self.host.posted, [], "a comment list that could not be read posted a lane-lint comment:\n" + out)
+        self.assertIn(self.host.comments_error, out, "the refusal does not name the read failure:\n" + out)
+        self.assertNotIn("no review record", out, "an unreadable comment list was reported as a missing review record:\n" + out)
 
     def test_a_ref_target_skips_the_review_record_check(self):
         self.host.records = {}  # the own pull request has no record, and a commit target never reads one
@@ -2918,6 +2944,8 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, "a comment list the real host could not read passed the lint:\n" + out)
         self.assertEqual(pass_lines(out), [], "a comment list the real host could not read printed a PASS line:\n" + out)
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "a comment list the real host could not read posted a lane-lint comment:\n" + out)
+        self.assertIn("Server Error", out, "the refusal does not name the read failure the real host reported:\n" + out)
+        self.assertNotIn("no review record", out, "an unreadable comment list was reported as a missing review record:\n" + out)
 
 
 class LintCheckReviewed(tm.ReviewEnv):
