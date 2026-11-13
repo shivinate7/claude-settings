@@ -16075,6 +16075,68 @@ class ReviewFixNotesGap(ReviewEnv):
         self.assert_refused(rc, out, err, f"a fix check over {merge.REVIEW_MERGE_WALK + 1} gap commits, one past the walk's cap, was accepted")
 
 
+class CommitFilesHost(merge.Host):
+    """Host whose one gh call, the REST read of commits/<sha>, returns `answer`, a (code, output) pair. The gh seam is faked as ProtectionHost
+    fakes it, so Host.api and Host.gh run for real. Each call's route is kept in `routes`."""
+    def __init__(self, answer):
+        super().__init__(required=("checks",), base="main", pause=lambda s: None)
+        self.answer, self.routes = answer, []
+
+    def gh(self, args, cwd=None):
+        self.routes.append(args[1])
+        return self.answer
+
+
+class HostCommitFiles(unittest.TestCase):
+    """The Host read of a commit's paths, commit_files: commits/<sha> through Host.api, the paths of its `files` list. A failed read, and a reply whose
+    `files` is absent or not a list, stops: a missing list must not read as an empty one. An empty list is no stop. Each case first asserts that Host
+    has commit_files, so a missing method fails as an assertion, not a crash."""
+
+    SHA, PARENT = "5a" * 20, "b0" * 20
+    CODE = "merge/merge.py"
+    RECORD = f"{layout.path(os.path.dirname(HERE), 'decisions')}/gap-host.md"
+
+    def reply(self, **fields):
+        """-> (0, the JSON of a commit read with one parent and `fields` as its keys)."""
+        return (0, json.dumps({"sha": self.SHA, "parents": [{"sha": self.PARENT}], **fields}))
+
+    def assert_has_method(self):
+        self.assertTrue(hasattr(merge.Host, "commit_files"), "Host has no commit_files: the read of a commit's paths is not built")
+
+    def test_the_paths_of_a_commit_are_its_files_list(self):
+        host = CommitFilesHost(self.reply(files=[{"filename": self.RECORD}, {"filename": self.CODE}]))
+        self.assertEqual(host.commit_read(self.SHA)[0], [self.PARENT], "control: the fake does not answer the commit read the walk already makes")
+        self.assert_has_method()
+        paths = host.commit_files(self.SHA)
+        self.assertEqual(host.routes[-1], f"repos/{{owner}}/{{repo}}/commits/{self.SHA}", "scope: the read did not go to commits/<sha>")
+        self.assertEqual(paths, [self.RECORD, self.CODE], "the paths are not the files list's filenames, in order")
+
+    def test_an_empty_files_list_is_an_empty_list_not_a_stop(self):
+        host = CommitFilesHost(self.reply(files=[]))
+        self.assert_has_method()
+        self.assertEqual(host.commit_files(self.SHA), [], "an empty files list did not read as no paths")
+
+    def test_a_failed_commit_read_stops(self):
+        host = CommitFilesHost((1, "gh: Not Found (HTTP 404)"))
+        self.assert_has_method()
+        with self.assertRaises(merge.Stop):
+            host.commit_files(self.SHA)
+
+    def test_a_reply_without_a_files_key_stops(self):
+        host = CommitFilesHost(self.reply())
+        self.assert_has_method()
+        with self.assertRaises(merge.Stop):
+            host.commit_files(self.SHA)
+
+    def test_a_files_value_that_is_not_a_list_stops(self):
+        self.assert_has_method()
+        for label, files in (("null", None), ("object", {}), ("string", self.RECORD)):
+            with self.subTest(files=label):
+                host = CommitFilesHost(self.reply(files=files))
+                with self.assertRaises(merge.Stop):
+                    host.commit_files(self.SHA)
+
+
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
     the owner's override, the first review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
