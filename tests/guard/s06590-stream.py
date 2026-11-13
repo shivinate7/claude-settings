@@ -592,6 +592,11 @@ sh("detached-launch: 1..3 | ForEach-Object {&$tool $_}, a glued call operator in
    "1..3 | ForEach-Object {&$tool $_}", "allow", tool="PowerShell", cwd=NOGIT)
 sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command, is allowed",
    "$r = (& ci-job checks)", "allow", tool="PowerShell", cwd=NOGIT)
+# A PowerShell call operator is no job, with or without an assignment before it. The control has no assignment.
+sh("check-tail: $r = & ci-job checks --lint piped to Select-String FAIL, a call operator after =, is allowed",
+   "$r = & ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
+sh("check-tail: & ci-job checks --lint piped to Select-String FAIL, a call operator alone, is allowed (control)",
+   "& ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
 sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
    "echo $((5&3))", "allow", cwd=NOGIT)
 sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmetic test, is allowed",
