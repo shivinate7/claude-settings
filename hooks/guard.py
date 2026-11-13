@@ -4690,6 +4690,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # file outside its own session's scratchpad, here or in an ssh remote command.
     if readonly_agent(payload):
         for text in [raw, *substitution_commands(raw, stripped)]:
+            if text.startswith("(") and text.endswith(")"):   # the inside of `$(( ))`: arithmetic, no command
+                continue
             matched = readonly_write_hit(text, cwd, session_id)
             if matched:
                 refuse(tool, "deny", "readonly-shell-write", READONLY_SHELL_WRITE_REASON, matched)
@@ -6017,7 +6019,8 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # exemption never applies: that path sits on the other machine. Quotes, comments and heredoc bodies are read as
 # the other shell rules read them (`split_segments`, `strip_heredoc_bodies`, `strip_redirections`). Cost: pure
 # text work inside the guard call already running; no process, no file.
-READONLY_WRITE_DEPTH = 4          # nested shells, ssh commands and substitutions read; deeper text is judged as written
+READONLY_WRITE_DEPTH = 4          # nested shells, ssh commands and substitutions read; text nested deeper is not judged
+READONLY_STREAMS = ("/dev/stdout", "/dev/stderr", "/dev/tty")   # open descriptors and the terminal: no file is written
 READONLY_TOUCH_VALUE_FLAGS = ("-d", "-t", "-r", "--date", "--reference")   # `touch` flags that take the next word
 
 
@@ -6035,18 +6038,62 @@ def readonly_agent(payload) -> bool:
 
 
 def _null_device(path: str) -> bool:
-    """True when `path` is a null device in any of the three shells: the one list is SILENT_WRITE_REDIRECT's."""
-    return bool(SILENT_WRITE_REDIRECT.match(">" + path))
+    """True when `path` writes no file: a null device or a stream. The null devices are SILENT_WRITE_REDIRECT's list,
+    narrowed by the tool: NUL and `$null` are PowerShell's, and on Bash `NUL` is an ordinary file name. The streams are
+    READONLY_STREAMS."""
+    if path in READONLY_STREAMS:
+        return True
+    if not SILENT_WRITE_REDIRECT.match(">" + path):
+        return False
+    return POWERSHELL_CALL[0] or path.strip("'\"").lower() != "nul"
+
+
+def _comparison_spans(segment: str):
+    """The (start, end) of each unquoted `[[ ... ]]` test and `(( ... ))` or `$(( ... ))` arithmetic in one segment.
+    A `>` inside one is a comparison, not a redirect. An opener left open runs to the end."""
+    spans, open_at, depth = [], None, 0
+    steps = [(at, bool(quote)) for at, _, quote in walk_quotes(segment)]
+    # walk_quotes skips the second char of an escape or `$'`: that char keeps the state of the one before it
+    quoted = {at + gap for (at, inside), (after, _) in zip(steps, steps[1:] + [(len(segment), False)])
+              if inside for gap in range(after - at)}
+    for at, char in enumerate(segment):
+        if at in quoted:
+            continue
+        if open_at is None:
+            word_start = at == 0 or segment[at - 1] in " \t!("
+            if segment.startswith("[[", at) and word_start and segment[at + 2:at + 3] in (" ", "\t"):
+                open_at, depth = at, -1
+            elif segment.startswith("((", at):
+                open_at, depth = at, 1
+        elif depth < 0:      # inside [[ ]]
+            if segment.startswith("]]", at) and segment[at - 1] in " \t":
+                spans.append((open_at, at + 2))
+                open_at = None
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                spans.append((open_at, at + 1))
+                open_at = None
+    if open_at is not None:
+        spans.append((open_at, len(segment)))
+    return spans
 
 
 def _redirect_targets(segment: str):
-    """The target of each unquoted output redirect in one segment that is no null device and no descriptor
-    duplicate (`2>&1`). An input redirect and a heredoc header (`<<`) write nothing."""
+    """The target of each unquoted output redirect in one segment that writes no file (`_null_device`), is no
+    comparison (`_comparison_spans`) and no descriptor duplicate (`2>&1`). An input redirect and a heredoc header
+    (`<<`) write nothing."""
+    spans = _comparison_spans(segment) if "[[" in segment or "((" in segment else []
     for found in REDIRECTION.finditer(segment):
         word = found.group()
-        if word[0] == "<" or not unquoted_at(segment, found.start()) or SILENT_WRITE_REDIRECT.match(word):
+        if word[0] == "<" or not unquoted_at(segment, found.start()) or any(a <= found.start() < b for a, b in spans):
             continue
-        start = found.start() + _REDIRECT_OPERATOR.match(word).end()
+        operator = _REDIRECT_OPERATOR.match(word).end()
+        if SILENT_WRITE_REDIRECT.match(word) and _null_device(word[operator:].lstrip("&")):
+            continue
+        start = found.start() + operator
         target = segment[start:found.end()]
         if re.fullmatch(r"&(?:\d+|-)", target):
             continue
