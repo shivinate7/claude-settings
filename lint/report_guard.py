@@ -731,6 +731,56 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
+# claim-vs-main-needs-read: a reply line that says how the work compares with main cites a read of main on that line.
+# It extends answered-needs-source: the same line reader (_prose_lines), code-span strip (CODE_SPAN) and hash pattern
+# (DONE_REF_RE). A claim form is a phrase of whole words; a hyphen joins words into a name, so "not-worse-than-main" is
+# no form. "regression test(s)" and "regression suite(s)" are nouns for a test count, not a claim. A hedge word on the
+# line exempts it. A cite is one of a closed list, found on the line with code spans unwrapped.
+_W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
+_MAIN = r"main(?![\w-])"
+MAIN_CLAIM_RE = re.compile(
+    _W + r"(?:not\s+a\s+regression|no\s+regression)(?![\w-])(?!\s+(?:tests?|suites?)\b)"
+    r"|" + _W + r"(?:worse\s+than|same\s+as|already\s+on|pre-?existing\s+on|matches|regression\s+from)\s+" + _MAIN +
+    r"|" + _W + r"main['\u2019]s\s+own(?![\w-])", re.I)
+MAIN_HEDGE_RE = re.compile(_W + r"(?:unmeasured|unknown|not\s+read)(?![\w-])", re.I)
+_SHA_HEAD = r"(?=[0-9a-f]*\d)[0-9a-f]{6,40}"
+_SHA = _SHA_HEAD + r"(?![\w-])"
+MAIN_CITE_RE = re.compile(
+    r"\b[\w/-]+\.[A-Za-z]\w{0,7}:\d+\b"
+    r"|(?<![\w/-])origin/main(?![\w-])"
+    r"|\bgit\s+show\s+(?:origin/)?main:"
+    r"|" + _W + r"main(?:['\u2019]s)?\s*(?:@|at\s+|commit\s+)?\s*" + _SHA +
+    r"|\b" + _SHA_HEAD + r"\s+(?:on|of|from|in)\s+" + _MAIN, re.I)
+MAIN_SHOT_RE = re.compile(_W + r"main(?:['\u2019]s)?\s+screenshot(?![\w-])", re.I)
+MAIN_SHOT_SOURCE_RE = re.compile(r"https?://\S+|[\w.-]+/[\w./-]*\.\w+")
+MAIN_CLAIM_REASON = owner_line(
+    "Main-claim guard (rule claim-vs-main-needs-read)",
+    "each line below says how the work compares with main and cites no read of main on the line; "
+    "a hedge word (unmeasured, unknown, not read), a question, a fence and an inline code span are no claim") + " Lines: "
+
+
+def _cites_main_read(kept):
+    """True when `kept` (a line with its code spans unwrapped) holds one of the closed cite forms."""
+    if MAIN_CITE_RE.search(kept):
+        return True
+    return bool(MAIN_SHOT_RE.search(kept) and MAIN_SHOT_SOURCE_RE.search(kept))
+
+
+def main_claim_problem(text):
+    """The refusal for reply lines that claim a state against main with no read of main on the line, else ''."""
+    if not re.search(r"main|regression", text, re.I):
+        return ""
+    bad = []
+    for body in _prose_lines(text):
+        plain = CODE_SPAN.sub(" ", body)
+        if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
+            continue
+        if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
+            continue
+        bad.append(body)
+    return MAIN_CLAIM_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
@@ -2774,6 +2824,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        claim = main_claim_problem(text)
+        if claim:
+            reasons.append(claim)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -3206,6 +3259,7 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+            relay.append(main_claim_problem(text))
         except Exception:
             pass
     cannot = ""
