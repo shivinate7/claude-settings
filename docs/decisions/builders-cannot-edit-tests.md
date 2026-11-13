@@ -19,7 +19,7 @@ Owner, 2026-11-12 21:59 CST, page item 679 a (builder-test-comment-edit), is fil
 - **JS and TS** (`.js .mjs .cjs .jsx .ts .tsx`): `hooks/comment_only.mjs` parses both texts with the TypeScript on PATH (`lint/typescript_on_path.mjs`, shared with `lint/comment_scan.mjs`). It is False when either text has a parse error. It compares each leaf token of the tree by kind and text, and by whether a line break comes before it, so a block comment that holds a line break cannot hide a change to a `return` or to automatic semicolon insertion. JSX text and template pieces are tokens. A JSDoc comment is a comment. No `node`, no `tsc`, a timeout or any error is False.
 - **Fail-closed.** Every other language, a new file, a deleted file, a file whose text is identical on both sides (a mode change, an invalid byte), an Edit whose old string is not in the file or not unique, a symlink that resolves to another path, and any unreadable file stay refused.
 - **Unchanged rules.** A mutation test (`AUTHOR_MUTATION_TESTS`) stays refused for any change. Test config keeps `disables_tests`, so a comment that adds a disabling line is refused. The shell check (`builder_shell_test_hit`) is unchanged: a shell write to a test path stays refused.
-- **Known gap.** A comment that a runner reads as an instruction, such as a Jest docblock `@jest-environment`, counts as a comment.
+- **Known gap.** A comment that a runner reads as an instruction, such as a Jest docblock `@jest-environment` or a TypeScript `// @ts-nocheck` or `// @ts-expect-error`, counts as a comment.
 - **Cost.** `tokenize` or one `node` run happens only when a builder's test path differs, once per such path at each commit, push, stop and write call (unmeasured). The node run has a 20 s cap, writes no file and starts no long-lived process.
 
 An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
@@ -38,7 +38,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list (unmeasured). Commits of the builder's own add one rev-list, and one parent read and one diff each (unmeasured). A merge commit or a merge in progress adds one `merge-tree`. `rev-parse` runs on each refused test-author product write, and `merge-tree` runs once per such write while MERGE_HEAD exists (unmeasured). Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 192 of 192 `builder-refuse` cases pass on this tip.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 190 of 192 `builder-refuse` cases pass on this tip. The two others (a test edit that matches neither of two received bases) write a comment-only change and expect a refusal: they wait for a test-author to re-point them to a code change.
 
 ## Roles
 
