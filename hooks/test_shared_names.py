@@ -566,7 +566,7 @@ def case_merge_role_reader_is_imported_not_copied():
     return not problems, "; ".join(problems) or "merge.py imports the role reader and defines none of it"
 
 
-def case_guard_merge_reads_the_shared_merge_tiers():
+def case_guard_merge_reads_the_shared_merge_roles():
     """hooks/guard_merge.py tests a session's merge role against MERGE_ROLES from shared_names. It binds no tier tuple of
     its own (ROLE_TIERS), which would drift from the merge tool's set."""
     with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
@@ -625,7 +625,7 @@ def case_read_merge_role_returns_the_batch_runner_for_its_own_record():
     return got == "batch-runner", "read_merge_role on its own batch-runner record = %r" % (got,)
 
 
-def case_read_merge_role_refuses_the_coordinator_tier():
+def case_read_merge_role_refuses_the_coordinator_role():
     """The coordinator never merges (decision session-tiers): its own coordinator record reads as no merge role."""
     shared = _shared()
     cfg = _role_config("own-coordinator", _role_file(ROLE_SESSION, "coordinator"))
@@ -663,7 +663,7 @@ def case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record():
     return not problems, "; ".join(problems) or "empty, malformed and list-role records all read as no merge role"
 
 
-def case_read_recorded_role_returns_the_coordinator_tier_of_its_own_record():
+def case_read_recorded_role_returns_the_coordinator_role_of_its_own_record():
     """The guard reads a session's tier whatever it is, so the coordinator's record reads as 'coordinator' here.
     Only read_merge_role narrows to the merge tiers."""
     shared = _shared()
@@ -724,11 +724,11 @@ CASES = [
     ("(r1) merge.py imports the role reader, MERGE_ROLES and role_path from shared_names and defines none of them",
      case_merge_role_reader_is_imported_not_copied),
     ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no tier tuple of its own",
-     case_guard_merge_reads_the_shared_merge_tiers),
+     case_guard_merge_reads_the_shared_merge_roles),
     ("(r3) read_merge_role returns batch-runner for this session's own batch-runner record",
      case_read_merge_role_returns_the_batch_runner_for_its_own_record),
     ("(r4) read_merge_role refuses the coordinator's own record: the coordinator never merges",
-     case_read_merge_role_refuses_the_coordinator_tier),
+     case_read_merge_role_refuses_the_coordinator_role),
     ("(r5) read_merge_role refuses another session's batch-runner record",
      case_read_merge_role_refuses_another_sessions_record),
     ("(r6) read_merge_role is None with no session id, even for a record that holds no session",
@@ -736,7 +736,7 @@ CASES = [
     ("(r7) read_merge_role is None for an empty, malformed or list-role record",
      case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record),
     ("(r8) read_recorded_role returns the coordinator tier of this session's own record",
-     case_read_recorded_role_returns_the_coordinator_tier_of_its_own_record),
+     case_read_recorded_role_returns_the_coordinator_role_of_its_own_record),
     ("(r9) role_path is state/merge-role.json under the config folder, and under ~/.claude when none is set",
      case_role_path_is_state_merge_role_under_the_config_folder),
 ]
