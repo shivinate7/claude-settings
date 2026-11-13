@@ -206,7 +206,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 17. **CI runs once per batch.** The integration PR run is the proof for its tree. Rulings: R61 (macOS
     CI once per batch), R62 (Linux and Windows CI once per batch), R63 (install.sh tests on Linux
     and macOS). The push to main starts no macOS job. It starts no suite on a tree that a green
-    integration PR run tested, and a reused run counts for a suite only if that suite ran on the same
+    integration PR run tested. A reused run counts for a suite only if that suite ran on the same
     tree. The repo has no nightly CI schedule, only a manual run (step drop-nightly-schedule, owner
     ruling 22:19 CST Nov 12). The no-merge-onto-red-main check reads the integration PR run on that tree. Unverified: R61 part 3
     asks for a first check that the check still reads a run. The macOS jobs `checks-macos` and `checks-macos-b`
