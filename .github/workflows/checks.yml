@@ -731,6 +731,7 @@ jobs:
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
+          bash actions/push-skip/test_action.sh
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
