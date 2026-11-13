@@ -1534,6 +1534,76 @@ def cmd_exe_delete_hit(segment: str) -> str:
     return ""
 
 
+# ARCHIVE PUSH GATES DELETE. Rule archive-push-gates-delete (rule shared-trees-archive-then-delete): a remote
+# branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive push
+# of the same branch in one command runs only when `&&` joins every step from the push to the delete, so the
+# push's own exit status gates it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
+# ends come from `split_segments`; each push is read by `_push_parse`. A branch word with a `$` is not
+# paired, and `bash -c` bodies, heredocs, script files and PowerShell are not read (`guard-guards-mistakes-only`).
+ARCHIVE_GATE = "&&"   # the join that gates, and the one word the remedy names
+ARCHIVE_PREFIX = "archive/"
+
+
+def _branch_name(text: str) -> str:
+    """A branch name as two spellings of it agree: no quotes, no `+`, no `refs/heads/`."""
+    return text.replace('"', "").replace("'", "").lstrip("+").removeprefix("refs/heads/")
+
+
+def _push_events(segment: str):
+    """[(kind, names)] for each `git push` in one segment: 'archive' for a refspec whose destination is
+    `archive/<name>` (names: its source and its suffix), 'delete' for each deleted branch."""
+    events = []
+    for subcommand, args in guard_core.git_calls(push_text(segment)):
+        if subcommand != "push":
+            continue
+        _f, _m, _e, _i, _u, _l, delete, _up, _remote, plain = _push_parse(args)
+        deleted = {_branch_name(spec[1:] if spec.startswith(":") else spec)
+                   for spec in plain if spec.startswith(":") or delete}
+        if deleted:
+            events.append(("delete", deleted))
+        if delete:
+            continue
+        for spec in plain:
+            source, colon, dest = spec.lstrip("+").partition(":")
+            dest = _branch_name(dest if colon else source)
+            if dest.startswith(ARCHIVE_PREFIX) and source:
+                events.append(("archive", {_branch_name(source), dest[len(ARCHIVE_PREFIX):]}))
+    return events
+
+
+def archive_gate_hits(segments, ends):
+    """Each delete that follows an archive push of its branch with anything but `&&` between them, as
+    `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
+    of the text (contractions as text) follows the first in both lists, and each ends with an empty end
+    and is judged alone."""
+    if len(segments) != len(ends):
+        return []
+    hits = []
+    start = 0
+    for stop in [number + 1 for number, end in enumerate(ends) if end == ""]:
+        reading, closes = segments[start:stop], ends[start:stop]
+        start = stop
+        archives = []   # (segment number, names), in order
+        for number, segment in enumerate(reading):
+            for kind, names in _push_events(segment):
+                if kind == "archive":
+                    archives.append((number, names))
+                    continue
+                for name in sorted(names):
+                    paired = [at for at, found in archives if at < number and name in found]
+                    if paired and any(closes[k] != ARCHIVE_GATE for k in range(paired[-1], number)):
+                        hits.append(name + " deleted after its archive push")
+    return hits
+
+
+ARCHIVE_GATE_REASON = (
+    "archive-push-gates-delete: this delete can run after its archive push failed, which loses the branch "
+    "with no copy (rule shared-trees-archive-then-delete). "
+    "Remedy: run the delete only when the archive push has succeeded, by joining the two with `&&` "
+    "and nothing else between the push and the delete."
+)
+
+
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
     "Remedy: retry with --force-with-lease --force-if-includes."
