@@ -142,7 +142,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
     marks an item "New reply" when `replied` is later than both the owner's last Send (the same time that decides seen) and the owner's last visit
     (`waiting.visit` in the browser, which the page writes on each load; with none, the last Send alone decides). The page reads both once at load, so a Send or a
-    visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
+    visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change. While `waits` is set, `--unread` does not read `replied` as a reply to an answer, since a wait moves it too.
   - `lastAnswer` (`{choice, note, at}` on a decision, `{done, note, at}` on a task, `{act: "park", note, at}` on an item the owner parked and then unparked) is the owner's last answer to this item.
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the item carries `shown`,
@@ -284,7 +284,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   `n` in every items write, set or update, so the guard can match it.
   - Not written yet: the writer writes the item closed (`status: "closed"` and `closed` set to now), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
-    close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
+    close" step 1) and writes `receipts/<id>` in the close batch of step 1 of "Route and close". The writer writes none at this close.
   - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
@@ -361,8 +361,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
-- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text. When the line ends `, lane <slug>`, it sends the same message to that lane too, found as "Never-ending wait" says.
-  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holds` and no `lane`. Find the lane that waits on it (ask the item's `owner`), then write `lane` on the item, or drop `holds` when nothing waits. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
+- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text. When the line ends `, lane <slug>)`, it sends the same message to that lane too, found as "Never-ending wait" says.
+  Two more lines need the writer's own act in the same wake. `lane-missing <id>`: an open item with `holds` and no `lane`, whatever its `waits`. Find the lane that waits on it (ask the item's `owner`), then write `lane` on the item, or drop `holds` when nothing waits. `answer-needs-reply <id>`: a `none` answer with a note and no item `reply` newer than the answer. An item with `waits` is always listed, since `replied` also moves with a wait; its close batch carries `--reply`. Write the `reply` and `replied` now (steps 1, 3 and 4 of "Route and close" carry them) and a receipt with `read`. Both lines list every item, whatever its `owner`.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
@@ -466,8 +466,10 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 1. Move the answer to the item's home first: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home). Steps 1 and 2 are then one write, never two: fetch `items/<id>` and `answers/<id>` (and `receipts/<id>`, if it exists) with `ArtifactData get` and `out_dir`, then run
-   `python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>]`
-   and pass its `writes` to one `ArtifactData batch`. That batch sets `receipts/<id>` (`read` and `filed`, ISO UTC with a trailing `Z`), closes the item and deletes `answers/<id>`, each pinned to the version read.
+   `python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--item-version <n>] [--answer-version <n>] [--receipt-version <n>] [--done]`
+   and pass its `writes` to one `ArtifactData batch`. That batch sets `receipts/<id>` (`read` and `filed`, ISO UTC with a trailing `Z`), closes the item and deletes `answers/<id>`.
+   Pass each `version` from your `ArtifactData get` results in the version flags, so each write is pinned. With a doc unpinned, the helper still prints the payload, but its first stderr line is `unpinned: <docs>` and the payload says `"pinned": false`: get the version and run it again before the batch.
+   An item with `lane` or `waits` stays open for the receiver's done report: the helper exits 2 (`item waits for a done report`) unless you pass `--done`, which you do only once the report or the wait's end is in.
    A closed item with no receipt reads "Filing pending" on the page, so never close with a plain `update`. A `none` answer with a note is a question: `--reply` carries the written reply, and the helper refuses without it. A `none` answer with a clear
    direction becomes a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
    `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record

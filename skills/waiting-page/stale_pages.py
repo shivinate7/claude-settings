@@ -107,20 +107,22 @@ A listed answer on an item with a non-empty `lane` ends its parentheses with `, 
 Two more lines, after the answer lines and before any unknown line:
 `answer-needs-reply <id> (item <n>, owner <owner>, answered <at>)` for an item answer of `choice` `none` whose `note` is not blank, when
 the item has no `reply` with text and a `replied` later than the answer's `at` (read or unread, whatever the wake). A `replied` that is
-not an ISO time, with a `reply` text, is unknown.
-`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holds` text, no `lane` text and no `waits` (a CI or PR wait is no lane block).
+not an ISO time, with a `reply` text, is unknown. An item with `waits` is always listed: `replied` also moves with a wait, so it is not trusted.
+`lane-missing <id> (item <n>, owner <owner>)` for an open item with `holds` text and no `lane` text, whatever its `waits`.
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
 Close-batch mode, run by the item's owner at step 1 and 2 of "Route and close" (SKILL.md):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done] [--item-version <n>] [--answer-version <n>] [--receipt-version <n>]
 
 Each file is a doc `ArtifactData get` saved ({id, data, version}) or bare data. It prints one `ArtifactData batch` payload, {"writes": [...]}:
 a `set` of receipts/<id> with `read` and `filed` at --now (default: the clock, ISO UTC with a Z), an `update` of items/<id> that closes it
 (`status`, `closed`, `lastAnswer` from the answer's `choice`, `done`, `note`, `at`; with --reply text also `reply` and `replied`), and a `delete` of
-answers/<id>. A write carries `if_version` when its doc's version is known, else none (--receipt names the receipt already stored). Exit 0.
-Exit 2 with one `unknown:` line and no payload when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
+answers/<id>, with `"pinned"` true or false beside `writes`. A write carries `if_version` from --item-version, --answer-version or --receipt-version, else from
+the fetched wrapper's `version`, else none (--receipt names the receipt already stored). With the item or answer (or a named receipt) unpinned, the first line
+on stderr is `unpinned: <docs>` and `pinned` is false; the payload still prints. Exit 0.
+Exit 2 with one `unknown:` line and no payload when the item has `lane` or `waits` and --done is not passed (`item waits for a done report`), when a file cannot be read, the ids differ, the answer has no readable `at`, or the answer is a
 `none` that asks a question and --reply has no text. Cost: one python process, reads up to 3 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
@@ -812,14 +814,14 @@ def unread_mode(argv):
             reply_at = parse_utc(item.get("replied")) if item.get("replied") is not None else None
             if item.get("replied") is not None and reply_at is None and has_text(item.get("reply")):
                 unknown.append("unknown: the reply on item %s has no readable replied" % key)
-            elif not (has_text(item.get("reply")) and reply_at is not None and reply_at > at):
+            # With `waits` set, `replied` may be only the wait's own change, so it is not trusted: the close batch's --reply clears the line.
+            elif "waits" in item or not (has_text(item.get("reply")) and reply_at is not None and reply_at > at):
                 lines.append("answer-needs-reply %s (item %s, owner %s, answered %s)" % (
                     key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"]))
-    # An open item that holds something up (`holds`) names its lane. A CI or PR wait (`waits`) is no lane block.
+    # An open item that holds something up (`holds`) names its lane, whatever its `waits`.
     for r in entries(items):
         item = data(r)
-        if (item.get("status") != "closed" and has_text(item.get("holds")) and not has_text(item.get("lane"))
-                and "waits" not in item):
+        if item.get("status") != "closed" and has_text(item.get("holds")) and not has_text(item.get("lane")):
             lines.append("lane-missing %s (item %s, owner %s)" % (r.get("id"), item.get("n", "?"), item.get("owner", "?")))
     out = lines + unknown
     print("\n".join(out) if out else "unread: clean")
@@ -856,9 +858,10 @@ def read_doc(path):
 
 
 def close_batch_mode(argv):
-    """`--close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]`: print the one ArtifactData batch
-    payload, {"writes": [...]}, that closes the item: the receipt set (read and filed), the item update (closed, lastAnswer, and reply with
-    replied) and the answer delete. Each fetched doc's version pins its write; a doc with no version gets no pin."""
+    """`--close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done] [--item-version <n>]
+    [--answer-version <n>] [--receipt-version <n>]`: print the one ArtifactData batch payload, {"writes": [...], "pinned": bool}, that closes the item: the receipt set (read and filed), the item update (closed, lastAnswer, and reply with
+    replied) and the answer delete. A version flag, else the fetched wrapper's version, pins its write. With a doc unpinned, stderr
+    starts with `unpinned: <docs>` and `pinned` is false. An item with `lane` or `waits` is refused unless --done."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--close-batch", action="store_true")
     ap.add_argument("--item", required=True)
@@ -866,6 +869,9 @@ def close_batch_mode(argv):
     ap.add_argument("--receipt")
     ap.add_argument("--reply")
     ap.add_argument("--now")
+    ap.add_argument("--done", action="store_true")
+    for name in ("item", "answer", "receipt"):
+        ap.add_argument("--%s-version" % name, type=int)
     args = ap.parse_args(argv)
     docs, ids, errors = {}, set(), []
     for name in ("item", "answer", "receipt"):
@@ -889,6 +895,18 @@ def close_batch_mode(argv):
     doc_id = next(iter(ids))
     answer, answer_version = docs["answer"]
     item, item_version = docs["item"]
+    for name in ("item", "answer", "receipt"):
+        given = getattr(args, name + "_version")
+        if given is not None and given < 1:
+            print("unknown: --%s-version of %s is not a whole number above zero" % (name, doc_id))
+            return 2
+    # A flag version wins over the wrapper's.
+    versions = {"item": args.item_version or item_version, "answer": args.answer_version or answer_version,
+                "receipt": args.receipt_version or (docs["receipt"][1] if "receipt" in docs else None)}
+    # An item with a lane or a wait stays open until the receiver reports the act done (SKILL.md, "Route and close").
+    if (has_text(item.get("lane")) or "waits" in item) and not args.done:
+        print("unknown: item waits for a done report (%s has lane or waits; pass --done once the act is done)" % doc_id)
+        return 2
     if parse_utc(answer.get("at")) is None:
         print("unknown: the answer of %s has no readable at" % doc_id)
         return 2
@@ -907,10 +925,13 @@ def close_batch_mode(argv):
     receipt = {"op": "set", "collection": "receipts", "doc_id": doc_id, "data": {"read": now, "filed": now}}
     update = {"op": "update", "collection": "items", "doc_id": doc_id, "data": closed}
     delete = {"op": "delete", "collection": "answers", "doc_id": doc_id}
-    for write, version in ((receipt, docs["receipt"][1] if "receipt" in docs else None), (update, item_version), (delete, answer_version)):
-        if version is not None:
-            write["if_version"] = version
-    print(json.dumps({"writes": [receipt, update, delete]}, indent=1))
+    unpinned = [name for name in ("item", "answer", "receipt") if versions[name] is None and (name != "receipt" or "receipt" in docs)]
+    for name, write in (("receipt", receipt), ("item", update), ("answer", delete)):
+        if versions[name] is not None:
+            write["if_version"] = versions[name]
+    if unpinned:  # the live get shape is unverified, so an unpinned close is printed, never refused
+        print("unpinned: %s" % ", ".join(unpinned), file=sys.stderr)
+    print(json.dumps({"writes": [receipt, update, delete], "pinned": not unpinned}, indent=1))
     return 0
 
 
@@ -930,7 +951,8 @@ def main(argv):
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
                  "       stale_pages.py --parked <dir> [--now <iso>]\n"
                  "       stale_pages.py --unread <dir>\n"
-                 "       stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>]")
+                 "       stale_pages.py --close-batch --item <file> --answer <file> [--receipt <file>] [--reply <text>] [--now <iso>] [--done]\n"
+                 "                      [--item-version <n>] [--answer-version <n>] [--receipt-version <n>]")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
