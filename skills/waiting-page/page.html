@@ -4134,7 +4134,7 @@ function top() {
   const read = H.read ? `Measured ${esc(m ? m[3] : H.read)}` : '<span class="unk">Measured at an unknown time</span>';
   const from = m ? `<li>From ${esc(m[1])} at <code>${esc(m[2])}</code>.</li>` : "";
   return `<section class="hv-top" aria-labelledby="hvH"><h2 id="hvH">How well each part works</h2>
-    <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap. Those targets are proposals, not agreed yet.</p>
+    <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap.</p>
     <ul class="gkey" aria-label="Grades">${GRADES.map(([g, c, w]) => { const k = count(g); return `<li${k ? "" : ' class="zero"'}>${mark(c)}<span>${w}</span><b>${k}</b></li>`; }).join("")}</ul>
     <p class="ikey" aria-hidden="true"><span>${GEAR}What makes it happen</span><span>${TARGET}What good looks like</span></p>
     ${coverage()}
