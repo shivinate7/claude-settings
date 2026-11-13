@@ -1,0 +1,14 @@
+{
+ "id": "fix-verifier-stands-for-round-2",
+ "title": "A fix verifier at the reviewed head stands in for round 2",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "parse_review demands rounds 1, 2, 3 in a row. A lane whose path is round 1 FAIL, fix verifier, round 3 must run a filler round 2 to post a record. That hit #3060 and #3116 on Nov 12-13. The cost is a wasted review round each time, and a record whose order does not match what happened.",
+ "source": "coordinator 03:57 CST Nov 13, from #3116 round 3 (head 89ab7d974)",
+ "note": "Guard change, to a lane, red first. Before building, the lane reads rule roles-review-cap-three (rounds 1 and 2 fix the defect; a small fix gets a fix verifier) and decision pr-review-record, and names the sentence that lets a fix verifier count as round 2. If no sentence allows it, the lane asks first (outcomes-stale-decision-protocol). Step review-record-no-restart asked for this path at 03:01 CST, but #3116 did not cover it.",
+ "updatedAt": "2026-11-13T03:58:29-06:00"
+}
