@@ -5269,7 +5269,7 @@ def idle_lanes(live, repo_dir=None):
     now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
     the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not
     done, an open pull, an open item) prints no line. Exit 1 with no summary when the
-
+    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
