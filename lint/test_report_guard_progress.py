@@ -16,6 +16,7 @@ a flagged twin beside its control, so a control that passes on code that does no
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -79,6 +80,21 @@ UNREAD = (
     "Lane counts-from-rest is nearly done; not read.",
     "Lane counts-from-rest is nearly done, how far unknown.",
 )
+
+
+# Runs report_guard.py's main with progress_claim_problem replaced by a call that raises, so the check cannot run.
+FORCE_PROGRESS_CODE = (
+    "import os, sys\n"
+    "sys.path.insert(0, os.path.dirname(sys.argv[1]))\n"
+    "import report_guard as RG\n"
+    "assert hasattr(RG, 'progress_claim_problem'), 'premise: the check is named progress_claim_problem'\n"
+    "def forced(text):\n"
+    "    raise RuntimeError('forced by the test')\n"
+    "RG.progress_claim_problem = forced\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "RG.main()\n"
+)
+UNKNOWN_NOTE = "Progress-claim guard: UNKNOWN, the check did not run"
 
 
 def with_cite(line, read):
@@ -378,6 +394,53 @@ class ProgressClaimTests(unittest.TestCase):
         self.assert_blocked("Lane 4 is in progress.", "Lane 4 is in progress.", RULE)
         self.assert_allowed("Lane 4 adds the work in progress marker to the guard.")
         self.assert_allowed("Lane 4 adds the in-progress marker to the guard.")
+
+    def test_pc_red_an_owner_wait_is_no_progress_claim(self):
+        # Scope first: a lane or batch waiting on CI flags. Catches: a wait on the owner is read as a progress claim,
+        # and a Done item's subject carries into the Next item of the same block.
+        self.assert_blocked("Lane 4 is waiting on CI.", "Lane 4 is waiting on CI.", RULE)
+        self.assert_blocked("Batch 133 is waiting on CI.", "Batch 133 is waiting on CI.", RULE)
+        self.assert_allowed("> **Done** BUILT PR #3172 merged\n> **Next** Waiting on your pick.")
+        self.assert_allowed("> **Done** BUILT PR #3172 merged\n> **Next** Waiting on your pick of the lane model.")
+        self.assert_allowed("Lane 4 is waiting on the owner's answer.")
+        self.assert_allowed("Lane 4 is waiting on you.")
+        self.assert_allowed("I am waiting for your answer on A or B")
+
+    def session_hook(self, records, sid, active=False):
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=trg.RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active, "session_id": sid}
+
+    def plain_run(self, hook):
+        run = trg.run_guard(trg.REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def forced_run(self, hook):
+        """The Stop run with the progress check made to raise. Returns the hook's JSON, or None."""
+        run = subprocess.run([sys.executable, "-c", FORCE_PROGRESS_CODE, trg.REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_pc_red_a_failing_progress_check_on_a_rewrite_reads_unknown_not_silence(self):
+        # Catches: a rewrite after a missing-report block drops an error in the progress check with no word, so the
+        # rewrite passes in silence. Control: the first Stop of a claim reads UNKNOWN in its systemMessage, with no block.
+        sid = "pc-rewrite-%d" % id(self)
+        turn = [trg.human("ask the owner"), trg.tool_use_msg("Bash", {"command": "git commit -m x"}),
+                trg.tool_result_msg()]
+        missing = self.plain_run(self.session_hook(turn + [trg.assistant_text("All done.")], sid))
+        self.assertIsNotNone(missing, "premise: the missing report did not block, so no rewrite marker was written")
+        self.assertIn("does not end with the report", missing["reason"])
+        out = self.forced_run(self.session_hook(turn + [trg.assistant_text("Lane 4 is nearly done.")], sid, active=True))
+        self.assertIsNotNone(out, "the rewrite passed in silence, so the progress check's error went unread")
+        self.assertNotEqual(out.get("decision"), "block", out)
+        self.assertIn(UNKNOWN_NOTE, out.get("systemMessage", ""), out)
+        first = self.forced_run(self.session_hook([trg.human("ask the owner"),
+                                                   trg.assistant_text("Lane 4 is nearly done.")], sid + "-first"))
+        self.assertIsNotNone(first, "the first Stop of a claim passed in silence")
+        self.assertNotEqual(first.get("decision"), "block", first)
+        self.assertIn(UNKNOWN_NOTE, first.get("systemMessage", ""), first)
 
     def test_pc_red_a_rewrite_under_stop_hook_active_stays_quiet(self):
         # Same shape as answered-needs-source: the rewrite that follows a block is not refused again.
