@@ -29,6 +29,7 @@ case's folders sit under it.
 """
 
 import atexit
+import hashlib
 import json
 import os
 import re
@@ -560,6 +561,70 @@ class NoStateFile(unittest.TestCase):
         assert_named(self, codes, ctx, "the same call naming the broken inbox", home.sid + ".inbox.md", home, line=2)
 
 
+class PreFilterCost(unittest.TestCase):
+    """The cost the decision states (docs/decisions/state-file-parse-check.md, Cost): a call that names neither
+    .json nor the handoff folder starts no Python, a call that names one starts one, and the hook writes no file.
+    A shim for python3 and python, first on PATH, records each start."""
+
+    @staticmethod
+    def state_command():
+        found = [c for c in hook_commands("Bash") if "state_parse_check" in c]
+        return found[0] if found else None
+
+    def run_filter(self, home, tool, tool_input, response):
+        """Run the state check's registered command with a recording shim first on PATH. Return (starts, files
+        before the call, files after it), each file as its path and sha256."""
+        # On an old commit no command is registered. Running none starts no Python, so the cost asserts give the red.
+        command = self.state_command() or "exit 0"
+        shims =tempfile.mkdtemp(prefix="shim-", dir=RUN)
+        log = os.path.join(shims, "starts.log")
+        for name in ("python3", "python"):
+            shim = os.path.join(shims, name)
+            write(shim, '#!/bin/sh\necho start >> %s\nexec %s "$@"\n' % (shlex.quote(log), shlex.quote(sys.executable)))
+            os.chmod(shim, 0o755)
+        # Compact JSON: the pre-filter cuts the input at the literal `"tool_input":` and `"tool_response":`.
+        compact = json.dumps({"session_id": home.sid, "cwd": home.work, "tool_name": tool, "tool_input": tool_input,
+                              "tool_response": response}, separators=(",", ":"))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=home.cfg, HOME=home.root, PYTHONDONTWRITEBYTECODE="1",
+                   PATH=shims + os.pathsep + os.environ.get("PATH", ""))
+
+        def listing():
+            return sorted((os.path.join(d, n), hashlib.sha256(read_bytes(os.path.join(d, n))).hexdigest())
+                          for d, _, names in os.walk(home.root) for n in names)
+
+        before = listing()
+        done = subprocess.run([test_wrappers.SH, "-c", command], input=compact, capture_output=True, text=True,
+                              env=env, cwd=home.work, timeout=60)
+        self.assertEqual(done.returncode, 0, "the filter must never block: %r" % done.stderr[:160])
+        starts = len(read_text(log).splitlines()) if os.path.exists(log) else 0
+        return starts, before, listing()
+
+    @SHELL_ONLY
+    def test_a_call_naming_no_state_file_starts_no_python_and_a_json_call_starts_one(self):
+        home = Home()
+        # The response names a .json, which the filter must not read: it cuts the input at tool_response.
+        starts, _, _ = self.run_filter(home, "Bash", {"command": "ls -la"}, {"stdout": "bad.json\n", "stderr": ""})
+        self.assertEqual(starts, 0, "a call that names no .json and no handoffs started Python")
+        path = os.path.join(home.work, "bad.json")
+        write(path, '{"a": 1,}\n')
+        starts, _, _ = self.run_filter(home, "Write", {"file_path": path, "content": '{"a": 1,}\n'}, {})
+        self.assertEqual(starts, 1, "a call that names a .json must start one Python")
+        starts, _, _ = self.run_filter(home, "Write", {"file_path": home.handoff, "content": "x"}, {})
+        self.assertEqual(starts, 1, "a call that names the handoff folder must start one Python")
+
+    @SHELL_ONLY
+    def test_the_hook_writes_no_file_when_it_judges_a_broken_state_file(self):
+        home = Home()
+        path = os.path.join(home.work, "bad.json")
+        write(path, '{"a": 1,}\n')
+        write(home.inbox, HEAD_1 + "\n````\nopen\n")
+        for name, target in (("bad.json", path), ("the inbox", home.inbox)):
+            with self.subTest(file=name):
+                starts, before, after = self.run_filter(home, "Write", {"file_path": target, "content": "x"}, {})
+                self.assertEqual(starts, 1, "scope: the hook must run on %s" % name)
+                self.assertEqual(before, after, "the hook wrote or changed a file while judging %s" % name)
+
+
 class ScannerTraps(unittest.TestCase):
     """Handoff text and JSON text that a fence scan must not misread."""
 
@@ -585,6 +650,18 @@ class ScannerTraps(unittest.TestCase):
         assert_named(self, codes, ctx, "the same .md in the handoff folder", home.sid + ".md", home,
                      line=fence_line)
 
+    def test_longer_outer_fence_left_open_around_a_shorter_inner_is_named(self):
+        # The inner ``` does not close a four-backtick fence: only a run at least as long closes it.
+        closed = handoff_text("````\n```\ninner text\n```\n````\n")
+        home = Home()
+        codes, ctx = home.write_hook(home.handoff, closed)
+        assert_silent(self, ctx, "the handoff with a longer outer fence closed after a shorter inner one")
+        left_open = handoff_text("````\n```\ninner text\n```\n")
+        fence_line = handoff_text().count("\n") + 1
+        codes, ctx = home.write_hook(home.handoff, left_open)
+        assert_named(self, codes, ctx, "a four-backtick outer fence left open around a three-backtick inner one",
+                     home.sid + ".md", home, line=fence_line)
+
     def test_json_string_holding_a_fence_is_silent_and_a_trailing_comma_is_named(self):
         home = Home()
         path = os.path.join(home.work, "body.json")
@@ -594,6 +671,27 @@ class ScannerTraps(unittest.TestCase):
         codes, ctx = home.write_hook(path, JSON_TRAP_BAD)
         assert_named(self, codes, ctx, "the same JSON with a trailing comma", "body.json", home,
                      line=line, column=column)
+
+
+class EditHandoffFence(unittest.TestCase):
+    """An Edit on a handoff .md that an open fence already broke. The Edit did not open the fence, so it stays
+    silent. The same text written whole is named, so the silent case has its named twin."""
+
+    def test_edit_on_a_handoff_already_broken_by_an_open_fence_is_silent(self):
+        home = Home()
+        before = handoff_text("```\nopen\n")
+        write(home.handoff, before)
+        old, new = "open\n", "still open\n"
+        self.assertEqual(before.count(old), 1, "scope: old_string must occur once in the handoff")
+        edit_on_disk(self, home.handoff, old, new)
+        after = read_text(home.handoff)
+        self.assertIn("```\nstill open\n", after, "scope: the fence is still open after the edit")
+        codes, ctx = home.dispatch("Edit", {"file_path": home.handoff, "old_string": old, "new_string": new})
+        assert_silent(self, ctx, "an Edit on a handoff that an open fence already broke")
+        fence_line = handoff_text().count("\n") + 1
+        codes, ctx = home.write_hook(home.handoff, after)
+        assert_named(self, codes, ctx, "the same open fence written in a Write", home.sid + ".md", home,
+                     line=fence_line)
 
 
 class LostSection(unittest.TestCase):
