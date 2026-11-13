@@ -137,6 +137,7 @@
                           Windows or macOS job refuses the build, naming the lane and the link, before any push; a run still running or missing
                           does not stop a new build (--ready refuses it, below). Cost: one check-runs read per lane per build; the batch's own head is never read.
                           --lane-lint reads the draft run only for a lane PR, never for a batch integration PR.
+                          --lane-lint also refuses a lane PR that closes a debt whose Retire names no runnable test file (no test runs; decision debt-close-runs-retire).
                           A cloud run needs the batch-runner role. Each run that does not stop ends with one line per pull request that
                           --reviewed reads done on the base and that no lane set, open pull request or base holds: `merge: #N left out of
                           batch NAME: none|prose|conflict` (prose: docs-only; conflict: its head conflicts with the base tip). A failed read
@@ -3223,6 +3224,18 @@ def refuse_incomplete_tree(wt, head, base):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+def unprovable_close_fails(wt, base, head):
+    """One FAIL text per debt that `head` closes whose Retire, read at base, names no runnable test file (check_debt_retire.unprovable_closes). Runs no test.
+    An unreadable history is a Stop, never a pass."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_debt_retire as debt
+    try:
+        found = debt.unprovable_closes(wt, f"origin/{base}", head)
+    except debt.Unknown as e:
+        raise Stop(f"the debt-close read of {head[:9]} against {base} is unknown, not a pass: {e}\n{LANE_LINT_REMEDY}")
+    return [f"{f.text}\nThe Retire is read at base, so this PR cannot change it. First name a test file in backticks in that Retire line, in its own PR on main. Then this PR deletes the debt and must touch that test (edit the file, even a comment) so `touched` runs it. A `Retire-run:` cite cannot prove this close before the batch. {DEBT_CITE}"
+            for f in found]
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3265,6 +3278,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
+            if not is_integration_pr(info):  # a lane PR runs only `touched`, so a close with no named test can never be proven there; a batch's run is the proof for its lanes
+                fails += unprovable_close_fails(wt, base, head)
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none.
             draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)

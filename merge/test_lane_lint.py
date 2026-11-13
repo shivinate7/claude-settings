@@ -276,6 +276,20 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         tm.sh(o, "git", "push", "-q", "origin", "feat")
         return self.head("feat")
 
+    def integration_body(self):
+        """The body of PR 7 on INTEGRATION_NAME: its freeze block with one frozen lane, then the session line a lane PR carries, so PR #8
+        reads as a same-lane PR (same_lane)."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return lane_body(OWN, "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})))
+
+    def assert_integration_scope(self):
+        """Precondition: PR 7's body holds a freeze block for INTEGRATION_NAME, and PR 7 is on that batch's integration branch."""
+        block = merge.parse_freeze(self.host.body)
+        self.assertIsNotNone(block, "precondition: PR 7's body holds no freeze block, so the case probes a lane PR")
+        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: the freeze block names another batch")
+        self.assertEqual(self.host.branch, merge.integration_branch(INTEGRATION_NAME),
+                         "precondition: PR 7 is not on its batch's integration branch, so it is a lane PR")
+
 
 class LaneLint(LaneFixture):
     """The lane-lint cases: the lint's verdicts, the stack check, the shallow reads and the ref targets."""
@@ -853,6 +867,81 @@ class LaneLint(LaneFixture):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+
+class DebtCloseLint(LaneFixture):
+    """`merge --lane-lint <pr>` refuses a PR that closes a debt whose Retire, read at base, names no runnable test file (decision debt-close-runs-retire).
+    Such a PR runs only the `touched` job, which selects no test, so a `Retire-run:` cite can never prove it, and the merge would refuse it after a
+    batch run. The refusal tells the lane where to name the test. A debt whose Retire names a tracked test file passes this check, and the lint
+    does not run that test: the merge runs it."""
+
+    def closes_debt(self, retire, test=False):
+        """main gains docs/debts/retire-target.md with the Retire line `retire`. feat is cut from that main and deletes the debt. With `test`, feat
+        also adds tests/test_retire_target.py, the file a Retire line names, which exits 0. Each push goes to origin, as a lane's push does."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        tm.put(os.path.join(o, "docs/debts/retire-target.md"), tm.DEBT_FIXTURE % retire)
+        tm.sh(o, "git", "add", "-A"); tm.sh(o, "git", "commit", "-qm", "main: a debt")
+        tm.sh(o, "git", "push", "-q", "origin", "main")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        tm.sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
+        if test:
+            tm.put(os.path.join(o, "tests", "test_retire_target.py"), "import sys\nsys.exit(0)\n")
+        tm.sh(o, "git", "add", "-A"); tm.sh(o, "git", "commit", "-qm", "feat: close the debt")
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+
+    def tracked_at_head(self):
+        return tm.sh(self.co, "git", "ls-tree", "-r", "--name-only", self.head("feat")).splitlines()
+
+    def test_a_pr_that_closes_a_debt_whose_retire_names_no_test_is_refused_with_the_fix(self):
+        self.closes_debt(tm.PROSE_RETIRE)
+        self.assertIn("- **Retire.** %s" % tm.PROSE_RETIRE, self.show("main", "docs/debts/retire-target.md"),
+                      "scope: main does not hold the debt the PR closes, with its prose Retire")
+        self.assertNotIn("docs/debts/retire-target.md", self.tracked_at_head(), "scope: the head still holds the debt")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a PR that closes a debt whose Retire names no test passed the lint: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn("retire-target", out, "the refusal does not name the debt it refuses")
+        self.assertRegex(out, r"(?i)name[^\n]*Retire", "the refusal does not tell the lane to name the test file in the Retire line")
+        self.assertRegex(out, r"(?i)\b(touch|pin)\b", "the refusal does not tell the lane to touch or pin the test so `touched` runs it")
+        self.assertEqual(self.lint_calls(), [], "the lint ran beside a refused close: " + out)
+
+    def test_a_pr_that_closes_a_debt_whose_retire_names_a_tracked_test_passes_this_check(self):
+        self.closes_debt(tm.RETIRE_TEST, test=True)
+        self.assertIn("tests/test_retire_target.py", self.tracked_at_head(), "scope: the head does not track the test the Retire line names")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a close whose Retire names a tracked test was refused at the lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_retire_run_cite_does_not_clear_a_close_whose_retire_names_no_test_at_the_lint(self):
+        self.closes_debt(tm.PROSE_RETIRE)
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a Retire-run cite cleared a close whose Retire names no test at the lint: " + out)
+        self.assertIn("retire-target", out, "the refusal does not name the debt it refuses")
+        self.assertEqual(self.lint_calls(), [], "the lint ran beside a refused close: " + out)
+
+    def test_a_batch_integration_pr_that_closes_a_debt_whose_retire_names_no_test_passes_the_lint_with_one_pass_line(self):
+        """Why: lane_lint runs the close check on a lane PR only (`if not is_integration_pr(info)`). A batch integration PR's closes are the batch
+        run's to prove, so the lint passes the close and prints one PASS line. No case covered that skip. Green on the old code."""
+        self.closes_debt(tm.PROSE_RETIRE)
+        branch = merge.integration_branch(INTEGRATION_NAME)
+        tm.sh(self.other, "git", "push", "-q", "origin", "feat:refs/heads/" + branch)  # the batch's branch carries the same close
+        self.host.branch, self.host.body = branch, self.integration_body()
+        self.assertIn("- **Retire.** %s" % tm.PROSE_RETIRE, self.show("main", "docs/debts/retire-target.md"),
+                      "scope: main does not hold the debt the PR closes, with its prose Retire")
+        self.assertNotIn("docs/debts/retire-target.md", self.tracked_at_head(), "scope: the head still holds the debt")
+        self.assert_integration_scope()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a batch integration PR that closes a debt whose Retire names no test was refused at the lint: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lint did not print one PASS line: " + text)
+        self.assertEqual(len(self.lint_calls()), 1, "the ci-job lint did not run once on the passing integration PR: " + text)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
@@ -1527,20 +1616,6 @@ class CrossMeasure(LaneFixture):
 
     # The batch integration PRs (the integration rule). PR 7 is a batch integration PR when its body holds a freeze block and its branch is
     # merge.integration_branch of that block's name. A clash of its head with a same-lane PR is a report line, not a FAIL; a base conflict stays a FAIL.
-
-    def integration_body(self):
-        """The body of PR 7 on INTEGRATION_NAME: its freeze block with one frozen lane, then the session line a lane PR carries, so PR #8
-        reads as a same-lane PR (same_lane)."""
-        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
-        return lane_body(OWN, "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})))
-
-    def assert_integration_scope(self):
-        """Precondition: PR 7's body holds a freeze block for INTEGRATION_NAME, and PR 7 is on that batch's integration branch."""
-        block = merge.parse_freeze(self.host.body)
-        self.assertIsNotNone(block, "precondition: PR 7's body holds no freeze block, so the case probes a lane PR")
-        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: the freeze block names another batch")
-        self.assertEqual(self.host.branch, merge.integration_branch(INTEGRATION_NAME),
-                         "precondition: PR 7 is not on its batch's integration branch, so it is a lane PR")
 
     def test_an_integration_pr_whose_head_conflicts_with_a_same_lane_pr_passes_and_reports_the_clash(self):
         """A batch integration PR does not FAIL on a clash with a same-lane PR: the lanes rebase after the merge, so the clash is one report
