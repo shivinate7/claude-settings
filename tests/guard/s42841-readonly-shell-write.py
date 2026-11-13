@@ -125,9 +125,20 @@ ro_refuse("readonly-shell-write: a subshell inside $(( )) within double quotes, 
 # Why: a [[ that does not start a command is an ordinary word, so a > after it, with no ]], is a redirect.
 ro_refuse("readonly-shell-write: a > after an unclosed [[ argument is a redirect, so it is refused",
           "echo [[ x > out.txt")
+# Why: a # or a lone quote inside a string does not end the string, so a redirect after it in a subshell still writes.
+ro_refuse("readonly-shell-write: a # in a string inside a subshell does not hide a redirect after it",
+          '(echo "# x" > out.txt)')
+ro_refuse("readonly-shell-write: a # on a second line of a string inside a subshell does not hide a redirect",
+          '(echo "one\n# two" > out.txt)')
+ro_refuse("readonly-shell-write: a lone apostrophe in a string inside a subshell does not hide a redirect",
+          '(echo "don\'t" > out.txt)')
 # Why: a subshell of reads writes nothing, so it stays allowed.
 ro_allow("readonly-shell-write: a read-only subshell is allowed", "(ls)")
 ro_allow("readonly-shell-write: a read-only subshell after a cd is allowed", "(cd /tmp && ls)")
+# Why: text that only looks like a subshell, inside quotes, is an argument, so it writes nothing.
+ro_allow("readonly-shell-write: a subshell's text in double quotes is an argument, allowed", 'echo "(touch f)"')
+ro_allow("readonly-shell-write: a subshell's text inside single quotes to grep is an argument, allowed",
+         "grep '(echo hi > out.txt)' f")
 
 # ---- B. Over ssh: the same forms, inside the remote command. No scratchpad exemption applies there.
 ro_refuse("readonly-shell-write: an ssh remote command's > redirect to a file is refused", "ssh host 'cat x > /tmp/y'")
