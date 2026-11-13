@@ -6106,14 +6106,15 @@ class GhHalf(Env):
 
     def assert_draft_stops(self, rc, out, before):
         """A draft confirm is the records step: it pushes at most the page, marks the pull request ready, and stops.
-        It never merges, claims a record number, or waits on a check. before: the head sha before the run."""
+        It never merges or waits on a check; it claims the record numbers in its one commit. before: the head sha before the run."""
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ticks, 0, "waited on a draft")
         self.assertNotIn(CHECKS_CALL, self.calls())
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
         sh(self.co, "git", "fetch", "-q", "origin")
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{self.head()}", "--format=%(trailers:key=Record-claim,valueonly)"), "")
+        # the draft step claims the record numbers, in the one commit that carries the page
+        self.assertLessEqual(len(sh(self.co, "git", "rev-list", f"{before}..{self.head()}").split()), 1)
 
     def test_a_draft_pr_previews_with_the_undo_check_and_claims_nothing_or_waits(self):
         self.set(draft=True)
@@ -9966,17 +9967,17 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.host.readies, [7])
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_prepare_claims_no_record_numbers(self):
-        # The pending decision on the head stays pending: claims are made at a ready confirm, never on the draft step.
+    def test_prepare_claims_the_record_numbers_with_the_page(self):
+        # The draft step claims the pending decision, in one commit with the page.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         after = self.head()
         self.assertNotEqual(after, before)
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%s"), "Rebuild the records page")
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%(trailers:key=Record-claim,valueonly)").strip(), "")
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
+        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%s"), "Claim record numbers")
+        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%(trailers:key=Record-claim,valueonly)").strip(), "D-002")
+        self.assertNotIn("id: pending", self.show("feat", "docs/decisions/second.md"))
         self.assertEqual(self.host.readies, [7])
 
     def test_prepare_then_confirm_merges_the_head_prepare_pushed(self):
@@ -9996,6 +9997,87 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.rev("origin/main^2"), prepared, "the ready confirm pushed a commit after the draft step")
         self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
+
+    def test_a_pr_with_a_record_to_claim_pushes_nothing_after_the_ready_run(self):
+        """Ruling: records-index-at-merge (one CI run per merge). The draft step claims the
+        numbers and rebuilds the page in one commit before ready, so the ready confirm waits on that head and pushes nothing."""
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a record summary the page must show, and a pending id to claim
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        ready_head = self.rev("origin/feat")
+        self.assertNotEqual(self.log1("%(trailers:key=Record-claim,valueonly)", ready_head).strip(), "", "the draft step claimed no number")
+        self.assertIn("docs/records.md", sh(self.co, "git", "show", "--name-only", "--format=", ready_head).splitlines())
+        self.host.draft = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), ready_head, "a commit was pushed after the ready run")
+        self.assertEqual(self.host.waits, [(ready_head, ready_head)], "the ready confirm waited on a head other than the ready head")
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_a_claim_head_whose_base_moved_names_the_revert_not_a_merge_of_the_base(self):
+        """Ruling: records-index-at-merge. Merging the base into a claim head would put the number in the tree twice, so the refusal
+        names the revert of the claim commit first, then the draft step."""
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.host.draft = False
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a refusal")
+        self.assertRegex(out, r"[Rr]evert that claim commit[\s\S]*draft", out)
+
+    def test_a_claim_head_whose_number_the_base_took_names_the_revert(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"docs/decisions/third.md": record("D-002", "third")}, "a record that takes the number")
+        self.host.draft = False
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a refusal")
+        self.assertRegex(out, r"[Rr]evert that claim commit[\s\S]*draft", out)
+
+    def test_a_merge_of_the_base_over_a_claim_that_took_a_number_still_names_the_revert(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"docs/decisions/third.md": record("D-002", "third")}, "a record that takes the number")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        self.host.draft = False
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a refusal")
+        self.assertRegex(out, r"[Rr]evert that claim commit[\s\S]*draft", out)
+
+    def test_the_remedy_of_a_claim_head_whose_base_moved_ends_in_a_merge(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"docs/decisions/third.md": record("D-002", "third")}, "a record that takes the number")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "revert", "--no-edit", "HEAD")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(7, self.host.readies)
+        ready_head = self.rev("origin/feat")
+        self.assertNotEqual(self.log1("%(trailers:key=Record-claim,valueonly)", ready_head).strip(), "", "the draft step claimed no fresh number")
+        self.host.draft = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), ready_head, "a commit was pushed after the ready run")
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
         # One repo, four draft confirms in turn: a stale page, a current page, a refused push, and a head behind main.
