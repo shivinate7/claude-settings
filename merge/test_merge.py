@@ -16913,12 +16913,12 @@ class RunState(Env):
         for status in ("in_progress", "queued"):
             with self.subTest(status=status):
                 pending = {**run_rows(("test", None, None))[0], "status": status}
-                rc, lines, text, _ = self.read([*run_rows(("lint", "success", RUN_T_A)), pending])
+                rc, lines, text, _ = self.read([*run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)), pending])
                 self.assertEqual(lines, [self.STATE + "running"], text)
                 self.assertEqual(rc, 0, text)
 
     def test_all_green_when_every_run_is_completed_with_success_neutral_or_skipped(self):
-        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A)))
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
         self.assertEqual(lines, [self.STATE + "all green"], text)
         self.assertEqual(rc, 0, text)
 
@@ -16944,6 +16944,48 @@ class RunState(Env):
         self.assertEqual(lines, [self.STATE + "none yet"], text)
         self.assertEqual(rc, 0, text)
 
+    def test_a_queued_or_running_rollup_beside_green_jobs_reads_running(self):
+        for status in ("queued", "in_progress"):
+            with self.subTest(status=status):
+                rollup = {**run_rows(("all-jobs-passed", None, None))[0], "status": status}
+                rc, lines, text, _ = self.read([*run_rows(("lint", "success", RUN_T_A), ("docs", "skipped", RUN_T_A)), rollup])
+                self.assertEqual(lines, [self.STATE + "running"], text)  # the rollup is not done, so the run is not green
+                self.assertEqual(rc, 0, text)
+
+    def test_a_queued_or_running_rollup_alone_reads_running_not_none_yet(self):
+        for status in ("queued", "in_progress"):
+            with self.subTest(status=status):
+                rollup = {**run_rows(("all-jobs-passed", None, None))[0], "status": status}
+                rc, lines, text, _ = self.read([rollup])
+                self.assertEqual(lines, [self.STATE + "running"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_a_scope_row_alone_reads_running_since_the_other_jobs_are_not_listed(self):
+        rc, lines, text, _ = self.read(run_rows(("scope", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "running"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_needed_job_skipped_beside_a_green_rollup_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("e2e", "skipped", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_draft_run_with_every_job_and_the_rollup_skipped_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("scope", "skipped", RUN_T_A), ("lint", "skipped", RUN_T_A), ("all-jobs-passed", "skipped", RUN_T_A)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)  # a draft's rollup is skipped, and a skipped rollup is clear
+        self.assertEqual(rc, 0, text)
+
+    def test_a_completed_row_with_no_conclusion_is_unknown_not_clear(self):
+        cases = {"test": [*run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)),
+                          batch_run("test", "completed", None, started=RUN_START, ended=RUN_T_B)],
+                 "all-jobs-passed": [*run_rows(("lint", "success", RUN_T_A)),
+                                     batch_run("all-jobs-passed", "completed", None, started=RUN_START, ended=RUN_T_B)]}
+        for job, rows in cases.items():
+            with self.subTest(job=job):
+                rc, lines, text, _ = self.read(rows)
+                self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: a finished row with no conclusion is not clear
+                self.assertIn(f"job {job} ", lines[0], text)  # it names the job
+
     # The first red line
 
     def test_the_first_red_is_the_one_that_ended_first_not_the_first_listed(self):
@@ -16958,16 +17000,16 @@ class RunState(Env):
 
     def test_a_fan_in_red_alone_names_no_first_red_job(self):
         rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "failure", RUN_T_B)))
-        self.assertTrue(any(line.startswith(self.STATE) for line in lines), "no state line was printed:\n" + text)  # scope first: the read ran
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)
         self.assertEqual(rc, 0, text)
-        self.assertEqual([line for line in lines if line.startswith(self.FIRST)], [], "a fan-in job is named as the first red:\n" + text)
 
     def test_the_newest_row_of_a_job_decides_its_state_whichever_row_is_listed_first(self):
         for order in ("older first", "newer first"):
             with self.subTest(order=order):
                 failed = {**run_rows(("test", "failure", RUN_T_B))[0], "id": 11}  # the first attempt, the older id
                 passed = {**run_rows(("test", "success", RUN_T_C))[0], "id": 12}  # the re-run, the newer id, which counts
-                rc, lines, text, _ = self.read([failed, passed] if order == "older first" else [passed, failed])
+                rollup = run_rows(("all-jobs-passed", "success", RUN_T_A))
+                rc, lines, text, _ = self.read([failed, passed, *rollup] if order == "older first" else [passed, failed, *rollup])
                 self.assertEqual(lines, [self.STATE + "all green"], text)  # no first red line: the newer row is green
                 self.assertEqual(rc, 0, text)
 
@@ -16978,11 +17020,26 @@ class RunState(Env):
                 self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: no state line, though e2e has not finished
                 self.assertIn(f"job test ended {conclusion}", lines[0], text)  # it names the job and its conclusion
 
-    def test_a_red_fan_in_beside_a_running_job_reads_running_and_names_no_first_red(self):
+    def test_a_red_fan_in_beside_a_running_job_reads_red_and_names_no_first_red(self):
         rc, lines, text, _ = self.read(run_rows(("all-jobs-passed", "failure", RUN_T_B), ("x", None, None)))
-        self.assertIn(self.STATE + "running", lines, "no running state line was printed:\n" + text)  # scope first: the read ran
+        self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)  # red beats running
         self.assertEqual(rc, 0, text)
-        self.assertEqual([line for line in lines if line.startswith(self.FIRST)], [], "the red fan-in job is named as the first red:\n" + text)
+
+    def test_a_red_rollup_beside_green_jobs_reads_red_for_every_red_conclusion(self):
+        for conclusion in ("failure", "timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A),
+                                                        ("all-jobs-passed", conclusion, RUN_T_B)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)
+                self.assertEqual(rc, 0, text)
+
+    def test_a_red_ci_done_beside_green_jobs_reads_red_and_names_no_first_red_job(self):
+        for conclusion in ("failure", "timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("docs", "neutral", RUN_T_A), ("e2e", "skipped", RUN_T_A),
+                                                        ("all-jobs-passed", "success", RUN_T_A), ("ci-done", conclusion, RUN_T_B)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (ci-done failed)"], text)
+                self.assertEqual(rc, 0, text)
 
     def test_the_first_red_line_gives_the_end_time_in_us_central_by_date(self):
         for ended, hhmm in (("2026-11-13T21:40:00Z", "15:40 CST"), ("2026-07-01T22:30:00Z", "17:30 CDT")):
@@ -17037,13 +17094,13 @@ class RunState(Env):
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
             os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)  # a cloud session with no id, so no merge role can be recorded
             self.assertIsNone(merge.read_merge_role(), "the set-up is not a session with no merge role")  # scope first
-            rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A)))
+            rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("all-jobs-passed", "success", RUN_T_A)))
         self.assertEqual(lines, [self.STATE + "all green"], text)
         self.assertEqual(rc, 0, text)
 
     def test_reads_the_live_head_and_takes_no_lock_pushes_nothing_and_writes_nothing(self):
         before, lock = self.refs(), NoLock()
-        rc, lines, text, host = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_B)), lock=lock)
+        rc, lines, text, host = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_B), ("all-jobs-passed", "success", RUN_T_B)), lock=lock)
         self.assertEqual(lines, [self.STATE + "all green"], text)  # the read ran and printed its state
         self.assertEqual(rc, 0, text)
         self.assertEqual(host.gh_calls, ["pulls/7", f"commits/{RUN_HEAD}/check-runs"], "the reads are not the pull request first, then the live head's check runs")
