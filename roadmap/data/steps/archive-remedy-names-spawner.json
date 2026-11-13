@@ -1,0 +1,14 @@
+{
+ "id": "archive-remedy-names-spawner",
+ "title": "The archive guard's 403 remedy names the spawner, not add_repo",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane of PR 3136, round 1 reviewer (12:01 CST Nov 13): the new remedy names add_repo, but hooks/guard.py:6826 (rule agent-no-remote-tools) refuses add_repo for any agent caller, so a lane agent meets a second refusal. The archive call is the spawner's, and the spawner can run add_repo.",
+ "source": "lane of PR 3136, 11:59 CST Nov 13",
+ "note": "Todo, follow-up. After #3136 lands, change the remedy text to name the spawner. A change to a guard's text waits for its own review; not done on #3136 to avoid restarting its rounds.",
+ "updatedAt": "2026-11-13T12:03:48-06:00"
+}
