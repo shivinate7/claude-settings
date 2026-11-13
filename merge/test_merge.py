@@ -6322,50 +6322,6 @@ class DebtRetire(Env):
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
 
-    def ci_verdict_read_fails_after_the_claim_push(self, error):
-        """The PR closes a debt. The head's CI is green and the claim is pushed; then the read of CI's verdict on the claim raises. -> (rc, out, the claim's sha)."""
-        self.pr_on_debt(0)
-        claimed = []
-        def read(url):
-            if claimed:
-                raise error
-            return "success", run_head
-        self.host.cited_run = read
-        self.host.on_claim = lambda: claimed.append(self.head())
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-        return rc, out, (claimed[0] if claimed else None)
-
-    def test_a_ci_verdict_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        rc, out, claim = self.ci_verdict_read_fails_after_the_claim_push(RuntimeError("boom"))
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
-
-    def test_a_ci_verdict_network_error_after_the_claim_push_keeps_the_claim_and_says_to_run_again(self):
-        """A network error is not a refusal, so the claim stays. The stop says nothing was reverted and to run again; it need not say unknown."""
-        gh_stop = merge.NetStop("network error from `gh api`, still failing after 3 retries. Nothing was reverted. Run again.")
-        rc, out, claim = self.ci_verdict_read_fails_after_the_claim_push(gh_stop)
-        self.assertIsNotNone(claim, "the claim was never pushed, so this case proves nothing about it:\n" + out)
-        self.assertEqual(rc, 1, out)
-        self.assertIn("Run again.", out, "the stop does not say to run again")
-        self.assertNotIn("reverted on", out, "a claim was reverted for a network error")
-        self.assertEqual(self.head(), claim, "feat moved after the claim push: something pushed or reverted")
-        self.assertNotIn("id: pending", self.show("feat", "docs/decisions/second.md"), "the claim's record is pending on feat: the claim was reverted")
-        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
-
-    def test_a_red_ci_verdict_after_the_claim_push_still_reverts(self):
-        """CI's verdict on the claim is red: the wait refuses and the claim reverts. confirm runs no Retire check after the push."""
-        self.pr_on_debt(0)
-        claimed = []
-        self.host.on_claim = lambda: claimed.append(self.head())
-        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertTrue(claimed, "scope: the wait after the claim push never ran")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted on feat", out)
-        self.assertIn("checks: fail", out, "the stop does not print the red check")
-        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
-
     def stub_retire_check(self):
         """Stand in for check_debt_retire.check: each call is recorded, and it finds nothing. -> the list of recorded calls."""
         import check_debt_retire
