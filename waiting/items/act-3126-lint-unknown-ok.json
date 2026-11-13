@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-13T16:48:00Z",
+  "context": "Goal: reviewed work lands without waiting on a CI run that never starts.\nProblem (rule): lane lint reads #3126 (a cp of another agent's file keeps that agent as writer) as unknown because no lane-touched-tests run started on any head after cb15b3758, and only your typed override lifts an unknown.\nBased on (read): #3126 at head 10d984931 has a done review record (rounds 1 to 3, net value positive), and its lane ran the whole test family locally, 171 of 171 passing; the change is guard tests and docs only.\nDeparts from: main, where lane lint holds a PR until a touched-tests run exists \u2014 lifts that hold for #3126 alone, on the lane's local run.",
+  "home": "step scratchpad-cp-keeps-writer",
+  "id": "act-3126-lint-unknown-ok",
+  "kind": "task",
+  "n": 692,
+  "options": [
+    {
+      "gain": "#3126 joins the next batch; the batch run still runs every suite before merge.",
+      "how": "Open the lane's session and paste: merge --lane-lint 3126 --lint-unknown-ok \"no lane-touched-tests run exists on the head, Actions started none after cb15b3758; the family ran 171 of 171 locally and the change is guard tests and docs only\"",
+      "id": "type-override",
+      "key": "a",
+      "label": "Type the override",
+      "links": [
+        {
+          "label": "Lane scratchpad-cp-keeps-writer",
+          "url": "https://claude.ai/code/session_013NEJL2sGyAvwpHNCHioxLc"
+        }
+      ],
+      "lose": "The Windows and macOS runs of the touched tests are skipped before the batch."
+    },
+    {
+      "gain": "The touched tests run on every platform before the batch.",
+      "how": "#3126 waits until a touched-tests run exists on its head (step draft-push-starts-touched-run).",
+      "id": "wait-for-run",
+      "key": "b",
+      "label": "Wait for a run",
+      "lose": "#3126 waits with no date, because nothing starts that run today."
+    }
+  ],
+  "owner": "lane scratchpad-cp-keeps-writer (session_013NEJL2sGyAvwpHNCHioxLc), PR #3126",
+  "ref": "coordinator 10:48 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Let #3126 pass lint with no test run",
+  "shown": [
+    {
+      "id": "type-override",
+      "key": "a",
+      "label": "Type the override"
+    },
+    {
+      "id": "wait-for-run",
+      "key": "b",
+      "label": "Wait for a run"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Type the override that lets #3126 pass lane lint with no touched-tests run",
+  "why": "The lane lint reads unknown because GitHub started no touched-tests run on #3126's head, and only your typed word lifts an unknown."
+}

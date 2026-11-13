@@ -1,0 +1,14 @@
+{
+ "id": "draft-push-starts-touched-run",
+ "title": "A draft push starts its lane-touched-tests run",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "PR #3126 (scratchpad-cp-keeps-writer, head 10d984931) has no lane-touched-tests run on any head after cb15b3758, so merge --lane-lint reads unknown and needs the owner's --lint-unknown-ok (Cockpit item 692, coordinator 10:48 CST Nov 13). #2932 hit the same class. Lanes must not kick CI by hand.",
+ "source": "coordinator 10:48 CST Nov 13",
+ "note": "Find why Actions starts no lane-touched-tests run on some draft pushes (trigger filter, paths, concurrency cancel or the draft rule), and fix the trigger so every pushed lane head gets one run. Related: step batch-build-reads-draft-runs (done) reads the run; step ready-pr-touched-tests measures the ready side. Done when: a draft push in a test repo or a dry-run of the workflow trigger shows the run starts for each head.",
+ "updatedAt": "2026-11-13T10:48:55-06:00"
+}
