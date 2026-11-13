@@ -1,7 +1,7 @@
 {
  "id": "paste-prompt-needs-check",
  "title": "A reply that hands the owner a paste prompt names the check showing no session here can do it",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retro 12:51 CST Nov 13: at 12:49 it handed the owner a paste prompt for Degen pin upgrades, but runner 11 or a lane on this account can attach degen; the owner corrected it at 12:50 CST. Only sessions and artifacts are per account; git repos are not.",
  "source": "retrospective 12:51 CST Nov 13",
- "note": "Todo, guard candidate (rule output-never-hand-off-doable-step: do an act yourself before handing it over; name the check). A reply that gives the owner a paste prompt for another session must name the check showing no session here can do it. Check the guard record first (building-guard-needs-incident); incident: this slip. Related: step refusal-text-before-pick.",
- "updatedAt": "2026-11-13T12:51:39-06:00"
+ "note": "Todo, guard candidate (rule output-never-hand-off-doable-step: do an act yourself before handing it over; name the check). A reply that gives the owner a paste prompt for another session must name the check showing no session here can do it. Check the guard record first (building-guard-needs-incident); incident: this slip. Related: step refusal-text-before-pick. Replaced 12:53 CST Nov 13 (retro 12:52 CST): the fix goes on the existing Hand-off guard step guard-remedy-not-to-owner, not a new step.",
+ "updatedAt": "2026-11-13T12:53:17-06:00"
 }
