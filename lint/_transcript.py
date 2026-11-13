@@ -467,7 +467,8 @@ def _writer_tokens(writer):
 
 def writer_ids(writer):
     """The session ids the page writer string names: each whole token of it that is `session_...` or a UUID,
-    and each `cse_<x>` token as `session_<x>` (the mapping of override.record_id). A word with no id shape,
+    and each `cse_<x>` token as itself and as `session_<x>` (the mapping of override.record_id), so a send
+    to either form of the writer's own id matches. A word with no id shape,
     such as `Triage`, is no id, so a writer that names none is unknown. Cost: a string scan, and the one-time
     import of override; no read of the repo, no process."""
     ids = set()
@@ -481,7 +482,7 @@ def writer_ids(writer):
             from override import record_id
             mapped = record_id(tok)
             if mapped:
-                ids.add(mapped)
+                ids.update((tok, mapped))
     return ids
 
 
