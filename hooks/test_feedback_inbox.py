@@ -81,6 +81,9 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     at later turn ends until it is jotted. The guard keeps its turn state beside the inbox, in
     <session_id>.inbox.turns. With no state file, every captured message counts as this turn's.
   - stop_hook_active true: exit 0, nothing on stdout. It still counts the turn's messages.
+  - A repeated heading is one message. Two blocks with the same stamp and the same text count as
+    one: an item under either copy counts, and a block's reason names the message once. The same
+    text under another stamp, or other text under the same stamp, is another message.
   - No inbox, or an empty inbox: nothing on stdout.
   - A block is {"decision": "block", "reason": ...}. The reason names each offending id, or the
     message by its Central stamp or the start of its text. Offences: a burst message with no
@@ -1061,6 +1064,88 @@ def case_guard_router_home_names_the_tracked_ruling_homes():
           "router.md is not a tracked ruling home" in reason, reason)
     check("router home: the reason names a ruling home path the fixture repo has",
           FIXTURE_RULING_HOME in reason, reason)
+
+
+# --------------------------------------------------------------------------- repeated heading cases
+
+DUP_STAMP = "2026-11-10 16:16 CST (UTC-06:00)"
+DUP_LATER = "2026-11-10 16:18 CST (UTC-06:00)"  # a second message, under another stamp
+DUP_TEXT = ("Two notes for the handoff:\n"
+            "the heading came out twice,\n"
+            "and the item went under the second copy.")
+DUP_OTHER = "A different note\nwith its own second line\nand a third line."
+DUP_ITEM = "- fb-1616-1 [note] -> noted"
+
+
+def dup_copies(first_items=(), second_items=()):
+    """One message written twice under the same heading and quote. Each copy holds the items under it."""
+    return (render_block(DUP_TEXT, header=DUP_STAMP, items=first_items)
+            + render_block(DUP_TEXT, header=DUP_STAMP, items=second_items))
+
+
+def case_guard_repeated_heading_item_under_second_copy_passes():
+    """The item is under the second copy. The first copy is the same message, so it needs no item."""
+    cfg, sid = new_cfg(), "dup-second"
+    write_file(inbox_of(cfg, sid), dup_copies(second_items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup heading: an item under the second copy passes silently", guard(cfg, sid))
+
+
+def case_guard_repeated_heading_item_under_first_copy_passes():
+    """The item is under the first copy. The second copy is the same message, so it needs no item."""
+    cfg, sid = new_cfg(), "dup-first"
+    write_file(inbox_of(cfg, sid), dup_copies(first_items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup heading: an item under the first copy passes silently", guard(cfg, sid))
+
+
+def case_guard_repeated_heading_with_no_items_is_one_message():
+    """Two copies and no items: one message, so the reason names it once."""
+    cfg, sid = new_cfg(), "dup-none"
+    write_file(inbox_of(cfg, sid), dup_copies())
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup heading: two copies with no items", p)
+    reason = block_reason(p) or ""
+    check("dup heading: the reason names the one message once", reason.count("has no items") == 1, reason)
+
+
+def case_guard_repeated_heading_second_copy_clears_the_next_stop():
+    """The first Stop blocks on the copy with no items. The item then goes under a second copy of the
+    same heading and quote, and the next Stop passes without a second block."""
+    cfg, sid = new_cfg(), "dup-stop"
+    write_file(inbox_of(cfg, sid), render_block(DUP_TEXT, header=DUP_STAMP))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_block("dup stop: the copy with no items blocks at the first Stop", guard(cfg, sid))
+    append_file(inbox_of(cfg, sid), render_block(DUP_TEXT, header=DUP_STAMP, items=(DUP_ITEM,)))
+    expect_silent("dup stop: the next Stop passes once the second copy holds the item", guard(cfg, sid))
+
+
+def case_guard_same_heading_different_quote_is_two_messages():
+    """Control: the same stamp over other text is another message. Its item does not cover the first."""
+    cfg, sid = new_cfg(), "dup-quote"
+    write_file(inbox_of(cfg, sid),
+               render_block(DUP_TEXT, header=DUP_STAMP)
+               + render_block(DUP_OTHER, header=DUP_STAMP, items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup quote: the same stamp over other text blocks", p)
+    reason = block_reason(p) or ""
+    check("dup quote: the reason names the first message, which has no items",
+          "Two notes for the handoff" in reason, reason)
+
+
+def case_guard_same_quote_different_stamp_is_two_messages():
+    """Control: the same text at another stamp is another message. Its item does not cover the first."""
+    cfg, sid = new_cfg(), "dup-stamp"
+    write_file(inbox_of(cfg, sid),
+               render_block(DUP_TEXT, header=DUP_STAMP)
+               + render_block(DUP_TEXT, header=DUP_LATER, items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup stamp: the same text at another stamp blocks", p)
+    reason = block_reason(p) or ""
+    check("dup stamp: the reason names the first stamp, which has no items", DUP_STAMP in reason, reason)
 
 
 # --------------------------------------------------------------------------- page cases
@@ -4330,6 +4415,12 @@ CASES = (
     case_guard_apple_tv_burst_names_where_items_go,
     case_guard_burst_heading_after_a_jotted_message_names_its_line,
     case_guard_router_home_names_the_tracked_ruling_homes,
+    case_guard_repeated_heading_item_under_second_copy_passes,
+    case_guard_repeated_heading_item_under_first_copy_passes,
+    case_guard_repeated_heading_with_no_items_is_one_message,
+    case_guard_repeated_heading_second_copy_clears_the_next_stop,
+    case_guard_same_heading_different_quote_is_two_messages,
+    case_guard_same_quote_different_stamp_is_two_messages,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
     case_page_send_with_error_result_does_not_count,
