@@ -1384,23 +1384,25 @@ TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude
 TRUST_REASON = (
     "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
     "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
-    "the owner or to an untagged session. A session with no record yet: run get_session (no "
-    "argument) alone in its own turn, then retry."
+    "the owner or to an untagged session. A session with a parent is a lane: it routes the act to its parent "
+    "with send_message to @parent, then keeps working or ends its turn. A session with no record yet: run "
+    "get_session (no argument) alone in its own turn, then retry."
 )
 
 
 def trust_card_hit(tool: str, transcript: str) -> str:
-    """Return the tool name when it opens a trust card and the own record does not prove an untagged
-    session, else ''. Fails closed: any error in the reads is a refusal, because the guard-wide crash
-    path fails open."""
+    """Return the tool name when it opens a trust card and the own record does not prove a plain session (no cs-build
+    tag and no parent: a session with a parent is a lane, R13 point 4), else ''. Fails closed: any error in the
+    reads is a refusal, because the guard-wide crash path fails open."""
     if tool not in TRUST_TOOLS:
         return ""
     try:  # cost: one transcript read, only on these two calls
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
-            if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+            tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
+            if (tags is not None and not tagged_after and parent is None
+                    and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags)):
                 return ""
     except Exception:
         pass

@@ -2271,3 +2271,8 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- lane-box-parent-covers-triage: The question-box refusal (`hooks/call_judge.py`, `lane_parent`) keys on a parent alone, so triage and the batch runner lose the box. Owner call: are they covered? The machine-load brake (decision `machine-load-brake`, line 14) says a parent alone makes no lane.
+- lane-trust-reason-parent-text: `TRUST_REASON` in `hooks/guard_merge.py` says "untagged session" and omits the no-parent condition, and `docs/decisions/session-tiers.md` and `docs/decisions/trust-error-docs-silent.md` name only the cs-build tag. Unknown whether create_session sets a parent on a helper by default (pc-bridge helper workaround).
+- lane-defs-differ: Three definitions of a lane disagree: `report_guard` reads tag or parent, the load brake reads tag only, and `call_judge` and `trust_card_hit` read parent only.
+- lane-box-mech-cite: `lint/rule_mechanisms.json` cites decision `questions-go-to-owner` for `lane-question-box` and for "an unread record counts as no lane", which that decision does not hold. The claim is true for the box only, since the trust card fails closed.
+- lane-box-agent-case-missing: No test covers a box from an `agent_id` call inside a lane, or a session with both a parent and the `cs-build:triage` tag. The remedy `send_message` to `@parent` is one that agents cannot use (decision `agent-no-remote-tools`).
