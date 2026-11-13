@@ -73,7 +73,22 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:33 CST Nov 7). Fix check, fresh full review and lane round 2 and later are 72 h, unmeasured (coordinator pick, 12:01 CST Nov 12). Lane lint is 72 h, unmeasured (lane pick, 12:13 CST Nov 12). `waits on` has no limit: a hold goes red when it has no page item or debt; the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
+Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Lane round 2 to 4, fix check and fresh full review are 72 h, set from the record-to-record row of "The round-age measure" below (the coordinator's 72 h picks of 12:01 CST Nov 12 stand). That row does not split fix check from fresh full review. Batch is 24 h, from the last-record-to-merge row. Lane round 1 (72 h, aged from the PR's last update), batch run (24 h, aged from its label) and lane lint (72 h, lane pick 12:13 CST Nov 12) are unmeasured. `waits on` has no limit: a hold goes red when it has no page item or debt. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red. Red only prints (a flag on the `--reviewed` line); the join, the lane lint and the merge never read it, so today no limit cuts work off. Parts 3b and 4 will read red to hold triage, never a lane or a merge, and reopen this question when they land (owner, 12:54 CST Nov 12, item 595 note: a stored number is fine when it does not cut work off).
+
+## The round-age measure
+
+Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...`, no GraphQL), on claude-settings only. Sample: every eighth PR from #1100 to #2860, plus all 351 open PRs: 524 PRs, 393 with a review log, created 2026-11-02 to 2026-11-12. A record's time is its comment's `created_at`.
+
+| Age | Samples | Median | 90th | Max | Over the limit |
+| --- | --- | --- | --- | --- | --- |
+| PR opened to first record (no limit reads it) | 393 | 0.2 h | 2.1 h | 122.0 h | n/a |
+| One record to the next (limit 72 h) | 709 | 0.6 h | 10.8 h | 56.8 h | 0 |
+| Last record to merge (limit 24 h) | 47 | 7.8 h | 12.6 h | 22.3 h | 0 |
+
+- No gap between two records passed 57 h. Of the 709 gaps, 217 add exactly one round (max 45.7 h; 363 add none, max 56.8 h), so 72 h flags no round that went on. Two PRs got their first record after 72 h (the longest 122 h). The opened-to-first-record row is context only; lane round 1 ages from the last update.
+- Of 288 open PRs with a record, 100 are over 72 h since the newest record (max 118 h); of 63 open with no record, 23 are over 72 h since the last update. They are still open: they may yet get a round. They are the stalled PRs the ledger exists to show.
+- 24 h for batch holds all 47 merged PRs that have a record, with 1.7 h to spare. The other 37 merged PRs in the sample have no record, so they are not measured. A main-red hold runs past it by design and shows red.
+- A tighter limit would flag live work: 24 h on one record to the next flags 30 of 709.
 
 A main-red hold shows on each batch line it holds.
 
@@ -116,6 +131,7 @@ Per rule `outcomes-mechanize-rules`:
 
 - Batch runner 8 activity from 2026-11-06 15:15 CST to 2026-11-07 05:00 CST: unknown.
 - The q_max PRs were not sampled.
+- The round-age measure does not split fix check from fresh full review: both sit in the record-to-record gaps. Lane lint ages are not measured. Dated by: ten days of one repo; remeasure after a change to the round rules.
 - A `review_ready` lane stays live (14:40 ruling), so its draft hides from the draft row. Unknown whether part 3b's `stalled pr:` line covers it.
 - Dated by: a change to how the batch runner reads its queue, or to the next-act read in `merge --reviewed`. Either change rewrites this record.
 
