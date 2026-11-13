@@ -6,7 +6,10 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    import pathlib
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -159,7 +162,7 @@ def config_dir() -> str:
 MERGE_ROLES = {"batch-runner"}
 
 
-def role_path():
+def role_path() -> "pathlib.Path":
     import pathlib  # inside the function: the config watch's fast exit imports this module and needs neither pathlib nor json
     return pathlib.Path(config_dir()) / STATE_DIR_NAME / "merge-role.json"
 
