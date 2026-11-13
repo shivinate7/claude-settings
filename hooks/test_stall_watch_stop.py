@@ -52,10 +52,14 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
 - A wait opens at the newest ready call: `gh pr ready <N>` in Bash or PowerShell, or a GitHub MCP
   update_pull_request with draft false. Draft true or absent starts none. Quoted text, heredoc bodies and
   `#` comments are no call.
-- A later user or queued message with a CI verdict line, or a later merge call, closes the wait. A red
-  verdict closes it and re-opens it until a later check-in.
-- A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. An open wait with
-  no check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
+- A later user or queued message with a green or cancelled CI verdict line closes the wait. A red verdict
+  keeps it open and voids the check-ins before it. A `CI unknown` line (still running included) closes nothing.
+- A merge closes the wait only when it names the waited PR: `gh pr merge <N>` or `gh pr close <N>` in Bash or
+  PowerShell, `bin/merge <N>` or `merge <N>` (the merge tool), or a GitHub MCP merge_pull_request with that
+  pullNumber. A merge that names another PR, or no PR, closes nothing.
+- A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. A check-in whose
+  tool_result is an error does not count; one with no result yet, or a good result, does. An open wait with no
+  check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
   A bad or unreadable transcript prints nothing.
 - The check reads the transcript only: no process, no network, no file write (the cost case).
 """
@@ -202,11 +206,19 @@ def stop_result(call_id, job_id, command="sleep 600", blocks=False):
         "toolUseResult": body}
 
 
+def tool_result(call_id, text, is_error=False, tool_use_result=None):
+    """The user record that carries one call's result: a tool_result block with its is_error flag. The record's
+    toolUseResult is tool_use_result, when given."""
+    rec = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id, "content": text, "is_error": is_error}]}}
+    if tool_use_result is not None:
+        rec["toolUseResult"] = tool_use_result
+    return rec
+
+
 def bash_result(call_id, text):
     """The result of a Bash call that started no job: plain stdout, no task id."""
-    return {"type": "user", "message": {"role": "user", "content": [
-        {"type": "tool_result", "tool_use_id": call_id, "content": text, "is_error": False}]},
-        "toolUseResult": {"stdout": text, "stderr": "", "interrupted": False}}
+    return tool_result(call_id, text, tool_use_result={"stdout": text, "stderr": "", "interrupted": False})
 
 
 def assistant_text(text):
@@ -1761,9 +1773,10 @@ def A10_full_size_each_quiet_agent_is_listed_once():
 
 
 # ---- The CI-wait check of this mode (decision ci-wait-reads-run-status, "The fallback") ----
-# A wait opens at the newest ready call and closes at a verdict or a merge. A red verdict re-opens it. A
-# check-in after the anchor (the newest ready call or red verdict) passes it. The check reads the records in
-# file order, so no fixture carries a time.
+# A wait opens at the newest ready call and closes at a green or cancelled verdict, or a merge of its own PR. A
+# red verdict keeps it open. A check-in after the anchor (the newest ready call or red verdict) passes it, unless
+# its result is an error. An unknown verdict closes nothing. The check reads the records in file order, so no
+# fixture carries a time.
 
 CI_PR = "4217"  # no sha, path or fixture id holds this number as a whole token, so \b4217\b names the PR alone
 CI_OTHER_PR = "1111"
@@ -1836,9 +1849,25 @@ def checkin(name):
     return tool_call(name, {"message": "CI check on PR %s" % CI_PR})
 
 
-def merge_bin(number=CI_PR):
-    """A Bash call of the merge tool, bin/merge."""
-    return call(cid(), "bin/merge %s --confirm" % number, desc="Merge the PR")
+def checkin_answered(name, is_error):
+    """A check-in call and its result, in file order. An error result carries its text as toolUseResult, as a
+    failed call does in a transcript."""
+    call_rec = checkin(name)
+    call_id = call_rec["message"]["content"][0]["id"]
+    text = "send_later failed: no session" if is_error else "scheduled"
+    return [call_rec, tool_result(call_id, text, is_error=is_error, tool_use_result=text)]
+
+
+def merge_bin(number=CI_PR, cmd="bin/merge", confirm=True):
+    """A Bash call of the merge tool: cmd (bin/merge, or the bare merge command) with the PR number, and
+    --confirm when confirm is true."""
+    words = [cmd, str(number)] + (["--confirm"] if confirm else [])
+    return call(cid(), " ".join(words), desc="Merge the PR")
+
+
+def shell(command):
+    """A Bash call of command, with no result."""
+    return call(cid(), command)
 
 
 def queued(text):
@@ -2003,9 +2032,11 @@ def CI14_cancelled_verdict_closes_the_wait():
 
 
 @case
-def CI15_unknown_verdict_closes_the_wait():
-    """CI15. ready, then an unknown verdict: passes. Control: ready with no verdict blocks"""
-    return silent_with_control([ready(), prompt(UNKNOWN)], [ready()])
+def CI15_unknown_verdict_leaves_the_wait_open():
+    """CI15. ready, then a CI unknown verdict (still running): nothing wakes the session, so the wait stays open
+    and blocks, and the reason names the PR. Control: ready, then a green verdict, passes"""
+    return ["unknown verdict: " + p for p in expect_block([ready(), prompt(UNKNOWN)])] + [
+        "control: " + p for p in expect_silent([ready(), prompt(GREEN)])]
 
 
 @case
@@ -2054,16 +2085,27 @@ def CI21_tool_result_printing_a_verdict_closes_nothing():
     return expect_block(items) + ["control: " + p for p in expect_silent([ready(), prompt(GREEN)])]
 
 
-@case
-def CI22_mcp_merge_closes_the_wait():
-    """CI22. ready, then a GitHub MCP merge_pull_request call: passes. Control: ready with no merge blocks"""
-    return silent_with_control([ready(), mcp_pr(MCP_MERGE)], [ready()])
+def closer_pair(own, other, label):
+    """A merge or close that names the waited PR closes the wait, so the check is silent. The same call naming
+    another PR closes nothing, so it blocks, and the reason names only the waited PR. label names the form in
+    each problem."""
+    return (["%s of the waited PR: %s" % (label, p) for p in expect_silent([ready(), own])]
+            + ["%s of another PR: %s" % (label, p)
+               for p in expect_block([ready(), other], not_named=[CI_OTHER_PR])])
 
 
 @case
-def CI23_bin_merge_closes_the_wait():
-    """CI23. ready, then a Bash call of bin/merge: passes. Control: ready with no merge blocks"""
-    return silent_with_control([ready(), merge_bin()], [ready()])
+def CI22_mcp_merge_closes_the_wait_only_for_its_own_pr():
+    """CI22. a GitHub MCP merge_pull_request closes the wait only when it names the waited PR. Another PR's merge
+    blocks, and the reason names only the waited PR. Control: the merge of the waited PR passes"""
+    return closer_pair(mcp_pr(MCP_MERGE), mcp_pr(MCP_MERGE, CI_OTHER_PR), "GitHub MCP merge")
+
+
+@case
+def CI23_bin_merge_closes_the_wait_only_for_its_own_pr():
+    """CI23. bin/merge closes the wait only when it names the waited PR. Another PR's merge blocks, and the reason
+    names only the waited PR. Control: bin/merge of the waited PR passes"""
+    return closer_pair(merge_bin(), merge_bin(CI_OTHER_PR), "bin/merge")
 
 
 @case
@@ -2262,6 +2304,139 @@ def CI48_check_reads_only_the_transcript():
     stray = [p for p in opens if p.startswith(folder) and os.path.basename(p) != "session.jsonl"]
     problems += expect(stray == [], f"the CI check read files other than the transcript: {stray}")
     return problems
+
+
+@case
+def CI49_gh_pr_merge_closes_the_wait_only_for_its_own_pr():
+    """CI49. gh pr merge in Bash closes the wait only when it names the waited PR. Another PR's merge blocks, and
+    the reason names only the waited PR. Control: the merge of the waited PR passes"""
+    return closer_pair(shell("gh pr merge %s --squash --delete-branch" % CI_PR),
+                       shell("gh pr merge %s --squash" % CI_OTHER_PR), "gh pr merge")
+
+
+@case
+def CI50_gh_pr_close_closes_the_wait_only_for_its_own_pr():
+    """CI50. gh pr close in Bash closes the wait only when it names the waited PR. Another PR's close blocks, and
+    the reason names only the waited PR. Control: the close of the waited PR passes"""
+    return closer_pair(shell("gh pr close %s" % CI_PR), shell("gh pr close %s" % CI_OTHER_PR), "gh pr close")
+
+
+@case
+def CI51_powershell_gh_pr_merge_closes_the_wait_only_for_its_own_pr():
+    """CI51. a PowerShell gh pr merge closes the wait only when it names the waited PR. Another PR's merge blocks,
+    and the reason names only the waited PR. Control: the merge of the waited PR passes"""
+    def ps(number):
+        return tool_call("PowerShell", {"command": "gh pr merge %s --squash" % number, "description": "Merge the PR"})
+    return closer_pair(ps(CI_PR), ps(CI_OTHER_PR), "PowerShell gh pr merge")
+
+
+@case
+def CI52_gh_pr_merge_in_quotes_closes_nothing():
+    """CI52. gh pr merge inside double or single quotes is text, so it blocks. Control: the real merge of the
+    waited PR passes"""
+    problems = []
+    for template, label in (('echo "gh pr merge %s"', "double quotes"), ("echo 'gh pr merge %s'", "single quotes")):
+        problems += ["%s: %s" % (label, p) for p in expect_block([ready(), shell(template % CI_PR)])]
+    problems += ["real merge (control): " + p
+                 for p in expect_silent([ready(), shell("gh pr merge %s" % CI_PR)])]
+    return problems
+
+
+@case
+def CI53_gh_pr_merge_in_a_heredoc_body_closes_nothing():
+    """CI53. gh pr merge in a heredoc body is text, so it blocks. Control: the real merge of the waited PR passes"""
+    text = "cat > notes.md <<'EOF'\ngh pr merge %s\nEOF" % CI_PR
+    return expect_block([ready(), shell(text)]) + [
+        "real merge (control): " + p for p in expect_silent([ready(), shell("gh pr merge %s" % CI_PR)])]
+
+
+@case
+def CI54_gh_pr_merge_after_a_hash_comment_closes_nothing():
+    """CI54. gh pr merge after a # comment is a comment, so it blocks. Control: the real merge of the waited PR
+    passes"""
+    return expect_block([ready(), shell("ls -la  # gh pr merge %s" % CI_PR)]) + [
+        "real merge (control): " + p for p in expect_silent([ready(), shell("gh pr merge %s" % CI_PR)])]
+
+
+@case
+def CI55_hash_inside_quotes_does_not_hide_a_real_merge():
+    """CI55. a # inside quotes does not hide a real merge of the waited PR after it: passes. Control: the
+    waited PR's wait with no merge blocks"""
+    return silent_with_control([ready(), shell('echo "# not a comment" && gh pr merge %s' % CI_PR)], [ready()])
+
+
+@case
+def CI56_lone_apostrophe_does_not_hide_a_real_merge():
+    """CI56. a lone apostrophe in an earlier word does not hide a real merge of the waited PR after it: passes.
+    Control: the waited PR's wait with no merge blocks"""
+    return silent_with_control([ready(), shell("echo don't; gh pr merge %s" % CI_PR)], [ready()])
+
+
+@case
+def CI57_merge_on_a_middle_line_of_quoted_text_closes_nothing():
+    """CI57. gh pr merge on a middle line of a quoted string is text, so it blocks. Control: the real merge of the
+    waited PR passes"""
+    text = 'echo "first line\ngh pr merge %s\nlast line"' % CI_PR
+    return expect_block([ready(), shell(text)]) + [
+        "real merge (control): " + p for p in expect_silent([ready(), shell("gh pr merge %s" % CI_PR)])]
+
+
+@case
+def CI58_gh_pr_merge_chained_after_git_push_closes_the_wait():
+    """CI58. a real gh pr merge of the waited PR chained after git push in one command: passes. Control: the
+    waited PR's wait with no merge blocks"""
+    return silent_with_control([ready(), shell("git push origin HEAD && gh pr merge %s" % CI_PR)], [ready()])
+
+
+@case
+def CI59_merge_that_names_no_pr_closes_nothing():
+    """CI59. a gh pr merge with no PR number, or a GitHub MCP merge with no pullNumber, names no PR, so it blocks
+    and the reason names the waited PR. Control: gh pr merge of the waited PR passes"""
+    return ["bare gh pr merge: " + p for p in expect_block([ready(), shell("gh pr merge --squash")])] + [
+        "MCP merge with no pullNumber: " + p
+        for p in expect_block([ready(), tool_call(MCP_MERGE, {"owner": CI_OWNER, "repo": CI_REPO})])] + [
+        "control: " + p for p in expect_silent([ready(), shell("gh pr merge %s --squash" % CI_PR)])]
+
+
+@case
+def CI60_queued_unknown_verdict_leaves_the_wait_open():
+    """CI60. a CI unknown verdict that arrives as a queued_command attachment closes nothing, so it blocks. Control:
+    the same queued form with a green verdict passes"""
+    return ["queued unknown verdict: " + p for p in expect_block([ready(), queued(UNKNOWN)])] + [
+        "control: " + p for p in expect_silent([ready(), queued(GREEN)])]
+
+
+@case
+def CI61_checkin_with_an_error_result_does_not_count():
+    """CI61. a check-in whose result is an error does not count, so the wait blocks. Control: a good check-in
+    after the error one counts, and a good check-in alone passes"""
+    err = checkin_answered(SEND_LATER, is_error=True)
+    ok = checkin_answered(SEND_LATER, is_error=False)
+    return ["error check-in alone: " + p for p in expect_block([ready()] + err)] + [
+        "error check-in, then a good one: " + p for p in expect_silent([ready()] + err + ok)] + [
+        "good check-in alone (control): " + p for p in expect_silent([ready()] + ok)]
+
+
+@case
+def CI62_merge_tool_forms_close_only_their_own_pr():
+    """CI62. the merge tool called bare (merge N --confirm), and bin/merge without --confirm, close the wait only
+    when they name the waited PR. Another PR's merge blocks, and the reason names only the waited PR"""
+    return closer_pair(merge_bin(CI_PR, cmd="merge"), merge_bin(CI_OTHER_PR, cmd="merge"), "bare merge") + (
+        closer_pair(merge_bin(CI_PR, confirm=False), merge_bin(CI_OTHER_PR, confirm=False),
+                    "bin/merge without --confirm"))
+
+
+@case
+def CI63_full_size_named_merges_close_their_own_prs():
+    """CI63. full size: 2000 text records, then 30 PRs each closed by gh pr merge of its own number, then one open
+    ready call. It blocks and names only the open PR. Control: the same session without the open ready call is
+    silent"""
+    items = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    for i in range(30):
+        items += [ready(str(1000 + i)), shell("gh pr merge %d --squash" % (1000 + i))]
+    items.append(ready())
+    closed = [str(1000 + i) for i in range(30)]
+    return expect_block(items, not_named=closed) + ["control: " + p for p in expect_silent(items[:-1])]
 
 
 if __name__ == "__main__":
