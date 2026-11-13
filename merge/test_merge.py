@@ -12860,12 +12860,11 @@ class RedMainBrake(Env):
         self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
         self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
 
-    def test_a_red_run_clears_when_its_revert_merges_even_though_the_revert_run_is_red(self):
-        # the merged revert is the pick (owner, 2026-11-13 13:20 CST, item 745 b): its own red run does not hold the merge
-        rc, out, _, rev = self.revert_case("completed", "failure")
-        self.merged(rc, out, self.NOT_CLEARED)
-        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
-        self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
+    def test_a_revert_whose_own_completed_run_is_red_refuses_naming_that_run(self):
+        # a revert whose completed run is red is a new red run on main: it needs its own revert (owner ruling, 2026-11-12 09:46 CST, relayed by the coordinator)
+        rc, out, before, _ = self.revert_case("completed", "failure")
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.REVERT_RUN} of checks", out, "the refusal does not name the revert's red run")
 
     def test_a_revert_naming_another_sha_does_not_clear_the_red_run(self):
         # a sha one digit off shares 39 digits with the head; a short sha is no full revert line, as git writes the full sha
