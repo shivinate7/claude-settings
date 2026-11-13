@@ -15537,7 +15537,7 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(rc, 0, f"a fix check naming {model} was refused:\n" + out + err)
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
-    def test_the_unknown_model_is_refused_by_the_fix_check_flag_form(self):
+    def test_the_unknown_model_is_refused_by_the_fix_verifier_flag_form(self):
         # owner page item 359 c (ruling round-1-sonnet-finding-labels). The sonnet fix check beside the refusals exits 0. The sonnet rule also refuses
         # the word, so the exit code alone cannot show the argument form refused it: argparse must name --fix-check.
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model="sonnet"), host=self.earlier_host())
