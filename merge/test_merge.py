@@ -22019,6 +22019,121 @@ class TouchesRead(Env):
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
+
+class RefreshMail(Env):
+    """A batch merge mails one refresh notice for the new main sha (decision merge-mail-refreshes-sessions): one file,
+    mail/refresh/<owner>-<repo>/main.md on the mail ref, replaced in one commit after the merge lands. A failed send
+    prints one line and never fails the merge. The store and the cloud receivers are hooks/test_mail.py's, so each case
+    reads the notice the way a session does."""
+
+    def mailbox(self):
+        import test_mail  # hooks/ is on sys.path: appended at the top of this file
+        return test_mail
+
+    def hook(self):
+        import mail  # hooks/mail.py: the refresh helper and the turn start
+        return mail
+
+    def new_store(self):
+        return self.mailbox().Store(self.t, "mail-store")
+
+    def mail_env(self, store):
+        """The environment of a merge run with MAILBOX_REPO set: the store, its identity, and this case's own cache."""
+        return dict(self.mailbox().IDENTITY, MAILBOX_REPO=store.url, MAILBOX_CACHE=os.path.join(self.t, "mail-cache.git"))
+
+    def landed_main(self):
+        """origin/main after the run: the commit the merge landed."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "rev-parse", "origin/main")
+
+    def commits(self, store):
+        return int(self.mailbox().git(store.path, ["rev-list", "--count", "refs/heads/mail"], store.env).strip())
+
+    def test_a_landed_merge_mails_one_notice_with_the_sha_it_landed(self):
+        store = self.new_store()
+        with unittest.mock.patch.dict(os.environ, self.mail_env(store)):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"), "control: the merge did not land")
+        notices = store.files("mail/refresh/")
+        self.assertEqual(len(notices), 1, "a merge that landed left %d refresh notices, expected one: %r"
+                         % (len(notices), notices))
+        self.assertEqual(store.read(notices[0]).strip(), "main moved to %s" % self.landed_main(),
+                         "the refresh notice does not name the sha the merge landed: %r" % store.read(notices[0]))
+
+    def test_the_new_notice_replaces_the_old_one_in_one_commit(self):
+        store = self.new_store()
+        path = "mail/refresh/%s/main.md" % self.hook().repo_slug(self.co)
+        store.publish(path, "main moved to %s\n" % ("c" * 40))
+        before, count = store.tip(), self.commits(store)
+        with unittest.mock.patch.dict(os.environ, self.mail_env(store)):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"), "control: the merge did not land")
+        added = self.commits(store) - count
+        self.assertEqual(added, 1, "the merge added %d commits to the mail ref, expected one" % added)
+        parent = self.mailbox().git(store.path, ["rev-parse", "%s^" % store.tip()], store.env).strip()
+        self.assertEqual(parent, before, "the notice commit does not sit on the old mail tip")
+        self.assertEqual(store.files("mail/refresh/"), [path], "the notice folder holds %r, expected only %s"
+                         % (store.files("mail/refresh/"), path))
+        self.assertEqual(store.read(path).strip(), "main moved to %s" % self.landed_main(),
+                         "the old notice was not replaced by the sha the merge landed")
+
+    def test_a_failed_send_prints_one_refresh_line_and_the_merge_still_lands(self):
+        missing = pathlib.Path(self.t, "no-store.git").as_uri()
+        env = dict(self.mailbox().IDENTITY, MAILBOX_REPO=missing, MAILBOX_CACHE=os.path.join(self.t, "mail-cache.git"))
+        with unittest.mock.patch.dict(os.environ, env):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"), "control: the merge did not land")
+        lines = [line for line in out.splitlines() if line.startswith("merge: refresh mail was not sent: ")]
+        self.assertEqual(len(lines), 1, "a refused refresh mail printed %d 'merge: refresh mail was not sent:' lines, "
+                         "expected one: %r" % (len(lines), out))
+        self.assertNotIn("Traceback", out)
+
+    def test_unset_mailbox_repo_prints_no_refresh_line_and_creates_no_cache(self):
+        cache = os.path.join(self.t, "mail-cache.git")
+        with unittest.mock.patch.dict(os.environ, {"MAILBOX_CACHE": cache}):
+            os.environ.pop("MAILBOX_REPO", None)
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"), "control: the merge did not land")
+        refresh = [line for line in out.splitlines() if line.startswith("merge: refresh mail")]
+        self.assertEqual(refresh, [], "MAILBOX_REPO unset: the merge printed refresh lines: %r" % refresh)
+        self.assertFalse(os.path.exists(cache), "MAILBOX_REPO unset: the merge created the mail cache")
+
+    @unittest.skipIf(os.name == "nt", "the install stand-in is an extensionless POSIX script, which Windows CreateProcess "
+                                      "never runs")
+    def test_a_merge_mails_two_live_cloud_sessions_and_each_installs_once(self):
+        mailbox, mail = self.mailbox(), self.hook()
+        store = self.new_store()
+        with unittest.mock.patch.dict(os.environ, self.mail_env(store)):
+            rc, out = self.run_merge("7", "--confirm")
+            self.assertEqual(rc, 0, out)
+            landed = self.landed_main()
+            payload = {"session_id": None, "cwd": self.co}
+            sessions = {}
+            for name in ("a", "b"):
+                script, log = mailbox.fake_installer(self.t, "install-" + name)
+                env = dict(os.environ, MAILBOX_CACHE=os.path.join(self.t, "cache-%s.git" % name), CLAUDE_CODE_REMOTE="true",
+                           CLAUDE_CODE_REMOTE_SESSION_ID="cse_" + name, MAILBOX_REFRESH_COMMAND=script)
+                sessions[name] = (env, log)
+            lines = {name: mail.turn_start_lines(payload, env) for name, (env, _) in sessions.items()}
+            for name, (_, log) in sessions.items():
+                self.assertIn("main moved to %s; refreshed" % landed, lines[name],
+                              "session %s printed no 'refreshed' line for the landed sha: %r" % (name, lines[name]))
+                self.assertEqual(len(mailbox.read_lines(log)), 1, "session %s ran the install %d times for one merge, expected once"
+                                 % (name, len(mailbox.read_lines(log))))
+            with mailbox.Starts() as again:
+                for env, _ in sessions.values():
+                    mail.turn_start_lines(payload, env)
+            fetched = [args for args in again.git_starts() if mailbox.git_subcommand(args) == "fetch"]
+            self.assertEqual(fetched, [], "a turn start with no new merge fetched: %r" % fetched)
+            for name, (_, log) in sessions.items():
+                self.assertEqual(len(mailbox.read_lines(log)), 1,
+                                 "a turn start with no new merge ran the install again in session %s" % name)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
