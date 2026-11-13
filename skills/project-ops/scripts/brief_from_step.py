@@ -12,7 +12,8 @@ a marker for each one missing, for the coordinator to fill, and invents nothing;
 An absent or unreadable store prints `Rulings: unknown (store ...)`, never "no rulings".
 
 Exit 0 with the brief on stdout; exit 1 when the step file is missing or unreadable; exit 2 on a bad argument.
-Cost: the two git reads of ruled_store.read_store and one more cat-file --batch for the step. No file is written.
+Cost: four git reads: the two of ruled_store.read_store, one more ls-tree of the ruling folder to count unreadable
+files, and one cat-file --batch for the step. No file is written.
 """
 import argparse
 import json
@@ -65,9 +66,10 @@ def _names(entry):
 
 
 def governing(entries, slug, note):
-    """The entries for this step: its slug among the entry's steps, or an id or alias the note names as a whole word."""
+    """The entries for this step: its slug among the entry's steps, or an id or alias the note names as a whole word.
+    The match ignores case, since notes write store id `r9` as "R9"."""
     def named(name):
-        return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), note) is not None
+        return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), note, re.IGNORECASE) is not None
     return [e for e in entries if slug in ruled_store._steps_of(e) or any(named(n) for n in _names(e))]
 
 
