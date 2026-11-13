@@ -3184,7 +3184,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit() and not is_integration_pr(info):  # a batch's integration PR carries no record of its own; a failed read is a Stop, never a pass
             bodies = [r[0] for r in host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[0].get(n, [])]
-            if newest_review_record(bodies, n) is None:
+            if newest_review_log(bodies, n) is None:
                 read = "the newest review record comment does not parse, or names another pull request" if bodies else "the review record comment is missing"
                 fails.append(f"#{n}: {read}. Print the record with `merge --review-record {n} --head <sha> ...`, post its lines as a comment on #{n}, then run `merge --lane-lint {n}` again.")
         if target.isdigit():
@@ -4272,7 +4272,7 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
-def newest_review_record(bodies, n):
+def newest_review_log(bodies, n):
     """-> the parsed newest record of `bodies` (oldest first) when it parses and names pull request n, else None (no body counts as None). The one home of
     how the newest record reads: `merge --reviewed` and the lane-lint record check both call it."""
     rec = parse_review(bodies[-1]) if bodies else None
@@ -4298,7 +4298,7 @@ def reviewed_read(h):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = newest_review_record(bodies, n)
+        rec = newest_review_log(bodies, n)
         state, why = live_review_state(h, rec, sha, main)
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)

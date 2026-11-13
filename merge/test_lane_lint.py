@@ -441,7 +441,7 @@ class LaneLint(LaneFixture):
     # merge.parse_review, the parser `merge --reviewed` uses, and names that pull request. A stale record passes: a lane posts its record at
     # the head it reviewed, then pushes a fix. Every record is built by record_text, the one literal of the form.
 
-    def test_a_pr_with_no_review_record_fails_before_the_ci_job_and_posts_nothing(self):
+    def test_a_pr_with_no_review_log_fails_before_the_ci_job_and_posts_nothing(self):
         self.use_ci_job(PASSING, 0)
         for label, records in (("no comment at all", {}),
                                ("a record on another pull request's thread", {8: [tm.record_text(n=8, head=self.head("feat"))]})):
@@ -453,7 +453,7 @@ class LaneLint(LaneFixture):
                 self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a missing review record:\n" + out)
                 self.assertEqual(self.host.posted, [], "a missing review record posted a lane-lint comment:\n" + out)
 
-    def test_a_newest_review_record_that_does_not_parse_fails_even_after_an_older_good_one(self):
+    def test_a_newest_review_log_that_does_not_parse_fails_even_after_an_older_good_one(self):
         head = self.head("feat")
         good = tm.record_text(head=head)
         self.assertIsNotNone(merge.parse_review(good), "precondition: the older record does not parse, so the case probes nothing")
@@ -470,7 +470,7 @@ class LaneLint(LaneFixture):
                 self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record that does not parse:\n" + out)
                 self.assertEqual(self.host.posted, [], "a record that does not parse posted a lane-lint comment:\n" + out)
 
-    def test_a_newest_review_record_that_parses_passes_after_an_older_one_that_does_not(self):  # the newest governs
+    def test_a_newest_review_log_that_parses_passes_after_an_older_one_that_does_not(self):  # the newest governs
         head = self.head("feat")
         older = tm.record_text(head=head).replace(tm.REVIEW_CI_LINE + "\n", "")  # does not parse: no CI line
         newest = tm.record_text(head=head)
@@ -494,7 +494,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record with text after its CI line:\n" + out)
         self.assertEqual(self.host.posted, [], "a record with text after its CI line posted a lane-lint comment:\n" + out)
 
-    def test_a_newest_review_record_that_names_another_pull_request_fails(self):
+    def test_a_newest_review_log_that_names_another_pull_request_fails(self):
         other = tm.record_text(n=8, head=self.head("feat"))  # parses, and names #8 on #7's thread
         parsed = merge.parse_review(other)
         self.assertIsNotNone(parsed, "precondition: the record does not parse, so the case probes the number and not the parser")
@@ -526,7 +526,7 @@ class LaneLint(LaneFixture):
         self.assertIn(self.host.comments_error, out, "the refusal does not name the read failure:\n" + out)
         self.assertNotIn("no review record", out, "an unreadable comment list was reported as a missing review record:\n" + out)
 
-    def test_a_ref_target_skips_the_review_record_check(self):
+    def test_a_ref_target_skips_the_review_log_check(self):
         self.host.records = {}  # the own pull request has no record, and a commit target never reads one
         sha = self.head("feat")
         self.use_ci_job(PASSING, 0)
@@ -535,7 +535,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(len(pass_lines(out)), 1, out)
         self.assertEqual(self.host.posted, [], "a commit target posted a lane-lint comment:\n" + out)
 
-    def test_an_integration_pr_skips_the_review_record_check(self):
+    def test_an_integration_pr_skips_the_review_log_check(self):
         head = self.head("feat")
         branch = merge.integration_branch(INTEGRATION_NAME)
         tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/%s" % (head, branch))
@@ -2923,7 +2923,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
             self.assertIn(part, printed, "a failed post printed no `%s` line of the comment body to post by hand, after the reason:\n%s" % (part, out))
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
 
-    def test_a_real_host_whose_newest_review_record_does_not_parse_refuses_and_posts_nothing(self):
+    def test_a_real_host_whose_newest_review_log_does_not_parse_refuses_and_posts_nothing(self):
         tm.install_gh_shim(self)
         head = self.head("feat")
         good = tm.review_comment(1, 7, tm.record_text(head=head))
