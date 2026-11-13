@@ -62,11 +62,12 @@ def pfr_record(rounds=(), fix=None, n=1467, head=SHA):
     return body
 
 
-def pfr_pr():
-    """The lane opens its pull request: a create_pull_request call whose result is no error."""
+def pfr_pr(result='{"number": 1467}'):
+    """The lane opens its pull request: a create_pull_request call whose result is no error. `result` is that result's
+    body, which holds no number for a PR whose number the session never learns."""
     return [role_use("toolu_pr1", PFR_CREATE_PR, {"owner": "shivinate7", "repo": "claude-settings",
                                                   "head": PFR_BRANCH, "base": "main", "title": "notes delete pass"}),
-            role_result("toolu_pr1", '{"number": 1467}')]
+            role_result("toolu_pr1", result)]
 
 
 def pfr_report(verdict, *lines):
@@ -491,7 +492,8 @@ PFR_STALE = ("stale-fail-fresh-pass-recorded", "stale-fail-fresh-pass-unrecorded
              "stale-fail-other-pr-log", "stale-fail-own-pr-log",
              "moved-known-only-from-log", "moved-other-branch-pr-after-fail",
              "fix-pending-moved", "fix-pending-fresh-round-recorded", "fix-pending-fix-record-at-descendant",
-             "tips-one-pending", "tips-two-pending")
+             "tips-one-pending", "tips-two-pending", "stale-fail-unknown-pr-descendant-log",
+             "stale-fail-same-head-pass-log", "live-head-fail-no-log")
 # The fixture's commits by name, set as the history builds: A on main, B the PR head the stale reports name, C the
 # sibling off A, and D2 the live head of PFR_BRANCH. A check reads them after `materialize(PFR_HIST)`.
 PFR_HIST_SHA = {}
@@ -584,18 +586,18 @@ def _build_pfr_history():
     if run_vcs(PFR_HIST, "cat-file", "-e", PFR_UNRESOLVED_HEAD + "^{commit}").returncode == 0:
         sys.exit("fixture setup failed in _build_pfr_history: the unresolved head names a commit of the history")
     stale = {
-        # The fresh round's record is posted at D2. The stale FAIL at B has no record of its own.
+        # The fresh round's review log is posted at D2. The stale FAIL at B has no review log of its own.
         "stale-fail-fresh-pass-recorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                           + pfr_call("toolu_rev2", fresh_pass)
                                           + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
                                                                             head=sha_d2)),
         "stale-fail-fresh-pass-unrecorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                             + pfr_call("toolu_rev2", fresh_pass),
-        # The only record is a FAIL of the same round, posted at C, which does not descend from B.
+        # The only review log is a FAIL of the same round, posted at C, which does not descend from B.
         "stale-fail-record-off-history": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                          + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")],
                                                                            head=sha_c)),
-        # Each reviewed head has its record: B's FAIL is recorded at B, then D2's PASS at D2.
+        # Each reviewed head has its review log: B's FAIL is logged at B, then D2's PASS at D2.
         "stale-fail-own-record-fresh-pass-recorded": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                                      + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL,
                                                                                          "FAIL")], head=sha_b))
@@ -615,33 +617,32 @@ def _build_pfr_history():
         "stale-fail-descendant-other-role-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                                 + pfr_post("toolu_c1", pfr_record([(1, "design-reviewer", PFR_MODEL,
                                                                                     "PASS")], head=sha_d2)),
-        # A round 1 log cannot clear a round 2 FAIL at B: the log holds a round 1 line and no round 2 line.
+        # A log of an earlier round cannot clear a later FAIL at B: it holds no line of the FAIL's round.
         "stale-fail-round2-descendant-round1-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail_round2)
                                                    + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL,
                                                                                        "PASS")], head=sha_d2)),
-        # A round 1 log for PR 1468 at D2 names another PR, so it cannot clear PR 1467's FAIL at B.
+        # A log for another PR cannot clear this PR's FAIL at B, even at a descendant head.
         "stale-fail-other-pr-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                    + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=sha_d2,
                                                                      n=1468), n=1468),
         # The control: the same log for the report's own PR, 1467, clears the FAIL.
         "stale-fail-own-pr-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                  + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=sha_d2)),
-        # The PR is known only from a posted log: a round 1 FAIL recorded at head A. Its round 2 FAIL at B is
-        # unrecorded.
+        # The PR is known only from a posted log, which names head A. A later FAIL at B has no review log.
         "moved-known-only-from-log": pfr_post("toolu_c0", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=sha_a))
                                       + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 2),
                                                                           "Reviewed at head %s" % sha_b, PFR_FINDING)),
         # A PR on another branch is opened after the FAIL at B. The push goes to PFR_BRANCH, whose PR's head is D2.
         "moved-other-branch-pr-after-fail": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
                                             + pfr_pr_open("toolu_pr2", PFR_NEXT_PR, PFR_NEXT_BRANCH),
-        # A fix verifier PASS reviewed at B, unrecorded. The PR's live head is D2, past B.
+        # A fix verifier PASS reviewed at B, with no review log. The PR's live head is D2, past B.
         "fix-pending-moved": pfr_pr() + pfr_call("toolu_rev1", fix_at_b, blocks=True),
-        # A fresh round at D2, recorded at D2, does not clear the fix verifier's report at B.
+        # A fresh round at D2, with its review log at D2, does not clear the fix verifier's report at B.
         "fix-pending-fresh-round-recorded": pfr_pr() + pfr_call("toolu_rev1", fix_at_b, blocks=True)
                                             + pfr_call("toolu_rev2", fresh_pass)
                                             + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
                                                                               head=sha_d2)),
-        # The control: a Fix check record at D2 whose Fix check line is B clears the fix verifier's report at B.
+        # The control: a Fix check review log at D2, its Fix check line at B, clears the fix verifier's report at B.
         "fix-pending-fix-record-at-descendant": pfr_pr() + pfr_call("toolu_rev1", fix_at_b, blocks=True)
                                                 + pfr_post("toolu_c2", pfr_record(fix=(sha_b, "reviewer", PFR_MODEL,
                                                                                        "PASS"), head=sha_d2)),
@@ -652,6 +653,18 @@ def _build_pfr_history():
                                                                          "Reviewed at head %s" % sha_c, PFR_FINDING))
                             + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2),
                                                                 "Reviewed at head %s" % sha_c, PFR_FINDING)),
+        # The PR-opening result names no number, so the report's PR is unknown. A log at descendant D2 cannot
+        # clear the FAIL at B, though its role and round match.
+        "stale-fail-unknown-pr-descendant-log": pfr_pr('{"state": "open"}') + pfr_call("toolu_rev1", stale_fail)
+                                                + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
+                                                                                  head=sha_d2)),
+        # The FAIL names head B. A review log posted at B is not a strict descendant of it, so the FAIL stays.
+        "stale-fail-same-head-pass-log": pfr_pr() + pfr_call("toolu_rev1", stale_fail)
+                                         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")],
+                                                                           head=sha_b)),
+        # The report names the live head D2, and no log is posted. Nothing has moved past D2, so no moved-head text.
+        "live-head-fail-no-log": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+            pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_d2, PFR_FINDING)),
     }
     for name in PFR_STALE:
         write(pfr_path(name), "".join(line + "\n" for line in stale[name]))
@@ -834,21 +847,22 @@ pfr_ask("a FAIL naming head B, then a PR for another branch, then the PR for B, 
 
 
 # A stale report names head B, the PR head when it was reviewed. The lane then pushed two commits, so the
-# live head D2 descends from B. A PASS report at D2 with its record posted at D2 supersedes the stale one. The ask
-# text names the route for a head that moved: a fresh round at the live head, with the record command.
-pfr_allow("a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its record posted at D2, then the push",
-          PFR_PUSH, pfr_path("stale-fail-fresh-pass-recorded"), cwd=PFR_HIST)
-pfr_ask("a round 1 FAIL at head B, then a round 1 PASS at D2 with no record, then the push", PFR_PUSH,
+# live head D2 descends from B. A PASS report at D2 with its review log posted at D2 supersedes the stale one. The ask
+# text names the route for a head that moved: a fresh round at the live head, with the command for its review log.
+pfr_allow("a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its review log posted at D2, "
+          "then the push", PFR_PUSH, pfr_path("stale-fail-fresh-pass-recorded"), cwd=PFR_HIST)
+pfr_ask("a round 1 FAIL at head B, then a round 1 PASS at D2 with no review log, then the push", PFR_PUSH,
         pfr_path("stale-fail-fresh-pass-unrecorded"), cwd=PFR_HIST,
         carries=("fresh round", "live head", "--review-record"))
-# A record of the same round and verdict, posted at C: C is no descendant of B, so it does not clear B's FAIL.
-pfr_ask("a round 1 FAIL at head B, then a round 1 FAIL record at head C, no descendant of B, then the push", PFR_PUSH,
-        pfr_path("stale-fail-record-off-history"), cwd=PFR_HIST)
-# The control: each reviewed head has its record, so no report is left and the push passes.
-pfr_allow("a round 1 FAIL at head B with its record posted at B, then a round 1 PASS at D2 with its record posted at D2, "
-          "then the push", PFR_PUSH, pfr_path("stale-fail-own-record-fresh-pass-recorded"), cwd=PFR_HIST)
+# A review log of the same round and verdict, posted at C: C is no descendant of B, so it does not clear B's FAIL.
+pfr_ask("a round 1 FAIL at head B, then a round 1 FAIL review log at head C, no descendant of B, "
+        "then the push", PFR_PUSH, pfr_path("stale-fail-record-off-history"), cwd=PFR_HIST)
+# The control: each reviewed head has its review log, so no report is left and the push passes.
+pfr_allow("a round 1 FAIL at head B with its review log posted at B, then a round 1 PASS at D2 "
+          "with its review log posted at D2, then the push", PFR_PUSH,
+          pfr_path("stale-fail-own-record-fresh-pass-recorded"), cwd=PFR_HIST)
 # A log posted before the stale FAIL is read cannot supersede it, even at a descendant head.
-pfr_ask("a round 1 PASS logged at descendant D2 before a round 1 FAIL at head B is read, no record of the FAIL, "
+pfr_ask("a round 1 PASS logged at descendant D2 before a round 1 FAIL at head B is read, no review log of the FAIL, "
         "then the push", PFR_PUSH, pfr_path("stale-fail-descendant-log-before"), cwd=PFR_HIST,
         carries=("fresh round", "live head", "--review-record"))
 # A log whose head names no commit is not shown to descend from B. A failed ancestry read keeps the FAIL asked.
@@ -860,12 +874,20 @@ pfr_ask("a round 1 FAIL at head B, then a design-reviewer PASS logged at its des
         pfr_path("stale-fail-descendant-other-role-log"), cwd=PFR_HIST)
 pfr_ask("a round 2 FAIL at head B, then a round 1 PASS logged at its descendant D2, then the push", PFR_PUSH,
         pfr_path("stale-fail-round2-descendant-round1-log"), cwd=PFR_HIST)
-# A log names the PR it is for. A round 1 log for PR 1468 at D2 does not clear PR 1467's FAIL at B. PR 1467's own
-# log does.
+# A log names the PR it is for. A log for another PR at D2 does not clear this PR's FAIL at B. The PR's own log does.
 pfr_ask("a round 1 FAIL at head B, then a round 1 FAIL logged for PR 1468 at its descendant D2, then the push",
         PFR_PUSH, pfr_path("stale-fail-other-pr-log"), cwd=PFR_HIST)
 pfr_allow("a round 1 FAIL at head B, then a round 1 FAIL logged for its own PR 1467 at its descendant D2, "
           "then the push", PFR_PUSH, pfr_path("stale-fail-own-pr-log"), cwd=PFR_HIST)
+# A PR-opening result with no number leaves the report's PR unknown, so no log clears its FAIL.
+pfr_ask("a round 1 FAIL at head B from a PR whose result names no number, then a round 1 PASS review log at D2, "
+        "then the push", PFR_PUSH, pfr_path("stale-fail-unknown-pr-descendant-log"), cwd=PFR_HIST)
+# A review log at the head the FAIL names is not a strict descendant of it, so the FAIL stays asked.
+pfr_ask("a round 1 FAIL at head B, then a round 1 PASS review log at B, then the push", PFR_PUSH,
+        pfr_path("stale-fail-same-head-pass-log"), cwd=PFR_HIST)
+# The report names the live head D2 itself. Nothing moved past it, so the ask carries the ordinary text.
+pfr_ask("a round 1 FAIL at the live head D2 with no review log, then the push", PFR_PUSH,
+        pfr_path("live-head-fail-no-log"), cwd=PFR_HIST, lacks=("fresh round", "live head"))
 
 
 PFR_COST_LABEL = ("push-needs-review-record: a push reads git for a held report only when one is held, and the count "
@@ -986,14 +1008,16 @@ pfr_ask("a fix check FAIL unrecorded, then a fix check PASS with its record post
 pfr_allow("a fix check FAIL recorded, then a fix check PASS recorded, then a push to another branch", PFR_NEXT_PUSH,
           pfr_path("fix-fail-record-then-fix-pass"))
 # A fix verifier's report gets the ordinary text even when its head has moved: the moved text is for a round report.
-pfr_ask("a fix check PASS at head B, unrecorded, with the PR head at D2 past it, then the push", PFR_PUSH,
+pfr_ask("a fix check PASS at head B with no review log, with the PR head at D2 past it, then the push",
+        PFR_PUSH,
         pfr_path("fix-pending-moved"), cwd=PFR_HIST, lacks=("fresh round", "live head"))
 # A fresh round never clears a fix verifier's report: the report still asks, with the ordinary text.
-pfr_ask("a fix check PASS at head B, then a round 1 PASS at D2 recorded at D2, then the push", PFR_PUSH,
+pfr_ask("a fix check PASS at head B, then a round 1 PASS at D2 with its review log at D2, then the push",
+        PFR_PUSH,
         pfr_path("fix-pending-fresh-round-recorded"), cwd=PFR_HIST, lacks=("fresh round", "live head"))
-# The control: a Fix check record at D2, with its Fix check line at B, clears the fix verifier's report at B.
-pfr_allow("a fix check PASS at head B, then a Fix check record at D2 naming B, then a push to another branch",
-          PFR_NEXT_PUSH, pfr_path("fix-pending-fix-record-at-descendant"), cwd=PFR_HIST)
+# The control: a Fix check review log at D2, with its Fix check line at B, clears the fix verifier's report at B.
+pfr_allow("a fix check PASS at head B, then a Fix check review log at D2 naming B, then a push to another "
+          "branch", PFR_NEXT_PUSH, pfr_path("fix-pending-fix-record-at-descendant"), cwd=PFR_HIST)
 
 # A stray line with no message content, after the FAIL report: the reader steps over it, so the FAIL stays unrecorded.
 pfr_ask("a round 1 FAIL, then a system line whose message has no content key, then the push", PFR_PUSH,
@@ -1043,13 +1067,13 @@ def pfr_expect_ask(label, reason):
 
 
 def pfr_expect_live_route(label, reason):
-    """The push asks, and the ask routes the review record to the live head: the tip of the pushed branch, D2. The
+    """The push asks, and the ask routes the review log to the live head: the tip of the pushed branch, D2. The
     route's `--head` argument carries its first 12 characters."""
     if not label:
         return "the push is allowed, want an ask"
     live = PFR_HIST_SHA["D2"][:12]
     if "--review-record --head " + live not in reason:
-        return "the ask does not route the review record to the live head %s" % live
+        return "the ask does not route the review log to the live head %s" % live
     return ""
 
 
@@ -1058,14 +1082,14 @@ def pfr_expect_live_route(label, reason):
 pfr_in_process("push-needs-review-record: a round 1 FAIL at head B, a descendant log, and no checkout: the push asks",
                pfr_path("stale-fail-fresh-pass-recorded"), pfr_expect_ask, where="", cwd=PFR_HIST,
                ok_note="no checkout: the stale FAIL is not cleared")
-# The PR is known only from a posted log, so the live head is the pushed branch's tip, not the record's head A.
+# The PR is known only from a posted log, so the live head is the pushed branch's tip, not the review log's head A.
 pfr_in_process("push-needs-review-record: a PR known only from a posted log, a round 2 FAIL at B, then a push to D2",
                pfr_path("moved-known-only-from-log"), pfr_expect_live_route,
-               ok_note="the ask routes the review record to the live head")
+               ok_note="the ask routes the review log to the live head")
 # A PR on another branch is opened after the FAIL. The push goes to PFR_BRANCH, so its live head is that branch's tip.
 pfr_in_process("push-needs-review-record: a PR on another branch opened after a FAIL at B, then the push routes to D2",
                pfr_path("moved-other-branch-pr-after-fail"), pfr_expect_live_route,
-               ok_note="the ask routes the review record to the live head")
+               ok_note="the ask routes the review log to the live head")
 
 
 PFR_TIPS_LABEL = "push-needs-review-record: the PR head's tips are read once per push, however many reports are pending"
