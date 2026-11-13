@@ -4,8 +4,9 @@ FAMILY = "message-time-matches-clock"
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
 # with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
 # then an optional date `YYYY-MM-DD ` and `H:MM` or `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any
-# letter case. Anything may follow it. A bracketed or parenthesised label needs no mark before the time. A bare label
-# needs `,`, `:`, or a dash spaced on both sides before the time, or a `Mon D` date and a colon after the zone. The zone must
+# letter case. Anything may follow it. A bracketed or parenthesised label, closed by its bracket, needs no mark before
+# the time. A bare label needs `,`, `:`, or a dash spaced on both sides before the time, or a `Mon D` date, with a real
+# month name, and a colon after the zone. The zone must
 # be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
 # A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
 # limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
@@ -215,6 +216,42 @@ mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it rea
 mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
 
+
+# ---- a label that does not join the time: prose after a closed bracket or paren, and a word after the zone that is not a
+# month. Each stamp is 20 minutes ahead of MTC_LABEL_CLOCK, so each would be refused by a header reader. A bracket closes
+# its label, so the words after it are prose. A `Mon D` date counts only with a real month name, so `and`, `for` and
+# `Foo` are not dates.
+MTC_LABEL_CLOCK = "2026-11-13T13:40:00-06:00"  # 13:40 CST, the clock of the cases in this block
+# Passes: the bracket closes `PR #3177` before the time, so `ready by` is prose after the bracket.
+mtc_allow("a bracket closed before the time, [PR #3177] ready by 14:00 CST, is allowed: prose after the bracket",
+          "[PR #3177] ready by 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bracket closed before the time, [Note] Standup moved to 14:00 CST, is allowed: prose after the bracket",
+          "[Note] Standup moved to 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a paren closed before the time, (done) merged PR at 14:00 CST, is allowed: prose after the paren",
+          "(done) merged PR at 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a one-letter bracket closed before the time, [x] done 14:00 CST, is allowed: prose after the bracket",
+          "[x] done 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a one-letter paren closed before the time, (a) merge at 14:00 CST, is allowed: prose after the paren",
+          "(a) merge at 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bracket of three words closed before the time, [batch runner 11] ETA 14:00 CST for merge, is allowed",
+          "[batch runner 11] ETA 14:00 CST for merge", clock=MTC_LABEL_CLOCK)
+# Refused: the time follows the closed bracket directly, so the bracket is the label and the stamp is its header. This
+# pins the edge of the allow cases above: a closed bracket with the time right after it still stamps its label.
+mtc_refuse("a closed bracket label with the time right after it, [PR #3177] 14:00 CST ready, is refused: the bracket is the label",
+           "[PR #3177] 14:00 CST ready", clock=MTC_LABEL_CLOCK, carries=("13:40 CST",))
+# Passes: `and` and `for` are three letters, but neither is a month, so the second time is prose, not a `Mon D` date.
+mtc_allow("a bare label with a second time after a three-letter word, Meet 14:00 CST and 15:00 CST for review, is allowed: and is not a month",
+          "Meet 14:00 CST and 15:00 CST for review", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bare label with a second time after and, Standup 14:00 CST and 14:30 CST both moved, is allowed: and is not a month",
+          "Standup 14:00 CST and 14:30 CST both moved", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bare label with a day after for, Window opens 14:00 CST for 2: reviewers, is allowed: for is not a month",
+          "Window opens 14:00 CST for 2: reviewers", clock=MTC_LABEL_CLOCK)
+# Passes: `Foo` is three letters and no month, so `Foo 3:` after the zone is not a `Mon D` date.
+mtc_allow("a bare label with a non-month word and a day after the zone, Coordinator 14:00 CST Foo 3: hi, is allowed: Foo is not a month",
+          "Coordinator 14:00 CST Foo 3: hi", clock=MTC_LABEL_CLOCK)
+# Refused: Dec is a real month, so `Dec 3:` after the zone is the date of a header 20 minutes ahead.
+mtc_refuse("a bare label with a real month and a day after the zone, coordinator 14:00 CST Dec 3: hi, is refused: Dec is a month",
+           "coordinator 14:00 CST Dec 3: hi", clock=MTC_LABEL_CLOCK, carries=("13:40 CST",))
 
 # ---- the forms with no separator: a bracket, a paren, or a bare label. A bracket or a paren is a header stamp with no
 # mark before the time. A bare label with no mark before the time is a header stamp only when a `Mon D` date and a
