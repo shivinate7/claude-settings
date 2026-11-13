@@ -2271,3 +2271,7 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- stale011-every-symbol-judged: STALE011 judges every code-looking symbol in the sentence, not only the one the cite anchors. "`CONST_VALUE` is read by `alpha_fn` at src/mod.py:200." fires for `alpha_fn` though the cite is right for `CONST_VALUE`. Fix idea: judge the nearest symbol before the cite.
+- stale011-body-cite-fires: a cite into a symbol's body, or at the first of four stacked decorators, is more than 3 lines from the def line and fires.
+- stale011-dotted-nested-silent: a dotted name (`Widget.method`), a call with nested parens, and a nested def are no symbol to STALE011, so a drifted cite for them passes.
+- stale011-swapped-row-silent: any cite in the sentence that holds the symbol silences it, so a table row with two swapped cites passes. A sentence wrapped over two lines, or a symbol and its cite in two sentences of one line, is not joined.
