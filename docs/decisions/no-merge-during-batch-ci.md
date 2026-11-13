@@ -23,10 +23,10 @@ Express lane:
 
 - R55, merge-flow fixes take an express lane. It puts a fix ahead of every other lane.
 - R67, drain first, puts a fix ahead of the drain too.
-- R65, ready express lanes share one batch. Ready express lanes go to main in one batch.
-- The batch runner cancels a running batch for an express fix first. The rule above still holds: no run is in progress at the merge.
+- R65, ready express lanes share one batch: they merge together.
+- If a batch is in CI when an express fix is ready, the batch runner cancels that run first. The rule above still holds: no run is in progress at the merge.
 - The list names kinds of fix, not step slugs. Every fix that tracks or lands work takes the express lane. The kinds are: merge flow, CI fixes, lane-start and hand-in guards, lost-work sweep, the pick-to-page guard, and the ruling-challenge fixes.
-- A fix of one of these kinds takes the lane, though no list names its slug. A lane of another kind does not.
+- A fix of one of these kinds takes the lane, though no list names its slug. A lane of another kind does not take the express lane.
 - This is not the `--express` flag above.
 
 Reason: R67 part 4 (owner grant, 10:54 and 10:56 CST Nov 13). Owner, 10:54 CST: "my rulings are being read too strictly". Owner, 10:56 CST: "fast track all of those". R55's list is read by kind, not word by word.
