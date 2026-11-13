@@ -301,3 +301,11 @@ Closed: #2654 #2661 #2663 #2664 #2665 #2666 #2672 #2673 #2674 #2676 #2680 #2685 
 ## Runner 10 hold list for the next pass (runner 10, 23:52 CST Nov 12)
 
 Do not close: #2682, #2793, #2818, #2745, #2785, #2848, #2866, #2917, #2978, #2992, #3021, #3042, #3060, #3069, #3016, #2970, #2899, #3050, #3059, #3071, #3074, #3076, #3068, #3070, #3072, #3063, #3078, #2838, #2860, #3075, #3026, #3014, #3024, #3092, #3094, #3086, #3084, #3090, #3097, #3048, #3023, #3083, #3085, #3058, #3065, #2829, #3057, #3004, #2915, #2996, #3003, #3066, #2971, #2081, #2902, #2905. Overlap with the 73 closed: #2793 and #2818 only, both reopened.
+
+## Third pass, after batch 122 (#3112, merged 904f3d5e2 02:21 CST Nov 13)
+
+List: main's build row "draft PRs over 12 h with no live lane", from live file readAt 2026-11-13T02:26:59-06:00 (434 open PRs, 1700 sessions): 291 listed, 85 not on the second pass's list and not on runner 10's 02:24 CST hold list (47 PRs: batch 123 build, later batches, named holds).
+- Held, named by an open step, an open page item, or a non-archived session's title or tags: 48.
+- Held, branch starts with an open step's slug (doing, no live lane): 19 (#2832, #2837, #2844, #2856, #2857, #2858, #2859, #2873, #2883, #2895, #2909, #2914, #2918, #2919, #2923-#2927).
+- Closed: 18, finished 02:29 CST, no closing comment, no branch delete: #2827 #2831 #2841 #2842 #2846 #2853 #2855 #2861 #2862 #2863 #2867 #2884 #2889 #2901 #2908 #2910 #2912 #2928.
+The 206 already listed in the second pass keep its verdicts; not re-joined.
