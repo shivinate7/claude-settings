@@ -1030,6 +1030,20 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   `merge --reviewed` (402 at 10:42 CST, 108 of them done).
   Home: steps lane-step-dup-check, lost-work-sweep and handin-cannot-drop.
 
+- **R67. Drain first: new lanes wait, and drain batches run big.** Read 10:48 CST Nov 13: from 00:00 CST
+  Nov 12, 22 merged batches carried 85 lanes, the largest 20, with a median gap of 1.1 h. Owner 10:48
+  CST: "I expect this to be done quickly -- how will we ensure that it is done quickly without causing
+  problems". Owner 10:50 CST, page item 693: "A is fine and I mean new work can be fine if we can
+  catulally track and land it, which those fixes themselves haven't yet landed so let's hold off on
+  sheer new work and just do A for right now".
+  1. The coordinator starts no lane except backlog-drain, lost-work-sweep, lane-step-dup-check, and the
+     express merge-flow and CI-fix lanes (R55, R65). Running lanes go on.
+  2. The batch runner builds drain batches from every done keep row that passes lane-lint. A red lane
+     drops and returns to the drain. CI and review stay as they are.
+  3. The hold ends when R66's ledger shows no row without a final verdict, and when the fixes that track
+     and land new work (handin-cannot-drop, lost-work-sweep, lane-step-dup-check) are on main.
+  Home: R66; decision session-tiers (the coordinator's lane starts).
+
 ## Stage 5. Resume lanes
 
 Under the new flow, once stage 3 and the settled parts of stage 4 land. An open part holds nothing: D1,
