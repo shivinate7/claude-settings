@@ -109,11 +109,12 @@ unless the file is a Haiku role. It also fails an `agents/*.md` body that states
 - Exempt: an `Agent` or `Task` Explore spawn whose brief's first non-blank line carries the audit marker `Audit:` (`EXPLORE_AUDIT_MARKER` in `hooks/shared_names.py`, which the guard and the spawn judge both import; case-sensitive, the first `Audit:` on the brief's first non-blank line, with any text ahead of it, so `**Audit:**` counts; the same first-line pick as the step-up marker scan). Any other such Explore that names a model runs on its haiku row. The guard passes an Explore that names no model whenever `CLAUDE_CODE_SUBAGENT_MODEL` is set (`agents/explore.md` pins haiku, so it also passes without the variable; see the no-model bullet). A Workflow `agent()` call that names a model is judged the same way, by its `agentType` and the brief it passes. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no marker, so the call is judged with an empty brief, and its refusal adds "write the brief as a literal string so the marker is readable" (item 127 pick a; coordinator ruling, 2026-11-01 22:54 CST). A call whose `model` or `agentType` the scan cannot read (a variable, a shorthand, or a spread with no literal `agentType`) is skipped. Owner ruling: shiv, 2026-11-01 11:43 CST, waiting-page item 107, pick a. The refusal names the marker. Also exempt: a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ceiling above judges (an Explore on Opus needs the marker there too, item 137 pick a). A reviewer whose brief's first non-blank line starts with the fix check marker `Fix check` is exempt too, to Sonnet only, on every PR (owner item 444 a, 2026-11-08 15:04 CST; `FIX_CHECK_MARKER` in `hooks/shared_names.py`; case-sensitive; blanks may stand ahead of it, text may not; the refusal names it). A reviewer whose brief carries the guard marker is exempt to its `1 guard` row's model on any round (owner, item 359 pick a, 2026-11-07 14:41 CST). A reviewer's round 1 with no guard marker runs its `1 other` row.
 - A spawn that names no model is refused under two conditions. `CLAUDE_CODE_SUBAGENT_MODEL` is unset or empty in the guard's environment. No `agents/*.md` file in the pointer checkout names the role with a `model:` pin in its frontmatter. A spawn with no role counts as general-purpose. The remedy is "name the role's model", with the row's model beside it unless the row is haiku.
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
+- Every agent file pins its role's model (`lint/check_agent_models.py` fails a file with no pin or an empty one; skills carry no pin), because the pin beats the env default. A per-spawn model beats the pin, so a builder's third try still sets opus per spawn.
 - The override lifts an above-row refusal (owner, 2026-11-01 17:25 CST, item 127, pick a; `never_lifted` in `hooks/guard.py` no longer reads it). No override lifts the no-model refusal (`owner-override`, the model guards).
 
 Cost: one read of this record per spawn (unmeasured). A spawn with no model adds one read of the agent files (unmeasured). No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
 
-Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
+Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` had no pin until step builder-model-pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
 **The lane effort pin.** A lane runs at medium effort (owner, 2026-11-10 13:19 CST, "B is good").
 The coordinator starts a lane with `create_session` set to effort `medium`, with `model` (the lane row's)
@@ -174,8 +175,9 @@ builder on Opus just runs, with no approval. The first-line form is case-sensiti
 when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder needs Opus.
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
-model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
-spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
+model and whose definition names no model. Every agent file pins a model now (`agents/builder.md` pins
+`sonnet`), so only a built-in role with no file reads the fallback. The measured rows below are from
+before the builder pin. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
 **The order**, first wins: the spawn's `model` field, then the agent definition's `model:` (a built-in
@@ -209,6 +211,18 @@ A running cloud thread does not load `~/.claude/agents` files written mid-sessio
 refused `reviewer`, `designer` and `builder` as unknown types. A process started after the write
 loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in
 the same container, reads the same order.
+
+MEASURED 2026-11-09 19:47 CST, cloud. The served model was read from each agent's transcript `model` field, not from `modelUsage`.
+
+| Spawn | Requested | Served | Good looks like |
+|---|---|---|---|
+| `reviewer`, `model: sonnet` | sonnet | claude-sonnet-5-5 | served = requested: sonnet |
+| `builder`, `model: sonnet` | sonnet | claude-sonnet-5-5 | served = requested: sonnet |
+| `reviewer`, no model, env `sonnet` | none; env sonnet | claude-haiku-5-5 | served = sonnet; haiku does not match |
+
+Not reproduced: a report of a sonnet-named spawn that served haiku (roadmap step 910), likely a spawn with no model. Unmeasured.
+
+Debt candidate, not built: a check of the served model against the requested one at agent end or record time.
 
 **The install's first home is the cloud environment's setup script** (owner, 2026-10-30 15:09 CDT,
 waiting item 77, pick a). The setup script runs `cloud-setup.sh` before Claude Code starts, so
