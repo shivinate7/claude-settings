@@ -116,10 +116,11 @@ a turn end in these cases:
     shell run (Bash or PowerShell) of export_page.py printed a line `same`, or `<page id>: same`
     under --all, anywhere in its output. No commit on the folder at all counts as older. This session is the writer when the newest
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
-    writer named there decides alone. When none is named, the extras key layout.page_writer_key decides: this
-    session is the writer when it equals the hook's session id or the remote id. Only with no key does an
-    interpreter run of export_page.py (EXPORT_RUN) before the write make this session the writer. A wake (a
-    Send's banner) counts as a write only when its `Artifact:` url is the waiting page's. A session that is not the writer, or whose
+    writer named there decides alone. When none is named, this session is the writer when the extras key
+    layout.page_writer_key equals the hook's session id or the remote id, or when an interpreter run of
+    export_page.py (EXPORT_RUN) comes before the newest exported write to any artifact or the newest page wake. The
+    key names a writer and never exempts one. A wake (a Send's banner) counts only when its `Artifact:` url is the
+    waiting page's. A session that is not the writer, or whose
     writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
     the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
     or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
@@ -1352,7 +1353,9 @@ def export_check(cwd, transcript_path, session_id):
     transcript is read and timestamps decide, so a write in an earlier turn still counts. A wake (a user record
     whose text begins with PAGE_BANNER: a Send on a page) counts as a page write at its time when its `Artifact:`
     url is the waiting page's (layout.is_waiting_page_url), so each Send's wake ends with an export. With no writer
-    named in the transcript, the extras key layout.page_writer_key names it before the export-run fallback."""
+    named in the transcript, an extras key layout.page_writer_key that names this session makes it the writer, and
+    the export run before the newest exported write (any artifact) or page wake makes it the writer whatever the key
+    names."""
     try:
         records = _transcript.read_transcript(transcript_path)
         import layout
@@ -1370,16 +1373,17 @@ def export_check(cwd, transcript_path, session_id):
         if root is None:
             return None, None
         is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes} | {w[1] for w in wakes}}
-        wrote = [w[0] for w in writes if is_page[w[2]]] + [w[0] for w in wakes if is_page[w[1]]]
+        page_wakes = [w[0] for w in wakes if is_page[w[1]]]
+        wrote = [w[0] for w in writes if is_page[w[2]]] + page_wakes
         if not wrote:
             return None, None
         if not writer:
+            # The key can only add this session as writer: an export run before the newest exported write to any
+            # artifact, or before a page wake, makes this session the writer whatever the key names.
+            clock = max([w[0] for w in writes] + page_wakes)
             key = layout.page_writer_key(root)
-            if key:
-                is_writer = key in (session_id, override.remote_session_id())
-            else:
-                is_writer = any(e[0] < max(wrote) for e in exports)
-            if not is_writer:
+            mine = bool(key) and key in (session_id, override.remote_session_id())
+            if not mine and not any(e[0] < clock for e in exports):
                 return None, None
         newest = max(wrote)
         waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
