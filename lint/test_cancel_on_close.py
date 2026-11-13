@@ -2,16 +2,19 @@
 """Guard for the PR-close cancel: .github/workflows/cancel-on-close.yml and .github/scripts/cancel_closed_pr_runs.py.
 
 WorkflowShape reads the workflow by line, as lint/test_windows_split.py does, with the step parser of lint/workflow_steps.py.
-ScriptSelects proves select_runs cancels only a queued, in-progress, waiting, pending or requested pull_request run of this
-PR from this repo, and only one whose PR list names this PR and no other. ScriptPrClosed proves pr_is_closed reads only
-"closed". ScriptGhCalls and ScriptMain prove every run list is a GET, main counts the runs it skips for having no PR list,
-and main reads the PR again before it cancels. ParserControl and ScannerTraps test the readers in this file on text that
-exists on main, so a red WorkflowShape case points at the workflow, not at the reader.
+ScriptSelects proves select_runs cancels only a queued, in-progress, waiting, pending or requested pull_request run of
+this PR from this repo, only one whose PR list names this PR and no other, and never the run whose id is own_run_id.
+ScriptPrClosed proves pr_is_closed reads only "closed". ScriptGhCalls and ScriptMain prove every run list is a GET,
+main counts the runs it skips for having no PR list, main reads the PR again before it cancels, main excludes the run
+named by GITHUB_RUN_ID, and main cancels nothing when GITHUB_RUN_ID is not numeric. ParserControl and ScannerTraps test
+the readers in this file on text that exists on main, so a red WorkflowShape case points at the workflow, not at the
+reader.
 
 Run with:  python3 lint/test_cancel_on_close.py -v
 """
 import contextlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -357,11 +360,12 @@ def has_get(argv):
 class ScriptSelects(ScriptCase):
     """select_runs(runs, pr_number, repo, default_branch) -> the run ids to cancel."""
 
-    def select(self, runs, pr=PR, repo=REPO_FULL, default=DEFAULT):
+    def select(self, runs, pr=PR, repo=REPO_FULL, default=DEFAULT, own_run_id=None):
         fn = getattr(self.module(), "select_runs", None)
         self.assertTrue(callable(fn), "select_runs is not defined in .github/scripts/cancel_closed_pr_runs.py")
+        args = (runs, pr, repo, default) if own_run_id is None else (runs, pr, repo, default, own_run_id)
         try:
-            return fn(runs, pr, repo, default)
+            return fn(*args)
         except Exception as e:
             self.fail(f"select_runs raised {type(e).__name__}: {e}")
 
@@ -444,6 +448,16 @@ class ScriptSelects(ScriptCase):
             runs.append(run)
         self.assertEqual(sorted(self.select(runs)), sorted(want), "the full-size list selected the wrong runs")
 
+    def test_excludes_the_own_run_and_selects_the_others(self):
+        # Scope first: select_runs must take own_run_id, or the call below fails as a TypeError and not as a finding.
+        fn = getattr(self.module(), "select_runs", None)
+        self.assertTrue(callable(fn), "select_runs is not defined in .github/scripts/cancel_closed_pr_runs.py")
+        self.assertIn("own_run_id", inspect.signature(fn).parameters,
+                      "select_runs takes no own_run_id, so the cancel job's own run cannot be left out")
+        got = self.select([run_of(id=101), run_of(id=102)], own_run_id=101)
+        self.assertIn(102, got, "the other run 102 was not selected")
+        self.assertNotIn(101, got, "the own run 101 was selected, so the cancel job would cancel itself")
+
 
 class ScriptPrClosed(ScriptCase):
     """pr_is_closed(state) is true only for the state "closed"."""
@@ -480,14 +494,18 @@ class ScriptGhCalls(ScriptCase):
 class ScriptMain(ScriptCase):
     """main(argv) reads the PR, cancels what select_runs picks, and reports the runs it skips for having no PR list."""
 
-    def run_main(self, runs, states=("closed",)):
+    def run_main(self, runs, states=("closed",), github_run_id=None):
+        # The env is set per case, so a GITHUB_RUN_ID from the CI runner never reaches a case that does not name one.
         mod = self.module()
         fake = FakeGh(runs, states)
         err = io.StringIO()
-        with mock.patch.object(mod.subprocess, "run", fake), contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(err):
-            mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
-        return err.getvalue(), fake
+        with mock.patch.dict(os.environ), mock.patch.object(mod.subprocess, "run", fake), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            os.environ.pop("GITHUB_RUN_ID", None)
+            if github_run_id is not None:
+                os.environ["GITHUB_RUN_ID"] = github_run_id
+            rc = mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
+        return err.getvalue(), fake, rc
 
     def test_prints_the_count_of_runs_with_no_pr_list(self):
         no_list = [run_of(id=201, pull_requests=[]), run_of(id=202, pull_requests=[])]
@@ -495,18 +513,31 @@ class ScriptMain(ScriptCase):
                        run_of(id=204, head_repository={"full_name": "someone/fork"}, pull_requests=[]),
                        run_of(id=205, head_branch=DEFAULT, pull_requests=[]),
                        run_of(id=206, pull_requests=[{"number": 8}])]
-        err, fake = self.run_main(no_list + not_counted + [run_of(id=101)])
+        err, fake, _ = self.run_main(no_list + not_counted + [run_of(id=101)])
         self.assertEqual(cancelled_ids(fake.calls), [101], "scope: the PR's own run was not the one cancelled")
         self.assertIn("2 run(s) skipped: no PR list", err, "main printed no count of the runs with no PR list")
 
     def test_cancels_nothing_when_the_pr_is_open_at_the_reread(self):
-        err, fake = self.run_main([run_of(id=101)], states=("closed", "open"))
+        err, fake, _ = self.run_main([run_of(id=101)], states=("closed", "open"))
         self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs")
         self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled run 101 after the PR read as open")
 
     def test_cancels_the_run_when_the_pr_stays_closed_at_the_reread(self):
-        err, fake = self.run_main([run_of(id=101)], states=("closed", "closed"))
+        err, fake, _ = self.run_main([run_of(id=101)], states=("closed", "closed"))
         self.assertEqual(cancelled_ids(fake.calls), [101])
+
+    def test_the_run_named_by_github_run_id_is_not_cancelled(self):
+        err, fake, _ = self.run_main([run_of(id=101), run_of(id=102)], github_run_id="101")
+        self.assertIn(102, cancelled_ids(fake.calls), "scope: the other run 102 was not cancelled")
+        self.assertNotIn(101, cancelled_ids(fake.calls), "the own run 101 named by GITHUB_RUN_ID was cancelled")
+
+    def test_a_non_numeric_github_run_id_cancels_nothing(self):
+        err, fake, _ = self.run_main([run_of(id=101), run_of(id=102)], github_run_id="abc")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled runs although GITHUB_RUN_ID is not numeric")
+
+    def test_a_non_numeric_github_run_id_exits_one(self):
+        err, fake, rc = self.run_main([run_of(id=101)], github_run_id="abc")
+        self.assertEqual(rc, 1, f"main returned {rc} for a GITHUB_RUN_ID that is not numeric, want 1")
 
 
 class ParserControl(unittest.TestCase):
