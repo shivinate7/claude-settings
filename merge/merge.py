@@ -164,6 +164,14 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
+def revert_rule():
+    """The one home of the revert rule (actions/ci-alarm/revert_rule.py, beside events.json; the CI alarm reads it through the API): REVERT_LINE, revert_map and net_reverted.
+    Loaded when a read needs it, not at the top, as clear_rule is: a copy of this file alone still loads. A missing file raises ImportError, which base_state reads as unknown and refuse_dropped_lane as a refused read."""
+    if os.path.dirname(ALARM_EVENTS) not in sys.path:
+        sys.path.append(os.path.dirname(ALARM_EVENTS))
+    import revert_rule as rule
+    return rule
+
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
@@ -1452,7 +1460,7 @@ class Host:
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         The revert clear (the one home of the rule): a red run R, one the verdict would list as red, is cleared when a commit reachable from origin/<base> other than R's head_sha carries
-        `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (net_reverted, the net-revert read of read_lanes). Each red run needs its own revert.
+        `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (revert_rule.net_reverted, the net-revert read of read_lanes). Each red run needs its own revert.
         The revert's own run does not matter while it is absent, queued or in progress; a completed red run of it is a red run of its own. A cancelled run with no red job, a re-run in flight and a
         failed read: those stay unknown. The revert read is one `git log` over the whole origin/<base> history (the ref base_workflows reads) per call, made only when a red run exists, so its cost grows with that history. Red runs that share one head_sha share one revert, since the revert names the head; a failed read is unknown.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
@@ -1460,6 +1468,7 @@ class Host:
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+            rule = revert_rule()  # loaded here, not at the top: a missing actions/ci-alarm/revert_rule.py is unknown (ImportError, caught below)
             import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
@@ -1500,9 +1509,9 @@ class Host:
                         reverts["recs"] = read_log(self.base_root, "-F", "--grep=This reverts commit", f"origin/{base}")
                     except (ValueError, subprocess.TimeoutExpired, OSError) as e:
                         raise Stop(f"reading the reverts on origin/{base} failed, so the revert clear is unknown (decision no-merge-onto-red-main): {e}")
-                    reverts["undone"] = revert_map(reverts["recs"])
+                    reverts["undone"] = rule.revert_map(reverts["recs"])
                 head = r.get("head_sha")
-                return next((h for h, _, body in reverts["recs"] if head and h != head and head in REVERT_LINE.findall(body) and not net_reverted(reverts["undone"], h)), None)
+                return next((h for h, _, body in reverts["recs"] if head and h != head and head in rule.REVERT_LINE.findall(body) and not rule.net_reverted(reverts["undone"], h)), None)
 
             def reverted(r):  # True, with a line for the green detail, when a live revert of the red run r is on the base
                 rev = revert_of(r)
@@ -2130,8 +2139,6 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-REVERT_LINE = re.compile(r"This reverts commit ([0-9a-f]{40})")
-
 def read_log(wt, *args):
     """-> [(sha, parents, body)] from `git log <args>`, newest first. A read that fails raises ValueError."""
     c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", *args)
@@ -2140,29 +2147,13 @@ def read_log(wt, *args):
     recs = (rec.strip().split("\x01", 2) for rec in out.split("\0"))
     return [tuple(parts) for parts in recs if len(parts) == 3]
 
-def revert_map(recs):
-    """-> {commit: the commit that reverts it}, from the "This reverts commit <sha>." lines of `recs` (read_log's rows)."""
-    undone = {}
-    for h, _, body in recs:
-        for r in REVERT_LINE.findall(body):
-            undone[r] = h
-    return undone
-
-def net_reverted(undone, h):
-    """True when commit `h` is undone: a revert of it, and a revert of that revert, so an odd chain is a revert. The one home of the net-revert read,
-    which read_lanes and Host.base_state both call."""
-    n, seen = 0, set()
-    while h in undone and h not in seen:
-        seen.add(h)
-        h, n = undone[h], n + 1
-    return n % 2 == 1
-
 def read_lanes(wt, base_ref, sha):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
     merge is net-reverted on the batch (net_reverted). A read that fails raises."""
+    rule = revert_rule()
     recs = read_log(wt, f"{base_ref}..{sha}")
-    undone = revert_map(recs)
+    undone = rule.revert_map(recs)
     took = {}  # tip -> the merges that took it in
     for h, parents, _ in recs:
         for t in parents.split()[1:]:
@@ -2175,7 +2166,7 @@ def read_lanes(wt, base_ref, sha):
                              "`git fetch --unshallow`)")
         if not c:
             tips.append(t)
-    return tips, {t for t in tips if all(net_reverted(undone, h) for h in took[t])}
+    return tips, {t for t in tips if all(rule.net_reverted(undone, h) for h in took[t])}
 
 def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
