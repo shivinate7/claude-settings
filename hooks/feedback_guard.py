@@ -976,6 +976,10 @@ def page_form_problem(text, items, homes, pages, session):
             % (TEMPLATE_DIR, scope[1], TEMPLATE_DIR, NOT_PAGE_FORM))
 
 
+class Closable(str):
+    """A refusal that `[closed]` settles: the final reason names that mark only when one of these is in it."""
+
+
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
     out, seen = [], {}
     for n, b in enumerate(blocks):
@@ -1006,14 +1010,14 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
                 found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant, at - 1)
                 if found:
-                    out.append(found)
+                    out.append(Closable(found))
             elif homes is not None and it[3] and it[1].startswith("[note]"):
                 found = homes.closed_problem(it[0], it[1])
                 if found:
                     out.append(found)
         for i in open_ids([b], ("[standing]",)):
             if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(i), handoff):
-                out.append("%s is not in the handoff: put it there, or end its line with [closed] once it is settled" % i)
+                out.append(Closable("%s is not in the handoff: put it there, or end its line with [closed] once it is settled" % i))
     return out
 
 
@@ -1546,8 +1550,9 @@ def inbox_stop(hook):
                        + "; ".join(r.rstrip(".") for r in reasons)
                        + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
-                          " message to that repo's triage session, and put open standing ids in the handoff, or end a settled item's"
-                          " line with [closed]."
+                          " message to that repo's triage session, and put open standing ids in the handoff"
+                          + (", or end a settled item's line with [closed]."
+                             if any(isinstance(r, Closable) for r in found) else ".")
                           if found else "."))
         return out
     except Exception as e:  # advisory: a crash passes, and says so on stderr
