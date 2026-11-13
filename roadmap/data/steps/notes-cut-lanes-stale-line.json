@@ -1,0 +1,14 @@
+{
+ "id": "notes-cut-lanes-stale-line",
+ "title": "Fix the stale line in docs/debts/notes.md that names cut_lanes in merge/merge.py",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A note names a function act 4 deleted, so a reader searches for code that is gone.",
+ "source": "Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), via the coordinator 15:41 CST Nov 13; items (g) and (h).",
+ "note": "Filed 15:43 CST Nov 13. About line 610 of docs/debts/notes.md names cut_lanes in merge/merge.py, which act 4 deleted (lane's read, unread by triage). Rewrite or drop the line. Docs only: a record-writer, no review beyond the docs rule (decision docs-only-prs-skip-review). Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:43:09-06:00"
+}

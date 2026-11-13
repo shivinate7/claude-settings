@@ -1,0 +1,14 @@
+{
+ "id": "stable-ruleset-protect-test",
+ "title": "A test for protect.py on the stable branch, then the live ruleset on stable with a read-back",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The stable branch that child repos read has no ruleset, so a delete or force-push could remove it.",
+ "source": "Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), via the coordinator 15:41 CST Nov 13; items (g) and (h). Closes debt stable-has-no-ruleset (its Retire now cites test_scaffold.py in PR #3275).",
+ "note": "Filed 15:43 CST Nov 13. Test: skills/project-ops/tests/test_scaffold.py gets a `--branch stable` case for skills/project-ops/scripts/protect.py (a ruleset on `stable` blocking delete and force-push, no required-check rule). Live act, once `stable` exists on origin (it needs a green main run): `protect.py --repo <owner>/<name> --branch stable --confirm`, then a read-back. The standing grant in .claude/CLAUDE.md lets a session on the owner's computer do it at the coordinator's request; a cloud session cannot (decision main-branch-protection). A check change: test-author red case first, builder, reviewer. Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:43:09-06:00"
+}
