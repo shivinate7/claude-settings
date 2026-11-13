@@ -1099,6 +1099,79 @@ def sleeping_child_behind_a_pipe_still_stalls():
     return problems
 
 
+def merge_shaped_job(children, secs):
+    """A silent parent like merge.py: it prints nothing and runs `children` busy Python children one after another, each `secs` seconds, no pipe."""
+    child = ("import time\nend = time.monotonic() + %s\nwhile time.monotonic() < end:\n    pass" % secs)
+    parent = ("import subprocess, sys\nfor _ in range(%d):\n    subprocess.run([sys.executable, '-c', %r])" % (children, child))
+    return "%s -c %s" % (shlex.quote(PY), shlex.quote(parent))
+
+
+@posix_case
+def batch_138_silent_parent_with_a_busy_child_is_no_stall():
+    """25c. batch 138 shape: a silent parent whose one child burns CPU for 6 s, under a 2 s quiet: no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(merge_shaped_job(1, 6))
+    reap()
+    if "--also" in cmd:
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a silent parent with a CPU-busy child (batch 138)"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def batch_139_build_4_serial_busy_children_are_no_stall():
+    """25d. batch 139 build 4 shape: a silent parent runs five busy children in a row (1.3 s each), under a 2 s quiet: no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(merge_shaped_job(5, 1.3))
+    reap()
+    if "--also" in cmd:
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a serial chain of CPU-busy children (batch 139 build 4)"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def cpu_read_costs_one_ps_per_check():
+    """25e. cost: one job-state check reads CPU time with one ps call, no other process, so a watcher pass costs one ps"""
+    sw = load_module()
+    calls = []
+    real = sw._run
+    sw._run = lambda args, timeout=sw.TOOL_TIMEOUT: calls.append(list(args)) or real(args, timeout)
+    try:
+        sw.job_state(os.getpid())
+    finally:
+        sw._run = real
+    return expect(len(calls) == 1 and calls[0][0] == "ps", f"a job-state check made {len(calls)} reads: {calls}")
+
+
+@posix_case
+def cpu_read_costs_one_proc_read_per_process():
+    """25f. cost: reading a tree of N processes under the job reads /proc/PID/stat N + 1 times (the job and each process under it), starts no process"""
+    sw = load_module()
+    rows = {"1": ["1", "0", "S", "0:00"], "2": ["2", "1", "S", "0:00"], "3": ["3", "2", "S", "0:00"], "4": ["4", "2", "S", "0:00"]}
+    kids = {"1": ["2"], "2": ["3", "4"]}
+    reads = []
+    real = sw.reaped_seconds
+    sw.reaped_seconds = lambda pid: reads.append(str(pid)) or 0.0
+    try:
+        cpu = sw.tree_cpu((rows, kids, ""), 1)
+    finally:
+        sw.reaped_seconds = real
+    return (expect(sorted(reads) == ["1", "2", "3", "4"], f"read {sorted(reads)}, want one read each of 1, 2, 3, 4")
+            + expect(sorted(cpu) == ["1", "2", "3", "4"], f"tree {sorted(cpu)}"))
+
+
+@posix_case
+def a_chain_of_ended_children_advances_the_root_reaped_time():
+    """25g. a process that waited for a child that burned CPU shows more CPU time at its next read, though no child is alive"""
+    sw = load_module()
+    if not os.path.exists("/proc/self/stat"):
+        raise Skip("no /proc")
+    before = sw.reaped_seconds(os.getpid())
+    subprocess.run([PY, "-c", "import time\nend = time.monotonic() + 0.5\nwhile time.monotonic() < end:\n    pass"])
+    return expect(sw.reaped_seconds(os.getpid()) > before, "reaped time did not advance after a busy child ended")
+
+
 def read_with(sw, command):
     """(paths, unresolved) that the module reads from command. A module with no read_named_logs gives its
     paths from named_logs and no unresolved path, so a row fails on what it reads, never on a missing name."""

@@ -563,6 +563,39 @@ def say(*lines):
         enc = sys.stdout.encoding or "ascii"
         print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
 
+# ------------------------------------------------------------------ the stall-watch beat
+@contextlib.contextmanager
+def phase_beat():
+    """While a run is in progress, append a line to $STALL_WATCH_BEAT every $MERGE_HEARTBEAT seconds (default 120), in every phase,
+    so a silent phase (a batch build's scans and waits) draws no false STALL (decision stall-watch). Does nothing when the variable is
+    unset. Cost: one thread a run, one append every 120 s; the thread ends, and is joined, before the run returns."""
+    path = os.environ.get("STALL_WATCH_BEAT")
+    if not path:
+        yield
+        return
+    try:
+        secs = float(os.environ.get("MERGE_HEARTBEAT") or 120)
+    except ValueError:
+        secs = 120
+    secs = secs if secs > 0 else 120
+    t0, done = time.time(), threading.Event()
+
+    def beat():
+        while not done.wait(secs):
+            try:
+                with open(path, "a", encoding="utf-8") as b:
+                    b.write(f"merge: still working, {time.time() - t0:.0f}s\n")
+            except OSError:
+                pass  # a gone beat file must not stop the run
+
+    th = threading.Thread(target=beat, daemon=True)
+    th.start()
+    try:
+        yield
+    finally:
+        done.set()
+        th.join()
+
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
@@ -5520,7 +5553,7 @@ def build_parser():
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
 
-def main(argv, host=None, lock=None, hosts=None):
+def _main(argv, host=None, lock=None, hosts=None):
     p = build_parser()
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
@@ -5791,6 +5824,11 @@ def main(argv, host=None, lock=None, hosts=None):
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
         return 1
+
+def main(argv, host=None, lock=None, hosts=None):
+    with phase_beat():
+        return _main(argv, host, lock, hosts)
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
