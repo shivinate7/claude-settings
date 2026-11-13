@@ -72,10 +72,11 @@ Stop: stall_watch.py --stop
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
   PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
   merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its
-  value (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --body-file f, --subject "Fix", --session lane)
-  skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr merge or close with no
+  value (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --body-file f, --subject "Fix", --comment x,
+  --session lane) skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr merge or close with no
   PR word, only flags and their values, closes any open wait; so does one whose PR word is a $var, an unknown
-  number. A gh pr merge with --auto closes nothing, and an MCP merge with no pullNumber closes none. A wait
+  number. A bin/merge with no PR word, or a $var one, gives no event. A gh pr merge with --auto or
+  --disable-auto closes nothing, and an MCP merge with no pullNumber closes none. A wait
   whose ready call named no number (bare gh pr ready, or a $var) closes on a merge or close of any PR. A
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
   CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
@@ -535,7 +536,7 @@ CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
 CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
-                            "-t", "--subject", "-A", "--author-email", "--match-head-commit"))
+                            "-t", "--subject", "-A", "--author-email", "--match-head-commit", "-c", "--comment"))
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
              "Set the next one after each red CI verdict, wider apart.")
 
@@ -657,7 +658,8 @@ def ci_events(rec):
                     if "--undo" not in gh[1]:
                         events.append(("ready", pr_ref(gh[1])))
                 elif gh:
-                    if "--auto" not in gh[1]:  # --auto only queues the merge: nothing has merged yet
+                    # --auto only queues the merge and --disable-auto drops it: neither has merged anything
+                    if not {"--auto", "--disable-auto"} & set(gh[1]):
                         pr = pr_ref(gh[1])
                         events.append(("merge", pr) if pr else ("mergeany",))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
