@@ -250,6 +250,40 @@ class ProgressClaimTests(unittest.TestCase):
         self.assert_allowed("The check flags `Lane counts-from-rest is nearly done.` as a claim.")
         self.assert_allowed("The check reads the phrase `nearly done` on a lane line.")
 
+    def test_pc_red_a_comment_opener_in_a_code_span_does_not_hide_the_claim(self):
+        # Scanner respects strings: `//`, `#` and `/*` in a code span open no comment, so the claim after the span is read.
+        # A `#` also starts a PR subject, so it is the opener that could hide a claim.
+        # Catches: a comment opener inside a code span cuts off the rest of the line.
+        for opener in ("//", "#", "/*"):
+            line = "Typed `%s` then: Lane x is nearly done." % opener
+            with self.subTest(opener=opener):
+                self.assert_blocked(line, line, RULE)
+        # Control: a phrase held in a code span, with no claim outside it, is no claim.
+        self.assert_allowed("Typed `#` then the phrase `nearly done` on a lane line.")
+
+    def test_pc_red_a_lone_quote_or_backtick_does_not_hide_the_claim(self):
+        # Scanner respects strings: a quote or a backtick with no pair is text, so the claim on its line is still read.
+        # Catches: an unpaired quote or backtick opens a span that hides the rest of the line.
+        for line in ('Lane x is nearly done, per the 9" note.', "Use a lone ` here. Lane x is nearly done."):
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+        # Control: the same lone quote on a line with no claim is no claim.
+        self.assert_allowed('Lane x finished, per the 9" note.')
+
+    def test_pc_red_a_code_span_across_a_line_break_hides_its_text(self):
+        # Scanner respects strings: a code span may break across lines, so its text is code and no claim.
+        # Twin first: the same claim with no span around it blocks.
+        # Catches: a span read one line at a time leaves its text as a claim.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed("Typed `see\n" + LANE_NEAR + "` for the mark.")
+
+    def test_pc_red_a_repo_path_commit_or_item_number_is_no_live_read(self):
+        # Catches: a source that the answered check accepts (a repo path, a commit hash, item <n>) read as a live read.
+        for source in ("in lint/report_guard.py", "at 1a2b3c4d", "from item 143"):
+            line = "Lane counts-from-rest is nearly done %s." % source
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+
     def test_pc_red_a_rewrite_under_stop_hook_active_stays_quiet(self):
         # Same shape as answered-needs-source: the rewrite that follows a block is not refused again.
         self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
