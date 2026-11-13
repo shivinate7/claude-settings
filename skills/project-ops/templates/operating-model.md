@@ -44,7 +44,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each pull-request lane right after its merge, from `merge --idle-lanes --live FILE`. Whoever starts a session answers for archiving it. The coordinator archives the other finished sessions it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` as a background command,
   so one repo's CI wait never holds another repo's hand-offs.
@@ -164,8 +164,8 @@ parent, or miss a message while busy.
 - Send a message at once in two cases: work is blocked (a PR held, a lane stopped), or the owner
   asked for something to be passed on.
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
-  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
-- Triage reads the outbox at each wake, files each item, and removes what it filed.
+  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled. A session's own handoff (`~/.claude/handoffs/<session_id>.md`) stays outside git. A lane's pushed handoff is a second file, `roadmap/outbox/<slug>-handoff.md`.
+- Triage reads the outbox at each wake, files each item, and removes what it filed. Triage keeps every `*-handoff.md` file.
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
 - A session re-reads the roster right before it sends to a standing session.
