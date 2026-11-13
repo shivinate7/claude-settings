@@ -5075,9 +5075,10 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
     - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
       main()" are no claim.
     - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
-      `,`, `;`, `:`), a closing paren `)`, a dash (—) or the line end follows it. So "main's own CI is green" is no
-      claim. "The layout is main's own.", "The layout: main's own.", "The glitch (main's own) predates this lane." and
-      "The glitch — main's own — predates this lane." are claims.
+      `,`, `;`, `:`), a closing paren `)` or bracket `]`, a closing quote, a dash (—, –), a spaced hyphen (`-` or
+      `--`, with spaces) or the line end follows it. So "main's own CI is green" is no claim. "The layout is main's
+      own.", "The layout: main's own.", "The glitch (main's own) predates this lane." and "The glitch — main's own —
+      predates this lane." are claims.
     - A hedge word on the line exempts it: "unmeasured", "unknown" or "not read", as whole words.
     - A cite of a main read on the same line: a path with a line (file.ext:123), origin/main, main@<sha>, `git show
       main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
@@ -5155,18 +5156,41 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The filter is not worse than the main branch.",
          "The filter is not worse than the main branch; see lint/x.py:12."),
     )
-    OWN_CLOSER_PAIRS = (  # (a claim, its cited twin): a closing paren or a dash after "main's own" makes the claim
+    OWN_CLOSER_PAIRS = (  # (a claim, its cited twin): a closer after "main's own" makes the claim
         ("The glitch (main's own) predates this lane.",
          "The glitch (main's own) predates this lane; see lint/report_guard.py:12."),
         ("The glitch — main's own — predates this lane.",
          "The glitch — main's own — predates this lane; see lint/report_guard.py:12."),
+        ("The glitch [main's own] predates this lane.",  # a closing bracket
+         "The glitch [main's own] predates this lane; see lint/report_guard.py:12."),
+        ("The glitch – main's own – predates this lane.",  # an en dash
+         "The glitch – main's own – predates this lane; see lint/report_guard.py:12."),
+        ('The glitch "main\'s own" predates this lane.',  # a straight closing double quote
+         'The glitch "main\'s own" predates this lane; see lint/report_guard.py:12.'),
+        ("The glitch 'main's own' predates this lane.",  # a straight closing single quote
+         "The glitch 'main's own' predates this lane; see lint/report_guard.py:12."),
+        ("The glitch “main's own” predates this lane.",  # a curly closing double quote
+         "The glitch “main's own” predates this lane; see lint/report_guard.py:12."),
+        ("The glitch ‘main’s own’ predates this lane.",  # a curly closing single quote
+         "The glitch ‘main’s own’ predates this lane; see lint/report_guard.py:12."),
+        ("The glitch - main's own - predates this lane.",  # a spaced hyphen
+         "The glitch - main's own - predates this lane; see lint/report_guard.py:12."),
+        ("The glitch -- main's own -- predates this lane.",  # a spaced double hyphen
+         "The glitch -- main's own -- predates this lane; see lint/report_guard.py:12."),
     )
-    OWN_CLOSER_NO_CLAIM = ("The glitch (main's own CI) is green.", "main's own CI is green.")
+    OWN_CLOSER_NO_CLAIM = (
+        "The glitch (main's own CI) is green.", "main's own CI is green.",
+        "The glitch [main's own CI] is green.", 'The glitch "main\'s own CI" is green.',
+    )
     UNDERSCORE_PAIRS = (  # (a claim, its cited twin): underscore emphasis is stripped like `*`
         ("This is _not a regression_.", "This is _not a regression_; see lint/report_guard.py:12."),
         ("__No regression__.", "__No regression__; see lint/report_guard.py:12."),
+        ("The _pre-existing on main_ flag is set.",
+         "The _pre-existing on main_ flag is set; see lint/report_guard.py:12."),
     )
-    SNAKE_NAMES = ("The no_regression_test is green.", "The no_regression_flag is set.")  # no claim: _ joins words
+    # No claim: _ joins words. Stripping every underscore would make "pre_existing on main" a claim ("preexisting").
+    SNAKE_NAMES = ("The no_regression_test is green.", "The no_regression_flag is set.",
+                   "The pre_existing on main flag is set.", "The not_a_regression flag is set.")
     NOUN_TWINS = ("No regression in the layout.", "No regressions in the layout.")  # both refused
     CITES = (
         "The filter is not worse than main; see lint/report_guard.py:123.",
@@ -5372,9 +5396,9 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed("main's own CI is green.")
 
     def test_mc_red_main_s_own_before_a_closer_is_a_claim(self):
-        # Catches: "main's own" before a closing paren or a dash is read as no claim, so a claim in brackets or between
-        # dashes passes. Each refusal's cited twin passes, so the cite is the only difference. "main's own CI" stays no
-        # claim, in brackets or at the start of a line.
+        # Catches: "main's own" before a closing paren, bracket, quote, dash or spaced hyphen is read as no claim, so a
+        # claim in brackets, quotes or between dashes passes. Each refusal's cited twin passes, so the cite is the only
+        # difference. "main's own CI" stays no claim, in brackets, quotes or at the start of a line.
         for line, twin in self.OWN_CLOSER_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
@@ -5393,7 +5417,8 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
 
     def test_mc_red_underscore_emphasis_is_stripped_like_star(self):
         # Catches: underscore emphasis ("_not a regression_", "__No regression__") hides the claim form, as `*` does
-        # not. Each refusal's cited twin passes. A snake_case name keeps its underscores, so it is no claim.
+        # not. Each refusal's cited twin passes. A snake_case name keeps its underscores, so it is no claim, even where
+        # stripping every underscore would make it one ("pre_existing on main").
         for line, twin in self.UNDERSCORE_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
