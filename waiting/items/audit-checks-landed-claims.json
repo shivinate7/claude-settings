@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:18:00Z",
+  "context": "Goal: nothing falls out across a compaction, in any role.\nProblem (goal): the audit each session runs after compaction compares the transcript with the handoff; it never checks that work said to have landed is on main.\nBased on (read): hooks/precompact_handoff_prompt.md on main (the Explore Sonnet audit, marker \"Audit:\"); step coordinator-transcript-reconcile adds a main and PR check for the coordinator only.\nDeparts from: main, where the audit reads transcript and handoff only \u2014 adds a check of each landed or done claim against main, the open PRs and the record branch, for every role.",
+  "home": "step handoff-audit-after-compact",
+  "id": "audit-checks-landed-claims",
+  "kind": "decision",
+  "n": 708,
+  "options": [
+    {
+      "gain": "A claim that work landed when it did not is caught at the next compaction, in every role.",
+      "how": "The audit after each compaction also checks each \"landed\", \"merged\" or \"done\" claim in the handoff against main, the open PRs and the record branch, for every standing session.",
+      "id": "audit-checks-landed",
+      "key": "a",
+      "label": "Yes, check every claim against main (Recommended)",
+      "lose": "Each audit reads git and GitHub too: a few more reads per compaction."
+    },
+    {
+      "gain": "No extra reads.",
+      "how": "The audit checks the transcript against the handoff only; only the coordinator also checks main and the PRs.",
+      "id": "audit-as-is",
+      "key": "b",
+      "label": "Keep the audit as it is",
+      "lose": "A false \"landed\" claim in a runner's or triage's handoff goes unchecked."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "your 11:15 CST question; retrospective 11:17 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Audit: check \"landed\" claims",
+  "shown": [
+    {
+      "id": "audit-checks-landed",
+      "key": "a",
+      "label": "Yes, check every claim against main (Recommended)"
+    },
+    {
+      "id": "audit-as-is",
+      "key": "b",
+      "label": "Keep the audit as it is"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Should the audit after each compaction also check every \"landed\" claim against main?",
+  "why": "You asked whether every session still sends a Sonnet agent to check its transcript against what landed. Today it checks the transcript against the handoff, not against main."
+}
