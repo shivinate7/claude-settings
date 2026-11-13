@@ -5063,19 +5063,29 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
     - `main_claim_problem(text)` in lint/report_guard.py returns a refusal string, or '' when no line is refused. It is
       wired like `answered_problem`: the Stop hook runs it on any turn, landed or not, and joins its refusal with the
       other reasons in one block. A rewrite after a missing-report block is checked once, as in rewrite_problems.
-    - A claim line is a prose line as `_prose_lines` yields it: outside fences and inline code spans, not ending in `?`,
-      with any blockquote marker removed. Any case. The forms: "not a regression" and "no regression" (each counts with
-      no other word on the line), and "not worse than main", "same as main", "main's own", "already on main",
-      "pre-existing on main", "matches main", "regression from main", "worse than main". A hyphen joins no words, so
-      "not-worse-than-main" is no form.
+    - A claim line is a prose line as `_prose_lines` yields it: outside fences, not ending in `?`, with any blockquote
+      marker removed. Any case. Emphasis marks (`*`) are removed before matching, so "**not worse** than main" is the
+      form; the refusal still lists the line as written. The forms: "not a regression", "no regression" or "no
+      regressions" (each counts with no other word on the line), and "not worse than main", "same as main", "main's
+      own", "already on main", "pre-existing on main", "matches main", "regression from main" or "regressions from
+      main", "worse than main". "The" may stand before main ("worse than the main"), and "branch" may follow it ("the
+      main branch"). A hyphen joins no words, so "not-worse-than-main" and "bug-same as main" are no form.
+    - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
+      main()" are no claim.
+    - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
+      `,`, `;`, `:`) or the line end follows it. So "main's own CI is green" is no claim, and "The layout is main's
+      own." and "The layout: main's own." are claims.
     - A hedge word on the line exempts it: "unmeasured", "unknown" or "not read", as whole words.
     - A cite of a main read on the same line: a path with a line (file.ext:123), origin/main, main@<sha>, `git show
       main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
-      screenshot" with a path or URL. A source inside an inline code span counts. The list is closed: a bare "main", a
-      path or file name with no line, a time, an item number and a `#<n>` PR ref are no cite.
-    - Exempt: a question line, a line inside a ``` or ~~~ fence, a claim that sits only inside an inline code span, and
-      the noun "regression test(s)" or "regression suite(s)" (a test count, not a claim). "No regression in the layout."
-      stays refused.
+      screenshot" with a path or URL. A hash is six to forty hex characters with at least one letter a-f, so "20261112"
+      is no hash. A source inside an inline code span counts. The list is closed: a bare "main", a path or file name
+      with no line, a time, an item number and a `#<n>` PR ref are no cite.
+    - Code spans: a span that holds only `main` is read as the word, so "not worse than `main`" is a claim. Any other
+      span is blanked, so a claim that sits only inside one is exempt: "The check refuses `not worse than main`" is a
+      mention.
+    - Exempt: a question line, a line inside a ``` or ~~~ fence, and the noun "regression test(s)", "regression
+      suite(s)" or "regression testing" (a test count, not a claim). "No regression in the layout." stays refused.
     - Scanning: a lone apostrophe or double quote opens no span or phrase, a code span pairs only within its own line,
       and a fence marker opens a fence only at the start of a line.
 
@@ -5117,8 +5127,23 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         "The check refuses `not worse than main` lines.",
         "The check refuses ``not worse than main`` lines.",
     )
-    HYPHENED = ("The branch not-worse-than-main is ready.", "The lane regression-from-main is open.")
-    NOUN_USES = ("No regression tests were added.", "No regression suite was changed.", "Not a regression test.")
+    HYPHENED = ("The branch not-worse-than-main is ready.", "The lane regression-from-main is open.",
+                "bug-same as main")
+    NOUN_USES = ("No regression tests were added.", "No regression suite was changed.", "Not a regression test.",
+                 "No regression testing was needed.")
+    NAME_PAIRS = (  # (no claim, its refused twin): main as a file name or a call is no claim
+        ("The glob matches main.py.", "The glob matches main."),
+        ("The workflow matches main.yml.", "The workflow matches main."),
+        ("The entry point is the same as main() in cli.py.", "The entry point is the same as main."),
+    )
+    OWN_TWINS = ("The layout is main's own.", "The layout: main's own.")  # refused; "main's own CI is green." passes
+    BYPASS_PAIRS = (  # (a claim, its cited twin): a bypass of a claim form is refused, and the cite passes it
+        ("The filter is not worse than `main`.", "The filter is not worse than `main`; see lint/x.py:12."),
+        ("The layout is **not worse** than main.", "The layout is **not worse** than main; see lint/x.py:12."),
+        ("No regressions from main on the filter.", "No regressions from main on the filter; see lint/x.py:12."),
+        ("The filter is not worse than the main branch.",
+         "The filter is not worse than the main branch; see lint/x.py:12."),
+    )
     NOUN_TWIN = "No regression in the layout."
     CITES = (
         "The filter is not worse than main; see lint/report_guard.py:123.",
@@ -5249,8 +5274,10 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(reply)
 
     def test_mc_red_a_hyphen_joined_name_is_no_form(self):
-        # Catches: a hyphen-joined name such as not-worse-than-main is read as the phrase.
+        # Catches: a hyphen-joined name such as not-worse-than-main, or a word after a hyphen (bug-same as main), is
+        # read as the phrase. The bare "same as main" is refused beside it, so the hyphen is the only difference.
         self.assert_blocked(self.CLAIM, self.CLAIM)
+        self.assert_blocked("same as main", "same as main")
         for line in self.HYPHENED:
             with self.subTest(line=line):
                 self.assert_allowed(line)
@@ -5293,13 +5320,43 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         self.assert_allowed("")
 
     def test_mc_red_the_regression_test_noun_is_exempt(self):
-        # Catches: "regression test(s)" or "regression suite(s)" is read as a claim, a false alarm on a test count.
+        # Catches: "regression test(s)", "regression suite(s)" or "regression testing" is read as a claim, a false alarm
+        # on a test count.
         # The refused twin stays first, so the exemption is the only difference between the two lines.
         with self.subTest(line=self.NOUN_TWIN):
             self.assert_blocked(self.NOUN_TWIN, self.NOUN_TWIN)
         for line in self.NOUN_USES:
             with self.subTest(line=line):
                 self.assert_allowed(line)
+
+    def test_mc_red_main_as_a_file_or_call_name_is_no_claim(self):
+        # Catches: "main" before a file extension (main.py) or a call (main()) is read as the branch, a false alarm.
+        for line, twin in self.NAME_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(twin, twin)
+                self.assert_allowed(line)
+
+    def test_mc_red_main_s_own_before_a_noun_is_no_claim(self):
+        # Catches: "main's own" before a noun ("main's own CI") is read as the claim form, a false alarm. The refused
+        # twins show the same form stays a claim as a predicate, or before a clause mark.
+        for twin in self.OWN_TWINS:
+            with self.subTest(twin=twin):
+                self.assert_blocked(twin, twin)
+                self.assert_allowed("main's own CI is green.")
+
+    def test_mc_red_a_bypass_of_a_claim_form_is_refused(self):
+        # Catches: a code span round `main`, emphasis marks, a plural, or "the main branch" hides the claim form. The
+        # cited twin passes, so the cite is the only difference.
+        for line, twin in self.BYPASS_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+
+    def test_mc_red_a_digit_only_string_is_no_hash(self):
+        # Catches: a pure-digit string (a date such as 20261112) is read as a commit hash next to main, so the claim
+        # is cited. The hash with a letter beside it passes.
+        self.assert_blocked("same as main at 20261112", "same as main at 20261112")
+        self.assert_allowed("same as main at 3f9a1c2")
 
     # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
 
