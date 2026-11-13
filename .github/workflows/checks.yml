@@ -566,7 +566,14 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
-        run: python3 lint/check_debt_retire.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA"
+        # Main's copy of the classifier and the modules it imports (lint/, hooks/) runs, so a PR cannot rewrite the check that judges its own close.
+        # The run is more than one lint command, so `ci-job checks --lint` (lane lint, the small base move) never runs it: it reads the PR body, which only CI has (decision debt-close-runs-retire).
+        run: |
+          [ -z "$GITHUB_REPOSITORY" ] || export GH_REPO="$GITHUB_REPOSITORY"  # gh finds the repository from the checkout, and the CLI runs from a scratch folder
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git archive "origin/$BASE_REF" $(git ls-tree --name-only "origin/$BASE_REF" lint hooks) | tar -x -C "$scratch"
+          (cd "$scratch" && python3 lint/check_debt_retire.py --repo "$OLDPWD" --upstream "origin/$BASE_REF" --head "$HEAD_SHA")
 
       - name: Comment narration fixture suite
         run: python3 lint/test_check_comment_narration.py

@@ -41,6 +41,7 @@ INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
+CHILD_SECRETS = ("GH_TOKEN", "GITHUB_TOKEN")  # the CLI reads a cited run with them; a check child gets neither
 RUN_URL_ID = re.compile(r"/actions/runs/(\d+)")
 
 
@@ -131,9 +132,11 @@ def run_span(wt, span, timeout):
     exe = shutil.which(argv[0])
     if not exe:
         return "unknown", "%s is not on PATH, so %s did not run" % (argv[0], span)
+    env = {k: v for k, v in os.environ.items() if k not in CHILD_SECRETS}  # the PR head's test code never reads the CLI's token
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         r = _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
-                                  timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                                  timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return "unknown", "%s ran past %d s" % (span, timeout)
     except OSError as e:
@@ -255,7 +258,7 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
         return None
     if got[0] == "prose":
         got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
-                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
+                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`. A cite added after the CI run needs a new push to count."
                         % (slug, text or "(no Retire line)", CITE, slug))
     else:
         got = got[0], "debt %s: %s" % (slug, got[1])
