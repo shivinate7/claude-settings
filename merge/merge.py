@@ -14,6 +14,8 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
+                          then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -95,7 +97,8 @@
                           no PASS line and no comment. Two heads clash when `git merge-tree` of them conflicts. A clash counts only when both
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
                           names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
-                          (--lint-unknown-ok never lifts it). PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
+                          (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
+                          batch's `batch-NAME`) it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
                           PR. (A PR-list read is one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
@@ -2968,7 +2971,7 @@ def is_unknown_reason(reason):
     """True when a merge_reason answer says unknown (unknown_reason wrote it), not a conflict."""
     return reason.startswith("unknown (")
 
-def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean):
+def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False):
     """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
     `git merge-tree --write-tree`. One PR-list read; for each PR compared, one merge-tree of that PR's head into origin/<base> (merge_reason) and one of
     the two heads. A PR in a stack with this head (one head holds the other) is skipped before any merge-tree: its own base is not the question.
@@ -2976,6 +2979,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
+    `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with."""
     lane = set(LANE_SESSION.findall(body or ""))
@@ -3017,6 +3021,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             unknown.append(f"  #{m}: the clash with this head cannot be counted, because {why}")
         elif why is not None:
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
+        elif integration:
+            reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
         else:
             conflicts.append(named)
     fails = []
@@ -3176,7 +3182,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit():
-            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None)
+            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
@@ -3657,7 +3663,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
         if linted_head and info["head"] != linted_head:  # the lane-lint PASS names linted_head; a push since then was not linted
-            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after its lane-lint was read. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
+            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after {linted_head[:9]} was checked. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -4148,12 +4154,26 @@ def live_review_state(h, rec, live, main):
     state, why = review_state(rec, rec["head"])
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
+def rollup_green(h, n, head):
+    """True only when every ROLLUP_JOB row on `head` is a pass. No row, any other bucket, or a failed read is False, so the caller keeps its own check."""
+    try:
+        rows = h.checks(n, warn=False, sha=head).get(ROLLUP_JOB) or []
+    except Stop:
+        return False
+    return bool(rows) and all(bucket == "pass" for bucket, _ in rows)
+
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
-    the join's own claim push, resumed, moves the head by exactly that."""
+    the join's own claim push, resumed, moves the head by exactly that.
+    The lint is skipped only for a batch integration PR (is_integration_pr) when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
+    merge takes: CI proved that head (rule roles-each-layer-proves-once). A lane PR keeps the need above even on a green rollup, as does a rollup that is
+    absent, red, pending or skipped, green only on another sha, or unreadable."""
+    if is_integration_pr(info) and rollup_green(h, n, info["head"]):
+        say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
+        return
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
@@ -4540,6 +4560,15 @@ BATCH_PREFIX = "batch-"  # CI reads a batch by the head ref `batch-*` (ci-scope.
 def integration_branch(name):
     """The one home of the integration branch form: batch NAME is on `batch-NAME`."""
     return f"{BATCH_PREFIX}{name}"
+
+def is_integration_pr(info):
+    """True when PR `info` (its "branch" and "body") is a batch integration PR: its body holds a freeze block and its branch is the integration branch
+    of that block's batch name. A body parse_freeze cannot read is not one: the PR is read as a lane PR."""
+    try:
+        block = parse_freeze(info["body"])
+    except Stop:
+        return False
+    return bool(block) and info["branch"] == integration_branch(block["name"])
 
 FROZEN_ONLY_DROP = "a frozen set never changes except by --batch-drop"
 

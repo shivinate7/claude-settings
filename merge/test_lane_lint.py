@@ -21,6 +21,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no te
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
@@ -100,6 +101,11 @@ jobs:
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
+
+
+def rollup_skip_lines(text):
+    """-> the `merge:` lines that say the lane lint was skipped. One line carries the words, so a case reads its keywords off one line."""
+    return [line for line in text.splitlines() if line.startswith("merge:") and re.search(r"(?i)\blint\b", line) and re.search(r"(?i)\bskip", line)]
 
 
 class NoLock:
@@ -868,6 +874,9 @@ def branch_of(n):
     return "lane-" + str(n).translate(str.maketrans("0123456789", "abcdefghij"))
 
 
+INTEGRATION_NAME = "cross-measure"  # the batch the integration cases lint; its branch is merge.integration_branch(INTEGRATION_NAME)
+
+
 def names_pr(text, number):
     """True when `text` names PR `number`, as #N or as a bare N. A hex run, such as a commit's sha, never counts."""
     return re.search(r"(?<![0-9a-f])#?%d(?![0-9a-f])" % number, text) is not None
@@ -1504,6 +1513,113 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
         self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
         self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
+
+    # The batch integration PRs (the integration rule). PR 7 is a batch integration PR when its body holds a freeze block and its branch is
+    # merge.integration_branch of that block's name. A clash of its head with a same-lane PR is a report line, not a FAIL; a base conflict stays a FAIL.
+
+    def integration_body(self):
+        """The body of PR 7 on INTEGRATION_NAME: its freeze block with one frozen lane, then the session line a lane PR carries, so PR #8
+        reads as a same-lane PR (same_lane)."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return lane_body(OWN, "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})))
+
+    def assert_integration_scope(self):
+        """Precondition: PR 7's body holds a freeze block for INTEGRATION_NAME, and PR 7 is on that batch's integration branch."""
+        block = merge.parse_freeze(self.host.body)
+        self.assertIsNotNone(block, "precondition: PR 7's body holds no freeze block, so the case probes a lane PR")
+        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: the freeze block names another batch")
+        self.assertEqual(self.host.branch, merge.integration_branch(INTEGRATION_NAME),
+                         "precondition: PR 7 is not on its batch's integration branch, so it is a lane PR")
+
+    def test_an_integration_pr_whose_head_conflicts_with_a_same_lane_pr_passes_and_reports_the_clash(self):
+        """A batch integration PR does not FAIL on a clash with a same-lane PR: the lanes rebase after the merge, so the clash is one report
+        line after the PASS line, naming PR #8 and its file."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.integration_body()
+        self.assert_integration_scope()
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the integration head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a clash of a batch integration PR with a same-lane PR refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        lines = text.splitlines()
+        pass_at = next(i for i, line in enumerate(lines) if line.startswith("PASS:"))
+        report = [line for line in lines[pass_at + 1:] if names_pr(line, 8)]
+        self.assertTrue(report, "no report line after the PASS names the clashing PR #8: " + text)
+        self.assertIn("shared-a.txt", "\n".join(report), "the report line for PR #8 does not name the clashing file: " + text)
+        self.assertRegex("\n".join(report), r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #8 does not say the lanes rebase after the merge: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
+
+    def freeze_only_body(self):
+        """The body batch_build writes on an integration PR: its freeze block and nothing else, so no session line names a lane."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})) + "\n"
+
+    def test_a_batch_integration_pr_with_a_freeze_only_body_passes_and_reports_a_clash_with_pr_8(self):
+        """Why: batch_build writes the integration PR's body as the freeze block alone. Without a session line the lane set is empty, so PR #8 is
+        named by --with, and the clash is still a report line, not a FAIL, since the lanes rebase after the merge. Green on the old code."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.freeze_only_body()
+        self.assert_integration_scope()
+        self.assertIsNone(session_of(self.host.body), "precondition: PR 7's body names a session, so it is not the freeze-only body")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the integration head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "8")
+        self.assertEqual(rc, 0, "a freeze-only batch integration PR with a clash on PR #8 refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        lines = text.splitlines()
+        pass_at = next(i for i, line in enumerate(lines) if line.startswith("PASS:"))
+        report = [line for line in lines[pass_at + 1:] if names_pr(line, 8)]
+        self.assertTrue(report, "no report line after the PASS names the clashing PR #8: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
+        self.assertRegex("\n".join(report), r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #8 does not say the lanes rebase after the merge: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
+
+    def test_an_integration_pr_whose_head_conflicts_with_main_still_fails_and_names_main(self):
+        """The integration rule lifts only a clash with a PR's head. A batch head that conflicts with main still FAILs, names main, and runs no ci-job."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.integration_body()
+        self.assert_integration_scope()
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the integration head merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a batch integration head that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "a batch integration head that conflicts with main printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a base conflict of a batch integration head: " + text)
+
+    def test_a_freeze_block_on_a_branch_that_is_not_its_integration_branch_is_a_lane_pr_and_fails(self):
+        """A freeze block makes a PR an integration PR only on its integration branch. On any other branch it is a lane PR, so a clash
+        with a same-lane PR FAILs. Each branch is a subTest; the second is another batch's branch name."""
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/batch-elsewhere" % head)
+        self.host.body = self.integration_body()
+        self.assertIsNotNone(merge.parse_freeze(self.host.body), "precondition: PR 7's body holds no freeze block, so the case probes no integration rule")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not counted")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        for branch in ("feat", "batch-elsewhere"):
+            with self.subTest(branch=branch):
+                self.host.branch = branch
+                self.assertNotEqual(branch, merge.integration_branch(INTEGRATION_NAME), "precondition: the branch is the integration branch, so the case probes nothing")
+                rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+                self.assertEqual(rc, 1, "a freeze block on branch %s passed as an integration PR: %s" % (branch, text))
+                self.assertTrue(names_pr(text, 8), "the refusal does not name the same-lane PR #8: " + text)
+                self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+                self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
+                self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
+                self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
@@ -2791,13 +2907,119 @@ class LintCheckJoin(tm.CloudSession):
 
     def test_a_rival_claim_commit_on_a_non_record_file_that_lands_after_the_lint_read_is_refused_by_the_lane_lint_head_check(self):
         # relayed_head_holds reads only the Record-claim trailer, so the join's head check and confirm's relayed-yes check both pass this commit.
-        # Only confirm's linted_head check refuses it, so the refusal must be the lane-lint one, not HEAD_MOVED.
+        # Only confirm's linted_head check refuses it, so the refusal must be the linted-head one, not HEAD_MOVED.
         linted = self.head("feat")
-        self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
+        new = self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
         out = self.assert_refused([lint_comment(2, linted)], "a Record-claim commit on a non-record file that lands after the lint read", ran_on=linted, lag={"n": 1, "prior": linted})
-        self.assertIn("after its lane-lint was read", out, "the refusal is not the lane-lint head refusal:\n" + out)
+        moved = [line for line in out.splitlines() if "moved from" in line]
+        self.assertTrue(moved, "the refusal is not the linted-head refusal (no line says the head moved):\n" + out)
+        self.assertIn(linted[:9], moved[0], "the moved-head refusal does not name the linted head:\n" + out)
+        self.assertIn(new[:9], moved[0], "the moved-head refusal does not name the new head:\n" + out)
         self.assertNotIn("since the owner's yes was relayed", out, "the refusal is HEAD_MOVED, so the lane-lint head check did not refuse:\n" + out)
 
+
+    def integration_body(self):
+        """The body batch_build writes on an integration PR: its freeze block alone, so no session line names a lane."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})) + "\n"
+
+    @contextlib.contextmanager
+    def integration_pr(self):
+        """PR #7 is a batch integration PR for the duration of the block: its body is the freeze block (set by the caller in the join's state), and
+        its head branch is the integration branch, which origin holds at feat's head. The gh shim names feat for every head ref, so the Host read
+        of PR #7 is rewritten to the integration branch, as the real pull request names it. Its base is `integ`, not the default branch, so a
+        join claims no record numbers and pushes nothing to the head, and the shim's head (feat) is the head the join sees move."""
+        branch = merge.integration_branch(INTEGRATION_NAME)
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        tm.sh(self.other, "git", "push", "-q", "origin", f"{self.head('feat')}:refs/heads/{branch}")
+        tm.sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        tm.GhHalf.set(self, base="integ")
+        real = merge.Host.pr
+
+        def pr(host, n):
+            info = real(host, n)
+            return {**info, "branch": branch} if n == 7 else info
+
+        with unittest.mock.patch.object(merge.Host, "pr", pr):
+            yield branch
+
+    def test_a_join_with_all_jobs_passed_green_on_the_live_head_skips_the_lane_lint_and_says_so(self):
+        """Why: the join needs a lane-lint PASS only to prove the head was checked. When the all-jobs-passed rollup is green on the exact head
+        the merge takes, CI already proved it on that head (rule roles-each-layer-proves-once), so the join skips the local lane lint and its
+        merge line names the skip, the rollup and the head. The skip is for a batch integration PR only: its clash is report-only, and a lane
+        PR keeps the lint need (the next cases). Red on the old code: lint_check refuses the head for its missing lane-lint PASS, whatever CI shows."""
+        head = self.head("feat")
+        with self.integration_pr():
+            rc, out = self.join([], body=self.integration_body(), checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
+        self.assertEqual(rc, 0, "a join with all-jobs-passed green on the live head was refused for the lane lint, not merged:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a join with all-jobs-passed green on the live head did not merge #7:\n" + out)
+        skips = rollup_skip_lines(out)
+        self.assertTrue(skips, "the merge printed no line that says the lane lint was skipped:\n" + out)
+        self.assertIn(REQUIRED_CHECK, skips[0], "the skip line does not name the all-jobs-passed rollup:\n" + out)
+        self.assertIn("green", skips[0], "the skip line does not say the rollup is green:\n" + out)
+        self.assertIn(head[:9], skips[0], "the skip line does not name the head it skipped:\n" + out)
+
+    def refused_with_rollup(self, name, seq):
+        """The join of an integration PR whose live head shows the rollup in `seq` (no lint PASS): refused, with no skip line."""
+        with self.integration_pr():
+            out = self.assert_refused([], f"all-jobs-passed {name} on the live head of an integration PR", checks_seq=seq, body=self.integration_body())
+        self.assertEqual(rollup_skip_lines(out), [], f"all-jobs-passed {name} on the live head printed a line that says the lane lint was skipped:\n{out}")
+
+    def test_an_integration_pr_with_no_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a rollup that is absent does not clear the lint on an integration PR. The join names `merge --lane-lint 7` and merges and pushes
+        nothing. Red under a mutant that reads every rollup as green: the join then skips the lint and merges."""
+        self.refused_with_rollup("absent", [[("checks", "pass", "")]])
+
+    def test_an_integration_pr_with_a_red_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a red rollup on the live head does not clear the lint on an integration PR. Red under a mutant that reads every rollup as green."""
+        self.refused_with_rollup("red", [[("checks", "pass", ""), (REQUIRED_CHECK, "fail", "https://x/y")]])
+
+    def test_an_integration_pr_with_a_pending_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a pending rollup on the live head does not clear the lint on an integration PR. Red under a mutant that reads every rollup as green."""
+        self.refused_with_rollup("pending", [[("checks", "pass", ""), (REQUIRED_CHECK, "pending", "")]])
+
+    def test_an_integration_pr_with_a_skipped_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a skipped rollup (a draft run skips it) does not clear the lint on an integration PR. Red under a mutant that reads every rollup
+        as green."""
+        self.refused_with_rollup("skipped", [[("checks", "pass", ""), (REQUIRED_CHECK, "skipping", "")]])
+
+    def moved_after_green_skip(self):
+        """A batch integration PR whose head moves after its green-rollup read: -> (rc, out) of its join. The first head read shows the linted head;
+        a claim commit then moves feat, which confirm's read under the lock sees. The claim is a Record-claim commit, so confirm's relayed-yes
+        check passes it and only the linted-head check can refuse the join."""
+        linted = self.head("feat")
+        with self.integration_pr() as branch:
+            moved = self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
+            tm.sh(self.other, "git", "push", "-q", "origin", f"{moved}:refs/heads/{branch}")  # the integration branch is the PR's head: it moves with feat
+            return self.join([], body=self.integration_body(), ran_on=linted, lag={"n": 1, "prior": linted},
+                             checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
+
+    def test_a_head_that_moves_after_a_green_rollup_skip_is_refused_before_the_merge(self):
+        """Why: a skip on a green rollup must still hand the head it read to confirm, which sets `checked` from it. A head that moves before the
+        lock is then refused by the linted-head check, before any merge call. The refusal names the move."""
+        rc, out = self.moved_after_green_skip()
+        self.assertEqual(rc, 1, "a head that moved after a green-rollup skip went ahead:\n" + out)
+        self.assertTrue([l for l in out.splitlines() if "moved from" in l], "the moved head was not refused by the linted-head check:\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a head that moved after a green-rollup skip was merged:\n" + out)
+
+    def test_the_moved_head_refusal_on_a_green_rollup_skip_does_not_say_a_lint_was_read(self):
+        """Why: on the skip path no lane lint was read, so the refusal line that names the moved head must not say a lint was read. The
+        refusal's wording is the builder's fix; this case holds the line to the claim it can make. Red on the code that words the refusal
+        with the lane-lint's read: the refusal line says `after its lane-lint was read` on the skip path."""
+        rc, out = self.moved_after_green_skip()
+        moved = [l for l in out.splitlines() if "moved from" in l]
+        self.assertTrue(moved, "the moved head was not refused by the linted-head check, so the wording is not read:\n" + out)
+        self.assertNotIn("lint was read", moved[0], "the moved-head refusal on a green-rollup skip says a lint was read, though none was:\n" + out)
+
+    def test_a_lane_pr_with_all_jobs_passed_green_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: the skip is for a batch integration PR only. A lane PR's head can clash with a sibling PR, and the lane lint is what counts that
+        clash, so a green rollup on a lane PR's head does not replace it: the join refuses with `no lane-lint PASS`, prints no skip line, and
+        merges and pushes nothing. Red on the code that skips for any PR: the lane PR joins on green CI."""
+        head = self.head("feat")
+        out = self.assert_refused([], "all-jobs-passed green on the live head of a lane PR", checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
+        self.assertIn("no lane-lint PASS", out, "the lane PR's refusal does not say no lane-lint PASS names its head:\n" + out)
+        self.assertIn(head[:9], out, "the lane PR's refusal does not name its live head:\n" + out)
+        self.assertEqual(rollup_skip_lines(out), [], "a lane PR printed a line that says the lane lint was skipped:\n" + out)
 
     def feat_commit(self, files, subject, trailer=None):
         """One commit on feat, pushed from the second clone: `files` maps a path to its text, and `trailer` (a Record-claim line, or None) ends
@@ -2862,6 +3084,28 @@ class LintCheckJoin(tm.CloudSession):
         side = self.side_commit()
         self.feat_commit({"docs/decisions/d906.md": "# D906\n"}, "Claim record numbers", "Record-claim: D-906")
         self.assert_refused([lint_comment(2, side)], "a lint PASS for a head that is not an ancestor of the live head")
+
+
+class LintCheckRollup(unittest.TestCase):
+    """lint_check's rollup read is per head. The host is the real Host, with its check runs read per sha from tm.PullsHost, so no gh shim
+    answers for the live head: one head is green, and the live head has no check run."""
+
+    def test_a_green_rollup_on_an_older_head_does_not_clear_the_live_head(self):
+        """Why: when the head moved, the live head's lane lint is still owed. Green on the old head proves nothing about the new head, which has
+        its own run. The PR is a batch integration PR, the only kind whose green rollup can clear the lint, so the rollup read decides. Red under a
+        mutant that reads every rollup as green: the lint is skipped on the live head."""
+        old, live = "1" * 40, "2" * 40
+        host = tm.PullsHost([], {old: [tm.batch_run(REQUIRED_CHECK, status="completed", conclusion="success")], live: []})
+        self.assertEqual(len(host.pages(f"commits/{old}/check-runs", "check_runs")), 1, "precondition: the older head has no green rollup row, so the case probes nothing")
+        self.assertEqual(host.pages(f"commits/{live}/check-runs", "check_runs"), [], "precondition: the live head has a check run, so the case probes nothing")
+        info = {"head": live, "branch": merge.integration_branch(INTEGRATION_NAME), "base": "main", "created": None,
+                "body": "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: old})) + "\n"}
+        self.assertTrue(merge.is_integration_pr(info), "precondition: the info is a lane PR, so the case probes no rollup")
+        root = tempfile.mkdtemp(prefix="lint-rollup-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        with self.assertRaises(merge.Stop) as cm:
+            merge.lint_check(host, 7, info, root, ".claude/merge.json")
+        self.assertIn("merge --lane-lint 7", str(cm.exception), "a green rollup on an older head cleared the live head's lane lint: %s" % cm.exception)
 
 
 if __name__ == "__main__":
