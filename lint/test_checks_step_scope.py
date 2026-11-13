@@ -7,7 +7,7 @@ step that reads a .md file stays ungated. The step lists are the audit of main's
 Pinned here:
   1. each NO-MD and NAMES-ONLY step carries the gate, exactly.
   2. each MUST-STAY-UNGATED step has no scope output in its `if:`, and each PR-only step keeps its own `if:`.
-  3. the checks job's step names equal main's: no rename, add or drop.
+  3. the checks job's step names equal MAIN_STEPS: no rename, add or drop.
   4. a docs-only pull request leaves `code` false, skips each gated step, and leaves STE lint running.
      The fail-safe flags are not repeated: lint/test_ci_scope.py pins them in Scope.test_push_schedule_and_dispatch_run_everything_even_for_docs,
      Scope.test_unreadable_diff_runs_everything, and Scope.test_merge_change_turns_the_merge_job_on (a .py change sets code).
