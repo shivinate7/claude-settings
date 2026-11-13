@@ -1,0 +1,14 @@
+{
+ "id": "role-text-follows-ruling",
+ "title": "A step that changes a role's duty changes its role text",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": "role-texts-match-rulings",
+ "why": "The role texts went stale because a ruling or step that changes a role's duty never has to touch its role text. Owner's goal: accurate at the fastest speed (owner 13:13 CST Nov 10).",
+ "source": "retrospective 09:33 CST Nov 13",
+ "note": "When a step that names a role (coordinator, triage, batch runner, lane) goes done, its PR also changes that role's text in skills/project-ops, or its body says 'no role text change'. A check reads it. Red first. Builds after role-texts-match-rulings.",
+ "updatedAt": "2026-11-13T09:35:20-06:00"
+}
