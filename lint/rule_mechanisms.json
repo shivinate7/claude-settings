@@ -16,7 +16,7 @@
     "outcomes-stale-decision-protocol": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Naming a stale decision, measuring its statement, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality."
+        "reason": "Naming a stale decision, measuring its statement, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality. The past-ruling check (call_judge item 8) passes a challenge that names the record and brings a new fact and refuses a re-ask with no new fact, and the Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a reply that cites a ruling as law against a measured harm with no challenge."
       }
     },
     "outcomes-tests-are-statements": {

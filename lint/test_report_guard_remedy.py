@@ -571,5 +571,125 @@ for _name in FIXTURES:
     setattr(RemedyReasons, "test_2_%s_still_blocks" % _name, _case_2(_name))
 
 
+# ------------------------------------------------------------------ R39: the relayed question and the record's steps
+#
+# R39 in docs/plans/restart-plan.md. A relayed question (report_guard.past_ruling_problem) judges item 8 with call_judge's
+# text, the one home. The owner-facing refusal holds no steps (decision guard-remedy-not-to-owner, session_wording), so the
+# session's how-to to challenge is the Past-ruling step section of that record: its steps name a challenge that brings a
+# new fact, call the other parts optional, and no step tells the session to withdraw or drop the question. The shape checks
+# below copy those of hooks/test_call_judge.py new_shape_checks, because this file's red run imports the test_call_judge.py
+# of the old commit, where a new name would crash the run instead of failing a check.
+
+CHALLENGE_ASKED = (
+    tcj.APPS_GOAL + "\n"
+    + ("Challenge to %s: its sentence keeps the apps' access as is. The audit counts 14 apps now, not the 9 it was "
+       "written on, so the outcome it protected needs a fresh measure. Proposed fix: remove the 5 unused apps."
+       % tcj.APPS_SLUG))
+PAST_RULING_HEAD = re.compile(r"(?m)^### Past-ruling guard\b")
+
+
+def challenge_shape(text):
+    """(label, passed) for the shape of a challenge in `text`, as hooks/test_call_judge.py new_shape_checks reads it: a
+    challenge that names the record and brings a new fact passes, the other parts are optional, and no step requires the
+    four parts."""
+    t = text.lower()
+    sentences = [s for s in re.split(r"[.\n]", t) if s.strip()]
+    return [
+        ("names the record and brings a new fact",
+         any("challenge" in s and "record" in s and "new fact" in s for s in sentences)),
+        ("calls the outcome and the fix optional",
+         any(re.search(r"\b(optional|never required|not required)\b", s) and ("outcome" in s or "fix" in s)
+             for s in sentences)),
+        ("requires no step to give the four parts", re.search(r"\bthose parts\b|\bfour\b", t) is None),
+    ]
+
+
+def past_ruling_steps():
+    """The text of the record's Past-ruling section, from its heading to the next ## or ### heading, or None."""
+    with open(RECORD, encoding="utf-8") as handle:
+        record = handle.read()
+    head = PAST_RULING_HEAD.search(record)
+    if not head:
+        return None
+    rest = record[head.end():]
+    end = SECTION_END.search(rest)
+    return rest[:end.start()] if end else rest
+
+
+class RelayedChallenge(unittest.TestCase):
+    """A relayed question's item 8 is call_judge's text, and the record's Past-ruling steps carry the challenge."""
+
+    def relayed_prompt(self, asked):
+        """(verdict, prompt): what report_guard.past_ruling_problem returns for `asked`, and the prompt it sends. The model
+        call is a stub that answers ok, so the prompt is read back and no model runs."""
+        import decision_watch
+        sent = []
+
+        def stub(prompt, **_):
+            sent.append(prompt)
+            return {"ok": True}, ""
+
+        real = decision_watch.invoke_model
+        decision_watch.invoke_model = stub
+        try:
+            verdict = RG.past_ruling_problem(asked, tcj.DECISIONS_REPO)
+        finally:
+            decision_watch.invoke_model = real
+        return verdict, (sent[0] if sent else "")
+
+    def test_relayed_question_sends_call_judge_item_8(self):
+        import call_judge
+        _, prompt = self.relayed_prompt(CHALLENGE_ASKED)
+        self.assertNotEqual(prompt, "", "the relayed question made no model call")
+        self.assertIn("8. " + call_judge.PAST_RULING_ITEM, prompt,
+                      "the relayed prompt does not carry call_judge's item 8")
+
+    def test_item_8_names_a_challenge_that_passes(self):
+        import call_judge
+        self.assertIn("challenge", call_judge.PAST_RULING_ITEM.lower(), "item 8 names no challenge that passes")
+
+    def test_past_ruling_steps_name_how_to_challenge(self):
+        section = past_ruling_steps()
+        self.assertIsNotNone(section, "the record has no Past-ruling step section")
+        self.assertIn("challenge", section.lower(), "the Past-ruling steps name no way to challenge a ruling")
+        for label, ok in challenge_shape(section):
+            with self.subTest(element=label):
+                self.assertTrue(ok, "the Past-ruling steps do not say: %s" % label)
+
+    def test_past_ruling_steps_never_say_withdraw(self):
+        section = past_ruling_steps()
+        self.assertIsNotNone(section, "the record has no Past-ruling step section")
+        bad = [line for line in section.splitlines()
+               if STEP_LINE.search(line) and any(p in line.lower() for p in ("withdraw", "drop the question"))]
+        self.assertEqual(bad, [], "a Past-ruling step tells the session to withdraw the question: %r" % bad)
+
+
+QUESTION_FORM_RECORD = os.path.join(HERE, "..", "docs", "decisions", "question-form.md")
+
+
+class ChallengeRecord(unittest.TestCase):
+    """The question-form record's item 8 line says a challenge passes on the record and a new fact, not on four parts."""
+
+    def item_8_line(self):
+        with open(QUESTION_FORM_RECORD, encoding="utf-8") as handle:
+            lines = [line for line in handle.read().splitlines() if "eighth item" in line]
+        return lines[0] if lines else ""
+
+    def test_item_8_line_names_a_challenge_that_brings_a_new_fact(self):
+        line = self.item_8_line().lower()
+        self.assertTrue(line, "the question-form record has no item 8 line")
+        names = re.search(r"\bnames? the record\b|\bnaming the record\b", line)
+        brings = re.search(r"\bbrings? a new fact\b|\bbringing a new fact\b", line)
+        self.assertTrue(names and brings,
+                        "the item 8 line does not say a challenge names the record and brings a new fact: %r" % line[:200])
+
+    def test_item_8_line_drops_the_four_part_bar(self):
+        line = self.item_8_line()
+        self.assertTrue(line, "the question-form record has no item 8 line")
+        self.assertNotIn("four parts", line.lower(), "the item 8 line still requires four parts")
+        self.assertNotIn("A new fact alone is not a pass", line,
+                         "the item 8 line still says a new fact alone is not a pass")
+
+
 if __name__ == "__main__":
     unittest.main()

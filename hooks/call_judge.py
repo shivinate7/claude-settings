@@ -54,6 +54,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -135,8 +136,22 @@ PAST_RULING_ITEM = (
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
-    "a re-ask the ruling allows is fine. This item passes when no list follows. "
+    "a re-ask the ruling allows is fine. A challenge that names the record passes on a new fact alone (rule "
+    "outcomes-stale-decision-protocol). A new fact is a measure or an observed harm that the ruling left "
+    "unweighed. \"Unmeasured\" alone is not a new fact. A restatement of the ruling's own claim is not a new fact. "
+    "The outcome the ruling protected, what protects it now and a proposed fix are optional, never "
+    "required. Refuse a re-ask that brings no new fact. "
+    "A challenge only asks; it never grants anything. "
+    "This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
+)
+# Appended to every past-ruling denial in refuse(), so a reason that came back bare still tells the session how to
+# challenge. It never tells the session to give the question up: a ruling is an argument the owner may be asked to
+# revisit (R39 in docs/plans/restart-plan.md). The challenge is judged as a question and read by no grant reader.
+CHALLENGE_HOW = (
+    "To challenge the ruling, send the question again as a challenge that names the record and brings a new fact: "
+    "a measure, or an observed harm the ruling left unweighed. The outcome it protected, what protects it now and a "
+    "proposed fix are optional. A challenge with the record and a new fact passes this check."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
@@ -150,8 +165,9 @@ JUDGE_ITEMS = (
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
     "8. " + PAST_RULING_ITEM + "\n"
-    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
-    "one line>\"}."
+    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"Item N: <the item that misses, and the fix, "
+    "one line>\"}. The reason opens with `Item N:`, where N is the number of the item that misses (1 to 8); for "
+    "several items, such as `Items 3 and 5:`."
 )
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
@@ -329,13 +345,33 @@ def explore_off_model(tool, args):
     return "sonnet" not in model and "opus" not in model
 
 
+def how_to_challenge(rule):
+    """CHALLENGE_HOW, with a leading space, for a past-ruling refusal; else ''. A spawn refusal imports no question_form."""
+    if rule == SPAWN_RULE:
+        return ""
+    import question_form
+    return " " + CHALLENGE_HOW if rule == question_form.PAST_RULING_RULE else ""
+
+
+# The `Item N:` or `Items 3 and 5:` opener the reply line of JUDGE_ITEMS asks a refusal for; group 1 holds the numbers.
+ITEM_OPENER = re.compile(r"^\W*items?\s+([1-8](?:\s*(?:,|and|&)?\s*[1-8])*)\s*:", re.I)
+
+
+def opener_items(reason):
+    """(the item numbers a refusal reason opens with, the reason after that opener); ((), reason) with no opener."""
+    opener = ITEM_OPENER.match(reason)
+    if not opener:
+        return (), reason
+    return tuple(int(n) for n in re.findall(r"[1-8]", opener.group(1))), reason[opener.end():]
+
+
 def refuse(payload, tool, args, rule, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE) + how_to_challenge(rule)  # both paths carry it
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
@@ -434,7 +470,13 @@ def main():
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
-        cite = question_form.ruling_cite(reason, ids) if units else ""
+        items, after = opener_items(reason) if units else ((), reason)
+        if not items:  # no readable opener: the record the reason opens with or names decides
+            cite = question_form.ruling_cite(reason, ids) if units else ""
+        elif 8 in items:  # item 8, the past-ruling item; a record after the opener that was not shown is bogus
+            cite = question_form.ruling_cite(after, ids) or "item 8"
+        else:  # a form item keeps the question-judge rule id, whatever record it names
+            cite = ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)

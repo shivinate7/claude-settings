@@ -59,6 +59,10 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- A challenge to a past ruling (decision `question-form`, rule outcomes-stale-decision-protocol): item 8 passes a
+  question that names the record and brings a new fact. The outcome protected, what protects it now and a proposed fix
+  are optional. It refuses a re-ask that brings no new fact. A denial tells the session how to challenge, never to
+  withdraw. A challenge is a question, never a grant (see the section "a challenge to a past ruling").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
@@ -1716,6 +1720,439 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a challenge to a past ruling (R39)
+#
+# Decision `question-form` and rule outcomes-stale-decision-protocol: a question that names the record and brings a new
+# fact passes, and the other parts are optional. Item 8 refuses a re-ask that brings no new fact. A denial tells the
+# session how to challenge, never to withdraw. A challenge reaches the owner as a question, never as a grant. The model is
+# mocked, so these cases read the text the code gives the model, the denial text the code appends, and the grant readers
+# that no question path calls.
+CHAL_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings, now the audit counts more of them"
+CHAL_PROBLEM = ("Problem (risk): %s says 'keep the apps' access to claude-settings as is', which protected easy calls "
+                "into the repo; the monthly audit now protects that, and it counts 14 apps where the ruling named 9, "
+                "so the ruling needs your word" % APPS_SLUG)
+CHAL_BASED = ("Based on (measured): the monthly audit counts 14 apps with access, 5 more than the 9 %s was written on"
+              % APPS_SLUG,)
+CHAL_OPTIONS = [
+    {"label": "Remove the 5 apps the audit lists as unused (Recommended)",
+     "description": "Gain: fewer apps can write to the repo, and the calls the ruling protected stay simple. "
+                    "Lose: five apps lose access."},
+    {"label": "Keep the apps as the ruling says",
+     "description": "Gain: nothing changes on the repo. Lose: five apps keep access the audit does not justify."}]
+CHAL_GRANT_OPTIONS = [
+    {"label": "Yes, grant it now (Recommended)",
+     "description": "Gain: a yes here overrides the ruling and grants the change now. Lose: the ruling's protection goes."},
+    {"label": "Hold it",
+     "description": "Gain: the ruling stands. Lose: the five extra apps keep access."}]
+CHAL_CONTEXT = "\n".join((CHAL_GOAL, CHAL_PROBLEM, CHAL_BASED[0], DEPARTS_LINE))
+CHAL_PAGE_TITLE = "Remove the five unused apps?"
+WITHDRAW_PHRASES = ("withdraw", "drop the question", "take the question back", "do not send", "don't send")
+# The grant readers of the owner's own prompts (hooks/override.py, hooks/local_time.py). No question path may call one.
+GRANT_READERS = ("grant_override_ask", "grant_opus_ask", "grant_override", "opus_ask", "override_ask", "opus_scope")
+JUDGE_SOURCES = ("hooks/call_judge.py", "hooks/question_form.py", "hooks/reply_judge.py", "lint/report_guard.py")
+
+
+def sentences_of(text):
+    """The lowercase sentences of `text`, split at a full stop or a line break."""
+    return [s for s in re.split(r"[.\n]", text.lower()) if s.strip()]
+
+
+def refuses_a_bare_re_ask(text):
+    """True when a sentence of `text` refuses a re-ask that brings no new fact."""
+    return any("refuse" in s and "re-ask" in s and "no new fact" in s for s in sentences_of(text))
+
+
+def names_a_new_fact_alone_passes(text):
+    """True when a sentence of `text` says a challenge that names the record passes on a new fact alone. A sentence with a
+    negative word (not, never, no) says the opposite, so it does not count."""
+    return any("new fact alone" in s and "pass" in s and "record" in s and re.search(r"\b(not|never|no)\b", s) is None
+               for s in sentences_of(text))
+
+
+def new_shape_checks(text, subject):
+    """Checks that `text` passes a challenge that names the record and brings a new fact, with the other parts optional,
+    refuses a re-ask that brings no new fact, and no longer says a new fact alone is not a pass. `subject` opens each
+    check's name, so a failure names where the text came from. A failure's detail is one line."""
+    flat = " ".join(text.split())[:300]
+    sentences = sentences_of(text)
+    check("%s: a challenge that names the record and brings a new fact passes" % subject,
+          any("challenge" in s and "pass" in s and "record" in s and "new fact" in s for s in sentences), flat)
+    check("%s: the outcome and the fix are optional, never required" % subject,
+          any(re.search(r"\b(optional|never required|not required)\b", s) and ("outcome" in s or "fix" in s)
+              for s in sentences), flat)
+    check("%s: a re-ask that brings no new fact is refused" % subject, refuses_a_bare_re_ask(text), flat)
+    check("%s: the item no longer says a new fact alone is not a pass" % subject,
+          "a new fact alone is not a pass" not in text.lower(), flat)
+
+
+def item8_of(prompt):
+    return item_text(prompt, 8)
+
+
+def case_past_ruling_item_passes_a_challenge_with_a_new_fact():
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    new_shape_checks(item, "challenge pass: the item")
+
+
+def case_past_ruling_challenge_question_gets_item_8():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_OPTIONS)
+    check("challenge question fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("challenge question: one model call, and the box reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("challenge question: the prompt holds item 8", item8 != "", detail(r))
+    new_shape_checks(item8, "challenge question: item 8")
+
+
+def case_past_ruling_challenge_page_item_gets_item_8():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title=CHAL_PAGE_TITLE, context=CHAL_CONTEXT)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "chal1", "data": item})
+    check("challenge page fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", item, doc_id="chal1", cwd=DECISIONS_REPO), answer=ALLOW)
+    check("challenge page item: one model call", len(r.calls) == 1, detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("challenge page item: the prompt holds item 8", item8 != "", detail(r))
+    new_shape_checks(item8, "challenge page item: item 8")
+
+
+NEW_FACT_PROBLEM = ("Problem (risk): the record decisions/%s says 'keep the apps' access to claude-settings as is'; the "
+                    "monthly audit counts 14 apps with access, where the ruling was written on 9, so the ruling needs your word"
+                    % APPS_SLUG)
+NEW_FACT_BASED = ("Based on (measured): the monthly audit counts 14 apps with access, 5 more than the 9 the ruling was "
+                  "written on",)
+
+
+def case_new_fact_alone_question_gets_item_8():
+    # A challenge that names the record and brings a new fact, with no outcome and no fix: one model call and no refusal
+    # (a green control). The item 8 the model reads is the one the new-fact checks read.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=NEW_FACT_PROBLEM, based=NEW_FACT_BASED, options=CHAL_OPTIONS)
+    check("new fact alone fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("new fact alone question: one model call, and it reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("new fact alone question: the prompt holds item 8", item8 != "", detail(r))
+    check("new fact alone question: item 8 passes a new fact alone with the record named",
+          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
+    new_shape_checks(item8, "new fact alone question: item 8")
+
+
+def case_new_fact_is_one_the_ruling_left_unweighed():
+    # A new fact is a measure or an observed harm the ruling left unweighed. A measure of what the ruling claims, a
+    # restatement of its claim, or the word unmeasured alone is not a new fact. The check reads the item's sentences.
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    flat = " ".join(item.split())
+    sentences = sentences_of(item)
+    check("unweighed: the item says a measure is a new fact only when the ruling left it unweighed",
+          re.search(r"\bmeasure\b(?:(?!\bclaim)[^.])*\bunweighed\b", flat.lower()) is not None, flat[:300])
+    check("unweighed: the item says the word unmeasured alone is not a new fact",
+          any("unmeasured" in s and "new fact" in s and re.search(r"\b(not|never|no)\b", s) for s in sentences),
+          flat[:300])
+    check("unweighed: the item says a restatement of the ruling's own claim is not a new fact",
+          any(("restat" in s or "own claim" in s) and "new fact" in s and re.search(r"\b(not|never|no)\b", s)
+              for s in sentences), flat[:300])
+
+
+def case_past_ruling_item_refuses_a_bare_re_ask():
+    # A re-ask that brings no new fact is refused by a sentence of the item. The refusal no longer points at a four-part
+    # challenge: "such a challenge" named that bar.
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    flat = " ".join(item.split())[:300]
+    check("bare re-ask: the item refuses a re-ask that brings no new fact", refuses_a_bare_re_ask(item), flat)
+    check("bare re-ask: the item no longer refuses a re-ask as not such a challenge",
+          "such a challenge" not in item.lower(), flat)
+
+
+def case_past_ruling_item_never_says_withdraw():
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    hits = [p for p in WITHDRAW_PHRASES if p in item.lower()]
+    check("withdraw: the item never tells the session to withdraw the question", not hits, hits)
+
+
+def case_past_ruling_tail_names_the_record_and_the_new_fact():
+    # The how-to-challenge tail of a past-ruling denial: name the record, bring the new fact, the other parts optional, and
+    # never withdraw. Read from call_judge.CHALLENGE_HOW, never copied here.
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    lower = tail.lower()
+    check("tail: names the record and brings the new fact", "record" in lower and "new fact" in lower, tail[:300])
+    check("tail: the other parts are optional", re.search(r"\b(optional|never required|not required)\b", lower) is not None,
+          tail[:300])
+    hits = [p for p in WITHDRAW_PHRASES if p in lower]
+    check("tail: never tells the session to withdraw the question", not hits, hits)
+
+
+def case_bare_re_ask_is_refused_beside_a_passing_challenge():
+    # R39 item 4: the same question with no new fact is refused. Its denial tells the session how to challenge, and never
+    # to withdraw. A challenge that brings a new fact, asked beside it, reaches the owner with no denial.
+    bare_box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=bare_box, cwd=DECISIONS_REPO), answer=refuse)
+    reason = r.reason().lower()
+    check("re-ask with no new fact: the mocked refusal reaches the denial under the past-ruling rule",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith("past-ruling"), detail(r))
+    check("re-ask with no new fact: the denial tells the session how to challenge", "challenge" in reason, reason[:300])
+    check("re-ask with no new fact: the denial names the record and a new fact", "record" in reason and "new fact" in reason,
+          reason[:300])
+    check("re-ask with no new fact: the denial says the other parts are optional",
+          re.search(r"\b(optional|never required|not required)\b", reason) is not None, reason[:300])
+    hits = [p for p in WITHDRAW_PHRASES if p in reason]
+    check("re-ask with no new fact: the denial never tells the session to withdraw the question", not hits, hits)
+    challenge = run_hook(question_input(box=good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED,
+                                                     options=CHAL_OPTIONS), cwd=DECISIONS_REPO), answer=ALLOW)
+    check("challenge beside it: judged once, reaches the owner with no denial",
+          len(challenge.calls) == 1 and challenge.code == 0 and challenge.out == "", detail(challenge))
+
+
+def case_past_ruling_item_says_a_challenge_never_grants():
+    # The item's own sentence that a challenge only asks. Deleting that sentence turns this check red: the behavioural
+    # case below stays green on such a mutant, because the hook's grant readers never run on a question either way.
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    says = any("challenge" in s and "grant" in s and re.search(r"\b(never|not)\b", s) is not None
+               for s in sentences_of(item))
+    check("grant sentence: the item says a challenge never grants anything", says, " ".join(item.split())[:300])
+
+
+def case_challenge_question_writes_no_grant():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_GRANT_OPTIONS)
+    check("grant text fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("grant text: the challenge is judged once and reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    grants = os.path.join(r.base, "config", "state", "override")
+    check("grant text: no override is written", not os.path.isdir(grants) or not os.listdir(grants), detail(r))
+    check("grant text: guard.log holds no override line", "\toverride\t" not in r.log, r.log[-200:])
+
+
+def case_challenge_text_never_lifts_a_refusal():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_GRANT_OPTIONS)
+    bare = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=bare)
+    check("grant text: a refusal stands when the challenge carries grant words",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("grant text: no lift line for the refusal, and no override line at all",
+          not lifted_log(r, question_form.PAST_RULING_RULE) and "\toverride\t" not in r.log, r.log[-200:])
+
+
+def case_new_fact_alone_passes_with_the_record():
+    # Item 8 passes a challenge that names the record and brings a new fact alone. The four-part bar is gone, so the item
+    # must not still require four parts.
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    flat = " ".join(item.split())[:300]
+    check("new fact alone: the item says a challenge that names the record passes on a new fact alone",
+          names_a_new_fact_alone_passes(item), flat)
+    check("new fact alone: the item no longer requires a challenge with four parts",
+          not any("only" in s and "four" in s for s in sentences_of(item)), flat)
+
+
+# A plain-words explain question: its item 5 refusal names a record the repo holds, and it keeps the question judge's
+# rule id. Only a past-ruling refusal gets the challenge tail.
+EXPLAIN_SLUG = "question-form"
+EXPLAIN_RULING = "Owner, 2026-10-20: every question names its ids and explains each one in plain words."
+EXPLAIN_REPO = make_repo("explain", decisions={EXPLAIN_SLUG: EXPLAIN_RULING})
+EXPLAIN_REASON = "Item 5: explain decisions/%s in plain words." % EXPLAIN_SLUG
+
+
+def case_plain_words_explain_keeps_its_rule_id():
+    import question_form  # the one form check (hooks/question_form.py)
+    question_rule = load_file_module(HOOK, "call_judge_under_test").QUESTION_RULE
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    check("explain fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=EXPLAIN_REPO), answer=json.dumps({"ok": False, "reason": EXPLAIN_REASON}))
+    reason = r.reason()
+    check("explain: the denial keeps the question-judge rule id, not the past-ruling one",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_rule + ":"), detail(r))
+    check("explain: the guard.log deny line names the question-judge rule",
+          ("\tdeny\t%s\t" % question_rule) in r.log, r.log[-200:])
+    check("explain: the denial carries no past-ruling challenge tail", "challenge" not in reason.lower(), reason[:300])
+
+
+# ------------------------------------------------------------------ a denial keeps its id, its date and the tail (R39)
+#
+# A refusal names the ruling's id and date, then may say not to re-ask it. The denial keeps both, and the how-to-challenge
+# tail follows. The tail is read from call_judge.CHALLENGE_HOW, never copied here.
+APPS_DATE = "2026-10-28"  # the date APPS_RULING carries
+
+
+def case_past_ruling_denial_keeps_its_id_and_date():
+    import question_form  # the one form check (hooks/question_form.py)
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s (%s): already decided; do not re-ask it."
+                         % (APPS_SLUG, APPS_DATE)})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=refuse)
+    reason = r.reason()
+    check("denial with a give-up sentence: the rule stays past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_form.PAST_RULING_RULE),
+          detail(r))
+    check("denial with a give-up sentence: the denial keeps the ruling's id", "decisions/%s" % APPS_SLUG in reason,
+          detail(r))
+    check("denial with a give-up sentence: the denial keeps the ruling's date", APPS_DATE in reason, detail(r))
+    check("denial with a give-up sentence: the how-to-challenge tail follows", tail != "" and tail in reason, detail(r))
+
+
+def case_past_ruling_denial_plain_reason_keeps_its_id_and_date():
+    # Green control: a refusal with no give-up words keeps its id and date on the current code. The loss in the case
+    # above comes from the give-up sentence alone.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s (%s): already decided by the keep-the-apps ruling."
+                         % (APPS_SLUG, APPS_DATE)})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=refuse)
+    reason = r.reason()
+    check("denial without a give-up sentence: keeps the ruling's id and date",
+          "decisions/%s" % APPS_SLUG in reason and APPS_DATE in reason, detail(r))
+
+
+# ------------------------------------------------------------------ a replayed missed re-ask (R39)
+#
+# Replay of a missed re-ask: a question asked whether the shared-tree guard should read git inside Python strings, and a
+# page item had already ruled to keep that gap (page item 366 option b, Nov 7). The ruling is held as a decision record.
+# The re-ask carries no challenge and no Based on (ruling) line, and the mocked model refuses it.
+REPLAY_SLUG = "shared-tree-guard-git-strings"
+REPLAY_DATE = "2026-11-07"
+REPLAY_RULING = ("Owner, %s, page item 366 option b: keep the gap. The shared-tree guard does not read git inside a "
+                 "Python string. Marker gap-5e21." % REPLAY_DATE)
+REPLAY_REPO = make_repo("shared-tree-gap", decisions={REPLAY_SLUG: REPLAY_RULING})
+REPLAY_TITLE = "Widen the shared-tree guard to read git inside Python strings?"
+REPLAY_CONTEXT = "\n".join((
+    "Goal: decide whether the shared-tree guard reads git inside Python strings",
+    "Problem (risk): a git call inside a Python string gets past the guard, so the guard's reach needs your word",
+    "Based on (read): the guard reads git calls in shell lines only",
+    DEPARTS_LINE))
+REPLAY_CHALLENGE_CONTEXT = "\n".join((
+    "Goal: decide whether the shared-tree guard reads git inside Python strings, given the ruling to keep the gap",
+    "Problem (risk): the record decisions/%s says \"keep the gap\" for git inside a Python string, and the ruling needs "
+    "your word" % REPLAY_SLUG,
+    "Based on (measured): the gap was re-asked 4 times in 5 days, and the guard missed 3 of 30 sampled git calls held "
+    "in Python strings",
+    DEPARTS_LINE))
+REPLAY_OPTIONS = [
+    {"key": "a", "label": "Widen the guard", "gain": "Git inside a Python string is checked.",
+     "lose": "The guard grows a parser."},
+    {"key": "b", "label": "Keep the gap", "gain": "The guard stays small.",
+     "lose": "Git inside a Python string is not checked."}]
+
+
+def case_past_ruling_replay_item_532():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title=REPLAY_TITLE, context=REPLAY_CONTEXT, options=REPLAY_OPTIONS)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c532", "data": item})
+    check("replay 532 fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s (%s): already decided, keep the gap; do not re-ask it."
+                         % (REPLAY_SLUG, REPLAY_DATE)})
+    r = run_hook(page_input("set", item, doc_id="c532", cwd=REPLAY_REPO), answer=refuse)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("replay 532: the ruling reaches the candidate list, in one model call",
+          len(r.calls) == 1 and REPLAY_SLUG in without_call(prompt, item) and REPLAY_RULING in without_call(prompt, item),
+          detail(r))
+    check("replay 532: item 8 refuses a re-ask that brings no new fact", refuses_a_bare_re_ask(item8_of(prompt)),
+          item8_of(prompt)[:300])
+    reason = r.reason()
+    check("replay 532: the write is denied under the past-ruling rule",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_form.PAST_RULING_RULE),
+          detail(r))
+    check("replay 532: the denial names the ruling's id", "decisions/%s" % REPLAY_SLUG in reason, detail(r))
+    check("replay 532: the denial names the ruling's date", REPLAY_DATE in reason, detail(r))
+    check("replay 532: the denial carries the how-to-challenge tail",
+          load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW in reason, detail(r))
+    check("replay 532: the guard.log deny line names the past-ruling rule",
+          "\tdeny\t%s\t" % question_form.PAST_RULING_RULE in r.log, r.log[-200:])
+
+
+def case_past_ruling_replay_item_532_challenge_passes():
+    # Green control, beside the replay: the same question with the record named and a new fact, and no outcome and no fix.
+    # One model call and no refusal. The item 8 the model reads passes a new fact alone, which the new-fact checks read.
+    import question_form  # the one form check (hooks/question_form.py)
+    challenge = good_page_item(title=REPLAY_TITLE, context=REPLAY_CHALLENGE_CONTEXT, options=REPLAY_OPTIONS)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c532c", "data": challenge})
+    check("replay 532 challenge fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", challenge, doc_id="c532c", cwd=REPLAY_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("replay 532 challenge: one model call, and it reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    check("replay 532 challenge: the ruling reaches the candidate list",
+          REPLAY_SLUG in without_call(prompt, challenge) and REPLAY_RULING in without_call(prompt, challenge), detail(r))
+    item8 = item8_of(prompt)
+    check("replay 532 challenge: item 8 passes a new fact alone with the record named",
+          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
+    new_shape_checks(item8, "replay 532 challenge: item 8")
+
+
+# ------------------------------------------------------------------ the Item N opener of a refusal (R39)
+#
+# A refusal that opens on `Item N:` names the form item it misses, and keeps its own rule id. A reason that opens on
+# item 8 names a listed record, so it stays a past-ruling refusal with the tail.
+
+
+def case_item_8_reason_stays_past_ruling():
+    # Green control: a reason that opens on item 8 and names a listed record is still a past-ruling refusal, with the tail.
+    import question_form  # the one form check (hooks/question_form.py)
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    refuse = json.dumps({"ok": False, "reason": "Item 8: decisions/%s (%s): already decided." % (APPS_SLUG, APPS_DATE)})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=refuse)
+    reason = r.reason()
+    check("item 8 reason: the denial stays under the past-ruling rule",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_form.PAST_RULING_RULE),
+          detail(r))
+    check("item 8 reason: the past-ruling tail follows", tail != "" and tail in reason, detail(r))
+
+
+def case_item_n_reasons_keep_their_own_rule_id():
+    # An Item 5 reason, and an `Items 3 and 5:` reason, name a shown record and are form items. Each keeps the
+    # question-judge rule id and carries no past-ruling tail. The `Items 3 and 5:` reason is the one a form-item
+    # reading that matches only `Item N` misses.
+    question_rule = load_file_module(HOOK, "call_judge_under_test").QUESTION_RULE
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    for label, text in (("Item 5", EXPLAIN_REASON),
+                        ("Items 3 and 5", "Items 3 and 5: explain decisions/%s in plain words." % EXPLAIN_SLUG)):
+        r = run_hook(question_input(box=box, cwd=EXPLAIN_REPO), answer=json.dumps({"ok": False, "reason": text}))
+        reason = r.reason()
+        check("%s reason: the denial keeps the question-judge rule id" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_rule + ":"), detail(r))
+        check("%s reason: the denial carries no past-ruling tail" % label, tail != "" and tail not in reason, detail(r))
+
+
+def case_reply_spec_asks_an_item_n_opening():
+    # The reply line of the judge items, which the question and the page prompts both carry, asks a refusal to open
+    # with `Item N:`. The hook reads that opener to tell a form item from a past ruling.
+    items = load_file_module(HOOK, "call_judge_under_test").JUDGE_ITEMS
+    spec = items[items.find("Reply JSON only"):] if "Reply JSON only" in items else ""
+    check("reply spec: the reason opens with 'Item N:'", "Item N:" in spec, " ".join(spec.split())[:300])
+
+
+def called_names(path):
+    """The names of each call in the Python file at `path`, read with the ast parser, so a name in a string or a
+    comment is no call."""
+    import ast
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                names.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                names.add(node.func.attr)
+    return names
+
+
+def case_judges_call_no_grant_reader():
+    for rel in JUDGE_SOURCES:
+        hit = sorted(called_names(os.path.join(REPO, *rel.split("/"))) & set(GRANT_READERS))
+        check("no grant: %s calls no grant reader" % rel, not hit, hit)
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1741,7 +2178,19 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_past_ruling_item_passes_a_challenge_with_a_new_fact, case_past_ruling_challenge_question_gets_item_8,
+                 case_past_ruling_challenge_page_item_gets_item_8, case_past_ruling_item_refuses_a_bare_re_ask,
+                 case_past_ruling_item_never_says_withdraw, case_bare_re_ask_is_refused_beside_a_passing_challenge,
+                 case_past_ruling_item_says_a_challenge_never_grants, case_challenge_question_writes_no_grant,
+                 case_challenge_text_never_lifts_a_refusal, case_new_fact_alone_passes_with_the_record,
+                 case_new_fact_is_one_the_ruling_left_unweighed,
+                 case_plain_words_explain_keeps_its_rule_id, case_judges_call_no_grant_reader,
+                 case_past_ruling_denial_keeps_its_id_and_date, case_past_ruling_denial_plain_reason_keeps_its_id_and_date,
+                 case_past_ruling_replay_item_532, case_past_ruling_replay_item_532_challenge_passes,
+                 case_item_8_reason_stays_past_ruling, case_item_n_reasons_keep_their_own_rule_id,
+                 case_reply_spec_asks_an_item_n_opening,
+                 case_past_ruling_tail_names_the_record_and_the_new_fact, case_new_fact_alone_question_gets_item_8):
         try:
             case()
         except Exception as exc:

@@ -137,7 +137,7 @@ Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reac
 
 Text: `RELAY_RULE_REASON`. Rule `past-ruling` (a question that a past ruling already settles).
 
-- Drop the question if the ruling settles it.
+- To challenge the ruling, send the question again. A challenge names the record and brings a new fact. The new fact is a measure or an observed harm the ruling left unweighed. The outcome the ruling protected, what protects it now and a proposed fix are optional. Item 8 passes such a challenge (decision `question-form`, rule `outcomes-stale-decision-protocol`). A challenge is a question: only the owner's yes grants anything.
 - Or add a `Based on (ruling): <id>` line that names that ruling and says why the owner is asked again. Use the id that the refusal names. The refusal gives the id, its date, and what it decides. When the judge's reason holds wording that tells the session what to do (`session_wording`), the refusal keeps the verdict and the id and drops that text.
 
 ### Unvetted guard (any reply with a question)
