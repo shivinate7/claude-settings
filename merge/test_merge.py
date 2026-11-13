@@ -9560,10 +9560,11 @@ class RecordsScope(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def delete_edit_setup(self, head_files=None, generated=False, trailer=False):
+    def delete_edit_setup(self, head_files=None, generated=False, trailer=False, lane_heals=False):
         """The page is in the base. The head edits it: by hand, or, when generated, to the generator's own output for the head's
         debts (head_files are written first, so the generator sees them). Then main deletes it. trailer adds the Drops-lines
-        trailer on the head's commit, as the heal's merge commit carries it."""
+        trailer on the head's commit. lane_heals: main deletes it before the run, so the lane heals against that drop (lane_heal)
+        before the confirm; otherwise main deletes it during the run's first head read."""
         self.kinds_off()
         self.on("main", {"docs/records.md": "records\n- base\n"}, "a hand-written page")
         o = self.other
@@ -9578,7 +9579,25 @@ class RecordsScope(RecordsEnv):
             put_lf(os.path.join(o, "docs", "records.md"), "records\n- head\n")
         msg = ["-m", "the head edits the page"] + (["-m", "Drops-lines: docs/records.md -- a generated page, rebuilt by the generator"] if trailer else [])
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", *msg); sh(o, "git", "push", "-q", "origin", "feat")
-        self.in_wait(lambda: self.drop("main", "docs/records.md", "main drops the page"))
+        if lane_heals:
+            self.drop("main", "docs/records.md", "main drops the page")  # before the run: the lane merges this drop, then the confirm reads it
+        else:
+            self.in_wait(lambda: self.drop("main", "docs/records.md", "main drops the page"))
+
+    def lane_heal(self):
+        """The lane's heal, before the confirm: merge origin/main into feat, rebuild the page, commit the merge and push it. main deleted
+        the page and the head edited it, so the merge conflicts on the page alone, and the generator's rebuild resolves it. -> the pushed sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        merged = subprocess.run(["git", "merge", "--no-edit", "origin/main"], cwd=o, capture_output=True, text=True)
+        self.assertNotEqual(merged.returncode, 0, "the merge of main did not conflict, so there is no page to heal")  # scope before subject
+        self.assertEqual(sh(o, "git", "diff", "--name-only", "--diff-filter=U"), "docs/records.md", "the merge conflicts on more than the page")
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "Merge main into feat")
+        sh(o, "git", "merge-base", "--is-ancestor", "origin/main", "HEAD")  # the head holds main's tip, so the confirm's merge reads it clean
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
 
     def test_a_page_deleted_on_main_and_edited_on_the_head_with_no_records_stops_the_merge(self):
         # The generator writes nothing here, and the head's page has no marker, so the head's page would be committed to main.
@@ -9596,23 +9615,27 @@ class RecordsScope(RecordsEnv):
         self.assertEqual(self.worktrees(), 1)
 
     def test_a_generated_page_deleted_on_main_with_records_rebuilds_and_merges(self):
-        # The control: a root with a record folder. The head's page is the generator's output for its debt, and main
-        # deletes the page. The rebuild should go on. The silent-undo check refuses the head's commit: it drops a base line and
-        # carries no Drops-lines trailer. The heal's merge commit carries one, and the next case shows it goes through with it.
-        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True)
+        # The control: a root with a record folder. The head's page is the generator's output for its debt, and main deletes
+        # the page. The lane merges main and rebuilds the page before the confirm, so the confirm reads a head that holds main's
+        # tip and merges it. The silent-undo check allows the page: it is the generator's output for the head, with no trailer needed.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, lane_heals=True)
+        healed = self.lane_heal()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        self.assertEqual(self.rev("origin/main^2"), healed, "the confirm did not merge the head the lane pushed")
 
     def test_a_generated_page_with_a_drops_trailer_deleted_on_main_with_records_rebuilds_and_merges(self):
-        # Green control, as the heal's merge commit does it: the same head commit with the Drops-lines trailer. The page is generated,
-        # so the drop of a base line is excused, and the merge goes on.
-        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True)
+        # The twin: the same head with the Drops-lines trailer on its commit. The page is generated, so the drop of a base line
+        # is excused, and the lane's heal and the merge go on as in the control.
+        self.delete_edit_setup({"debts/gap-one.md": DEBT_TEXT}, generated=True, trailer=True, lane_heals=True)
+        healed = self.lane_heal()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertIn("gap-one", self.show("main", "docs/records.md"))
+        self.assertEqual(self.rev("origin/main^2"), healed, "the confirm did not merge the head the lane pushed")
 
     def test_a_root_with_hooks_and_no_settings_merges(self):
         # The generator must not stop on "hook_catalog: cannot read settings.json": the records page can be rebuilt.
