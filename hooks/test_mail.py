@@ -229,6 +229,12 @@ def fixture_env(home, extra=None):
 
 def git(cwd, args, env, input_text=None, binary=False):
     """binary=True returns bytes. Text mode turns a lone CR into a newline, and the CRLF cases look for that CR."""
+    if isinstance(input_text, bytes):
+        # Text-mode stdin on Windows turns each LF into CRLF, so a CRLF fixture would reach git as CR CR LF.
+        result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text, capture_output=True, timeout=60)
+        if result.returncode:
+            raise RuntimeError("fixture git %s failed: %s" % (args[0], result.stderr.decode("utf-8", "replace").strip()))
+        return result.stdout if binary else result.stdout.decode("utf-8", "replace")
     mode = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text,
                             capture_output=True, timeout=60, **mode)
@@ -291,7 +297,8 @@ class Store:
             git(self.path, ["read-tree", "--empty"], env)
         else:
             git(self.path, ["read-tree", tip], env)
-        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=text).strip()
+        data = text.encode("utf-8") if "\r" in text else text
+        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=data).strip()
         git(self.path, ["update-index", "--add", "--cacheinfo",
                         "100644,%s,mail/%s/%s.md" % (blob, addr, mid)], env)
         tree = git(self.path, ["write-tree"], env).strip()
