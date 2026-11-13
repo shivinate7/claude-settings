@@ -9,8 +9,14 @@
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. Cost, only for a failed group that has
 # such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
-# a failed read is unknown. The same failed-run rule as Host.base_state. Needs python3 (stdlib only) and
-# clear_rule.py beside this file; no checkout. Env: BRANCH, SELF
+# a failed read is unknown. The same failed-run rule as Host.base_state.
+# A failed run that nothing clears is also lifted by a live revert on BRANCH (revert_rule.py, the one home of the rule, which merge.py
+# reads too; the same rule as Host.base_state's revert clear): a commit reachable from BRANCH, other than the run's headSha, with
+# `This reverts commit <headSha>` (40 hex) in its message, not net-reverted (an odd chain is a revert). Each red run needs its own
+# revert. It never clears a cancelled run (never alarms anyway), a re-run in flight (not listed: --status completed) or a failed read (unknown).
+# Cost, per failed run with no clearing run: one search/commits read, and one compare read per revert link; none when every run is green.
+# Commit search sees the default branch only, so a BRANCH that is not the default finds no revert: it alarms and never clears.
+# Needs python3 (stdlib only) and clear_rule.py and revert_rule.py beside this file; no checkout. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
 set -o pipefail
@@ -58,7 +64,16 @@ workflow_of() {
   gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=$sha" -H "Accept: application/vnd.github.raw+json" > "$cache/wf-$1" || { rm -f "$cache/wf-$1"; return 1; }
   [ -s "$cache/wf-$1" ] || { rm -f "$cache/wf-$1"; return 1; }
 }
-# Red = failure, timed_out or startup_failure, unless a clearing run N exists (see the header).
+# True (0) when a live revert on the branch lifts the failed run with head sha $1 (revert_rule.py); a failed read is unknown. One read set per head.
+reverted() {
+  [ -n "$1" ] || return 1
+  if [ ! -f "$cache/rev-$1" ]; then
+    python3 "$here/revert_rule.py" --repo "$GITHUB_REPOSITORY" --branch "$branch" --head "$1"
+    echo $? > "$cache/rev-$1"
+  fi
+  case "$(cat "$cache/rev-$1")" in 0) return 0 ;; 1) return 1 ;; *) unknown "revert_rule.py could not read the reverts" ;; esac
+}
+# Red = failure, timed_out or startup_failure, unless a clearing run N exists or a live revert lifts it (see the header).
 red=""
 failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")' <<<"$newest")" \
   || unknown "could not read the runs"
@@ -82,6 +97,7 @@ while IFS= read -r r; do
       done <<<"$cands"
     fi
   fi
+  reverted "$(jq -r '.headSha // empty' <<<"$r")" && continue
   red+="$(jq -r '"- \(.workflowName) (\(.conclusion)): \(.url)"' <<<"$r")"$'\n'
 done <<<"$failed"
 red="${red%$'\n'}"

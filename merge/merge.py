@@ -196,6 +196,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+sys.path.append(os.path.dirname(ALARM_EVENTS))  # actions/ci-alarm, beside events.json: the failed-run clear and the revert rule live there, and the CI alarm calls them too
+from revert_rule import REVERT_LINE, revert_map, net_reverted  # noqa: E402  the one home of the revert rule (actions/ci-alarm/revert_rule.py); the CI alarm reads it through the API
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -2564,8 +2566,6 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-REVERT_LINE = re.compile(r"This reverts commit ([0-9a-f]{40})")
-
 def read_log(wt, *args):
     """-> [(sha, parents, body)] from `git log <args>`, newest first. A read that fails raises ValueError."""
     c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", *args)
@@ -2573,23 +2573,6 @@ def read_log(wt, *args):
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
     recs = (rec.strip().split("\x01", 2) for rec in out.split("\0"))
     return [tuple(parts) for parts in recs if len(parts) == 3]
-
-def revert_map(recs):
-    """-> {commit: the commit that reverts it}, from the "This reverts commit <sha>." lines of `recs` (read_log's rows)."""
-    undone = {}
-    for h, _, body in recs:
-        for r in REVERT_LINE.findall(body):
-            undone[r] = h
-    return undone
-
-def net_reverted(undone, h):
-    """True when commit `h` is undone: a revert of it, and a revert of that revert, so an odd chain is a revert. The one home of the net-revert read,
-    which read_lanes and Host.base_state both call."""
-    n, seen = 0, set()
-    while h in undone and h not in seen:
-        seen.add(h)
-        h, n = undone[h], n + 1
-    return n % 2 == 1
 
 def read_lanes(wt, base_ref, sha):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
