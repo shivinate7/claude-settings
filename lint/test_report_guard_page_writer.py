@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""The pick guard finds this repo's page writer in the repo's own layout extras (roadmap step pick-guard-cloud-writer).
+"""The pick guard finds this repo's page writer by its triage tag, not by a fixed session id (the roadmap step
+page-writer-key-follows-tag; its cases are in lint/test_page_writer_tag.py).
 
 A cloud session that asks a question has no meta/page read in its transcript. question_problem then takes the page
-writer from the repo's extras key `page-writer` (layout.page_writer_key). Without that key, every question this repo's
-sessions send to the page writer is refused as "the page writer is not known to this session", though the send was
-delivered in the same turn.
+writer from the one session tagged cs-build:triage for this repo, read from the transcript's get_session and
+list_sessions records. The extras key `page-writer` is not the writer.
 
 These cases read this repo's real .claude/layout-extras.json, at the root the guard finds from lint/ (report_guard's
 repo_root). No fixture stands in for it. The run folder, the send and transcript helpers come from
-lint/test_report_guard.py, the one home. Run with:
+lint/test_report_guard.py, and the triage listing from lint/test_page_writer_tag.py, the one homes. Run with:
 
     python3 lint/test_report_guard_page_writer.py -v
 """
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -24,9 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the run folder, the send and transcript helpers, the guard (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the triage session's own record and remote id (one home)
+import test_page_writer_tag as ptt  # noqa: E402  the triage listings and the triage ids (one home)
 
-layout = trg.RG.layout  # the module the guard reads the writer key from, so this file reads the same key
-SESSION_ID = re.compile(r"session_[A-Za-z0-9]+")
+layout = trg.RG.layout  # the module the guard reads the extras key from, so this file reads the same key
 OTHER_ID = "session_notthewriter"  # a delivered send's target that is not this repo's page writer
 PARENT_ID = "session_parent1"  # the parent id a triage session's own record names
 REMOTE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"  # set only in a lane; unset here, so the check reads an owner-facing session
@@ -41,7 +40,7 @@ def tearDownModule():
 
 
 class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
-    """This repo's extras file names a page writer that the pick check can match a same-turn send against. The send
+    """This repo's triage tag names a page writer that the pick check can match a same-turn send against. The send
     is SameTurnWriter.send, and the check is question_problem, the function the Stop hook calls."""
 
     PICK = trg.QuestionReachesPageTests.PICK
@@ -76,21 +75,30 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         refusal, _note = trg.RG.question_problem(records, records[1:], self.reply(self.PICK), hook)
         return refusal
 
-    def test_rw_key_names_a_session_id_for_this_repo(self):
-        # Catches: this repo's layout-extras.json with no page-writer key, or with a blank, parent-alias or non-session
-        # value, so the pick check has no writer to match a same-turn send against.
-        _root, writer = self.repo_and_writer()
-        self.assertIsNotNone(writer, "this repo's layout-extras.json names no usable page-writer key")
-        self.assertNotIn(writer, layout.PARENT_TARGETS, "the page-writer key names a parent alias, which reaches no one")
-        self.assertIsNotNone(SESSION_ID.fullmatch(writer), "the page-writer key is not a session id: %r" % writer)
+    def triage_listing(self, root, session_id):
+        """A list_sessions result that names `session_id` as this repo's triage session. The repo name is checked first."""
+        repo = layout.repo_name(root)
+        self.assertIsNotNone(repo, "scope: this checkout has no GitHub origin, so no cs-repo tag can name it")
+        return ptt.list_sessions_result([(session_id, ptt.triage_tags(repo))])
 
-    def test_rw_green_send_to_the_key_writer_is_not_refused(self):
-        # Catches: a delivered send to this repo's page writer refused as "the page writer is not known to this
-        # session" when the repo's extras file names that writer, the cloud false alarm.
-        root, writer = self.repo_and_writer()
-        self.assertIsNotNone(writer, "this repo's layout-extras.json names no page writer, so there is no id to send to")
-        refusal = self.question_refusal(root, self.send(session_id=writer, result=self.DELIVERED))
-        self.assertEqual(refusal, "", "a delivered send to this repo's page writer was refused: %s" % refusal)
+    def test_rw_pick_check_does_not_read_the_fixed_key(self):
+        # Catches: the pick check taking the writer from this repo's extras key, the fixed id that goes stale when
+        # triage gets a new session. The triage listing alone must carry the writer, so the key is not read.
+        root, _writer = self.repo_and_writer()
+        acts = [*self.triage_listing(root, ptt.NEW), *self.send(session_id=ptt.NEW, result=self.DELIVERED)]
+        with mock.patch.object(layout, "page_writer_key", return_value=None) as key_read:
+            refusal = self.question_refusal(root, acts)
+        self.assertEqual(key_read.call_count, 0,
+                         "the pick check read the fixed page-writer key %d time(s)" % key_read.call_count)
+        self.assertEqual(refusal, "", "a delivered send to the triage session was refused with the key unread: %s" % refusal)
+
+    def test_rw_green_send_to_the_tagged_writer_is_not_refused(self):
+        # Catches: a delivered send to this repo's triage session refused as "the page writer is not known to this
+        # session", the cloud false alarm, when no meta/page read names the writer.
+        root, _writer = self.repo_and_writer()
+        acts = [*self.triage_listing(root, ptt.NEW), *self.send(session_id=ptt.NEW, result=self.DELIVERED)]
+        refusal = self.question_refusal(root, acts)
+        self.assertEqual(refusal, "", "a delivered send to this repo's triage session was refused: %s" % refusal)
 
     def test_rw_red_send_to_another_id_still_blocks(self):
         # Catches: the writer key passing any delivered send, so a question sent to a session that is not the page
