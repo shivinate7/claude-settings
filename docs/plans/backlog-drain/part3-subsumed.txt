@@ -260,7 +260,7 @@
 2943 coordinator-session-board A done 19 n=10 subsumed_by=
 2944 brief-reads-owner-rulings C norecord 20 n=5 subsumed_by=
 2945 install-hash-skips-pycache A nolint 22 n=6 subsumed_by=
-2946 subagent-handback-skipped C norecord 19 n=2 subsumed_by=
+2946 agent-handback-skipped C norecord 19 n=2 subsumed_by=
 2948 express-pass-owner-quotes B open 19 n=9 subsumed_by=
 2949 convert-time-pinned-tests C norecord 20 n=2 subsumed_by=
 2950 orchestrator-mixed-merge-refused C norecord 19 n=13 subsumed_by=

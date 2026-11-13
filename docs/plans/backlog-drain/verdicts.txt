@@ -262,7 +262,7 @@ PR	verdict	kind	step	head	reason
 2943	keep	code	coordinator-session-board	98e847bbd507	needs main merged, 3 hunks, union of keys
 2944	fresh	-	brief-reads-owner-rulings	a86c4ea32e9f	fresh: runner 10 (under 48 h, not reviewed)
 2945	fresh	-	install-hash-skips-pycache	950ab7b0df5d	fresh: runner 10 (under 48 h, not reviewed)
-2946	fresh	-	subagent-handback-skipped	fc321cea4017	fresh: runner 10 (under 48 h, not reviewed)
+2946	fresh	-	agent-handback-skipped	fc321cea4017	fresh: runner 10 (under 48 h, not reviewed)
 2948	keep	code	express-pass-owner-quotes	205747a52cac	merge tool part 2 (--quotes-matched, kind_misfits decision check, retires debt ruling-pr-kind-unchecked); 2 trivial conflicts (merge.py review_round_model line, test_merge.py import); also supersedes 2727 (fan-prose-debts close stands)
 2949	keep	code	convert-time-pinned-tests	0a0186050db7	growth ratio; merges clean
 2950	fresh	-	orchestrator-mixed-merge-refused	dad2aa8aa8f8	fresh: runner 10 (under 48 h, not reviewed)
