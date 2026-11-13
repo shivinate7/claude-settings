@@ -101,7 +101,7 @@ add("coordinator-scope: a cloud coordinator's Agent spawn of a claude-code-guide
     tool="Agent", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="claude-code-guide",
     prompt="Explain the setting.")
 # The rule reads the Task tool name as well as Agent (SPAWN_TOOLS in hooks/guard.py): a Task spawn of a builder is
-# refused, and a Task spawn of a listed type is allowed. The refused one is the pin: an allow alone passes on main too.
+# refused, and a Task spawn of a listed type is allowed. The refused one is the pin: an allow alone passes whether or not the rule reads Task.
 add("coordinator-scope: a cloud coordinator's Task spawn of a Plan agent is allowed", "allow",
     tool="Task", cwd=NOGIT, env=COORD_ENV, config=COORD_CFG, subagent_type="Plan", prompt="Plan the change.")
 add("coordinator-scope: a cloud coordinator's Task spawn of a builder is refused", "deny", COORD_RULE,
