@@ -316,3 +316,11 @@ List: main's build row "draft PRs over 12 h with no live lane", from live file r
 - Held, named by an open step, a non-archived session's tags, or an open page item: 51.
 - Held, held in the second pass by an idle, unarchived lane: 8 (#2941, #2946, #2948, #2953, #2954, #2955, #2991, #3006).
 - Closed at 06:22 CST, with no closing comment and no branch delete: #2998, plus runner 10's own stale batch drafts #2995 (batch 108) and #3016 (batch 110), which runner 10 released at 06:18 CST.
+
+## Fifth pass, after batch 127 (#3122, merged 74d53b377 07:15 CST Nov 13)
+
+List: main's build row "draft PRs over 12 h with no live lane", from live file readAt 2026-11-13T07:17:29-06:00 (403 open PRs, 1948 sessions): 348 listed. 13 were not on an earlier pass's list and not on runner 10's hold list (06:18 CST list plus its 07:16 CST changes: #3116, #3121, #3126, #2978, #3123).
+- Held, the guard-cull family of step guard-false-alarm-cull, doing under live lane session_013NEJL1zDA7EF7cqDccCwhe: 10 (#3028-#3037).
+- Held, #3038 (the relayed-grant PR; the R18 point 5 settings edit waits on it) and #3040 (its review debts).
+- Held, branch starts with open step notes-fix-reverify-small: #3039.
+- Closed: none.
