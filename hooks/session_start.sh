@@ -232,12 +232,12 @@ if [ -n "$gm_out" ]; then
     gm_note=""
     [ -n "$gm_unref" ] && gm_note="; $gm_ref is unrefreshed"
     if [ "$gm_head1" != "$gm_ref1" ]; then
-      gm_differs=1
+      [ "$gm_ref" = "origin/$gm_default" ] && gm_differs=1
       printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
     if [ "$gm_head2" != "$gm_ref2" ]; then
-      gm_differs=1
+      [ "$gm_ref" = "origin/$gm_default" ] && gm_differs=1
       printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
@@ -300,8 +300,9 @@ EOF
             # A tracked directory that origin replaces with a file goes with whatever ignored files it holds, so that
             # case holds too. Literal pathspecs, so a name holding * or ? cannot match some other tracked path. No
             # comment, case or quote sits inside the substitution below: bash 3.2 (macOS sh) mis-parses those there.
-            ff_hit=$(cd "$toplevel" 2>/dev/null && git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" 2>/dev/null \
-              | tr '\0' '\n' | while IFS= read -r ff_p; do
+            ff_raw=$(cd "$toplevel" 2>/dev/null && { git diff -z --no-renames --name-only --diff-filter=A HEAD "origin/$gm_default" -- 2>/dev/null; printf 'rc=%s\n' "$?"; } | tr '\0' '\n')
+            ff_rc=$(printf '%s\n' "$ff_raw" | tail -n 1)
+            ff_hit=$(printf '%s\n' "$ff_raw" | sed '$d' | while IFS= read -r ff_p; do
                   ff_in=""
                   if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then ff_in="$ff_p"; fi
                   ff_d="$ff_p"
@@ -316,7 +317,11 @@ EOF
                       && [ -n "$(git --literal-pathspecs ls-files -z -o -i --exclude-standard -- "$ff_in" 2>/dev/null | tr '\0' '\n')" ]; then echo 1; break; fi
                   fi
                 done)
-            [ -n "$ff_hit" ] && ff_reason="an ignored file is in the way"
+            if [ "$ff_rc" != "rc=0" ]; then
+              ff_reason="the added paths could not be read"
+            elif [ -n "$ff_hit" ]; then
+              ff_reason="an ignored file is in the way"
+            fi
           fi
         fi
       fi
