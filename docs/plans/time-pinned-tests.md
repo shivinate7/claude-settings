@@ -25,7 +25,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 | joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, 0, each wait-cap judged |
 | mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, 0, each wait-cap judged |
 | ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, 0, each wait-cap judged |
-| claude-settings | `fccff95e` | 32 | 8 | 0 (allowed) | 346 (allowed) | 386 | 98 | 1 | 0, 0, 0, hang guards allowed (P5) |
+| claude-settings | `fccff95e` | 32 | 8 | 0 (hang guards) | 346 (hang guards; allowed only if each cap sits well above the run, P5) | 386 | 98 | 1 | 0, 0, no target for hang guards |
 
 - home: not scanned. Its lane is held.
 - claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at `fccff95e` (2026-11-13) the finder lists 386 here (sleep 32, elapsed-assert 8, test-cap 0, wait-cap 346, in 98 files, 1 unread: `merge/test_merge.py`, over 1 MB). Its test-cap and wait-cap are hang guards, allowed by P5 when each cap sits well above the run; the lane checks that. That list goes to a later claude-settings lane. Pending: finder keep marker, PR 2975.
