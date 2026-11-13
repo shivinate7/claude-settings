@@ -17,7 +17,7 @@ Part 1, the brief tool `brief_from_step`, on this head. It builds one fixed temp
 - Size, at head 075aa670d2. Words, and characters with chars/4 as an estimate:
   - Template: 821 words before the rewrite (pre-rewrite head of PR 3237, commit efc87b0c0; 5121 characters, estimate 1280). Now 439 words (2703 characters, estimate 676).
   - Probe: `git show efc87b0c0:` on the project-ops brief template, then `wc -w` -> 821. The current template, `wc -w` -> 439.
-  - Tool output for five steps: brief-matches-rulings (brief matching) 497 words, 3061 characters (estimate 765); brief-from-step (the brief tool itself) 572 words, 3470 characters (estimate 868); lane-brief-template-gaps (template gaps) 477 words, 3004 characters (estimate 751); close-replaced-at-open (close at open) 558 words, 3442 characters (estimate 861); past-ruling-on-send (the page-question judge) 471 words, 2895 characters (estimate 724).
+  - Tool output for five steps: brief-matches-rulings (brief matching) 497 words, 3061 characters (estimate 765); brief-from-step (the brief tool itself) 572 words, 3470 characters (estimate 868). Also lane-brief-template-gaps (template gaps) 477 words, 3004 characters (estimate 751). Also close-replaced-at-open (close at open) 558 words, 3442 characters (estimate 861); past-ruling-on-send (the page-question judge) 471 words, 2895 characters (estimate 724).
   - Probe: the tool run on each slug against the main checkout, then `wc -w` and `wc -c` on each output.
   - Carried from the earlier measure, not re-measured at this head: the same rulings ran 821-915 words before the rewrite, and hand-written lane briefs run 198-484 words.
 
@@ -44,7 +44,7 @@ Covered by earlier steps. Their homes stay as they are.
 Cost:
 
 - Part 1: git reads of the step and the store. No model call, no file written, no process kept.
-- Part 2: one model call per judged brief, plus git reads of the store (one list, one batch read). No file, no timer.
+- Part 2: one model call per judged brief, plus git reads of the store (one list, one batch read). No file, no timer (part 2 fact, not on this head).
 
 Known limits:
 
@@ -52,7 +52,7 @@ Known limits:
 - A mistyped step slug reads "skipped" and exits 0 (part 2).
 - A step with no topic field prints a topic placeholder that the coordinator fills.
 - The spawn guard (the guard that checks agent spawns) reads a marker on any line of a brief, outside fenced text, not only the first. So the block's own listing can lift a spawn refusal.
-- The builder commits of both parts edited the CI workflow wiring (test config).
+- The builder commits of both parts edited the CI workflow wiring (test config; part 2 fact, not on this head).
 
 Incidents:
 
