@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-13T16:49:00Z",
+  "context": "Goal: accurate work landed at the fastest speed.\nProblem (goal): the drain competes with new lanes for batches, and at today's pace of about 4 lanes per batch and 1.1 h between batches, the 108 done PRs alone need about 27 batches.\nBased on (measured): merged batches from 00:00 CST Nov 12 to 10:48 CST Nov 13: 22 batches, 85 lanes, the largest 20 lanes; median gap 1.1 h on both days.\nBased on (ruling): R66 backlog-drain (your 10:45 CST pick a on item 691); R55 and R65, express lanes go first.\nDeparts from: main, where new lanes start whenever a step is ready and batches take whatever is handed in \u2014 adds a pause on new lanes except the drain, express and CI fixes until the shared number has no unsorted row, with drain batches taking every done keep row that passes lane lint.",
+  "home": "step backlog-drain",
+  "id": "drain-first-big-batches",
+  "kind": "decision",
+  "n": 693,
+  "options": [
+    {
+      "gain": "The backlog clears in a few big batches, and nothing new adds to it.",
+      "how": "Pause new lanes except the drain lanes, express merge-flow fixes and CI fixes until the shared number (402 at 10:42 CST) has no unsorted row. Runner 10 builds drain batches of every done keep row that passes lane lint; a red lane drops and goes back to the drain. CI and review stay as they are: speed comes from batch size, not skipped checks.",
+      "id": "drain-first",
+      "key": "a",
+      "label": "Drain first, big batches (recommended)",
+      "lose": "New steps wait, and a big batch drops more lanes on a red run."
+    },
+    {
+      "gain": "No step waits.",
+      "how": "New lanes go on, and drain rows share the normal batches.",
+      "id": "drain-beside",
+      "key": "b",
+      "label": "Drain beside new work",
+      "lose": "The drain runs at about 4 lanes per batch, and new lanes can repeat the backlog's work."
+    },
+    {
+      "gain": "The fastest drain.",
+      "how": "No lane at all but the drain, express lanes included.",
+      "id": "hard-freeze",
+      "key": "c",
+      "label": "Hard freeze",
+      "lose": "Merge-flow and CI fixes wait too, and those are what speed the drain."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 10:49 CST Nov 13; your 10:48 CST question",
+  "repo": "shivinate7/claude-settings",
+  "short": "Drain first with big batches",
+  "shown": [
+    {
+      "id": "drain-first",
+      "key": "a",
+      "label": "Drain first, big batches (recommended)"
+    },
+    {
+      "id": "drain-beside",
+      "key": "b",
+      "label": "Drain beside new work"
+    },
+    {
+      "id": "hard-freeze",
+      "key": "c",
+      "label": "Hard freeze"
+    }
+  ],
+  "stands": false,
+  "status": "open",
+  "title": "Drain first: pause new lanes and run bigger batches until the backlog is sorted?",
+  "why": "You asked at 10:48 CST whether new lanes are halted and how the drain gets done quickly without problems. The coordinator is holding non-drain starts until you answer."
+}
