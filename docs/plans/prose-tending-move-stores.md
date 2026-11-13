@@ -2,7 +2,7 @@
 
 Owner ruling R28 step 3 (plan restart-plan, section 3.14). Decision `prose-tending-contract`. Dies when every
 store below is `live` or retired. Audit read 2026-11-12 16:00 CST over main plus origin/roadmap by an Explore agent;
-counts are from that read of main at commit d2cce9ec (a later main moves them by a few per cent; recount before relying on one), timings are local (Linux), CI cost is unmeasured.
+counts are from that read of main at commit d2cce9ec. A later main moves them by a few per cent, so recount before relying on one. Timings are local (Linux). CI cost is unmeasured.
 
 Rule: a store moves when a lane next touches it (R28). This plan names each store's gap, so that lane knows what to build.
 
