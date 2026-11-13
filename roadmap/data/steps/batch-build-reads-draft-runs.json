@@ -1,0 +1,14 @@
+{
+ "id": "batch-build-reads-draft-runs",
+ "title": "Batch build refuses a lane whose draft head's touched-tests run is red",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Batches 123 (#3115) and 124 (#3118) each went red on one lane's Windows-only failure, at about 40 min per run. #2978 touches hooks/test_session_start.py, and its own draft run of lane-touched-tests ('run (windows-latest)', run 43415910423) failed at 05:23 CST Nov 13 on its head. So the proof existed before the batch, but nothing read it. merge --lane-lint --touched-tests runs touched tests on Linux only and never reads the draft's Windows or macOS run.",
+ "source": "retrospective 05:27 CST Nov 13 (sighting for lane-lint-windows-guard-slice); coordinator 04:59 CST; triage read #2978's check runs 05:27 CST",
+ "note": "Fix: merge --batch-build (and --lane-lint on a PR number) reads the lane-touched-tests run on the lane's live head. A failed Windows or macOS job refuses with the job link. A run that is unfinished or missing reads unknown, and --lint-unknown-ok lifts it. Covers non-guard suites, which lane-lint-windows-guard-slice (guard tests only) does not. Check, red first: a fixture lane with a failed touched-tests run is refused. Cost: one check-runs read per lane per build. Not yet read: whether #3079's draft run also went red.",
+ "updatedAt": "2026-11-13T05:27:58-06:00"
+}
