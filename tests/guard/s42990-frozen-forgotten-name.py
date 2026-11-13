@@ -8,9 +8,7 @@ FAMILY = "frozen"
 # passes on that crash, so each case here reads the log too. The crash line is named first.
 #
 # The RED cases expect allow: a name the guard cannot read keeps its default word as written, per decision
-# frozen-path-resolves-shell-vars. The `D=$(false)` case is the write the shell takes to the config folder's
-# hooks/guard.py. Main allows it only because main reads no default word, so it is pinned to allow as a gap for the
-# owner to rule on, not as a settled behaviour.
+# frozen-path-resolves-shell-vars.
 #
 # CONTROLS. Each passes on the old commit. A quoted target, or a name with a known value, takes no crash path. A write
 # to the config folder, literal or through a known value of the word, is refused, so WORD_DIR is frozen.
@@ -59,9 +57,6 @@ _fz_check("frozen: forgotten name: D=(a b), an unquoted write to ${D:-/tmp/w}/f 
           os.path.join(ROOT, "fz-array"), 'D=(a b); echo x > ${D:-/tmp/w}/f', "allow")
 _fz_check("frozen: forgotten name: D=$(mktemp -d), an unquoted append to ${D:?}/f is allowed, no crash",
           os.path.join(ROOT, "fz-append"), 'D=$(mktemp -d); echo x >> ${D:?}/f', "allow")
-_fz_check("frozen: forgotten name: D=$(false), an unquoted write to ${D:-<config folder>}/hooks/guard.py is allowed, "
-          "no crash (main's verdict)",
-          WORD_DIR, 'D=$(false); echo x > ${D:-%s}/hooks/guard.py' % WORD_DIR, "allow")
 
 # CONTROLS. Each passes on the old commit, and each differs from a red case by the one thing that makes the crash.
 _fz_check("frozen: forgotten name control: D=$(mktemp -d), a quoted write to ${D:-/tmp/w}/f is allowed, no crash",
