@@ -5,7 +5,7 @@
                                                               2 unvetted
 
 The rulings are the store lint/ruled_store.py reads (the one reader). The step is the brief's `Lane brief: <slug>` line
-(first line, or after a leading `Grant:` line) or its `cs-step:<slug>` tag. Every entry of that step, open or closed,
+(first line, or after a leading `Grant:` line, with guard_merge's markdown lead) or its `cs-step:<slug>` tag. Every entry of that step, open or closed,
 goes to one model call with the brief. A flag needs a reason that names a shown ruling by its `ruled:<id>`; any other
 reason, an unreadable or absent store, or a model error is "unvetted", never "ok" and never "flag".
 
@@ -22,26 +22,23 @@ for _dir in (HERE, os.path.join(HERE, "..", "lint")):
     if _dir not in sys.path:
         sys.path.append(_dir)
 
-LANE_BRIEF = re.compile(r"^Lane brief:[ \t]*([\w.-]*\w)", re.I)
-CS_STEP = re.compile(r"(?<![\w-])cs-step:([\w.-]*\w)")
-GRANT_LINE = re.compile(r"^Grant:", re.I)
 RULED_ID = re.compile(r"(?<![\w/-])ruled:[\w.-]*\w")
 CODES = {"ok": 0, "skipped": 0, "flag": 1, "unvetted": 2}
 
 
 def step_of(brief):
-    """The step slug a brief names, or None. The Lane brief line counts only as the first line, or after leading Grant
-    lines: a copy of it lower in the text is prose."""
-    for line in brief.splitlines():
-        if not line.strip():
-            continue
-        if GRANT_LINE.match(line.strip()):
-            continue
-        found = LANE_BRIEF.match(line.strip())
-        if found:
-            return found.group(1)
-        break
-    tag = CS_STEP.search(brief)
+    """The step slug a brief names, or None. The brief header is read as hooks/guard_merge.py reads it (its markdown
+    lead too): the Lane brief line counts only as the first line, or the first after a Grant line. A cs-step tag
+    anywhere is the fallback. guard_merge is imported here, not at the top: it is the one home of the header form."""
+    import guard_merge
+    from shared_names import LANE_GRANT_MARKER
+    lines = [line.strip() for line in brief.splitlines() if line.strip()]
+    if lines and lines[0].startswith(LANE_GRANT_MARKER):
+        lines = lines[1:]
+    found = guard_merge._BRIEF_LINE.match(lines[0]) if lines else None
+    if found:
+        return found.group("step")
+    tag = re.search(r"(?<![\w-])%s([\w.-]*\w)" % re.escape(guard_merge.ARCHIVE_STEP_PREFIX), brief)
     return tag.group(1) if tag else None
 
 
@@ -121,8 +118,13 @@ def main(argv):
     parser.add_argument("brief_file")
     parser.add_argument("--repo", default=os.getcwd())
     args = parser.parse_args(argv)
-    with open(args.brief_file, encoding="utf-8") as handle:
-        verdict, why = judge(handle.read(), args.repo)
+    try:
+        with open(args.brief_file, encoding="utf-8") as handle:
+            brief = handle.read()
+    except (OSError, ValueError) as exc:  # a missing file, a folder, bytes that are not UTF-8
+        verdict, why = "unvetted", "the brief file could not be read: " + " ".join(str(exc).split())
+    else:
+        verdict, why = judge(brief, args.repo)
     print("%s: %s" % (verdict, why))
     return CODES[verdict]
 
