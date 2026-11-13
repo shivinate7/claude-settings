@@ -458,6 +458,49 @@ class RetireRun(Case):
         self.assertEqual(self.retired_of(body, None), {})
 
 
+class WrongRefusalNote(Case):
+    """A prose debt closes on a notes line: the same change adds a line to docs/debts/notes.md that carries the debt's slug
+    and names decision cull-guard-wrong-refusals (owner ruling 2026-11-10 15:04 CST). A runnable Retire is judged by its test."""
+
+    DECISION = "cull-guard-wrong-refusals"
+    NOTE = "- d-prose: a wrong refusal by a guard. Decision: %s.\n" % DECISION
+
+    def close_with_note(self, note=None):
+        """Delete the prose debt d-prose; with `note`, add that line to docs/debts/notes.md in the same change."""
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write=self.notes(note) if note else {}, rm=["docs/debts/d-prose.md"])
+
+    def notes(self, line):
+        """The write of docs/debts/notes.md: the base's notes with `line` added at the end."""
+        return {"docs/debts/notes.md": BASE["docs/debts/notes.md"] + line}
+
+    def test_n1_a_prose_debt_closed_with_a_notes_line_naming_its_slug_and_the_decision_passes(self):
+        self.close_with_note()
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "scope: the close with no notes line is not refused as prose")
+        self.change(write=self.notes(self.NOTE))
+        self.assertEqual(pairs(self.findings()), [], "a prose close whose notes line carries its slug and names the decision was refused")
+
+    def test_n2_the_same_close_with_no_notes_line_is_refused_as_prose(self):
+        self.close_with_note()
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a prose close with no notes line was not refused as prose")
+
+    def test_n3_a_notes_line_with_the_slug_but_no_decision_name_is_refused(self):
+        self.close_with_note("- d-prose: a wrong refusal by a guard.\n")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line that names no decision cleared the prose close")
+
+    def test_n4_a_notes_line_for_another_slug_is_refused(self):
+        # d-prose-old holds this debt's slug as a prefix: a substring or word-boundary match takes it, a slug match does not
+        self.close_with_note("- d-prose-old: a wrong refusal by a guard. Decision: %s.\n" % self.DECISION)
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line for another slug cleared the prose close")
+
+    def test_n5_a_runnable_retire_is_judged_by_its_test_even_with_a_notes_line(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write=self.notes("- d-fail: a wrong refusal by a guard. Decision: %s.\n" % self.DECISION), rm=["docs/debts/d-fail.md"])
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the runnable Retire did not run in the head folder")
+        self.assertEqual(pairs(found), [("d-fail", "red")], "a notes line cleared a red runnable Retire")
+
+
 class TemplateExcuses(unittest.TestCase):
     """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
     path or a debt in every PR that keeps it (decision debt-close-runs-retire)."""
