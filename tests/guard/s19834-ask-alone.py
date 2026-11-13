@@ -273,7 +273,7 @@ chained_prune("ask-alone: a cd - to the previous folder before the prune is no n
 # A COMMENT OPENER OR A LONE APOSTROPHE INSIDE A HARMLESS TAIL (debt ask-alone-tail-test-gap). The tail is read with the
 # shell's own quoting: a quoted #, a quoted /* and a lone apostrophe in a double-quoted echo or Write-Host text hide no
 # command and open no comment, so each call still asks once. Test only: the guard already reads these tails this way,
-# so the cases pass on main and carry no red run.
+# so these cases pin the current verdict, and no guard change is needed for them.
 for _label, _text in (("a quoted hash", "a # b"), ("a quoted block opener", "x /* y"),
                       ("a lone apostrophe", "don't stop")):
     asks_alone("ask-alone: %s in an && echo tail still asks once" % _label,

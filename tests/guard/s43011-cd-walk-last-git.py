@@ -36,6 +36,6 @@ sh("cd-walk: a gtimeout-wrapped reset in a dirty folder denies", "gtimeout 5 " +
 # A WRAPPER IN THE VERDICT PIPE. verdict-pipe reads the verdict stage through the command wrappers, as timeout
 # is one. gtimeout is the macOS name of timeout, so a pipe out of it hides a verdict the same way.
 FAMILY = "stream"
-# RED on main, GREEN on the branch that adds gtimeout to the wrappers. Kept as the pin for that fix.
+# The verdict pipe reads through gtimeout as it reads through timeout. This case pins that reading.
 sh("verdict-pipe: gtimeout 60 verdict pytest piped to tail denies, as timeout 60 does",
    "gtimeout 60 verdict pytest | tail -3", "deny", VERDICT_PIPE, cwd=NOGIT)

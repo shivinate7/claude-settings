@@ -507,7 +507,7 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
 # THE CAP ASK NAMES ITS LIFT FIELD (debt cap-until-field-taught-late). The deadline key `_agentCapUntil` is how
 # a cap is lifted past its expiry, so the ask names it, and an approver reads the field before the write is
 # approved. The green control is the existing cap asks that carry the model name (cap: a redirect onto a project
-# settings file asks, and its Write sibling), which pass on main.
+# settings file asks, and its Write sibling). It checks that those asks stay asks once the field is named.
 add("cap-until: a Write that sets the cap asks and names the _agentCapUntil field", "ask", "agent-model-cap",
     tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(), carries="_agentCapUntil")
 sh("cap-until: a shell redirect that sets the cap asks and names the _agentCapUntil field",
