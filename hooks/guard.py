@@ -563,7 +563,7 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_copier_of, scratchpad_folder_writer, scratchpad_owner_of,
+            scratchpad_clear_writer, scratchpad_copier_of, scratchpad_folder_writer, scratchpad_holder_of,
             scratchpad_record_writer, scratchpad_writer_of,
             SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
@@ -6048,7 +6048,8 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file, unless
+# the caller copied it (`scratchpad_holder_of`). A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -6205,8 +6206,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     `rm` names is judged but not recorded. A `cp` or `mv` destination carries the record of its source: a copy
     of another agent's file is no read of it. The caller's record goes on a destination whose source lies
     outside the scratchpad, and on a `cp` destination whose source has no record. A copy of another agent's file
-    also records its copier: only a run reads the writer, and a write over the file or a removal reads the owner,
-    the copier else the writer (`scratchpad_owner_of`). A first write, a rewrite of its own file and a file that
+    also records its copier: only a run reads the writer, and a write over the file or a removal reads the holder,
+    the copier else the writer (`scratchpad_holder_of`). A first write, a rewrite of its own file and a file that
     no longer exists pass. Run once the call's other rules passed."""
     agent, session, files, removed, moved, copied = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
@@ -6245,7 +6246,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
         return
     taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
-        writer = scratchpad_owner_of(full, session)
+        writer = scratchpad_holder_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed and not taken:

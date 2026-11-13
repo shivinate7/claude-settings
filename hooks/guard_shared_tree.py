@@ -638,7 +638,7 @@ def scratchpad_writer_of(where: str, session_id: str) -> str:
 
 def scratchpad_copier_of(where: str, session_id: str) -> str:
     """The agent id recorded as the copier of the scratchpad file `where`, or '' when none is recorded or the file
-    no longer exists. Only a run reads the writer; a write over the file or a removal of it reads the owner."""
+    no longer exists. Only a run reads the writer; a write over the file or a removal of it reads the holder."""
     try:
         record = scratchpad_writer_record(where, session_id)
         if not record or not os.path.lexists(where):
@@ -650,9 +650,20 @@ def scratchpad_copier_of(where: str, session_id: str) -> str:
         return ""
 
 
-def scratchpad_owner_of(where: str, session_id: str) -> str:
-    """The agent that may write over or remove the scratchpad file `where`: its copier, else its writer."""
-    return scratchpad_copier_of(where, session_id) or scratchpad_writer_of(where, session_id)
+def scratchpad_holder_of(where: str, session_id: str) -> str:
+    """The agent that may write over or remove the scratchpad file `where`: its copier, else its writer. One read
+    of the record serves both."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if not record or not os.path.lexists(where):
+            return ""
+        with open(record, encoding="utf-8") as handle:
+            lines = handle.read().split("\n")
+        if len(lines) > 1 and lines[1].startswith("copier=") and lines[1][len("copier="):].strip():
+            return lines[1][len("copier="):].strip()
+        return lines[0].strip()
+    except Exception:
+        return ""
 
 
 SCRATCHPAD_WALK_CAP = 5000   # entries one folder check reads, at most
@@ -732,7 +743,7 @@ def scratchpad_folder_writer(where: str, session_id: str, agent_id: str, cap: in
     and skips the record folder. It stops after `cap` entries, and then the rest is unread: a folder past the
     cap passes unless a file in the first `cap` entries already names another agent. That favours the agent that
     clears its own large folder (a checkout, a build output) over a rare miss. A folder that cannot be listed
-    is skipped, and the walk goes on. The records are the ones `scratchpad_owner_of` reads: no second format."""
+    is skipped, and the walk goes on. The records are the ones `scratchpad_holder_of` reads: no second format."""
     left = [cap]
     skip = os.path.join(session_scratchpad_root(where, session_id) or "\0", SCRATCHPAD_WRITERS)
     try:
@@ -761,7 +772,7 @@ def scratchpad_folder_writer(where: str, session_id: str, agent_id: str, cap: in
                     except OSError:
                         pass   # a folder that cannot be listed is not judged; the others still are
                     continue
-                writer = scratchpad_owner_of(top, session_id)
+                writer = scratchpad_holder_of(top, session_id)
                 if writer and writer != agent_id:
                     return top, writer
     except Exception:
