@@ -954,9 +954,11 @@ def challenged_hit(text) -> str:
 
 
 def _challenged_judged(op: str, data) -> bool:
-    """Whether this write of a decision owes the line: it has a pick, and is not a stood pick or a port item. An
-    update owes it only when it carries both the pick and the context."""
-    if not data.get("pick") or data.get("stands") is True or data.get("port"):
+    """Whether this write of a decision owes the line: it has a recommended option (`recommended`, or its old name
+    `pick`; a non-empty str or list), and is not a stood pick or a port item. An update owes it only when it carries
+    both that field and the context."""
+    has_recommended = any(isinstance(data.get(f), (str, list)) and data.get(f) for f in RECOMMENDED_FIELDS)
+    if not has_recommended or data.get("stands") is True or data.get("port"):
         return False
     return op == "set" or "context" in data
 

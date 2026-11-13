@@ -120,10 +120,10 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with a `pick` also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`); the page draws that line as its own block under the options. A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with `recommended` (old name `pick`) also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`); the page draws that line as its own block under the options. A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
-    the guard cannot see the stored fields. An update that carries `kind: decision`, `pick` and `context` also carries the Against line,
+    the guard cannot see the stored fields. An update that carries `kind: decision`, `recommended` and `context` also carries the Against line,
     and carries `stands: true` again on a stood pick.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
     strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
@@ -320,7 +320,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
      Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
      A question that changes nothing is not asked: act on main's behaviour.
-   - A decision with a `pick` and no `stands: true` gets the case against its pick, before you write it. Spawn one Sonnet agent
+   - A decision with `recommended` and no `stands: true` gets the case against its pick, before you write it. Spawn one Sonnet agent
      (general-purpose, model sonnet). Its brief holds only the item's Goal, Problem, Based on lines, each option's key, label,
      how, gain and lose, and the pick. Leave out `why` and your own reasoning, so it argues from the same facts the owner has.
      Ask for the strongest case against the pick in under 80 words. Copy it into `context` as one line:
@@ -501,7 +501,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
      recommendation.
    - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
-     guard refuses an update with `kind` `decision` and `context` that lacks it. This update carries a new `pick`, so it also needs the
+     guard refuses an update with `kind` `decision` and `context` that lacks it. This update carries a new `recommended`, so it also needs the
      case against that pick: spawn the Sonnet agent for the new pick (see "Add an item") and add the line "Against the pick (sonnet): <the case>".
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.

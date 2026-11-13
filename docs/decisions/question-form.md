@@ -26,13 +26,13 @@ Owner steer, 2026-10-30 12:50 CDT: a question to the owner has one form and one 
 
 ## The case against the pick (rule `question-challenged`)
 
-Owner ruling, item 284 a, row `refuter-page-against` in `docs/plans/debate-model-tiers.md`: each page decision with a pick gets one refuter's best case against the pick. Model: Sonnet (item 289: Sonnet for all, for now).
+Owner ruling, item 284 a, row `refuter-page-against` in `docs/plans/debate-model-tiers.md`: each page decision with a recommended option gets one refuter's best case against the pick. Model: Sonnet (item 289: Sonnet for all, for now).
 
 - The line. `context` holds one line at a line start, `Against the pick (sonnet): <case>` or `(opus)`. A bullet and a bold label are read, as for the Departs from line. The text is not empty and not only a placeholder. Every such line must be valid. The predicate is `challenged_hit`; the writer's guard runs it after `question-departs`.
-- The writer gives the refuter only the item's Goal, Problem, Based on lines, options and pick, never `why`, and copies its case into the line (skill `waiting-page`, "Add an item").
-- Judged: an open decision with a `pick`, on a `set` or on an update that carries `kind: decision`, `pick` and `context`. A `str_replace` on `context` whose old or new text holds the line must leave a valid one.
-- Not judged: a closed item, a task, a note, an item with no `pick`, `stands: true`, `port: true`, and the chat question box.
-- Departs from the ruling's words "each page decision with a pick": the exemptions above stay, since a stood pick is the owner's own ruling and the guard cannot read stored fields. An update that carries no `pick` is not judged; the SKILL steps tell the session to keep or refresh the line.
+- The writer gives the refuter only the item's Goal, Problem, Based on lines, options and `recommended`, never `why`, and copies its case into the line (skill `waiting-page`, "Add an item").
+- Judged: an open decision with `recommended` (old name `pick`; a non-empty string or list), on a `set` or on an update that carries `kind: decision`, that field and `context`. A `str_replace` on `context` whose old or new text holds the line must leave a valid one.
+- Not judged: a closed item, a task, a note, an item with no `recommended`, `stands: true`, `port: true`, and the chat question box.
+- Departs from the ruling's words "each page decision with a pick": the exemptions above stay, since a stood pick is the owner's own ruling and the guard cannot read stored fields. An update that carries no `recommended` is not judged; the SKILL steps tell the session to keep or refresh the line.
 - Cost: at most one Sonnet call per decision item written. No process and no file.
 - Known limit: code reads that the line is there and well formed. It cannot read whether the agent was blind, ran at all, or argued well. The owner reads the case.
 
