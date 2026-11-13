@@ -497,10 +497,13 @@ fi
 
 # The owner's rulings that main has not yet taken in (the ruled store, decision ruled-store-one-home): lint/ruled_store.py
 # --session-line prints one header, up to five entry lines and a command line, or nothing. It reads origin/roadmap and
-# origin/main of the claude-settings clone ($d), else of this checkout, as the fetches above left them: no fetch of its
-# own. Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python start and two
-# read-only git processes (ls-tree, cat-file --batch), plus a third cat-file when an open entry names the text it lands
-# in; no file written, no timer, no process kept.
+# origin/main of the claude-settings clone ($d), else of this checkout. It fetches the roadmap itself when FETCH_HEAD
+# holds no roadmap line within 60 s (lint/roadmap_ref.py, bounded at 2 s): the main refresh above rewrites FETCH_HEAD
+# with a main line only, so at nearly every start, resume and compaction that fetch runs; when it fails the header ends
+# "read as of <time>". Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python
+# start, one git fetch of up to 2 s when the roadmap is stale, and two read-only git processes (ls-tree, cat-file
+# --batch), plus a third cat-file when an open entry names the text it lands in; no file written but git's own, no
+# timer, no process kept.
 if command -v python3 >/dev/null 2>&1; then
   rs_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/ruled_store.py"
   [ -f "$rs_script" ] || rs_script="$config_dir/lint/ruled_store.py"
