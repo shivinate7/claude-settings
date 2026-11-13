@@ -6,4 +6,4 @@
 
 **Decision.** `parallelism-each-own-checkout` (each agent in its own checkout).
 
-**Retire.** A guard refuses a lane session's checkout of a branch an agent's worktree pushes, or the lane brief keeps the session off the branch (records go through an agent). Check: a red test where a second worktree on the same branch is refused.
+**Retire.** A guard refuses a lane session's checkout of a branch an agent's worktree pushes, or the lane brief keeps the session off the branch (an agent writes the records). Check: a red test where a second worktree on the same branch is refused.
