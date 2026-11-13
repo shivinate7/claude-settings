@@ -30,4 +30,7 @@ output style load in each session on each repo.
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn). The batch runner
   may push a plain merge of main into a handed-in PR branch when no lane has pushed there in the last 2 hours.
   No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets
-  a fix verifier and a fresh review log. Source: decision `standing-merge-grant`.
+  a fix verifier and a fresh review log. Owner, 14:17 CST, typed in runner 10's chat: "you have a standing grant
+  to act on overlaps by me, owner". So the batch runner may act on overlaps between lane branches. Runner 10 reads
+  that as a plain merge of one lane's head into another lane's branch, under the limits above. The owner has not
+  confirmed that reading. Source: decision `standing-merge-grant`.
