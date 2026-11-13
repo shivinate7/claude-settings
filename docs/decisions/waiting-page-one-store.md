@@ -55,7 +55,7 @@ Taken by the coordinator at 11:43 CST on 2026-11-12, as an undoable pick (no own
 
 ## Known gaps
 
-- The backup's age has no set bound. The owner said "timely enough (not real time)". The export check (Mechanism step 1) blocks a turn that wrote the page without a later copy, except a cloud writer until step 1 lands. That is stricter than he asked. Unmeasured: whether that check costs more than it protects.
+- The backup's age has no set bound. The owner said "timely enough (not real time)". The export check (Mechanism step 1) blocks a turn that wrote the page without a later copy (read hooks/feedback_guard.py:1332), except a cloud writer until step 1 lands. That is stricter than he asked. Unmeasured: whether that check costs more than it protects.
 - The git copy holds five collections and no `receipts` (`export_page.py`, `lint/layout.py:275`). A recovery from it loses the receipts. Whether that matters is unmeasured.
 - Two accounts: the owner winds one down by hand before using the other, and the skill's "Before you switch Claude accounts" export covers it (read `skills/waiting-page/reference/copies-and-accounts.md`). No check makes him do it.
 - The Status tab stays baked and lags until a republish.
