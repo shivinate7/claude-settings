@@ -556,7 +556,8 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
+            SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -6039,6 +6040,12 @@ SCRATCHPAD_OVERWRITE_REASON = (
     "Remedy: write your own file under a fresh file name of your own. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
+SCRATCHPAD_FOLDER_REASON = (
+    "Rule (scratchpad-owner): this folder holds a file written by another agent of this session, and removing or "
+    "moving it destroys work that agent may still need. "
+    "Remedy: remove only the files you wrote, each by its own name, and leave the rest. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
+)
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
@@ -6055,16 +6062,24 @@ REDIRECT_WORD = re.compile(r"(?:\d*[<>]+&?|&>>?)")
 
 
 def scratchpad_copies(command: str, cwd: str):
-    """[(verb, source, destination)] for each `cp` and `mv` of the shell text, as absolute paths: the
+    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text, as absolute paths: the
     destination of each source (a folder destination takes the source's name), with `-t DIR` read too. A flag
-    is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss."""
-    found, ends = [], []
+    is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss. `into` is the
+    folder an `mv` moves its sources into (a folder destination, or the `-t` folder), else ''. It is '' too when
+    the destination word holds a brace list or a glob, which the shell makes into other words, and when any other
+    word of the text names that folder (`rm -rf S/sub && mv x S/sub/`)."""
+    found, ends, names, intos = [], [], {}, {}
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment)
         if not tokens:
             continue
         where = dir_before_segment(segments, number, cwd, ends)
+        for token in tokens:   # every word that may name a folder, a flag's `=value` too
+            named = token.partition("=")[2] if token.startswith("-") else token
+            named = shell_abs(named, where) if named else None
+            if named:
+                names[os.path.normpath(named)] = names.get(os.path.normpath(named), 0) + 1
         for word, args in scratchpad_command_words(tokens):
             verb = basename(word)
             if verb not in ("cp", "mv"):
@@ -6085,13 +6100,20 @@ def scratchpad_copies(command: str, cwd: str):
                     plain.append(arg)
             dest, sources = (target, plain) if target else ((plain[-1], plain[:-1]) if len(plain) > 1 else ("", []))
             full = shell_abs(dest, where) if dest else ""
+            into = ""
+            if (full and sources and (target or dest.endswith(("/", os.sep)) or os.path.isdir(full))
+                    and expand_shell_braces(dest) == [dest] and not SCRATCHPAD_GLOB_MAGIC.search(dest)):
+                into = full
+                intos[os.path.normpath(full)] = intos.get(os.path.normpath(full), 0) + 1
             for source in sources:
                 source_full = shell_abs(source, where)
                 if not full or not source_full:
                     continue
                 folder = dest.endswith(("/", os.sep)) or os.path.isdir(full)
-                found.append((verb, source_full, os.path.join(full, os.path.basename(source.rstrip("/\\"))) if folder else full))
-    return found
+                found.append((verb, source_full, os.path.join(full, os.path.basename(source.rstrip("/\\"))) if folder else full,
+                              into if verb == "mv" else ""))
+    return [(verb, source, dest, into if into and names.get(os.path.normpath(into)) == intos[os.path.normpath(into)] else "")
+            for verb, source, dest, into in found]
 
 
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
@@ -6133,7 +6155,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                     removed.add(found[hit][0])
             # A `cp` or `mv` destination is a file this call writes. An `mv` is judged as a removal above, and its
             # destination is recorded too: it carries the record of its source.
-            for verb, source, dest in scratchpad_copies(_resolve_vars(command), cwd):
+            for verb, source, dest, into in scratchpad_copies(_resolve_vars(command), cwd):
+                # The folder an `mv` moves into loses nothing, so it is not walked as a removal; its sources are.
+                # It is no written file either: the new entry `dest` is, so the folder takes no record of its own.
+                for listed in [full for full in files if into and os.path.normpath(full) == os.path.normpath(into)]:
+                    files.remove(listed)
+                    removed.discard(listed)
                 if SCRATCHPAD_WORD in dest and under_session_scratchpad(dest, session):
                     if dest not in files:
                         files.append(dest)
@@ -6176,11 +6203,18 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
             else:
                 scratchpad_clear_writer(full, session)
         return
-    taken = ""
+    taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+        elif full in removed and not taken:
+            # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
+            # only a file has a record: read the files (`scratchpad_folder_writer`).
+            held = scratchpad_folder_writer(full, session, agent)
+            if held:
+                taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
+                reason = SCRATCHPAD_FOLDER_REASON
 
     def record_writers():
         for full in files:
@@ -6189,7 +6223,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken, on_lift=record_writers)
+        refuse(tool, "deny", "scratchpad-owner", reason, taken, on_lift=record_writers)
     record_writers()
 
 
