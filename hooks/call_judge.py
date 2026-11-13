@@ -195,7 +195,7 @@ QUESTION_PROMPT = (
 )
 # A page write carries only the fields it changes, so the prompt names the fields and judges only those.
 PAGE_PROMPT = (
-    "Review these writes of a waiting-page item, each as {op, doc_id, data}: %s\nThe item is a question to "
+    "Review these writes of a page item, each as {op, doc_id, data}: %s\nThe item is a question to "
     "the owner. Its `context` holds the Goal, Problem and Based on lines. Each entry of `options` has a "
     "label, a `gain` and a `lose`. `recommended` (old name `pick`) is the recommendation. Code has already checked the form lines "
     "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
