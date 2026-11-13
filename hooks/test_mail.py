@@ -109,10 +109,10 @@ ROOT = _test_temp.run_folder()
 MAIL_CLI = os.path.join(REPO, "bin", "mail")
 MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
-SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
-            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+SCRUBBED = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO",
+            "MAILBOX_CACHE", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
             "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT",
-            "MAILBOX_HOLD_OFF")
+            "MAILBOX_HOLD_OFF", "MAILBOX_REFRESH_COMMAND")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
