@@ -20,10 +20,11 @@ sh("frozen: braced default-word: CLAUDE_CONFIG_DIR set in the environment is rea
    env={"CLAUDE_CONFIG_DIR": CFG})
 
 # CONTROLS. Each passes before the change and after it.
-# A value outside the frozen set is read, and the braced word, which is frozen, is not taken.
-sh("frozen: braced default-word: CLAUDE_CONFIG_DIR set in the environment to a folder outside the frozen set, allowed",
-   'printf x > "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/hooks/guard.py"', "allow", cwd=NOGIT,
-   env={"CLAUDE_CONFIG_DIR": DW_OUTSIDE, "HOME": DW_HOME, "USERPROFILE": DW_HOME})
+# A value outside the frozen set is read, and the braced word, which is frozen, is not taken. DW_DIR, not the
+# config variable, holds the folder: the config dir stays HOME/.claude, so DW_OUTSIDE is not frozen.
+sh("frozen: braced default-word: DW_DIR set in the environment to a folder outside the frozen set, allowed",
+   'printf x > "${DW_DIR:-${HOME}/.claude}/hooks/guard.py"', "allow", cwd=NOGIT,
+   env=dict(DW_UNSET, DW_DIR=DW_OUTSIDE))
 # A safe braced default folder is no frozen path: ${HOME}/tmp is outside the frozen set.
 sh("frozen: braced default-word: a safe braced default ${OUT:-${HOME}/tmp}/f is allowed",
    'printf x > "${OUT:-${HOME}/tmp}/f"', "allow", cwd=NOGIT, env=dict(DW_UNSET, OUT=None))
