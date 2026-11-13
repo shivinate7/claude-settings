@@ -323,10 +323,11 @@ SESSION_IMPERATIVES = frozenset((
     "add", "send", "post", "keep", "write", "drop", "give", "name", "move", "run", "never", "do", "don't", "resend",
     "rewrite", "mark", "resume", "pause", "fix", "ship", "wait", "reply", "put", "cite", "check", "answer", "close",
     "open", "update", "remove", "include", "set", "make", "stop", "let", "tell", "ask", "see", "read", "dispose",
+    "build", "queue",
 ))
 # A unit ends at a sentence mark, a clause mark (; : ,) or a line break, so an order after a clause is seen too.
 _UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
-_CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
+_CONNECTORS = frozenset(("so", "then", "and", "but", "or", "now", "first", "next", "also", "please"))
 _WORD = re.compile(r"[a-z][a-z'-]*")
 # A list of backtick spans ("refused `Agent`, `Write` this session") ends each unit but the last in span + comma. The
 # unit after it that opens directly with a span names the next item and holds no order. A connector before the span
@@ -748,10 +749,10 @@ def answered_problem(text):
 PROMISE_RE = re.compile(r"(?<![\w-])from\s+now\s+on(?![\w-])", re.I)
 PROMISE_HANDOFF_RE = re.compile(r"(?<![\w-])handoffs?(?![\w-])", re.I)
 PROMISE_LABEL_RE = re.compile(r"\bhandoff\s+gave\s*:", re.I)  # the compaction-carry label names no home
-PROMISE_REASON = (
-    "Promise guard (rule building-mistake-names-its-guard): each line below promises \"from now on\" and names "
-    "only a handoff as its home. A handoff line is no mechanism (rule building-mistake-names-its-guard). Build the check "
-    "or hook now and cite its PR or commit on the line, queue it as step:<slug>, or drop the promise. Lines: ")
+PROMISE_REASON = owner_line(
+    "Promise guard (rule building-mistake-names-its-guard)",
+    "each line below promises \"from now on\" and names only a handoff as its home, and a handoff line is no "
+    "mechanism; a PR or commit, a step:<slug>, or a repo path on the line clears it")
 
 
 # A line that reports what a handoff said ("The handoff file said from now on the page is exported") makes no
@@ -786,7 +787,7 @@ def promise_problem(text):
         if DONE_REF_RE.search(kept) or MISTAKE_STEP_RE.search(kept) or _has_path(kept):
             continue
         bad.append(body)
-    return PROMISE_REASON + "".join("\n- " + b for b in bad) if bad else ""
+    return PROMISE_REASON + " Lines: " + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
