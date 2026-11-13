@@ -9,6 +9,7 @@
  "blockedBy": [],
  "why": "A lane with no cs-step tag never passes the idle-lanes archive tests: the build cannot tie it to a step. Example: #3052's lane session_013NEJKzMndrATd5V4pyEZoB. The same gap hid lanes from the stale-draft row on Nov 12 (plans/stale-drafts-2026-11-13.md).",
  "source": "retrospective 00:44 CST Nov 13",
- "note": "The coordinator's lane start sets cs-step:<slug> with set_session_tags in the same turn as create_session. Guard: a check at lane start (or in the coordinator brief template) that refuses a create_session for a lane with no cs-step tag. Red test first. Until then, runner 10 archives merged lanes by the session named in each PR footer.",
- "updatedAt": "2026-11-13T00:46:40-06:00"
+ "note": "The coordinator's lane start sets cs-step:<slug> with set_session_tags in the same turn as create_session. Guard: a check at lane start (or in the coordinator brief template) that refuses a create_session for a lane with no cs-step tag. Red test first. Until then, runner 10 archives merged lanes by the session named in each PR footer. Lane 01:23 CST Nov 13: #3111 handed in. Lane question (strict tag vs strip like guard_merge.py:1676) settled by triage, no owner item: a, keep strict; undoable, lane-recommended, the refusal prints the fix, and b widens what the check accepts. Note: the lane-start check and the archive guard read the cs-step tag two ways; a later change may give both one reader (rule building-one-home-per-capability).",
+ "updatedAt": "2026-11-13T01:23:48-06:00",
+ "pr": "#3111"
 }
