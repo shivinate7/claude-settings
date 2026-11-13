@@ -492,19 +492,26 @@ class ScriptSelects(ScriptCase):
                                  "a run listing this PR among others was not selected")
 
     def test_never_cancels_a_push_run_on_main(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, event="push", head_branch=DEFAULT)]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, event="push", head_branch=DEFAULT)])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a push run on main was selected")
 
     def test_never_cancels_a_push_run_on_this_prs_branch(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, event="push")]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, event="push")])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a push run on this PR's branch was selected")
 
     def test_never_cancels_a_completed_run(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, status="completed")]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, status="completed")])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a completed run was selected")
 
     def test_never_cancels_a_run_of_another_pr(self):
         for prs in ([{"number": OTHER_PR}], [{"number": 5}, {"number": OTHER_PR}]):
             with self.subTest(pull_requests=prs):
-                self.assertEqual(self.select([run_of(id=101), run_of(id=102, pull_requests=prs)]), [101],
-                                 "a run naming only other PRs was selected")
+                got = self.select([run_of(id=101), run_of(id=102, pull_requests=prs)])
+                self.assertIn(101, got, "scope: this PR's run was not selected")
+                self.assertNotIn(102, got, "a run naming only other PRs was selected")
 
     def test_never_cancels_a_run_on_the_default_branch(self):
         pr = pr_dict(ref=DEFAULT)
@@ -519,7 +526,9 @@ class ScriptSelects(ScriptCase):
         self.assertEqual(self.select(runs, pr=pr_dict(ref="main"), default="trunk"), [101])
 
     def test_never_cancels_a_fork_run(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_repository={"full_name": "someone/fork"})]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, head_repository={"full_name": "someone/fork"})])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a run from a fork was selected")
 
     def test_never_cancels_any_run_when_the_pr_head_is_a_fork(self):
         self.assertEqual(self.select([run_of(id=101)]), [101], "scope: this PR's run is not selected with a same-repo head")
@@ -527,19 +536,25 @@ class ScriptSelects(ScriptCase):
                          "a run was selected for a PR whose head is a fork")
 
     def test_never_cancels_a_run_of_another_head_sha(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_sha=OLD_SHA)]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, head_sha=OLD_SHA)])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a run of another head SHA was selected")
 
     def test_never_cancels_a_run_of_another_branch(self):
-        self.assertEqual(self.select([run_of(id=101), run_of(id=102, head_branch="other")]), [101])
+        got = self.select([run_of(id=101), run_of(id=102, head_branch="other")])
+        self.assertIn(101, got, "scope: this PR's run was not selected")
+        self.assertNotIn(102, got, "a run of another branch was selected")
 
     def test_skips_a_run_missing_a_key(self):
         for key in ("id", "event", "status", "head_branch", "head_sha", "pull_requests", "head_repository"):
             with self.subTest(missing=key):
-                self.assertEqual(self.select([without(run_of(), key), run_of(id=101)]), [101],
-                                 f"a run missing {key} was selected")
+                got = self.select([without(run_of(id=102), key), run_of(id=101)])
+                self.assertIn(101, got, "scope: this PR's run was not selected")
+                self.assertEqual([i for i in got if i != 101], [], f"a run missing {key} was selected")
         with self.subTest(missing="head_repository.full_name"):
-            self.assertEqual(self.select([run_of(head_repository={}), run_of(id=101)]), [101],
-                             "a run with no head_repository.full_name was selected")
+            got = self.select([run_of(id=102, head_repository={}), run_of(id=101)])
+            self.assertIn(101, got, "scope: this PR's run was not selected")
+            self.assertNotIn(102, got, "a run with no head_repository.full_name was selected")
 
     def test_skips_malformed_runs_and_keeps_the_valid_one(self):
         runs = [None, "run", 5, run_of(id=103, pull_requests=None), run_of(id=104, pull_requests=[None]),
@@ -750,6 +765,10 @@ class ScriptMain(ScriptCase):
                                       run_of(id=102, pull_requests=[{"number": PR}])])
         self.assertIn(102, cancelled_ids(fake.calls), "scope: the run on the PR's branch was not cancelled")
         self.assertNotIn(101, cancelled_ids(fake.calls), "a run of another branch was cancelled")
+
+    def test_cancels_nothing_when_the_pr_head_is_a_fork(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], pr=pr_dict(head_repo="someone/fork"))
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled a run for a PR whose head is a fork")
 
     def test_no_active_runs_cancels_nothing_and_exits_zero(self):
         err, fake, rc = self.run_main([])
