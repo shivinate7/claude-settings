@@ -3277,7 +3277,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--pinned", "--base", f"origin/{base}", notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
     finally:
