@@ -2514,6 +2514,20 @@ class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, Session
         self.assert_one_not_ff(lines, "the merge failed")
         self.assertEqual(self.checkout_state(self.primary), before, "a failed merge changed the checkout")
 
+    def test_a_stub_git_whose_added_paths_diff_fails_prints_the_could_not_be_read_line_and_moves_nothing(self):
+        # A failed read of the added paths is not an empty list. The move is held, and the one line says why.
+        self.origin_moves_ahead(commits=2)
+        folder = self.make_git_stub("diff-fails-shim", 'if [ "$1" = diff ]; then exit 128; fi')
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup(path_dir=folder)
+        self.assert_stub_reached(folder, "diff")
+        self.assert_one_not_ff(lines, "the added paths could not be read")
+        found = self.not_ff_lines(lines)[0]
+        self.assertTrue(same_checkout(found.group("top"), self.primary),
+                        "the line names another checkout: %r" % found.group(0))
+        self.assertEqual(self.checkout_state(self.primary), before,
+                         "a checkout whose added paths could not be read changed")
+
     def publish_checkout(self, files, patterns):
         """Commits `files` (path to text) on the checkout's main, with a .gitignore that ignores `patterns`, and pushes
         main, so origin and the checkout agree before origin moves on."""
