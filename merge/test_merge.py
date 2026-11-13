@@ -155,6 +155,7 @@ class FakeHost:
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
         self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
+        self.run_rows, self.runs_error, self.runs_calls = [], None, []  # run_rows: the workflow run rows runs() returns for any sha (Host.runs' shape); runs_error: raised by runs instead; runs_calls: each sha a runs read named
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -280,6 +281,12 @@ class FakeHost:
         if self.draft_rows is None:
             return "pass", []
         return DraftRunReads(self.draft_rows, self.draft_reads).draft_run_state(sha)
+
+    def runs(self, sha):  # the fake of Host.runs: the workflow runs of `sha` a case scripted (none by default), each read logged in runs_calls
+        self.runs_calls.append(sha)
+        if self.runs_error:
+            raise self.runs_error
+        return list(self.run_rows)
 
 DRAFT_RUN = 4300  # the run id that a draft's lane-touched-tests rows link to
 
@@ -19044,6 +19051,36 @@ def block_base(body):
     """The sha on the block's `Base:` line, or None when the block has none."""
     return next((m.group(1) for x in block_raw(body) or [] if (m := re.fullmatch(r"Base: ([0-9a-f]{40})", x))), None)
 
+# The measure block (the batch's lanes, drops, CI runs and CI minutes): its own markers, kept outside the frozen block. The format is what
+# these cases pin: `Lanes: N`, `Drops: N`, `CI runs: N`, `CI minutes: N`, each N a whole number or `unknown`.
+MEASURE_BEGIN, MEASURE_END = "<!-- batch-measure:begin -->", "<!-- batch-measure:end -->"
+RUN_THREE = {"name": "ci", "status": "completed", "conclusion": "success", "startedAt": "2026-11-13T10:00:00Z", "completedAt": "2026-11-13T10:03:00Z"}
+RUN_FIVE = {"name": "lint", "status": "completed", "conclusion": "success", "startedAt": "2026-11-13T11:00:00Z", "completedAt": "2026-11-13T11:05:00Z"}
+MEASURED_RUNS = [RUN_THREE, RUN_FIVE]  # two completed runs: 2 runs, 8 minutes
+MEASURE_AT_BUILD = {"Lanes": "3", "Drops": "0", "CI runs": "2", "CI minutes": "8"}  # the three lanes of a build, the runs above
+MEASURE_AT_MERGE = {"Lanes": "2", "Drops": "1", "CI runs": "2", "CI minutes": "8"}  # lanes #101 and #102 with #103 dropped, the runs above
+
+def measure_block(lanes, drops, runs, minutes):
+    """A measure block's lines, markers included, one value each: a whole number, or `unknown` for a read that could not run."""
+    return "\n".join([MEASURE_BEGIN, f"Lanes: {lanes}", f"Drops: {drops}", f"CI runs: {runs}", f"CI minutes: {minutes}", MEASURE_END]) + "\n"
+
+def measure_values(text):
+    """-> {name: value} of the one measure block in `text`, a CR at a line end ignored; None when `text` holds no single block."""
+    lines = [x.rstrip("\r") for x in text.split("\n")]
+    if lines.count(MEASURE_BEGIN) != 1 or lines.count(MEASURE_END) != 1 or lines.index(MEASURE_END) < lines.index(MEASURE_BEGIN):
+        return None
+    inner = lines[lines.index(MEASURE_BEGIN) + 1:lines.index(MEASURE_END)]
+    return {k: v for k, _, v in (x.partition(": ") for x in inner)}
+
+def measure_count(text):
+    """How many measure begin marker lines `text` holds, a CR at a line end ignored."""
+    return sum(1 for x in text.split("\n") if x.rstrip("\r") == MEASURE_BEGIN)
+
+def program_name(argv0):
+    """A program's name for the process check: its file name in lower case without .exe, and every Python (python3, or the interpreter's full path) as python."""
+    name = os.path.basename(argv0).lower().removesuffix(".exe")
+    return "python" if name.startswith("python") else name
+
 
 def sentences_of(text):
     """The sentences of `text`. A full stop, question mark or exclamation mark that a space or a line break follows ends one; a line break
@@ -20911,6 +20948,261 @@ class BatchFreeze(CloudSession):
 
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+
+    # The measure block (MEASURE_BEGIN, MEASURE_END): a build writes it, the merge of an integration pull request refreshes it, and a freeze
+    # rewrite keeps it outside the frozen block. Nothing writes it on main, so a case that asserts it is red there. The controls pass on main
+    # for a part the feature must keep: text outside the markers already survives, and a lane pull request is never written.
+
+    def measure_merge(self, tail="", runs=(), crlf=False):
+        """Lanes #101 and #102 in batch-nightly, with #103 dropped (its Dropped line): one ready batch pull request whose body is the frozen
+        block, then `tail`. The host's runs of the head are `runs`. `crlf` ends each body line with CR LF, as a web edit leaves it.
+        -> the pull request's number."""
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        body = freeze_body(freeze_inner("nightly", [(n, self.heads[n]) for n in (101, 102)], dropped=[103])) + tail
+        self.host.batch_pulls[pr]["body"] = body.replace("\n", "\r\n") if crlf else body
+        self.host.branch = "batch-nightly"  # FakeHost.merge takes the head of its own branch, which here is the batch's
+        self.host.run_rows = list(runs)
+        return pr
+
+    def merge_spy(self):
+        """Wraps the host's merge. -> the list each call appends to: (n, the body that pull request holds at that call)."""
+        seen, real = [], self.host.merge
+
+        def spy(n, method, sha):
+            seen.append((n, self.host.batch_pulls[n]["body"] if n in self.host.batch_pulls else self.host.body))
+            return real(n, method, sha)
+        self.host.merge = spy
+        return seen
+
+    def test_measure_block_build_writes_all_four_numbers_outside_the_freeze_block(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.host.run_rows = MEASURED_RUNS
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        body = self.host.created[0]["body"]
+        self.assertEqual(measure_count(body), 1, "the build's pull request holds %d measure blocks, not one: %s" % (measure_count(body), out))
+        self.assertIn(MEASURE_BEGIN, body.split(BATCH_END)[1], "the build's measure block sits inside the frozen block, not after it: %s" % out)
+        self.assertEqual(measure_values(body), MEASURE_AT_BUILD, "the build's measure block is not Lanes 3, Drops 0, CI runs 2, CI minutes 8: %s" % out)
+        self.assertEqual(self.host.runs_calls, [self.head("batch-nightly")], "the build did not read the runs of the new batch head once: %s" % out)
+
+    def test_measure_block_build_with_a_failed_runs_read_writes_unknown_and_still_opens_the_pr(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.host.runs_error = merge.Stop("gh run list failed: HTTP 502: Bad Gateway")
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(len(self.host.created), 1, "the build did not open its pull request after the runs read failed: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s after the runs read failed: %s" % (rc, out))
+        body = self.host.created[0]["body"]
+        self.assertEqual(measure_count(body), 1, "the build's pull request holds %d measure blocks, not one: %s" % (measure_count(body), out))
+        self.assertEqual(measure_values(body), {"Lanes": "2", "Drops": "0", "CI runs": "unknown", "CI minutes": "unknown"},
+                         "the build wrote a count where its runs read failed, not unknown: %s" % out)
+
+    def test_measure_block_build_of_twelve_lanes_counts_all_of_them_and_reads_no_runs_yet(self):
+        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes; a text sort would put #10 and #100 before #9
+        for n in numbers:
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in reversed(numbers)))
+        self.assertEqual(rc, 0, "the build of twelve lanes exited %s: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the build of twelve lanes did not open exactly one pull request: %s" % out)
+        body = self.host.created[0]["body"]
+        self.assertEqual(measure_count(body), 1, "the build of twelve lanes holds %d measure blocks, not one: %s" % (measure_count(body), out))
+        self.assertEqual(measure_values(body), {"Lanes": "12", "Drops": "0", "CI runs": "0", "CI minutes": "0"},
+                         "the build of twelve lanes with no runs yet is not Lanes 12, Drops 0, CI runs 0, CI minutes 0: %s" % out)
+
+    def test_measure_block_build_writes_no_body_after_the_create_and_no_lane_body(self):
+        for n in (101, 102):
+            self.lane(n)
+        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as writes:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertEqual(writes.call_count, 0, "the build wrote a body after creating its pull request: the block belongs in the create: %s" % out)
+        self.assertEqual(self.host.batch_pulls[101]["body"], "", "the build changed lane #101's body")
+
+    def test_measure_block_control_parse_freeze_reads_a_body_with_the_block_as_one_without_it(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        plain = self.body(pr)
+        self.assertIsNotNone(merge.parse_freeze(plain), "setup: the frozen body does not parse")
+        self.assertEqual(merge.parse_freeze(plain + measure_block(2, 0, 0, 0)), merge.parse_freeze(plain),
+                         "a measure block after the frozen block changes what parse_freeze reads")
+
+    def test_measure_block_control_freeze_rewrite_keeps_one_block_outside_the_frozen_block(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        body = self.body(pr) + measure_block(9, 9, 9, 9)
+        lines = merge.freeze_lines("nightly", {101: self.heads[101], 102: self.heads[102]}, dropped=[103])
+        text = merge.freeze_rewrite(body, merge.parse_freeze(body), lines)
+        self.assertEqual(measure_count(text), 1, "the freeze rewrite left %d measure blocks, not one" % measure_count(text))
+        self.assertIn(MEASURE_BEGIN, text.split(BATCH_END)[1], "the freeze rewrite moved the measure block inside the frozen block")
+        self.assertIn("Dropped: #103", text.split(BATCH_END)[0], "the freeze rewrite did not write its Dropped line into the frozen block")
+
+    def test_measure_block_control_a_drop_keeps_the_block_outside_the_frozen_block(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
+        self.host.batch_pulls[pr]["body"] += measure_block(3, 0, 2, 8)
+        self.host.run_rows = MEASURED_RUNS  # a refresh at the drop reads the same runs the seeded block shows
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        body = self.body(pr)
+        self.assertEqual(measure_count(body), 1, "the drop left %d measure blocks, not one: %s" % (measure_count(body), out))
+        self.assertIn(MEASURE_BEGIN, body.split(BATCH_END)[1], "the drop moved the measure block inside the frozen block: %s" % out)
+        self.assertIn(measure_values(body), (MEASURE_AT_BUILD, MEASURE_AT_MERGE),
+                      "the drop changed the measure block to neither its seeded values nor the refreshed ones: %s" % out)
+
+    def test_measure_block_control_a_crlf_block_survives_a_blame_write(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.host.batch_pulls[pr]["body"] = (self.body(pr) + measure_block(2, 0, 2, 8)).replace("\n", "\r\n")
+        self.host.run_rows = MEASURED_RUNS  # a refresh at the blame reads the same runs the seeded block shows
+        rc, out = self.blame_lane("nightly", 102)
+        self.assertEqual(measure_count(self.body(pr)), 1, "the blame write left %d measure blocks in the CRLF body, not one: %s" % (measure_count(self.body(pr)), out))
+        self.assertEqual(measure_values(self.body(pr)), {"Lanes": "2", "Drops": "0", "CI runs": "2", "CI minutes": "8"},
+                         "the blame write changed or lost the CRLF measure block: %s" % out)
+
+    def test_measure_block_merge_refreshes_the_block_before_the_merge_call(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "the merge of the batch did not land: " + out + err)
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        self.assertEqual(measure_values(seen[0][1]), MEASURE_AT_MERGE, "the body at the merge call does not hold the refreshed measure block: " + out + err)
+
+    def test_measure_block_merge_with_a_failed_runs_read_writes_unknown_and_still_merges(self):
+        self.host.runs_error = merge.Stop("gh run list failed: HTTP 502: Bad Gateway")
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9))
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "a failed runs read at the merge exited %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "a failed runs read at the merge stopped the merge: " + out + err)
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        self.assertEqual(measure_values(seen[0][1]), {"Lanes": "2", "Drops": "1", "CI runs": "unknown", "CI minutes": "unknown"},
+                         "a failed runs read at the merge did not write unknown into the block: " + out + err)
+
+    def test_measure_block_a_refused_write_at_merge_does_not_block_the_merge_and_names_the_block(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        self.fail_the_next_body_write()  # the merge's one body write is the measure block's
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the refused measure write exited the merge with %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "the refused measure write stopped the merge: " + out + err)
+        self.assertTrue(printed(out + err, "measure"), "the refused measure write printed no line naming the measure block: " + out + err)
+
+    def test_measure_block_merge_refreshes_a_crlf_body_and_keeps_the_frozen_block_readable(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS, crlf=True)
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge of a CRLF body exited %s: %s" % (rc, out + err))
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        at_merge = seen[0][1]
+        self.assertEqual(measure_values(at_merge), MEASURE_AT_MERGE, "the CRLF body's measure block was not refreshed before the merge call: " + out + err)
+        frozen = merge.parse_freeze(at_merge)
+        self.assertEqual((sorted(frozen["lanes"]), frozen["dropped"]), ([101, 102], [103]), "the CRLF body's frozen block no longer reads as it was: " + out + err)
+
+    def test_measure_block_merge_of_an_older_batch_with_no_block_appends_one_and_keeps_the_frozen_block(self):
+        pr = self.measure_merge(tail="", runs=MEASURED_RUNS)
+        self.assertEqual(measure_count(self.body(pr)), 0, "setup: the older batch's body already holds a measure block")
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge of an older batch exited %s: %s" % (rc, out + err))
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        at_merge = seen[0][1]
+        self.assertEqual(measure_count(at_merge), 1, "the merge left %d measure blocks in an older batch's body, not one: %s" % (measure_count(at_merge), out + err))
+        self.assertEqual(measure_values(at_merge), MEASURE_AT_MERGE, "the merge did not append the refreshed measure block to an older batch's body: " + out + err)
+        frozen = merge.parse_freeze(at_merge)
+        self.assertEqual((sorted(frozen["lanes"]), frozen["dropped"]), ([101, 102], [103]), "the older batch's frozen block changed: " + out + err)
+
+    def test_measure_block_a_marker_inside_a_fenced_example_is_text_and_the_real_block_is_written_outside_it(self):
+        example = "```\n" + MEASURE_BEGIN + "\nLanes: 99\n" + MEASURE_END + "\n```\n"
+        pr = self.measure_merge(tail="An example of the block:\n" + example, runs=MEASURED_RUNS)
+        self.assertIn(example, self.body(pr), "setup: the fenced example is not in the body")
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        at_merge = seen[0][1]
+        self.assertIn(example, at_merge, "the merge changed the fenced example, which is text and not a block: " + out + err)
+        self.assertEqual(measure_values(at_merge.replace(example, "")), MEASURE_AT_MERGE,
+                         "the merge did not write the measure block outside the fenced example: " + out + err)
+
+    def test_measure_block_a_duplicate_block_is_left_as_it_is_and_named_and_the_merge_goes_on(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9) + measure_block(8, 8, 8, 8), runs=MEASURED_RUNS)
+        self.assertEqual(measure_count(self.body(pr)), 2, "setup: the body does not hold two measure blocks")
+        before = self.body(pr)
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "a duplicate measure block exited the merge with %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "a duplicate measure block stopped the merge: " + out + err)
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        self.assertEqual(seen[0][1], before, "the merge rewrote a body that holds two measure blocks: " + out + err)
+        self.assertTrue(printed(out + err, "measure"), "the merge printed no line naming the two measure blocks: " + out + err)
+
+    def test_measure_block_control_a_lane_pr_merge_never_writes_its_body_even_when_it_quotes_a_block(self):
+        quoted = "Quoting a batch:\n" + freeze_body(freeze_inner("nightly", [(101, "a" * 40)])) + measure_block(1, 0, 0, 0)
+        self.host.body = quoted
+        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as writes:
+            rc, out, err = self.run_args("7", "--confirm")
+        self.assertEqual(rc, 0, "the merge of lane #7 exited %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "the merge of lane #7 did not land: " + out + err)
+        self.assertEqual(writes.call_count, 0, "the merge of lane #7 wrote a pull request body: " + out + err)
+        self.assertEqual(self.host.body, quoted, "the merge of lane #7 changed its body")
+
+    def test_measure_block_merge_adds_one_runs_read_and_one_set_body_and_no_other_write(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        batch_head = self.head("batch-nightly")
+        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as set_body, \
+                unittest.mock.patch.object(self.host, "post_comment", wraps=self.host.post_comment) as post, \
+                unittest.mock.patch.object(self.host, "ready", wraps=self.host.ready) as ready, \
+                unittest.mock.patch.object(self.host, "to_draft", wraps=self.host.to_draft) as to_draft, \
+                unittest.mock.patch.object(self.host, "create_pr", wraps=self.host.create_pr) as create:
+            rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertEqual(self.host.runs_calls, [batch_head], "the merge read the runs of the batch head %d times, not once: %s" % (len(self.host.runs_calls), out + err))
+        self.assertEqual(set_body.call_count, 1, "the merge wrote %d pull request bodies, not one: %s" % (set_body.call_count, out + err))
+        other = {name: m.call_count for name, m in (("post_comment", post), ("ready", ready), ("to_draft", to_draft), ("create_pr", create)) if m.call_count}
+        self.assertEqual(other, {}, "the merge made writes beyond its one body write: %s" % other)
+
+    def written_files(self):
+        """Every file under this case's run folder, as a path relative to it, but not the two checkouts' trees (the merge checks the batch's lanes
+        out in one, so its files are the merge's own) and not git data (a .git directory, or the bare origin). A log or state file lands outside them."""
+        skip = tuple(os.path.relpath(p, self.run_dir) + os.sep for p in (self.co, self.other))
+        found = set()
+        for folder, dirs, names in os.walk(self.run_dir):
+            dirs[:] = [d for d in dirs if d not in (".git", "origin.git")]
+            for name in names:
+                rel = os.path.relpath(os.path.join(folder, name), self.run_dir)
+                if not rel.startswith(skip):
+                    found.add(rel)
+        return found
+
+    def test_measure_block_control_a_merge_starts_only_git_no_thread_and_writes_no_new_file(self):
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        files = self.written_files()
+        programs, real_sh = [], merge.sh
+
+        def spy_sh(args, *rest, **kw):
+            programs.append(program_name(args[0]))
+            return real_sh(args, *rest, **kw)
+        threads, real_start = [], threading.Thread.start
+
+        def spy_start(thread):
+            threads.append(thread.name)
+            return real_start(thread)
+        with unittest.mock.patch.object(merge, "sh", side_effect=spy_sh), unittest.mock.patch.object(threading.Thread, "start", spy_start):
+            rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertLessEqual(set(programs), {"git", "node", "python"}, "the merge started a program main does not start today (git, node, python): %s" % sorted(set(programs)))
+        # The one thread main starts is the silent-undo scan's progress line (merge.py, the scan's beat), so only that one is allowed.
+        self.assertEqual([t for t in threads if "(beat)" not in t], [], "the merge started a thread that is not the scan's beat: %s" % threads)
+        self.assertEqual(self.written_files() - files, set(), "the merge wrote a file that was not there before the merge")
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
