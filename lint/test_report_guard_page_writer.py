@@ -8,7 +8,7 @@ list_sessions records. The extras key `page-writer` is not the writer.
 
 These cases read this repo's real .claude/layout-extras.json, at the root the guard finds from lint/ (report_guard's
 repo_root). No fixture stands in for it. The run folder, the send and transcript helpers come from
-lint/test_report_guard.py, and the triage listing from lint/test_page_writer_tag.py, the one homes. Run with:
+lint/test_report_guard.py, the one home, listing included. Run with:
 
     python3 lint/test_report_guard_page_writer.py -v
 """
@@ -23,7 +23,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the run folder, the send and transcript helpers, the guard (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the triage session's own record and remote id (one home)
-import test_page_writer_tag as ptt  # noqa: E402  the triage listings and the triage ids (one home)
 
 layout = trg.RG.layout  # the module the guard reads the extras key from, so this file reads the same key
 OTHER_ID = "session_notthewriter"  # a delivered send's target that is not this repo's page writer
@@ -79,13 +78,13 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         """A list_sessions result that names `session_id` as this repo's triage session. The repo name is checked first."""
         repo = layout.repo_name(root)
         self.assertIsNotNone(repo, "scope: this checkout has no GitHub origin, so no cs-repo tag can name it")
-        return ptt.list_sessions_result([(session_id, ptt.triage_tags(repo))])
+        return self.listing([(session_id, self.session_tags("triage", repo))])
 
     def test_rw_pick_check_does_not_read_the_fixed_key(self):
         # Catches: the pick check taking the writer from this repo's extras key, the fixed id that goes stale when
         # triage gets a new session. The triage listing alone must carry the writer, so the key is not read.
         root, _writer = self.repo_and_writer()
-        acts = [*self.triage_listing(root, ptt.NEW), *self.send(session_id=ptt.NEW, result=self.DELIVERED)]
+        acts = [*self.triage_listing(root, self.WRITER), *self.send(session_id=self.WRITER, result=self.DELIVERED)]
         with mock.patch.object(layout, "page_writer_key", return_value=None) as key_read:
             refusal = self.question_refusal(root, acts)
         self.assertEqual(key_read.call_count, 0,
@@ -96,7 +95,7 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         # Catches: a delivered send to this repo's triage session refused as "the page writer is not known to this
         # session", the cloud false alarm, when no meta/page read names the writer.
         root, _writer = self.repo_and_writer()
-        acts = [*self.triage_listing(root, ptt.NEW), *self.send(session_id=ptt.NEW, result=self.DELIVERED)]
+        acts = [*self.triage_listing(root, self.WRITER), *self.send(session_id=self.WRITER, result=self.DELIVERED)]
         refusal = self.question_refusal(root, acts)
         self.assertEqual(refusal, "", "a delivered send to this repo's triage session was refused: %s" % refusal)
 

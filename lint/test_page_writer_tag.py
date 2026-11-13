@@ -7,13 +7,12 @@ sessions name no writer, and a send to no one passes. The pick check (lint/repor
 owner-feedback page check (hooks/feedback_guard.py Pages.is_writer) both read that one home, so they agree.
 
 Every case runs on this repo's real .claude/layout-extras.json root. Its fixed `page-writer` key is a stale id for these
-cases: no case may pass a send to it. The run folder, the send and transcript helpers come from
+cases: no case may pass a send to it. The run folder, the send, transcript and listing helpers come from
 lint/test_report_guard.py, the one home. Run with:
 
     python3 lint/test_page_writer_tag.py -v
 """
 import inspect
-import json
 import os
 import shutil
 import sys
@@ -24,43 +23,15 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-import test_report_guard as trg  # noqa: E402  the run folder, the send and transcript helpers, the guard (one home)
-import test_report_guard_stalled as trs  # noqa: E402  tool_pair: a tool call and its result as a transcript holds them
+import test_report_guard as trg  # noqa: E402  the run folder, the send, transcript and listing helpers, the guard (one home)
 import feedback_guard  # noqa: E402  Pages.is_writer, the owner-feedback page check
 
 layout = trg.RG.layout  # the module the guard reads the extras key from, so this file reads the same key
-GET_SESSION = "mcp__claude-code-remote__get_session"
-LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
 REMOTE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"  # set only in a lane; unset here, so the check reads an owner-facing session
 NEW = "session_pwtnew1"  # a triage session whose id is not the extras key
 OTHER = "session_pwtother"  # a second triage session, or one whose newest record is no longer triage
 LANE = "session_pwtlane"  # a session tagged as a lane, never a writer
 META = "session_pwtmeta"  # the writer a meta/page get names
-NONCE = "ab12cd"  # the nonce of the wrapper the harness puts round another session's record
-
-
-def triage_tags(repo):
-    return ["cs-build:triage", "cs-repo:" + repo]
-
-
-def lane_tags(repo):
-    return ["cs-build:lane", "cs-repo:" + repo]
-
-
-def get_session_result(session_id, tags, wrapped=False):
-    """The get_session call and result for `session_id`. `wrapped` puts the record in the wrapper the harness
-    gives another session's record (hooks/own_session.py reads it)."""
-    body = json.dumps({"ccr": {"id": session_id, "tags": list(tags)}})
-    if wrapped:
-        body = '<other-session nonce="%s" untrusted="true">\nSession record:\n%s\n</other-session nonce="%s">' % (
-            NONCE, body, NONCE)
-    return trs.tool_pair(GET_SESSION, {"session_id": session_id}, body)
-
-
-def list_sessions_result(sessions):
-    """The list_sessions call and result over (session_id, tags) pairs. The result shape is assumed."""
-    body = json.dumps({"sessions": [{"id": sid, "tags": list(tags)} for sid, tags in sessions]})
-    return trs.tool_pair(LIST_SESSIONS, {}, body)
 
 
 def setUpModule():
@@ -121,11 +92,12 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # "the page writer is session <key>". Two listings: a short one, and a full one of 51 sessions, triage last.
         root, repo, key = self.scope()
         self.assertNotEqual(NEW, key, "scope: the new triage id is the extras key, so the case proves nothing")
-        short = [(LANE, lane_tags(repo)), (NEW, triage_tags(repo))]
-        full = [("session_pwtlane%02d" % n, lane_tags(repo)) for n in range(50)] + [(NEW, triage_tags(repo))]
+        short = [(LANE, self.session_tags("lane", repo)), (NEW, self.session_tags("triage", repo))]
+        full = [("session_pwtlane%02d" % n, self.session_tags("lane", repo)) for n in range(50)] + [
+            (NEW, self.session_tags("triage", repo))]
         for label, sessions in (("short listing", short), ("full listing", full)):
             with self.subTest(listing=label):
-                acts = [*list_sessions_result(sessions), *self.send(session_id=NEW, result=self.DELIVERED)]
+                acts = [*self.listing(sessions), *self.send(session_id=NEW, result=self.DELIVERED)]
                 refusal = self.refusal(root, acts)
                 self.assertEqual(refusal, "", "a delivered send to the triage session %s was refused: %s" % (NEW, refusal))
 
@@ -134,9 +106,11 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # its spec. The pick check must pass a delivered send to that id only, and is_writer must say the same.
         root, repo, key = self.scope()
         rows = [
-            ("one triage session", list_sessions_result([(NEW, triage_tags(repo)), (LANE, lane_tags(repo))]), NEW),
-            ("two triage sessions", list_sessions_result([(NEW, triage_tags(repo)), (OTHER, triage_tags(repo))]), None),
-            ("no triage session", list_sessions_result([(LANE, lane_tags(repo))]), None),
+            ("one triage session", self.listing([(NEW, self.session_tags("triage", repo)),
+                                                 (LANE, self.session_tags("lane", repo))]), NEW),
+            ("two triage sessions", self.listing([(NEW, self.session_tags("triage", repo)),
+                                                  (OTHER, self.session_tags("triage", repo))]), None),
+            ("no triage session", self.listing([(LANE, self.session_tags("lane", repo))]), None),
             ("meta/page writer", self.writer_read(META), META),
             ("empty transcript", [], None),
         ]
@@ -155,7 +129,8 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # Catches: the pick check still passing a delivered send to the extras key id after a listing names another
         # triage session for this repo. That stale id refuses the real writer.
         root, repo, key = self.scope()
-        acts = [*list_sessions_result([(NEW, triage_tags(repo))]), *self.send(session_id=key, result=self.DELIVERED)]
+        acts = [*self.listing([(NEW, self.session_tags("triage", repo))]),
+                *self.send(session_id=key, result=self.DELIVERED)]
         refusal = self.refusal(root, acts)
         self.assertNotEqual(refusal, "", "a delivered send to the stale key %s passed while %s is the triage session"
                             % (key, NEW))
@@ -165,7 +140,7 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # no writer, so the send is refused.
         root, repo, key = self.scope()
         cases = (("no session record", []),
-                 ("listing with no triage session", list_sessions_result([(LANE, lane_tags(repo))])))
+                 ("listing with no triage session", self.listing([(LANE, self.session_tags("lane", repo))])))
         for label, acts in cases:
             with self.subTest(records=label):
                 refusal = self.refusal(root, [*acts, *self.send(session_id=key, result=self.DELIVERED)])
@@ -176,7 +151,7 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # Catches: one of two triage sessions for this repo taken as the writer. The key id is one of the two, so the
         # stale key passes unless the two count as no writer.
         root, repo, key = self.scope()
-        acts = list_sessions_result([(key, triage_tags(repo)), (NEW, triage_tags(repo))])
+        acts = self.listing([(key, self.session_tags("triage", repo)), (NEW, self.session_tags("triage", repo))])
         for sid in (key, NEW):
             with self.subTest(session=sid):
                 refusal = self.refusal(root, [*acts, *self.send(session_id=sid, result=self.DELIVERED)])
@@ -187,7 +162,8 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # the real writer.
         root, repo, key = self.scope()
         self.assertNotEqual("cs-repo:" + self.OTHER_REPO, "cs-repo:" + repo, "scope: the other repo is this repo")
-        acts = list_sessions_result([(NEW, triage_tags(repo)), (OTHER, ["cs-build:triage", "cs-repo:" + self.OTHER_REPO])])
+        acts = self.listing([(NEW, self.session_tags("triage", repo)),
+                             (OTHER, self.session_tags("triage", self.OTHER_REPO))])
         with self.subTest(session=NEW):
             refusal = self.refusal(root, [*acts, *self.send(session_id=NEW, result=self.DELIVERED)])
             self.assertEqual(refusal, "", "this repo's triage session %s was refused: %s" % (NEW, refusal))
@@ -199,7 +175,8 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # Catches: an undelivered send passing as the writer's pick, or the refusal naming the stale key rather than
         # the triage session the tag names.
         root, repo, key = self.scope()
-        acts = [*list_sessions_result([(NEW, triage_tags(repo))]), *self.send(session_id=NEW, result=self.NOT_DELIVERED)]
+        acts = [*self.listing([(NEW, self.session_tags("triage", repo))]),
+                *self.send(session_id=NEW, result=self.NOT_DELIVERED)]
         refusal = self.refusal(root, acts)
         with self.subTest(part="passes"):
             self.assertNotEqual(refusal, "", "an undelivered send to the triage session %s passed the pick check" % NEW)
@@ -212,7 +189,7 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         root, repo, key = self.scope()
         for label, wrapped in (("bare record", False), ("wrapped record", True)):
             with self.subTest(form=label):
-                acts = [*get_session_result(NEW, triage_tags(repo), wrapped=wrapped),
+                acts = [*self.session_record(NEW, self.session_tags("triage", repo), wrapped=wrapped),
                         *self.send(session_id=NEW, result=self.DELIVERED)]
                 refusal = self.refusal(root, acts)
                 self.assertEqual(refusal, "", "a delivered send to the triage session %s, named by its %s, was refused: %s"
@@ -223,7 +200,7 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         root, repo, key = self.scope()
         upper = "cs-repo:" + repo.upper()
         self.assertNotEqual(upper, "cs-repo:" + repo, "scope: the tag is already lowercase, so the case proves nothing")
-        acts = [*list_sessions_result([(NEW, ["cs-build:triage", upper])]), *self.send(session_id=NEW, result=self.DELIVERED)]
+        acts = [*self.listing([(NEW, ["cs-build:triage", upper])]), *self.send(session_id=NEW, result=self.DELIVERED)]
         refusal = self.refusal(root, acts)
         self.assertEqual(refusal, "", "a triage session tagged %r was refused for this repo: %s" % (upper, refusal))
 
@@ -231,8 +208,9 @@ class PageWriterTagTests(trg.SameTurnWriter, unittest.TestCase):
         # Catches: a session whose newest record no longer carries cs-build:triage still counted. Then two sessions
         # match and the real triage session is refused.
         root, repo, key = self.scope()
-        acts = [*get_session_result(OTHER, triage_tags(repo)), *get_session_result(OTHER, lane_tags(repo)),
-                *get_session_result(NEW, triage_tags(repo))]
+        acts = [*self.session_record(OTHER, self.session_tags("triage", repo)),
+                *self.session_record(OTHER, self.session_tags("lane", repo)),
+                *self.session_record(NEW, self.session_tags("triage", repo))]
         with self.subTest(session=NEW):
             refusal = self.refusal(root, [*acts, *self.send(session_id=NEW, result=self.DELIVERED)])
             self.assertEqual(refusal, "", "the triage session %s was refused; %s's newest record is a lane: %s"
