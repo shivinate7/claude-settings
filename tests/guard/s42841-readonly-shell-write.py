@@ -108,6 +108,27 @@ ro_refuse("readonly-shell-write: a lone apostrophe in a heredoc body does not hi
 ro_refuse("readonly-shell-write: a redirect into another session's scratchpad is refused",
           "echo x > " + os.path.join(RO_OTHER_SCRATCH, "ro-other.txt"), session=FAKE_SESSION)
 
+# ---- A2. A subshell, a command substitution, or arithmetic that runs commands: a write inside is a write of the call.
+# Why: a group ( ) runs its text as commands, so a redirect or touch in it writes a file even when the outer call reads.
+ro_refuse("readonly-shell-write: a touch after a cd inside a subshell is refused", "(cd /tmp && touch f)")
+ro_refuse("readonly-shell-write: a redirect inside a subshell is refused", "(echo hi > out.txt)")
+ro_refuse("readonly-shell-write: a redirect after a cd inside a subshell is refused", "(cd /tmp; echo hi > out.txt)")
+ro_refuse("readonly-shell-write: a touch inside a bare subshell is refused", "(touch f)")
+ro_refuse("readonly-shell-write: a touch in a subshell chained after a read subshell is refused", "(ls) && (touch f)")
+ro_refuse("readonly-shell-write: a redirect inside a subshell with spaces in the parentheses is refused",
+          "( echo hi > out.txt )")
+# Why: a backquote or $( ) runs its text as a command, so a write in it is a write of the call.
+ro_refuse("readonly-shell-write: a touch in a backquote command substitution is refused", "echo `(touch f)`")
+# Why: a $(( )) that is not arithmetic runs its text as a command, so the writes in it count.
+ro_refuse("readonly-shell-write: a subshell inside $(( )) within double quotes, with a touch, is refused",
+          'echo "$((touch f); (touch g))"')
+# Why: a [[ that does not start a command is an ordinary word, so a > after it, with no ]], is a redirect.
+ro_refuse("readonly-shell-write: a > after an unclosed [[ argument is a redirect, so it is refused",
+          "echo [[ x > out.txt")
+# Why: a subshell of reads writes nothing, so it stays allowed.
+ro_allow("readonly-shell-write: a read-only subshell is allowed", "(ls)")
+ro_allow("readonly-shell-write: a read-only subshell after a cd is allowed", "(cd /tmp && ls)")
+
 # ---- B. Over ssh: the same forms, inside the remote command. No scratchpad exemption applies there.
 ro_refuse("readonly-shell-write: an ssh remote command's > redirect to a file is refused", "ssh host 'cat x > /tmp/y'")
 ro_refuse("readonly-shell-write: an ssh remote command's >> append to a file is refused", "ssh host 'cat x >> /tmp/y'")
@@ -165,6 +186,11 @@ ro_allow("readonly-shell-write: a > comparison inside $(( )) arithmetic is not a
 ro_allow("readonly-shell-write: a > string comparison inside [[ ]] is not a redirect, allowed",
          '[[ "a" > "b" ]] && echo y')
 ro_allow("readonly-shell-write: a > comparison inside (( )) is not a redirect, allowed", "(( 3 > 2 )) && echo y")
+ro_allow("readonly-shell-write: a > comparison inside [[ ]] after a command is not a redirect, allowed",
+         "[[ 3 > 2 ]] && echo y")
+ro_allow("readonly-shell-write: a > comparison with spaces inside $(( )) is not a redirect, allowed", "echo $(( 3 > 2 ))")
+ro_allow("readonly-shell-write: a > in a ternary inside an assignment's $(( )) is not a redirect, allowed",
+         "x=$(( a > b ? 1 : 0 ))")
 ro_allow("readonly-shell-write: a redirect to /dev/stderr is a stream, allowed", "echo x > /dev/stderr")
 ro_allow("readonly-shell-write: a redirect to /dev/stdout with no space is a stream, allowed", "echo x >/dev/stdout")
 ro_allow("readonly-shell-write: a redirect to /dev/tty is the terminal, not a file, allowed", "echo x > /dev/tty")
