@@ -4,6 +4,7 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
+    python3 lint/ruled_store.py stale [REPO]          one line per open entry whose step is done or has no lane; exit 0
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -24,8 +25,13 @@ every entry text only. A guard rule id is the first token of the ref, with a tra
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
-names `lands_in`. check_store adds one more cat-file --batch, only when an open entry names a `step`. A missing ref, a
-missing folder or a failed git start gives [], never an error.
+names `lands_in`. check_store and stale_entries each add one more cat-file --batch for step files, only when an open entry names a
+step. So `stale` reads: the entries (ls-tree and cat-file), main blobs only when an entry has `lands_in`, step files
+only when an open entry names a step. A missing ref, a missing folder or a failed git start gives [], never an error.
+
+stale_entries(repo_dir) lists the open entries that sit open too long: each step the entry names (_steps_of) has its
+file on origin/roadmap and is done or has no `lane` (missing, null or empty). A missing step file is unknown, so the
+entry is not listed. It has no age or numeric limit. Each item is (entry id, reason).
 
 An unchecked entry (`supersedes_none` starts with "unread": triage has not read what it supersedes) informs a session
 and is marked "(unchecked, not law)" in the past-ruling search. It never governs a guard: ruling_for_guard and
@@ -361,22 +367,63 @@ def check_store(repo_dir):
     for (_kind, name), ids in shared.items():
         if len(ids) > 1:
             problems.append("entries %s both supersede %s" % (_joined(ids), name))
-    stepped = [(e, _steps_of(e)) for e in opened]
-    specs = sorted({"%s:%s%s.json" % (STORE_REF, STEP_DIR, slug) for _e, slugs in stepped for slug in slugs})
-    blobs = _batch_blobs(repo_dir, specs)
-
-    def is_done(slug):
-        spec = "%s:%s%s.json" % (STORE_REF, STEP_DIR, slug)
-        try:
-            return json.loads(blobs[spec].decode("utf-8")).get("status") == "done"
-        except (KeyError, ValueError, AttributeError):
-            return False
-
-    for entry, slugs in stepped:
-        if slugs and all(is_done(slug) for slug in slugs):
+    steps = _step_files(repo_dir, [slug for e in opened for slug in _steps_of(e)])
+    for entry in opened:
+        slugs = _steps_of(entry)
+        if slugs and all(_is_done(steps, slug) for slug in slugs):
             noun = "step %s is" % slugs[0] if len(slugs) == 1 else "steps %s are" % _joined(slugs)
             problems.append("%s done but entry %s is still open" % (noun, entry.get("id", "?")))
     return problems
+
+
+def _step_files(repo_dir, slugs):
+    """{slug: step dict} for each step slug whose file on STORE_REF reads as a JSON object, from one cat-file --batch.
+    A missing, unreadable or non-object file is absent from the answer. The one step-file read for check_store and
+    stale_entries."""
+    specs = sorted({"%s:%s%s.json" % (STORE_REF, STEP_DIR, slug) for slug in slugs})
+    found = {}
+    for spec, blob in _batch_blobs(repo_dir, specs).items():
+        try:
+            body = json.loads(blob.decode("utf-8"))
+        except ValueError:
+            continue
+        if isinstance(body, dict):
+            found[spec[len("%s:%s" % (STORE_REF, STEP_DIR)):-len(".json")]] = body
+    return found
+
+
+def _is_done(steps, slug):
+    """True when the step's file was read and its `status` is "done"."""
+    return steps.get(slug, {}).get("status") == "done"
+
+
+def _has_lane(step):
+    lane = step.get("lane")
+    return isinstance(lane, str) and bool(lane.strip())
+
+
+def stale_entries(repo_dir):
+    """[(entry id, reason)] for each open entry that sits open too long, oldest first: every step it names has a step
+    file on STORE_REF, and each is done or has no `lane`, while main lacks the ruling. An entry with no step, or one
+    whose step file is missing (unknown), is not listed. No age limit. [] when the store is absent or unreadable."""
+    opened = open_entries(ruled_entries(repo_dir), repo_dir)
+    steps = _step_files(repo_dir, [slug for e in opened for slug in _steps_of(e)])
+    listed = []
+    for entry in opened:
+        slugs = _steps_of(entry)
+        if not slugs or any(slug not in steps for slug in slugs):
+            continue
+        if all(_is_done(steps, slug) or not _has_lane(steps[slug]) for slug in slugs):
+            reasons = ["step %s is done" % slug if _is_done(steps, slug) else "step %s has no lane" % slug
+                       for slug in slugs]
+            listed.append((entry.get("id", "?"), ", ".join(reasons) + ", and the ruling is not on main"))
+    return listed
+
+
+def _stale(repo_dir):
+    for rid, reason in stale_entries(repo_dir):
+        print("%s: %s" % (rid, reason))
+    return 0
 
 
 def _check(repo_dir):
@@ -392,11 +439,11 @@ def main(argv):
             for line in session_lines(argv[1]):
                 print(line)
             return 0
-        if len(argv) in (1, 2) and argv[0] in ("list", "check"):
+        if len(argv) in (1, 2) and argv[0] in ("list", "check", "stale"):
             repo = argv[1] if len(argv) == 2 else "."
-            return _list(repo) if argv[0] == "list" else _check(repo)
+            return {"list": _list, "check": _check, "stale": _stale}[argv[0]](repo)
     except Exception:
-        return 0 if argv[:1] == ["--session-line"] else 2
+        return 0 if argv[:1] in (["--session-line"], ["stale"]) else 2
     sys.stderr.write(__doc__.split("\n\n")[0] + "\n")
     return 2
 
