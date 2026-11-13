@@ -48,8 +48,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and the rulings store, one file per owner ruling, from the owner's quoted words with their time (ruling R59,
   a ruling governs at once; `lint/ruled_store.py` checks the store). It sends the coordinator the ready list.
   It closes the build's stale drafts once, then at each batch (decision `stalled-steps`; step
-  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts, and flags to the coordinator a lane on a step
-  others wait on that has sent no report since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step. It may run agents.
+  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts.
+  It flags to the coordinator each lane on a step others wait on that has sent no report since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives the PR lanes for the coordinator, from the list `merge --idle-lanes --live <file>` prints (ruling R46; decision `session-tiers`, Archiving scope). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
