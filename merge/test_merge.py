@@ -8906,6 +8906,55 @@ class TwoStepConfirm(RecordsEnv):
         self.assertIn("moved", out, "the refusal does not say the head moved: %s" % out)
         self.assertFalse(getattr(self.host, "merged", False), out)
 
+class ClaimCollision(RecordsEnv):
+    """Two lanes claim the same record number between their confirms (per-lane merge, the coordinator's pick of Nov 12 2026). Lane B's first
+    confirm pushes its claim D-002 and stops. Lane A then merges, and main holds D-002. Lane B's second confirm finds its own claim taken on main:
+    it reverts that claim while its branch still holds it, says so, and stops. Its next confirm claims a fresh number and merges. Lane A's merge
+    is a push of its record to main from the second clone, as a landed merge leaves it. Each case names its cause in its first assert."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def lane_b_pushes_its_claim(self):
+        """Lane B's first confirm: it pushes its claim commit and stops. -> the sha of that claim head."""
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(claim_pushed_line(out), "lane B's first confirm did not stop at its pushed claim: %s" % out)
+        return self.head("feat")
+
+    def lane_a_merges(self):
+        """Lane A's merge lands on main: its record holds D-002 and carries the claim trailer."""
+        self.on("main", {"docs/decisions/lane-a.md": record("D-002", "lane-a")}, "Claim record numbers\n\nRecord-claim: D-002")
+
+    def test_a_second_confirm_whose_claim_main_holds_reverts_it_and_stops(self):
+        claim = self.lane_b_pushes_its_claim()
+        self.lane_a_merges()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 1, out)  # scope first: the confirm stops
+        self.assertFalse(getattr(self.host, "merged", False), "lane B merged on a claim main already holds: %s" % out)
+        self.assertNotEqual(self.head("feat"), claim, "lane B kept the claim D-002 that main holds: %s" % out)
+        self.assertEqual(self.log1("%s", "origin/feat"), 'Revert "Claim record numbers"', "feat's head is not the revert of the claim: %s" % out)
+        self.assertRegex(out, r"[Rr]evert", "the stop does not name the revert: %s" % out)
+        self.assertRegex(out, r"--confirm", "the stop does not name the next confirm: %s" % out)
+
+    def test_the_lane_whose_claim_collided_claims_a_fresh_number_and_merges(self):
+        self.lane_b_pushes_its_claim()
+        self.lane_a_merges()
+        self.run_merge_once("7", "--confirm")  # the revert stop
+        rc, out = self.run_merge("7", "--confirm")  # the next confirm claims, pushes, and merges on its second step
+        self.assertEqual(rc, 0, "the confirm after the revert did not merge: %s" % out)
+        self.assertTrue(getattr(self.host, "merged", False), "the confirm after the revert did not merge: %s" % out)
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-003",
+                         "the merged claim is not the fresh number D-003: %s" % out)
+
+    def test_a_second_confirm_whose_claim_main_does_not_hold_still_merges(self):  # control: green on the old code
+        self.lane_b_pushes_its_claim()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "a claim main does not hold did not merge on its second confirm: %s" % out)
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
+
 class RecordsRebuild(RecordsEnv):
     """The records index is rebuilt at merge time, the way record numbers are claimed
     from the slug form at merge: merge.py runs a records generator.
