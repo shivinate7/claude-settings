@@ -1,0 +1,14 @@
+{
+ "id": "lane-touched-tests-windows-cap",
+ "title": "Re-measure the lane-touched-tests Windows job cap: it cancels at 10 minutes and blocks lane lint",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A stale provisional cap holds a records-only PR (#2974) out of the batch; any lane may hit it.",
+ "source": "Lane outbox-aggregate-plan 14:20 CST Nov 13 (session_013NEJL21kw7F4TNpNyj1j1o); decision ci-job-caps.",
+ "note": "Filed 14:20 CST Nov 13. Lane's measure (unread by triage): .github/workflows/lane-touched-tests.yml line 72 `timeout-minutes: 10 # provisional, 4 runs, slowest 4.7 min`; run 43470187957 on #2974 (head 65e3e1199): Windows cancelled three times at the cap in \"Run the touched tests\", 9 to 10 min on three attempts; macOS 5 min; ubuntu pass; earlier head 55ebbdd07 passed. Fix: re-measure from recent runs and set the cap from the sample (decision ci-job-caps); coordinator says lane watcher-builtin-hook-survey is splitting a timeout-minutes 30 cap change into an express PR (ci-job-caps stopgap); a builder first checks whether that PR already covers this file. Past rulings not checked. No override for the failure itself: a lint-unknown-ok lifts an unknown only, and the owner types it.",
+ "updatedAt": "2026-11-13T14:20:34-06:00"
+}

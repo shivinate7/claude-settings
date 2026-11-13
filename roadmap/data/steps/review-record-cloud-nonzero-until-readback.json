@@ -1,0 +1,16 @@
+{
+ "id": "review-record-cloud-nonzero-until-readback",
+ "title": "In a cloud session the default `merge --review-record` says to post the lines through the GitHub tool, then --read-back, and exits non-zero until read back",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "review-record-failed-post"
+ ],
+ "why": "Today the default run exits 0 and says \"nothing was posted\"; under `verdict` that reads as PASS, so a record can look posted when it is not.",
+ "source": "Coordinator 14:45 CST Nov 13, from lane review-record-readback (#3235), measured 19:58 UTC.",
+ "note": "Filed 14:20 CST Nov 13 as the coordinator's candidate; triage judges it worth it: the same false PASS caused the hand-posts on #3226 and #3192 (page item 762). Measure (lane's, unread by triage): on main's tool a default run exits 0 and prints \"nothing was posted\"; #3235 keeps exit 0 on the default run, and only `--post` and `--read-back` give a verdict that means posted or confirmed; `--post` is refused in cloud, so cloud lanes hand-post through the MCP. Stacks on #3235 (one home: merge.py). A check's verdict changes, so test-author red case first, builder, reviewer. Past rulings not checked. Not started, no lane.",
+ "updatedAt": "2026-11-13T14:20:34-06:00"
+}
