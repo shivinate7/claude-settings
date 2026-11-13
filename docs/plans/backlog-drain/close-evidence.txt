@@ -19,6 +19,7 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 1706	superseded	yes	Coordinator 18:05, 19:15 CST Nov 7; 09:41 CST Nov 8	needs-home: all three, none on main	close-after-home-filed		notes-fix-large-3	subset of 2115
 1707	superseded	yes	Coordinator 18:59, 19:15 CST Nov 7	needs-home: both, none on main	close-after-home-filed		notes-fix-large-3	subset of 1722/2115; adds false debt review-record-mcp-edit-unjudged
 1708	superseded	yes	coordinator 06:28 CST Nov 8; GitLock-on-Mac pick	needs-home: 06:28 ruling and GitLock pick	close-after-home-filed		merge-lock-expired-delete-race	ancestor of 1729 and 2148
+1715	superseded by 3226	no		unknown	close-after-home-filed	Coordinator 13:20 CST Nov 13; lane mutate-sweep-control hand-in names #3226; not on main yet	mutate-sweep-control	home #3226, not on main yet
 1722	superseded	yes	coordinator 18:59 CST Nov 7; owner item 402 a	needs-home: 18:59 ruling (402 a filed)	close-after-home-filed		notes-fix-large-3	superseded by 2115
 1729	superseded	yes	coordinator 06:28 CST Nov 8	needs-home: the ruling	close-after-home-filed		merge-lock-expired-delete-race	ancestor of 2148
 1743	superseded	yes	coordinator 19:27, 20:03, design approved 20:04	needs-home: all three	close-after-home-filed		silent-undo-reads-retire-run	ancestor of 1753
@@ -44,6 +45,7 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 1995	superseded	yes	coordinator 06:50 CST; items 386 410 a	needs-home: routing and item 386	close-after-home-filed		runner-repos-in-parallel	superseded by 2071 rebuild
 2001	main	yes	Coordinator ruling 06:18 CST Nov 8 option a (one install script)	needs-home: that ruling	close-after-home-filed		lane-lint-guard-suite-install	earlier layers on main in other form; new guard-suite-in-lane-lint layer contradicts main (job scope is linted job only; GUARD_SHARD jobs; touched-tests HEAVY); closing loses debts lane-lint-guard-browser-skip + notes: re-file against main design if wanted
 2002	superseded by 3167	yes	coordinator 07:22 CST Nov 8; P5 bullet 2026-11-01 22:30	needs-home: order and the P5 bullet	close-after-home-filed		timing-tests	subset of 2081
+2017	superseded by 3200	no		unknown	close-after-home-filed	Coordinator 13:20 CST Nov 13; lane fan-code-check-cost-pins hand-in names #3200; not on main yet	lane-lint-cloud-time-limit	home #3200, not on main yet
 2033	superseded	yes	coordinator 07:58; item 386; ruling 12	needs-home: order, 386, ruling 12	close-after-home-filed		sim-lease-gaps	contained in 2061
 2052	superseded	yes	owner item 410 a: gap-fix lanes start during the hold	needs-home: that text	close-after-home-filed		(env-walk group)	subset of 2171
 2081	superseded by 3167	no		needs-home: P5 owner words only in 1177 / lane branch timing-tests-2	close-after-home-filed	lane timing-tests	timing-tests	rebuilt as 3167
@@ -60,6 +62,7 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 2277	superseded	yes	coordinator picks Q1 a 17:35, Q2 a 18:53, 15:56 withdrawal, 15:18 and 16:03 readings	needs-home: all, only in 2277 decision text	keep-open	own complete record; 2365 has no record naming the stack diff; retarget first	review-record-past-head	subset of 2365
 2301	superseded	yes	Coordinator ruling 03:12 CST Nov 8 (fail-open imports break install-hooks-whole); 04:29 fold-in	needs-home: both quotes	close-after-home-filed		bg-tail-loses-verdict	ancestor of 2015
 2321	superseded	yes	none	none	close-ok		bg-tail-loses-verdict	ancestor of 2015
+2322	superseded by 3209	no		unknown	close-after-home-filed	Coordinator 13:20 CST Nov 13; lane builder-diff-auto-merge-reflog hand-in names #3209; not on main yet	builder-diff-auto-merge-reflog	home #3209, not on main yet
 2347	superseded	yes	owner 13:20; coordinator Nov 9 19:47 20:07 20:14 23:26; owner items 448 a 454 a; coordinator Nov 10 03:32 06:04 09:00	needs-home: items 448 a, 454 a and the orders	close-after-home-filed		notes-fix-page	ancestor of 2982 (outside group, rebuild: re-shard 5-leg shoot job vs main's checks-waiting-page split); 2982 carries it
 2463	superseded	yes	coordinator ruling a; refusal pick (Nov 9)	needs-home: both, only in PR diff	close-after-home-filed		lane-push-frozen-in-batch	superseded by 3019; its debt docs/debts/push-batch-mutant-merge-dir.md not in 3019 (unknown if still real)
 2491	main	yes	parked 2026-11-09 21:09 CST; reopen condition	needs-home: park note (speaker unnamed)	close-after-home-filed		merge-route-author-paths	already on main (e2aec35ac; guard.py merge_route_paths, mutant, tests/guard s23264)
