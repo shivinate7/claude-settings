@@ -4,16 +4,17 @@
 Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the push-skip job
 is a visible success and scope reads its output.
 
-skip=true only when the push commit's tree equals the tree of a batch-* pull request head whose all-jobs-passed check run
-concluded success. A batch pull request is ready, and its ready run carries every job, the Windows full shards included, so
-that run proved this tree. Any read failure writes skip=false and says "unknown": an unknown state runs everything, never skips.
+skip=true only when the push commit's tree equals the tree of an integration PR head (a batch-* branch) whose all-jobs-passed check
+run concluded success. An integration PR is ready, and its ready run runs the Windows guard, merge and rest jobs in full whatever the
+scope flags say. Every other job ran under its scope flags, as on any PR, and the janitor sweep mutation steps ran only when the sweep
+flag was set. Any read failure writes skip=false and says "unknown": an unknown state runs everything, never skips.
 
 The result is read from the head's all-jobs-passed check run, not from the checks.yml run's own conclusion: a draft run skips every
 job and concludes success, and it must not stand for the ready run. A skipped check run (the draft run's) is not a result.
 
 Input (env): PUSH_TREE (the push commit's tree sha), REPO (owner/name), GH_TOKEN, HEAD_SHA (the push commit). PRS_JSON is a stand-in
-for the read: a JSON list of batch pull request heads, each {"head_branch", "tree", "status", "conclusion"}
-(lint/test_push_skip.py). Cost: one pull request list read, then per batch head its commit and its check runs; no file, no process kept.
+for the read: a JSON list of integration PR heads, each {"head_branch", "tree", "status", "conclusion"}
+(lint/test_push_skip.py). Cost: one pull request list read, then per integration PR head its commit and its check runs; no file, no process kept.
 """
 import functools
 import importlib.util
@@ -54,8 +55,8 @@ def get(path, query, env):
 
 
 def rollup_result(env, sha):
-    """(status, conclusion) of the newest all-jobs-passed check run on `sha` that ran. A skipped one is the draft run's, so it is
-    not a result. (\"none\", None) when no check run ran."""
+    """(status, conclusion) of the newest all-jobs-passed check run on `sha` that ran, a queued one included. A skipped one is the
+    draft run's, so it is not a result. ("none", None) when no check run ran."""
     body = get("commits/%s/check-runs" % sha, {"check_name": ROLLUP, "per_page": str(PAGE)}, env)
     runs = body.get("check_runs") if isinstance(body, dict) else None
     if not isinstance(runs, list):
@@ -65,7 +66,8 @@ def rollup_result(env, sha):
     ran = [r for r in runs if isinstance(r, dict) and r.get("conclusion") != "skipped"]
     if not ran:
         return "none", None
-    newest = max(ran, key=lambda r: str(r.get("started_at") or ""))
+    # A run with no started_at is queued and not started yet, so it is the newest: an older green run must not stand for it.
+    newest = max(ran, key=lambda r: str(r.get("started_at") or "\uffff"))
     return newest.get("status"), newest.get("conclusion")
 
 

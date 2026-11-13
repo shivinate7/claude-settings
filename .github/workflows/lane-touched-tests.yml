@@ -51,7 +51,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -u
-          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # GitHub masks the token, not its base64 form, so mask the form and the header before anything can print them.
+          b64=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$b64"
+          auth="AUTHORIZATION: basic $b64"
+          echo "::add-mask::$auth"
           # First argument: the one fetch option. Then the remote and what to fetch.
           fetch() { local opt=$1; shift; git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags "$opt" origin "$@"; }
           head_sha=$(git rev-parse HEAD)

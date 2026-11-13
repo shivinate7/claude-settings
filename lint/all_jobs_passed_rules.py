@@ -16,19 +16,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, draft_guard_only, eval_if as _eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, draft_guard_only, eval_if, PUSH_SKIP_JOB, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
                                 schedule_only, shard_base, yaml_scalar)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
-
-PUSH_SKIP_JOB = "push-skip"  # R62: the push-only job whose skip output scope reads, as it reads the nightly skip job's
-
-
-def eval_if(expr, event, flag_value, draft=False, nightly_skip=""):
-    """test_windows_split.eval_if, with the push skip job's output read as unset (a push that is not skipped). Bandaid: the reader
-    has one home, in a test file a builder may not edit, and it cannot read needs.push-skip.outputs.skip. The cure is a push_skip
-    argument on that reader, as nightly_skip has; this wrapper goes then."""
-    expr = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", "''", expr)
-    return _eval_if(expr, event, flag_value, draft=draft, nightly_skip=nightly_skip)
 
 
 def push_only(expr):
