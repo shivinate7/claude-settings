@@ -4928,6 +4928,11 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_blocked("```\nkeep the apps\n```\nAnswered: no permission rule can lift it.",
                             "Answered: no permission rule can lift it.")
 
+    def test_an_pin_a_stray_fence_leaves_the_answered_line_judged(self):
+        # Pin: a ``` with no closing partner opens no fence, so the line after it is judged. Catches: an open fence
+        # that hides the line, so "answered" with no source passes after a stray fence.
+        self.assert_blocked("```\nThe owner answered it.", "The owner answered it.")
+
     def test_an_red_landed_turn_blocks_above_a_good_report(self):
         # Catches: the check runs only on unlanded turns, or misses a line above the report.
         reply = "Answered: no permission rule can lift it.\n\n> **Done** BUILT abc123\n> **Next** ship it"
@@ -5150,6 +5155,135 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript, GUARD_PY})
+
+
+class PromiseNeedsMechanismTests(unittest.TestCase):
+    """The promise verdict (rule building-mistake-names-its-guard). On any turn, a reply line that promises
+    "from now on" and names only a handoff as its home is refused. Incident: roadmap step export-after-page-write."""
+
+    hook = AnsweredNeedsSourceTests.hook
+    verdict = AnsweredNeedsSourceTests.verdict
+    assert_blocked = AnsweredNeedsSourceTests.assert_blocked
+    assert_allowed = AnsweredNeedsSourceTests.assert_allowed
+
+    INCIDENT = ("From now on, every wake that changes the page ends with an export. That step is in my handoff.")
+
+    def test_pr_red_incident_line_blocks_on_an_unlanded_turn(self):
+        # Catches: the check runs only on landed turns; the incident turn landed nothing.
+        self.assert_blocked(self.INCIDENT, "Promise guard", self.INCIDENT)
+
+    def test_pr_red_refusal_names_the_rule_and_no_dated_owner_cite(self):
+        # Catches: the refusal text cites a dated owner line as the reason a handoff is no mechanism, so the
+        # rule's name is not the cite the reader meets.
+        out = self.assert_blocked(self.INCIDENT, "Promise guard", "building-mistake-names-its-guard")
+        self.assertNotIn("2026-11-06", out["reason"], "the refusal text carries a dated owner cite")
+
+    def test_pr_red_incident_line_blocks_in_a_report_on_a_landed_turn(self):
+        # Catches: a promise inside the report blockquote passes.
+        self.assert_blocked("> **Done** BUILT abc1234\n> **Next** " + self.INCIDENT, "Promise guard", landed=True)
+
+    def test_pr_red_a_handoff_path_is_no_home(self):
+        # Catches: the handoff file's own path read as a repo path, so the promise passes.
+        line = "From now on I export after each wake; see ~/.claude/handoffs/session_x.md."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_backticked_handoff_path_is_no_home(self):
+        # Catches: a handoff named only inside a code span read as no handoff, so the promise passes.
+        line = "From now on every wake ends with an export; the step is in `~/.claude/handoffs/session_x.md`."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_green_handoff_gave_label_passes(self):
+        # Catches: the compaction-carry label read as the promise's home.
+        self.assert_allowed("Handoff gave: owner ruling 19:02, from now on every page write ends with an export.")
+
+    def test_pr_green_a_mechanical_home_passes(self):
+        rows = [
+            # Catches: a PR cite on the line still refused.
+            "From now on the Stop check refuses it (#1400); the handoff keeps a note too.",
+            # Catches: a commit cite still refused.
+            "From now on the hook blocks it, commit 3f2a9c1d; the handoff points there.",
+            # Catches: a queued step still refused.
+            "From now on: queued as step:export-after-wake, handoff holds it until then.",
+            # Catches: a hook path still refused.
+            "From now on hooks/feedback_guard.py refuses it; the handoff says so.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pr_green_no_handoff_or_quoted_or_code_passes(self):
+        rows = [
+            # Catches: any "from now on" refused, with no handoff named.
+            "From now on the page shows the receipts.",
+            # Catches: the owner's quoted words read as this session's promise.
+            'The owner said "from now on it lives in the handoff" was wrong.',
+            # Catches: code spans read as prose.
+            "The bad line was `from now on, in my handoff`.",
+            # Catches: a question read as a promise.
+            "Should this live in the handoff from now on?",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pr_green_fenced_promise_passes(self):
+        # Catches: a fenced block read as prose.
+        self.assert_allowed("```\nFrom now on, in my handoff.\n```")
+
+    def test_pr_red_a_quoted_handoff_word_names_the_home(self):
+        # Catches: the quoted word "handoff" is stripped before the handoff check, so the promise passes.
+        line = 'From now on every wake exports; the "handoff" holds it.'
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_promise_after_a_stray_fence_is_judged(self):
+        # Catches: a ``` that never closes hides every line after it, so the promise passes.
+        line = "From now on every wake exports; the handoff holds it."
+        self.assert_blocked("```\n" + line, "Promise guard", line)
+
+    def test_pr_green_a_report_of_handoff_text_passes(self):
+        # Catches: a report of a handoff's text read as a promise made in this session.
+        self.assert_allowed("The handoff file said from now on the page is exported.")
+
+    def test_pr_red_a_lone_apostrophe_is_judged_like_its_plain_twin(self):
+        # Catches: the apostrophe in "Don't" opens a quoted span, so the promise passes.
+        rows = [
+            "Don't worry; from now on the handoff holds it.",
+            "Dont worry; from now on the handoff holds it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_first_person_handoff_subject_stays_a_promise(self):
+        # Scope first: a report of another handoff's text is still allowed, so the rows below are judged as the
+        # session's own promise and not as a report.
+        self.assert_allowed("The handoff file said from now on the page is exported.")
+        rows = [
+            # Catches: the report cut takes "My own handoff says" as a report, so the session's promise passes.
+            "My own handoff says from now on every wake exports.",
+            # Catches: the report cut takes "My latest handoff says" as a report, so the session's promise passes.
+            "My latest handoff says from now on every wake exports.",
+            # Catches: the report cut takes "This session's handoff says" as a report, so the promise passes.
+            "This session's handoff says from now on every wake exports.",
+            # Catches: the report cut takes "The session handoff says" as a report, so the promise passes.
+            "The session handoff says from now on every wake exports.",
+            # Control: the plain form stays refused, since the report cut keeps a my or our subject.
+            "My handoff says from now on every wake exports.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_second_promise_after_a_reported_one_counts(self):
+        # Catches: the report cut takes the line's only handoff word, so the session's second promise passes.
+        line = "The handoff file said from now on the page is exported; I will keep to that from now on."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_green_a_second_promise_with_a_mechanical_home_passes(self):
+        # Control: the same line with a PR cite on its second promise passes. Catches: a fix that refuses every
+        # second promise on a line that reports a handoff.
+        self.assert_allowed("The handoff file said from now on the page is exported; I will keep to that from now on, "
+                            "see #1400.")
 
 
 class PendingRefusalTests(unittest.TestCase):

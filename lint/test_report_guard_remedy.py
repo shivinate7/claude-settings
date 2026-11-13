@@ -16,8 +16,9 @@ hooks/test_call_judge.py. The triage records come from lint/test_report_guard_st
 Case 1a checks that no reason holds a session phrase or an order to the session. Case 1b checks the record cite.
 Case 1c checks that the first sentence names the check. Case 2 checks that each path still refuses, and that a clean
 report is not refused. Case 3 checks that the record holds a step heading for each check name that report_guard
-passes to owner_line, and a step line under each heading. Controls pin session_wording on fact sentences, on plain
-and mid-clause orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span
+passes to owner_line, and a step line under each heading. Case 3 also checks that PROMISE_REASON is an owner_line
+call. Controls pin session_wording on fact sentences, on plain and mid-clause orders, on the promise refusal's own
+orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span
 or one a span hides is still flagged. A judge reason that carries an order is checked at the Stop boundary:
 the refusal still fires, the ruling id stays, and the order does not reach the owner word for word.
 
@@ -50,7 +51,7 @@ FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unsta
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
-            "recovered_no_source", "past_ruling_order", "refusal_two_tools")
+            "recovered_no_source", "past_ruling_order", "refusal_two_tools", "promise")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -98,6 +99,11 @@ LIST_WORD_ORDER = "The classifier refused `Agent`, write the line."
 # A span with a dot before its comma is no list item, so the verb unit after it is still read. This fails for a
 # _SPAN_COMMA_END that drops the dot from its excluded marks.
 DOT_LIST_VERB_ORDER = "The check read `a.b`, `add` it."
+# The orders of the promise refusal (PROMISE_REASON). Each is an order to the session, so session_wording must flag it.
+PROMISE_ORDERS = ("Build the check or hook now and cite its PR or commit on the line.",
+                  "Queue it as step:<slug>, or drop the promise.")
+# The promise row's reply: the incident line, then a second promise line, so the refusal lists more than one bad line.
+PROMISE_SECOND = "From now on the handoff keeps the export step."
 # A step line is a bullet or a numbered item. A section ends at the next ## or ### heading.
 STEP_LINE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\S")
 SECTION_END = re.compile(r"(?m)^#{2,3} ")
@@ -118,11 +124,23 @@ def judge_answer(reason):
     return json.dumps({"ok": False, "reason": reason})
 
 
-def owner_line_checks():
-    """The check name of each owner_line call in report_guard.py, read from that module's own source. A name is a
-    string literal or a module-level name bound to one. Any other argument reads as None."""
+def report_guard_tree():
+    """report_guard.py's syntax tree, parsed from its own source. Each AST check reads this tree."""
     with open(trg.REPORT_GUARD, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+        return ast.parse(handle.read())
+
+
+def module_value(tree, name):
+    """The value node bound to the module-level `name` in `tree`, or None when no assignment binds it."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return node.value
+    return None
+
+
+def owner_line_checks(tree):
+    """The check name of each owner_line call in `tree`, which is report_guard.py's source. A name is a string literal
+    or a module-level name bound to one. Any other argument reads as None."""
     consts = {}
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
@@ -282,6 +300,9 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                  trg.assistant_text(self.PROSE)], "refusal", clean,
                 env={"CLAUDE_CONFIG_DIR": self.refusal_repo_config(self.TWO_TOOLS)},
                 extra={"session_id": self.REFUSAL_SID}),
+            # Promise: two "from now on" lines whose only home is a handoff. The refusal must be an owner line with a cite.
+            "promise": lambda: case([trg.human("do the task"), trg.assistant_text(
+                trg.PromiseNeedsMechanismTests.INCIDENT + "\n" + PROMISE_SECOND)], "promise", clean),
             # Lane: the lane's own get_session record, then a question with no send to the parent or the writer.
             "lane": lambda: case([*trg.QuestionReachesPageTests.lane_record(self), trg.human("decide"),
                                   trg.assistant_text(trg.RELAY)], "lane", bare, env=lane_env),
@@ -503,9 +524,17 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         problem = RG.session_wording(reason)
         self.assertEqual(problem, "", "1a the three-tool refusal reason reads as an order to the session: %r" % problem)
 
+    def test_1a_control_promise_orders_are_flagged(self):
+        # Each order of the promise refusal must be flagged. A miss is the detector's gap: the refusal text holds them.
+        for order in PROMISE_ORDERS:
+            with self.subTest(order=order):
+                self.assertNotEqual(RG.session_wording(order), "",
+                                    "1a control: session_wording does not flag an order of the promise refusal: %r"
+                                    % order)
+
     def test_3_record_has_a_step_heading_and_step_line_for_each_owner_line_check(self):
         # The names come from report_guard.py's own source, the one place each owner_line call is written.
-        names = owner_line_checks()
+        names = owner_line_checks(report_guard_tree())
         self.assertTrue(names, "report_guard passes no check name to owner_line")
         self.assertNotIn(None, names, "a check name is neither a literal nor a module constant: it cannot be read")
         self.assertTrue(os.path.exists(RECORD), "the decision record is missing: %s" % RECORD)
@@ -515,6 +544,14 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             with self.subTest(check=name):
                 self.assertEqual(record_problems(record, [name]), [],
                                  "3 the record holds no step heading and step line for the check %r" % name)
+
+    def test_3_promise_reason_is_an_owner_line_call(self):
+        # PROMISE_REASON is one module-level name. Its value must be the owner_line call, so the owner line and its cite
+        # come from the one home, never from a plain string.
+        value = module_value(report_guard_tree(), "PROMISE_REASON")
+        self.assertIsNotNone(value, "3 report_guard binds no module-level PROMISE_REASON")
+        self.assertTrue(isinstance(value, ast.Call) and getattr(value.func, "id", None) == "owner_line",
+                        "3 PROMISE_REASON is a plain string, not an owner_line call")
 
     def test_3_record_holds_the_correction_step_in_shared_tails(self):
         # The refusals hold no correction text, so the one step that asks for the corrected lines lives in the record's
