@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Git is the page's home. The page database is the live view that one account writes through. It is exported to git in a timely way, not in real time. Nothing points to one claude.ai link as the real data set (owner, 2026-11-13 12:03 CST, relayed by the retrospective, as written: "nothing points to a specific link of the artifact as the real dataset, only git data in a sense").
+Git is the page's home. The page database is the live view that one account writes through. Each Send wakes the page writer, which exports the git copy then. Any other write is exported in a timely way, not in real time (owner, 2026-11-13 14:24 CST, page item 757 a, ruling `own-757-a-send-exports`: "yes, each Send wakes the writer, which exports the git copy then"). Nothing points to one claude.ai link as the real data set (owner, 2026-11-13 12:03 CST, relayed by the retrospective, as written: "nothing points to a specific link of the artifact as the real dataset, only git data in a sense").
 
 Owner, 2026-11-12 12:40 CST, relayed by the coordinator (the relayed text; the records on the roadmap branch elide parts of it, so it is not checked against them): "the artifact is never operated upon by two accounts at the same time ... before it runs on another account i tend to wind it all down ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay from that aspect of acocunt switching ... now if there are other problems /concerns like even within the same account the setup with all the lanes + triage is causing some sorta internal lag ... then we should still be open to the switchr otue".
 
@@ -11,7 +11,7 @@ Anchor: decision `waiting-data-in-repo` (owner, 2026-11-02 14:58 CST): "Git is e
 Basis: owner R28, 2026-11-11 11:50 CST (restart plan item 3.14, `docs/plans/restart-plan.md` 554-555): "remember ij [sic] just care about the outcomes not the plumbing to reach it". Owner, 2026-11-12 11:24 CST, through the retrospective: "it shouldn't be a skill thing though it should be pretty mechanized". Owner, 12:10 CST, relayed by the coordinator: "Custom connectors are not allowed -- so we can do route B". Route B was then picked; route D is ruled out (`plans/owner-rulings-2026-11-12.md` line 49 on the roadmap branch). The 12:40 ruling overrides the 12:10 route B pick: route C is chosen, and route B is the fallback on the triggers under "What triggers route B".
 
 - The page database is the live view. In one account, sessions read and write it live through ArtifactData. The page keeps `db` and `comments`, and nothing changes on the page.
-- The copy in git is the home. It is exported in a timely way, not in real time, so it can be behind the live view by the export's age. For an account move, for recovery, and for a read from another account, the copy is the data.
+- The copy in git is the home. A Send wakes the page writer, which exports the copy then, so the copy holds that moment: a snapshot, and a later save is not in it. Any other write is exported in a timely way, not in real time, so the copy can be behind the live view by the export's age. For an account move, for recovery, and for a read from another account, the copy is the data.
 - A session in the account that owns the page reads the database for what is newest. A session in any other account reads the git copy, read-only, and knows its age (step `waiting-copy-age-read`).
 - Route B (the owner's own site) is the fallback. A measured problem triggers it. See "What triggers route B".
 - Mechanized: the timely export is a check, never a skill step (owner, 11:24 CST). The Stop check enforces it, and Mechanism step 1 closes its cloud-writer miss. The copy steps in `skills/waiting-page/reference/copies-and-accounts.md` are the run the check asks for.
@@ -24,7 +24,7 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the own
 |---|---|
 | A. Db off, page shows a baked git snapshot | Fails: loses Send, Undo, Withdraw, Ask, Park, Mark read; a baked snapshot is a copy with lag. |
 | B. Owner's own site, a Worker holds a token, git is the live store too | The fallback. Keeps every feature. Survives an account switch. Needs a Cloudflare account, a token and an access gate. |
-| C. Git is the home, the page database is the live view, git gets a timely export | Chosen. Costs nothing to build. Its gap is the copy's age, which has no set bound. The export check holds a page write to a later copy commit, except a cloud writer until Mechanism step 1 lands. |
+| C. Git is the home, the page database is the live view, git gets a timely export | Chosen. Costs nothing to build. A Send closes the copy's age for Sends (the page writer exports at its wake). Its gap is a later save, which is not in the copy, and the age of the copy for any write that is not a Send, which has no set bound. The export check holds a page write to a later copy commit, except a cloud writer until Mechanism step 1 lands. |
 | D. Page on claude.ai, no `db`, git through a connector | Ruled out: custom connectors are not allowed (owner, 12:10 CST). |
 
 ## Why C is enough today (read from `skills/waiting-page/page.html`, checked on origin/main at commit 7dd44c41c)
@@ -61,7 +61,7 @@ Taken by the coordinator at 11:43 CST on 2026-11-12, as an undoable pick (no own
 
 ## Known gaps
 
-- The copy's age has no set bound. The owner said "timely enough (not real time)". The export check (Mechanism step 1) blocks a turn that wrote the page without a later copy (read hooks/feedback_guard.py:1332), except a cloud writer until step 1 lands. That is stricter than he asked. Unmeasured: whether that check costs more than it protects.
+- The copy's age has no set bound for a write that is not a Send. A Send is exported at the page writer's wake (ruling `own-757-a-send-exports`), and a save after it is not in the copy. The owner said "timely enough (not real time)". The export check (Mechanism step 1) blocks a turn that wrote the page without a later copy (read hooks/feedback_guard.py:1332), except a cloud writer until step 1 lands. That is stricter than he asked. Unmeasured: whether that check costs more than it protects.
 - The git copy holds five collections and no `receipts` (`export_page.py`, `lint/layout.py:275`). A recovery from it loses the receipts. Plan item 2 adds them.
 - Two accounts: the owner winds one down by hand before using the other, and the skill's "Before you switch Claude accounts" export covers it (read `skills/waiting-page/reference/copies-and-accounts.md`). No check makes him do it.
 - The Status tab stays baked and lags until a republish.
@@ -72,7 +72,7 @@ Taken by the coordinator at 11:43 CST on 2026-11-12, as an undoable pick (no own
 2. `waiting-copy-backup-only` (blockedBy none): the skill, the export script and the checks name the copy as the home for recovery, account moves and cross-account reads. They never name it the live view in the owning account. The allow list of tools that may read the copy folder holds the recovery, merge and export modes of `export_page.py`, `stale_pages.py --lag` and `--copy-age` (steps 3 and 5), and one more entry: a read-only read of another account's git copy. That read is the only route from this account to the Home and Degen pages, which it cannot reach through ArtifactData (coordinator, 2026-11-13 12:09 CST; unmeasured here). A tool that reads the copy folder for any other reason fails the check. The cross-account entry is read-only: a tool that writes to another account's copy fails the check. Red first, for both the extra reader and the write.
 3. `waiting-lag-read` (blockedBy none): `stale_pages.py --lag <folder>` reads the folder the writer already saves at each wake. It prints each answer's delay from `at` to its receipt `read`, and each answer with no receipt older than a set age. No new store, no timer, no process. The named reader is the writer at its wake.
 4. `answers-session-write-guard` (blockedBy none): the guard of Picks. Already a lane.
-5. `waiting-copy-age-read` (blockedBy `waiting-lag-read`, which gives the reader its home in `stale_pages.py`): `stale_pages.py --copy-age <folder>` prints the copy's age, the time since its last export commit, and the age of the newest item or answer the copy holds. It is a step because it needs code. Reader: the page writer at its wake, and any session that reads another account's copy, which sees the age beside the data. No new store, timer or process. Red first: a copy folder with a last commit older than the set age must print its age and the word late.
+5. `waiting-copy-age-read` (blockedBy `waiting-lag-read`, which gives the reader its home in `stale_pages.py`): `stale_pages.py --copy-age <folder>` prints the copy's age, the time since its last export commit, and the age of the newest item or answer the copy holds. It is the check for a write that is not a Send, since a Send exports at the page writer's wake (step 6). It is a step because it needs code. Reader: the page writer at its wake, and any session that reads another account's copy, which sees the age beside the data. No new store, timer or process. Red first: a copy folder with a last commit older than the set age must print its age and the word late.
 
 The R28 steps `prose-tending-contract`, `prose-tending-move-stores`, `feedback-log-tends-itself` and `shared-job-finder` stay as they are. The copy is a store that `prose-tending-contract` tends: its "still true?" test compares the copy with the database, its live view. The copy is the home, so a difference is the copy's lag, never the database's error.
 
@@ -91,7 +91,7 @@ Done proof: a fresh clone on the other account rebuilds each page from git alone
 
 ## Why
 
-Protects: the owner sees live data on the page, and the data survives a lost page or an account switch because git is its home. A lost page or an account switch loses what the copy has not yet caught, and the copy's age has no set bound. A session in another account reads the copy with its age beside it. It also protects against building a second system the owner does not need.
+Protects: the owner sees live data on the page, and the data survives a lost page or an account switch because git is its home. A lost page or an account switch loses what the copy has not yet caught: any save after the last Send, and, for a write that is not a Send, an age with no set bound. A session in another account reads the copy with its age beside it. It also protects against building a second system the owner does not need.
 
 ## Cost
 
