@@ -141,7 +141,8 @@ def _split_segments_cached(cmd: str, powershell: bool):
 # a rule that must know whether a character sits inside quotes. `quote` is "", `'`, `"`, or `$'` (a
 # bash ANSI-C string). A backslash escapes the next character outside quotes and inside `"..."` or
 # `$'...'`, a backslash too, so `\"` neither opens nor closes a quote and `\\'` opens one; inside
-# `'...'` it escapes nothing. PowerShell text takes PowerShell's rules: a backslash is a path
+# `'...'` it escapes nothing, except in a python, node, perl or ruby heredoc body, which `_split_reading` alone
+# reads by the script's own rules (`_script_text_spans`). PowerShell text takes PowerShell's rules: a backslash is a path
 # character; a backtick escapes the next character outside quotes and inside `"..."`; `''` inside
 # `'...'` and `""` inside `"..."` are one literal quote; `<# ... #>` is a comment (state `<#`) and
 # `@"` or `@'` at a line's end opens a here-string that ends at `"@` or `'@` on a line's start
@@ -257,6 +258,30 @@ def split_segments(cmd: str, ends=None):
     return segments
 
 
+def _script_text_spans(cmd: str):
+    """[(start, end, template)] character spans of each body that python, node, perl or ruby reads from a
+    quoted-delimiter heredoc, from `_walk_heredocs`'s line spans. Bash never runs that text: the interpreter
+    reads its quotes, so `\\'` inside a single-quoted string is an escape there, where bash's own reading would
+    close the string. `template` is true for a node body, whose backtick string runs across lines.
+    A header line alone holds no body, so a single line returns at once: `_INTERPRETER_FIRST` splits the
+    header it is given, and a walk of that line again would not end."""
+    if "\n" not in cmd or "<<" not in cmd or not ("\\'" in cmd or "`" in cmd):
+        return ()
+    lines, found = cmd.split("\n"), []
+    _, bodies, _ = _walk_heredocs(cmd, spans=found)
+    offsets, at = [], 0
+    for line in lines:
+        offsets.append(at)
+        at += len(line) + 1
+    spans = []
+    for (quote, _body, header), (first, end) in zip(bodies, found):
+        if quote and _INTERPRETER_FIRST(header) and not SHELL_HEREDOC(header):
+            begin = offsets[first] if first < len(lines) else len(cmd)
+            stop = offsets[end] - 1 if end < len(lines) else len(cmd)
+            spans.append((begin, stop, script_language(header) == "js"))
+    return tuple(spans)
+
+
 def _split_reading(cmd: str, ends, contractions_are_text: bool):
     """One reading of split_segments: (segments, the quote open at the end, whether an unquoted
     `'` has a contraction's shape). The first reading is bash's own: every unquoted `'` opens a
@@ -269,10 +294,25 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     quote = ""
     shaped = False
     powershell = is_powershell(cmd)
+    spans = () if powershell else _script_text_spans(cmd)
+    template_end = 0
     index = 0
     length = len(cmd)
     while index < length:
         char = cmd[index]
+        if quote == "`" and index >= template_end:
+            quote = ""   # a template literal never outlives its body: a stray backtick hides nothing after it
+        if spans and char in ("\\", "`") and quote in ("", "'"):
+            body = next((span for span in spans if span[0] <= index < span[1]), None)
+            if body and char == "\\" and quote == "'":
+                current.append(cmd[index:index + 2])   # a script's escaped quote: the string goes on
+                index += 2
+                continue
+            if body and body[2] and char == "`" and not quote:
+                current.append(char)   # a node template literal opens, and may run across lines
+                quote, template_end = "`", body[1]
+                index += 1
+                continue
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
             if char in ("'", '"', "`", "#", "<", "@"):
                 current.append(char)
