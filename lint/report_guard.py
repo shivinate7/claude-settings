@@ -868,24 +868,20 @@ def _names_main_run(kept, cwd=None, cache=None):
     return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
 
 
-QUESTION_OPENER_RE = re.compile(
-    r"\s*(?:is|are|was|were|do|does|did|has|have|had|can|could|should|would|will|shall|may|might|must"
-    r"|which|what|why|how|whether)\b", re.I)
+PREMISE_RE = re.compile(r"\b(?:given|seeing)\s+that\b", re.I)  # premise words the parser's lead-in lists lack
 
 
 def _claim_part(sentence):
     """`sentence` when it can hold a claim, else "". A sentence that does not end in `?` is all claim. A question of one
     clause asks and holds none ("Is the failure pre-existing?"). A question of more clauses is judged whole: its premise or
-    its first clause can state the claim ("Can I merge, as the failure is pre-existing?"). A lead-in word with no comma
-    ("so", "and") also splits it when an auxiliary or a wh-word opens the clause after it ("... is pre-existing so should I merge?")."""
+    its first clause can state the claim ("Can I merge, as the failure is pre-existing?"). A lead-in word that opens a clause
+    ("so", "and", "since", "as") or a premise ("given that") splits it too, with no comma ("... is pre-existing so should I merge?")."""
     if not sentence.rstrip("*_)\"' ").endswith("?"):
         return sentence
-    if len(_clause.clauses(sentence, [False] * len(sentence))) > 1:
+    if len(_clause.clauses(sentence, [False] * len(sentence))) > 1 or PREMISE_RE.search(sentence):
         return sentence
-    for m in PRE_LEAD_RE.finditer(sentence):
-        rest = sentence[m.end():]
-        if QUESTION_OPENER_RE.match(rest) and _clause.lead_opens_clause(m.group(), rest):
-            return sentence
+    if any(_clause.lead_opens_clause(m.group(), sentence[m.end():]) for m in PRE_LEAD_RE.finditer(sentence)):
+        return sentence
     return ""
 
 
