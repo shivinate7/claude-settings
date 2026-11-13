@@ -3132,10 +3132,9 @@ def case_turn_ends_at_the_owners_next_typed_prompt():
 
 
 def case_turn_notice_between_the_ask_and_the_spawn_keeps_it():
-    # Case 3: a notice between a role-scoped ask and its spawn keeps the grant, so the reviewer spawn is lifted (control). A
-    # typed prompt after the notice ends it (red on the old code). The builder's end-notice must not cancel `opus reviewers`
-    # before the reviewers spawn (ruling own-761-d, 14:21 CST Nov 13). The notice-tag start has no source, so it is
-    # read as typed by _keyword_typed, which the design uses for removal: that conflict is flagged to the owner.
+    # A notice between a role-scoped ask and its spawn keeps the grant, so the reviewer spawn is lifted. A typed prompt after
+    # the notice ends it. The builder's end-notice must not cancel `opus reviewers` before the reviewers spawn (ruling
+    # own-761-d, 14:21 CST Nov 13). _keyword_typed reads a notice-tag start as no typed turn, so that notice keeps the grant.
     notices = (
         ("a loop_wakeup notice", "a builder ended its round", {"source": "loop_wakeup"}),
         ("a system record", "a builder ended its round", {"source": "system"}),
@@ -3327,6 +3326,63 @@ def case_opus_off_ends_a_no_length_opus_override():
     opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(days=1))
     check("opus off, no length: after `opus off` a day later, a reviewer spawn is refused",
           not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(days=1, minutes=1))), "take() was lifted")
+
+
+def case_typed_opus_off_after_a_turn_grant_says_ended_and_logs_it():
+    # A typed `opus off` ends a plain Opus ask's turn grant, and the end is one receipt line and one guard.log line. `opus
+    # off` ends any grant (ruling own-761-d-task-scoped-opus, 14:21 CST Nov 13). No timed file is written here, so the
+    # receipt comes only from the turn file. The full-size variant holds the owner's `opus off` past the top-of-file read
+    # cap, so the prompt's own record is read from the tail.
+    late = (("no transcript", None),
+            ("a full-size transcript", full_size_transcript(owner_turn("send opus judges"), owner_turn("opus off"))))
+    for name, path in late:
+        cfg, calls, _, _ = opus_type("send opus judges", answer={"ok": True})
+        check("opus off after turn: %s: precondition, the turn file is written and no timed file" % name,
+              len(calls) == 1 and opus_grant_file(cfg, OPUS_TURN_FOLDER) is not None
+              and opus_grant_file(cfg, OPUS_FOLDER) is None, "files %r" % (ov_files(cfg),))
+        _, _, out, _ = opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1), transcript=path)
+        check("opus off after turn: %s: `opus off` prints the one Opus receipt line" % name,
+              out.splitlines() == ["Opus override: ended."], "stdout %r" % (out[-200:],))
+        check("opus off after turn: %s: `opus off` writes one opus-off guard.log line" % name,
+              sum("opus-off" in line for line in ov_log(cfg)) == 1, "log %r" % (ov_log(cfg),))
+        check("opus off after turn: %s: the turn file is removed (control)" % name,
+              opus_grant_file(cfg, OPUS_TURN_FOLDER) is None, "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+        check("opus off after turn: %s: a reviewer spawn after `opus off` is refused (control)" % name,
+              not lifted(take_spawn(cfg, "reviewer", at=OV_NOW + timedelta(minutes=2))), "take() was lifted")
+
+
+def case_typed_opus_off_with_no_grant_prints_nothing():
+    # With no Opus file of either kind, a typed `opus off` ends nothing, so it prints no receipt and logs no opus-off line
+    # (ruling own-761-d-task-scoped-opus, 14:21 CST Nov 13).
+    cfg = ov_cfg()
+    check("opus off, no file: precondition, no Opus file exists", opus_files(cfg) == [], "files %r" % (ov_files(cfg),))
+    _, _, out, _ = opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1))
+    check("opus off, no file: `opus off` prints no Opus receipt", out == "", "stdout %r" % (out[-200:],))
+    check("opus off, no file: `opus off` writes no opus-off guard.log line",
+          not any("opus-off" in line for line in ov_log(cfg)), "log %r" % (ov_log(cfg),))
+
+
+def case_harness_opus_off_keeps_the_turn_file():
+    # A harness `opus off` is no typed turn, so it never ends the owner's turn grant. A notice, a wakeup, a peer or a task
+    # notification can carry the words, and a builder's end-notice must not cancel a plain ask before its spawn (ruling
+    # own-761-d, 14:21 CST Nov 13). Each such `opus off` leaves the turn file, prints no receipt and logs no line.
+    cases = [("source %s" % source, {"source": source}, None) for source in SOURCE_REFUSED]
+    for origin_name, origin in QUEUED_NOT_OWNER:
+        cases.append(("a prompt record, %s" % origin_name, None,
+                      transcript_file([transcript_record("user", "opus off", origin=origin)])))
+        cases.append(("a queued command, %s" % origin_name, None,
+                      transcript_file([queued_record("opus off", origin)])))
+    for name, extra, path in cases:
+        cfg, _, _, _ = opus_type("send opus judges", answer={"ok": True})
+        check("opus off harness: %s: precondition, the turn file is written and no timed file" % name,
+              opus_grant_file(cfg, OPUS_TURN_FOLDER) is not None and opus_grant_file(cfg, OPUS_FOLDER) is None,
+              "files %r" % (ov_files(cfg),))
+        _, _, out, _ = opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1), extra=extra, transcript=path)
+        check("opus off harness: %s: the turn file is kept" % name,
+              opus_grant_file(cfg, OPUS_TURN_FOLDER) is not None, "turn file %r" % (opus_grant_file(cfg, OPUS_TURN_FOLDER),))
+        check("opus off harness: %s: no receipt is printed" % name, out == "", "stdout %r" % (out[-200:],))
+        check("opus off harness: %s: no opus-off guard.log line is written" % name,
+              not any("opus-off" in line for line in ov_log(cfg)), "log %r" % (ov_log(cfg),))
 
 
 def case_once_override_ends_at_the_owners_next_typed_prompt():
@@ -3603,6 +3659,9 @@ def main():
         case_turn_removal_costs_one_remove_and_no_process()
         case_opus_ask_length_still_ends_at_its_time()
         case_opus_off_ends_a_no_length_opus_override()
+        case_typed_opus_off_after_a_turn_grant_says_ended_and_logs_it()
+        case_typed_opus_off_with_no_grant_prints_nothing()
+        case_harness_opus_off_keeps_the_turn_file()
         case_once_override_ends_at_the_owners_next_typed_prompt()
         case_once_override_survives_a_harness_prompt()
         case_once_override_survives_a_harness_queued_command()
