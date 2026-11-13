@@ -11,7 +11,10 @@ It makes no network call. Triage saves each tool result verbatim into READS firs
   prev.json         the previous live file: landedPulls, keepSessions, each session's unarchived_epoch.
   held.txt          one pull number per line, "#" comments allowed; a line ALL holds every open pull. Optional.
   readat.txt        the ISO time, with zone, of the reads.
-A missing or gapped page list, or a row of the wrong shape, stops the run with a message and writes nothing.
+A missing or gapped page list, a held.txt line that is not a number, #N, ALL or a comment, an idle_since with no
+zone, an unarchived_epoch that is not a JSON int, or an item or pull number that is not an int stops the run with a
+message and writes nothing. No held.txt means no holds. No items/ folder leaves `items` out of the file, so the
+build reads the items as unknown, never as none.
 Output: {readAt, pulls, branches, sessions, items, landedPulls, keepSessions}. A pull row has `held`. A session
 row has `tags` (never absent), and `idle_since` on an IDLE row: its updated_at, which stands in for "last did
 anything". `unarchived_epoch` is carried from prev.json only (a row with none stays without the key). landedPulls
@@ -20,6 +23,7 @@ wins. It writes no `reviewLog` (part 2 of step stale-draft-reads-runner-holds); 
 `idle_since` and `unarchived_epoch` in draft PR 3142.
 """
 import argparse
+import datetime
 import json
 import pathlib
 import re
@@ -72,10 +76,30 @@ def need(row, *path):
 
 
 def held_set(folder):
+    """The held pull numbers as text, or "ALL". A line is a number, "#N", ALL, or a comment starting "# "."""
     path = folder / "held.txt"
-    if not path.exists():
-        return set()
-    return {line.split("#")[0].strip() for line in path.read_text(encoding="utf-8").splitlines()} - {""}
+    held = set()
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines() if path.exists() else [], 1):
+        if re.match(r"#\D", line.strip()):
+            continue
+        word = line.split(" #")[0].strip().lstrip("#")
+        if not word:
+            continue
+        if word != "ALL" and not word.isdigit():
+            raise Stop("held.txt line %d is not a number, ALL or a comment: %r" % (n, line))
+        held.add(word)
+    return held
+
+
+def instant(text, what):
+    """An ISO time with a zone as an aware datetime; a bad or zoneless time stops the run."""
+    try:
+        at = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        raise Stop("%s is not an ISO time: %r" % (what, text))
+    if at.tzinfo is None:
+        raise Stop("%s has no time zone: %r" % (what, text))
+    return at
 
 
 def build(folder, since):
@@ -88,35 +112,46 @@ def build(folder, since):
     if not isinstance(prev, dict):
         raise Stop("prev.json is not an object")
     held = held_set(folder)
+    since_at = instant(since, "--landed-since")
     opens = {need(p, "number"): p for p in pages(folder, "open")}
+    if not all(type(n) is int for n in opens):
+        raise Stop("an open pull number is not an int")
     pulls = [{"number": p["number"], "title": need(p, "title"), "branch": need(p, "head", "ref"),
               "draft": bool(p.get("draft")), "createdAt": need(p, "created_at"), "head": need(p, "head", "sha"),
               "held": "ALL" in held or str(p["number"]) in held} for p in opens.values()]
     landed = {r["number"]: r for r in prev.get("landedPulls", [])}
     for p in pages(folder, "closed"):
-        if need(p, "base", "ref") == "main" and p.get("closed_at") and p["closed_at"] >= since:
+        if need(p, "base", "ref") == "main" and p.get("closed_at") and instant(p["closed_at"], "closed_at") >= since_at:
             landed[p["number"]] = {"number": p["number"], "branch": need(p, "head", "ref"),
                                    "head": need(p, "head", "sha"), "merged": bool(p.get("merged_at"))}
     epochs = {s["id"]: s["unarchived_epoch"] for s in prev.get("sessions", []) if "unarchived_epoch" in s}
+    if not all(type(e) is int for e in epochs.values()):
+        raise Stop("a prev.json unarchived_epoch is not a JSON int")
     sessions = {}
     for s in pages(folder, "sess"):
         row = {"id": need(s, "id"), "session_status": need(s, "session_status"), "tags": s.get("tags") or [],
                "status_bucket": s.get("status_bucket")}
         if row["session_status"] == IDLE and s.get("updated_at"):
+            instant(s["updated_at"], "idle_since")
             row["idle_since"] = s["updated_at"]
         if row["id"] in epochs:
             row["unarchived_epoch"] = epochs[row["id"]]
         sessions[row["id"]] = row
     items = []
-    for path in sorted((folder / "items").glob("**/*.json")):
+    for path in sorted((folder / "items").glob("**/*.json")) if (folder / "items").is_dir() else []:
         doc = load(path)
         if isinstance(doc, dict) and "data" in doc and "n" not in doc:
             doc = doc["data"]
         if not isinstance(doc, dict):
             raise Stop("%s is not an item" % path.name)
+        if type(doc.get("n")) is not int:
+            raise Stop("%s: an item's n is not an int" % path.name)
         items.append({k: doc[k] for k in ITEM_KEYS if k in doc})
-    return {"readAt": read_at, "pulls": pulls, "branches": [], "sessions": list(sessions.values()), "items": items,
-            "landedPulls": list(landed.values()), "keepSessions": prev.get("keepSessions", [])}
+    result = {"readAt": read_at, "pulls": pulls, "branches": [], "sessions": list(sessions.values()),
+              "landedPulls": list(landed.values()), "keepSessions": prev.get("keepSessions", [])}
+    if (folder / "items").is_dir():
+        result["items"] = items
+    return result
 
 
 def main(argv=None):

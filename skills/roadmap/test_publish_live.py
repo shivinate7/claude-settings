@@ -50,7 +50,7 @@ class PublishLive(unittest.TestCase):
                                    sess("session_b", "SESSION_STATUS_RUNNING", "2026-11-13T09:30:00Z", ["cs-repo:o/r"])])
         self.save("sess_p2.json", [sess("session_c", "SESSION_STATUS_IDLE", "2026-11-13T08:00:00Z")])  # tags absent
         self.save("prev.json", {"landedPulls": [{"number": 5, "branch": "b5", "merged": True}],
-                                "sessions": [{"id": "session_b", "unarchived_epoch": 1789000000}],
+                                "sessions": [{"id": "session_b", "unarchived_epoch": 1789000000}, {"id": "session_a"}],
                                 "keepSessions": [{"id": "session_a", "reason": "r"}]})
         (self.dir / "held.txt").write_text("# runner list\n9  # nine\n", encoding="utf-8")
         (self.dir / "readat.txt").write_text("2026-11-13T10:00:00Z\n", encoding="utf-8")
@@ -93,6 +93,53 @@ class PublishLive(unittest.TestCase):
     def test_all_line_holds_every_pull(self):
         (self.dir / "held.txt").write_text("ALL\n", encoding="utf-8")
         self.assertTrue(all(p["held"] for p in self.published()["pulls"]))
+
+    def stops(self, message):
+        done = self.run_pub()
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn(message, done.stderr)
+        self.assertFalse((self.dir / "live.json").exists())
+
+    def test_missing_items_folder_omits_the_key(self):
+        for path in sorted((self.dir / "items").glob("**/*.json")):
+            path.unlink()
+        (self.dir / "items" / "items").rmdir()
+        (self.dir / "items").rmdir()
+        raw = self.published()
+        self.assertNotIn("items", raw)
+        self.assertTrue(build.live_work(str(self.dir / "live.json"), {}, "o/r")["itemsWhy"].startswith("unknown"))
+
+    def test_hold_lines(self):
+        (self.dir / "held.txt").write_text("#9\n# comment\n7 # seven\n", encoding="utf-8")
+        self.assertEqual({p["number"]: p["held"] for p in self.published()["pulls"]}, {7: True, 9: True})
+        (self.dir / "live.json").unlink()
+        for bad in ("all\n", "PR 9\n", "9 7\n"):
+            (self.dir / "held.txt").write_text(bad, encoding="utf-8")
+            self.stops("held.txt line")
+
+    def test_wrong_types_stop(self):
+        prev = json.loads((self.dir / "prev.json").read_text(encoding="utf-8"))
+        for bad in (1.0, "0", True):
+            prev["sessions"] = [{"id": "session_b", "unarchived_epoch": bad}]
+            self.save("prev.json", prev)
+            self.stops("unarchived_epoch")
+        self.save("prev.json", {"landedPulls": [], "keepSessions": []})
+        self.save("sess_p2.json", [sess("session_c", "SESSION_STATUS_IDLE", "2026-11-13T08:00:00")])  # no zone
+        self.stops("idle_since")
+        self.save("sess_p2.json", [sess("session_c", "SESSION_STATUS_IDLE", "2026-11-13T08:00:00Z")])
+        self.save("items/items/1.json", {"n": "1", "status": "open", "home": "h"})
+        self.stops("item")
+        self.save("items/items/1.json", {"n": 1, "status": "open", "home": "h"})
+        self.save("open_p1.json", [dict(pull(7, "lane-x"), number="7")])
+        self.stops("number")
+
+    def test_landed_window_compares_instants(self):
+        self.save("closed_p1.json", [pull(21, "a", "2026-11-06T13:00:00Z", True)])
+        done = subprocess.run([sys.executable, "-I", str(HERE / "publish_live.py"), "--dir", str(self.dir),
+                               "--landed-since", "2026-11-06T12:00:00-06:00"], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)  # 13:00Z is before 18:00Z: outside the window
+        landed = json.loads((self.dir / "live.json").read_text(encoding="utf-8"))["landedPulls"]
+        self.assertEqual([r["number"] for r in landed], [5])
 
     def test_gapped_or_missing_reads_stop_and_write_nothing(self):
         self.save("sess_p4.json", [])  # page 3 missing
