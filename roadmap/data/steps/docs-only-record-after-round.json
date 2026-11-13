@@ -1,0 +1,14 @@
+{
+ "id": "docs-only-record-after-round",
+ "title": "May a docs-only review record follow an earlier review round on the same PR?",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": "owner item",
+ "why": "Lane fix-verifier-stands-for-round-2 found case (c): a review record that is docs-only after an earlier round. Decision pr-review-record line 54 refuses a lower top round, and decision docs-only-prs-skip-review says a review record is never docs-only. No owner ruling covers it (triage read 08:33 CST Nov 13).",
+ "source": "lane session_013NEJKzx2Ao17sWsBeMCFr5 08:32 CST Nov 13",
+ "note": "Needs an owner item before any build: the lane sends triage the question-form lines (goal, problem, based-on, departs-from, gain and lose per option). Triage posts the item. No lane until the owner answers.",
+ "updatedAt": "2026-11-13T08:33:22-06:00"
+}
