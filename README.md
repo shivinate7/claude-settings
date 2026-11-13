@@ -174,8 +174,7 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
 merge --reviewed --root DIR [--root DIR ...]
-                        the same list for each repo checkout DIR, one block each, then one batch line per repo:
-                        `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+                        the same list for each repo checkout DIR, one block each. A failed root prints unknown.
 merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
                         failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
