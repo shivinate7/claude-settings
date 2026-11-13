@@ -294,17 +294,16 @@ sh("merge-batch: gh pr merge is allowed while another ready pr that does not hol
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr holds this head but this head is behind main",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
-# The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
-# With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
-# other way is unknown, and a merge with an unknown read is denied.
+# The batch brake is removed: no other ready pull request's checks, and no base protection read, refuse a merge.
+# A protection read that fails with a server error or on the network does not deny a merge whose head reads green.
 sh("merge-batch: with no branch protection a pending check on the other ready pr does not refuse gh pr merge",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
 sh("merge-batch: with no branch protection a passed check on the other ready pr allows gh pr merge",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROTDONE + os.pathsep + PY_PATH)
-sh("merge-batch: a protection read that fails with a server error is unknown, and denies gh pr merge",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
-sh("merge-batch: a protection read that fails on the network is unknown, and denies gh pr merge",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
+sh("merge-checks: a protection read that fails with a server error still allows gh pr merge on a green head",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
+sh("merge-checks: a protection read that fails on the network still allows gh pr merge on a green head",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
 # A running or queued workflow on another ready pull request does not hold a merge: the batch brake that read it is removed.
 sh("merge-batch: gh pr merge is allowed while another ready pr's workflow runs, before its required check reports",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
