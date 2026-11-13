@@ -92,6 +92,17 @@ archive_gate_refused("archive push, then a bare newline, then --delete is refuse
 archive_gate_refused("archive push, ; at the line end, then --delete on the next line is refused",
                      ARCHIVE_GATE_PUSH + " ;\n" + ARCHIVE_GATE_DELETE)
 
+# A line break after a segment that is not empty is not a join. `echo ok` sits between the push's `&&` and the
+# break, so the break closes a real command with no `&&` in front of the delete: it can run after a failed push.
+# A blank line after `&&` stays in the chain, as bash runs it, so the delete is still gated. A blank line after
+# `||` is the same chain with `||`: the delete runs when the push fails, so it is refused.
+archive_gate_refused("archive push && echo ok, then a bare newline, then --delete is refused: a non-empty segment does not gate",
+                     ARCHIVE_GATE_PUSH + " && echo ok\n" + ARCHIVE_GATE_DELETE)
+archive_gate_allowed("archive push, && and a blank line, then --delete is allowed: the blank line stays in the && chain",
+                     ARCHIVE_GATE_PUSH + " &&\n\n" + ARCHIVE_GATE_DELETE)
+archive_gate_refused("archive push, || and a blank line, then --delete is refused: the || chain runs the delete when the push fails",
+                     ARCHIVE_GATE_PUSH + " ||\n\n" + ARCHIVE_GATE_DELETE)
+
 # Explicit source, and an empty archive name. An explicit source is the branch pushed, so the taken name
 # `archive/feat-2` pairs only `feat-2`, and `feat` is free. An empty name (`HEAD:archive/`) pairs nothing. A crash
 # in the pairing fails open for the whole command and allows silently, as a plain delete does, so a verdict alone
