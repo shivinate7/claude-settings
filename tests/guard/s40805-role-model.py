@@ -629,6 +629,37 @@ def role_pin_unreadable_first_check():
     return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
 
 
+# ---- H: role_model_rank(model) reads the family a model value holds (decision agent-model-cap, the pin reader's family
+# step). A family word is read from the value, never from a trailing comment, so `haiku  # sonnet` holds haiku. The
+# control reads bare names only, so a red comment case is the trailing comment alone.
+def role_model_rank_check(value, want, what):
+    """role_model_rank(value) gives `want`, an index into ROLE_MODEL_RANK."""
+    reader = getattr(_load_guard_module(), "role_model_rank", None)
+    if reader is None:
+        return False, "the guard has no role_model_rank(model) to read a model name's family"
+    try:
+        got = reader(value)
+    except Exception as exc:
+        return False, "%s: role_model_rank(%r) raised %r" % (what, value, exc)
+    if got != want:
+        return False, "%s: role_model_rank(%r) gives %r, want %r" % (what, value, got, want)
+    return True, "%s: role_model_rank(%r) gives %r" % (what, value, want)
+
+
+def role_model_rank_bare_check():
+    """Control: a bare model name reads its family. claude-sonnet-5-5 is sonnet (1) and Haiku is haiku (0)."""
+    for value, want in (("claude-sonnet-5-5", 1), ("Haiku", 0)):
+        ok, detail = role_model_rank_check(value, want, "a bare model name")
+        if not ok:
+            return ok, detail
+    return True, "a bare model name reads its family: claude-sonnet-5-5 is 1, Haiku is 0"
+
+
+def role_model_rank_comment_check():
+    """`haiku  # sonnet is above the row` holds haiku (0). The trailing comment names sonnet, and the reader must not read it."""
+    return role_model_rank_check("haiku  # sonnet is above the row", 0, "a trailing comment that names sonnet")
+
+
 # ---- F: the three role lists agree with the role table (decision agent-model-cap). role_list_drift(pointer_root)
 # in hooks/guard.py returns one line per disagreement, and [] when all agree. The lists are constants, and the table
 # is read from the pointer at run time. A real role is an agents/ file's `name`, or a built-in name. The junk rows
@@ -731,6 +762,9 @@ for _label, _check in (
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
     ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
     ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-model: role_model_rank reads a bare model name's family, sonnet 1 and haiku 0", role_model_rank_bare_check),
+    ("role-model: role_model_rank does not read sonnet from a trailing comment, so haiku # sonnet is 0",
+     role_model_rank_comment_check),
     ("role-list: the three role lists agree with the real decision record", role_list_real_check),
     ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),

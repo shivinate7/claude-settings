@@ -76,6 +76,11 @@ def agent_file(role, *lines, body="body\n"):
         role, "".join(line + "\n" for line in lines), body)
 
 
+# The two sizes a pin fixture runs at (test-fixtures reach the empty and the full-size state): no filler line, and a
+# file of 200 filler lines.
+SIZES = (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200))))
+
+
 class Haiku(unittest.TestCase):
     def test_listed_roles_may_set_haiku(self):
         for role in ROLES:
@@ -115,6 +120,11 @@ class PinEqualsRow(unittest.TestCase):
         table = C._guard.role_model_table(C.ROOT) or {}
         self.assertEqual(table.get(role), row, "the record's row for %r moved; re-point the cases that name it" % role)
 
+    def assertNoRow(self, role):
+        # The unlisted role must stay unlisted: a row for it would let the pin-equals-row rule flag it instead.
+        table = C._guard.role_model_table(C.ROOT) or {}
+        self.assertNotIn(role, table, "the record has a row for %r; re-point the cases that name it as unlisted" % role)
+
     def agent(self, role, model):
         return verdict("agents/%s.md" % role.lower(), model, name=role)
 
@@ -141,11 +151,16 @@ class PinEqualsRow(unittest.TestCase):
                 self.assertRow(role, row)
                 self.assertEqual(self.agent(role, model), (0, ""))
 
-    def pin_missing(self, role, text, what):
-        """The fixture has no pin value (scope), and the check flags its file with a line that names the file and `model`."""
-        keys, _, problem = agent_parts(text)
-        self.assertIsNone(problem, "fixture error: %s" % problem)
-        self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: %s has a model: value" % what)
+    def pin_missing(self, role, text, what, pin_line=None):
+        """The fixture has no pin value (scope), and the check flags its file with a line that names the file and `model`.
+        `pin_line` is the fixture's own pin line. The scope then reads that line from the text, never from the reader under
+        test: a comment-only or null pin is what the reader must get right, so its value cannot be the scope."""
+        if pin_line is None:
+            keys, _, problem = agent_parts(text)
+            self.assertIsNone(problem, "fixture error: %s" % problem)
+            self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: %s has a model: value" % what)
+        else:
+            self.assertIn(pin_line, C.frontmatter(text), "fixture error: the frontmatter has no %r line" % pin_line)
         code, out = verdict("agents/%s.md" % role, text=text)
         self.assertEqual(code, 1, "%s passes the check: %r" % (what, out))
         self.assertTrue(names(out, "%s.md" % role, "model"), "no line names %s.md and its model pin: %r" % (role, out))
@@ -153,7 +168,7 @@ class PinEqualsRow(unittest.TestCase):
     def test_agent_file_with_no_model_pin_is_flagged(self):
         # Case 1. An agent file with no `model:` key inherits the session model, so every agent file must pin one.
         for role in ("builder", "plan"):
-            for size, lines in (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200)))):
+            for size, lines in SIZES:
                 with self.subTest(role=role, size=size):
                     self.pin_missing(role, agent_file(role, *lines), "an agent file with no model: pin")
 
@@ -164,12 +179,14 @@ class PinEqualsRow(unittest.TestCase):
                 self.pin_missing("builder", agent_file("builder", line), "an empty pin, %s" % line)
 
     def test_decoy_model_lines_are_not_a_pin(self):
-        # Source-text cases (building-scanner-respects-strings): a comment line, an indented block-scalar line, a body line
-        # and a description with a lone quote and a comment opener each name sonnet. None of them is the frontmatter pin.
+        # Source-text cases (building-scanner-respects-strings): a comment line, an indented block-scalar line, a body line,
+        # a description with a lone quote and a comment opener, and a capitalised `Model:` key each name sonnet. None of
+        # them is the frontmatter pin, which is the lowercase `model:` key alone.
         decoys = (("comment line", agent_file("builder", "# model: sonnet")),
                   ("indented block-scalar line", agent_file("builder", "description: |", "  model: sonnet")),
                   ("body line", agent_file("builder", body="model: sonnet\n")),
-                  ("description with a lone quote", agent_file("builder", "description: Don't pin # model: sonnet")))
+                  ("description with a lone quote", agent_file("builder", "description: Don't pin # model: sonnet")),
+                  ("capitalised Model: key", agent_file("builder", "Model: sonnet")))
         for label, text in decoys:
             with self.subTest(label=label):
                 self.pin_missing("builder", text, "a decoy %s" % label)
@@ -177,7 +194,7 @@ class PinEqualsRow(unittest.TestCase):
     def test_sonnet_pin_on_builder_passes(self):
         # Case 2, the green control beside case 1: the same file with `model: sonnet` on the builder row passes.
         self.assertRow("builder", "sonnet")
-        for size, lines in (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200)))):
+        for size, lines in SIZES:
             with self.subTest(size=size):
                 self.assertEqual(verdict("agents/builder.md", text=agent_file("builder", "model: sonnet", *lines)), (0, ""))
 
@@ -205,6 +222,47 @@ class PinEqualsRow(unittest.TestCase):
                                  text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
                                       "model: haiku  # sonnet is above the row\n---\nbody\n"),
                          (0, ""))
+
+    def test_pin_that_is_only_a_comment_is_no_pin(self):
+        # Case 1. `model: # sonnet` holds a comment and no value. It names no model, so the file inherits the session model,
+        # as one with no pin does. The builder row is sonnet, so a sonnet pin would pass the pin-equals-row rule there. The
+        # unlisted role has no row, so that rule never runs on it. Only the missing-pin rule can flag either file.
+        self.assertRow("builder", "sonnet")
+        self.assertNoRow("some-role")
+        for role in ("builder", "some-role"):
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    self.pin_missing(role, agent_file(role, "model: # sonnet", *lines), "a comment-only pin",
+                                     pin_line="model: # sonnet")
+
+    def test_tilde_or_null_pin_on_unlisted_role_is_no_pin(self):
+        # Case 2. `~` and `null` are YAML's null: no value, so no pin. The unlisted role has no row, so only the missing-pin
+        # rule can flag the file.
+        self.assertNoRow("some-role")
+        for line in ("model: ~", "model: null"):
+            for size, lines in SIZES:
+                with self.subTest(line=line, size=size):
+                    self.pin_missing("some-role", agent_file("some-role", line, *lines), "a null pin, %s" % line,
+                                     pin_line=line)
+
+    def test_tilde_or_null_pin_on_a_row_role_is_flagged(self):
+        # Control: a role-table file with `~` or `null` already fails, as a pin that does not equal its row.
+        self.assertRow("builder", "sonnet")
+        for line in ("model: ~", "model: null"):
+            with self.subTest(line=line):
+                code, out = verdict("agents/builder.md", text=agent_file("builder", line))
+                self.assertEqual(code, 1, "%s on the builder row passes the check: %r" % (line, out))
+                self.assertTrue(names(out, "builder.md"), "no line names builder.md: %r" % out)
+
+    def test_sonnet_pin_with_a_trailing_comment_or_bare_passes(self):
+        # Case 3, the green controls beside case 1: a quoted pin with a trailing comment and a bare pin both name sonnet.
+        self.assertRow("builder", "sonnet")
+        self.assertNoRow("some-role")
+        for role in ("builder", "some-role"):
+            for line in ('model: "sonnet" # note', "model: sonnet"):
+                for size, lines in SIZES:
+                    with self.subTest(role=role, line=line, size=size):
+                        self.assertEqual(verdict("agents/%s.md" % role, text=agent_file(role, line, *lines)), (0, ""))
 
 
 # The kind is the backticked first cell of a table row, as hooks/test_precompact_handoff.py reads it.
