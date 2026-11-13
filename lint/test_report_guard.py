@@ -5220,6 +5220,76 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    def test_pe_red_ref_in_a_later_clause_after_a_pronoun_is_refused(self):
+        # A later clause that opens with a pronoun and a verb, then the ref, takes the
+        # failure word from the earlier clause.
+        rows = [
+            # Catches: the carry branch matches the ref only at the clause start, so "it does on <sha> too" passes.
+            "The lint fails, and it does on 32b5f8b8e too.",
+            # Catches: the same, behind "as it".
+            "The test fails, as it does on 32b5f8b8e too.",
+            # Catches: the same, with "main" for the sha.
+            "The lint fails, and it does on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_split_claim_across_sentences_is_refused(self):
+        # A failure in one sentence and "it is pre-existing" in the next is one claim.
+        rows = [
+            # Catches: the failure check reads one sentence, so "It is pre-existing." holds no failure word and passes.
+            "One job failed. It is pre-existing.",
+            # Catches: the same, with the claim after a second sentence's failure word.
+            "The lint is red. This is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_later_clause_ref_and_split_claim_with_a_run_or_a_negator_pass(self):
+        # Control for the two red tests above: a named run, a negator, or no failure anywhere stays allowed.
+        rows = [
+            "The lint fails, and it does on main at 32b5f8b8e too.",
+            "The lint fails, and it does not on 32b5f8b8e too.",
+            "One job failed. It is pre-existing on main at 32b5f8b8e.",
+            "One job failed. I have not shown it is pre-existing.",
+            "The guard is new. It is pre-existing code.",
+            "Nothing failed. It is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_split_claim_needs_a_failed_pronoun_claim_and_a_plain_failure(self):
+        # Catches: the carry from the sentence before reads any claim form, or "error" as a failure, or a verb other than be or do
+        # in the ref clause, or a quoted sentence cut apart.
+        rows = [
+            "I added error handling. The guard is pre-existing.",
+            "The lint fails here, and it passes on main too.",
+            'The lane wrote "One job failed. It is pre-existing." in its report.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_yet_that_verb_after_a_negated_clause_is_refused(self):
+        # Catches: "yet that breaks" reads as an adverb plus complementizer, so "did not fail" reaches the claim after it.
+        line = "The change did not fail yet that breaks on 32b5f8b8e too."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_yet_that_before_a_bare_noun_is_a_hedge_not_a_claim(self):
+        # "that" after "yet" before a bare noun is a complementizer, not a subject.
+        rows = [
+            # Catches: "yet" opens a clause before "that failures", so "can't" never reaches the claim after it.
+            "I can't say yet that failures are pre-existing.",
+            # Catches: the same, before "that main also fails".
+            "I have not proven yet that main also fails on 32b5f8b8e.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
     # Red: a yet hedge, an as clause, a plain-verb as, a glued period and a dotted name. One test per line.
 
     def test_pe_red_yet_before_say_is_a_hedge_not_a_claim(self):
@@ -5488,6 +5558,147 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     def test_pe_green_dotted_name_twin_without_the_dot_passes(self):
         # Control: the twin with the dot taken out of the name is allowed on the current code, and stays allowed.
         self.assert_allowed("I have not confirmed the failure in Console is pre-existing.")
+
+    def test_pe_red_its_form_after_a_failure_is_refused(self):
+        # Catches: mutant "no 's form": the 's form of it, this or that drops out of PRE_PRONOUN_SUBJECT_RE, so "It's
+        # pre-existing." after a failure passes.
+        rows = [
+            "The lint failed. It's pre-existing.",
+            "The lint failed. That's pre-existing.",
+            "The lint failed. That’s pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_yet_that_a_verb_after_that_is_refused(self):
+        # Catches: mutant "VERBS word is a noun": "does" after "yet that" reads as a plural noun, so "yet" opens no clause
+        # and "did not fail" reaches the claim after it.
+        line = "The change did not fail yet that does also fail on main."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_yet_that_a_verb_in_s_with_also_before_its_ref_is_refused(self):
+        # Catches: "also" after a word in -s reads as the verb that makes it a plural noun, so "yet that fails also on main"
+        # opens no clause. No mutant of the set holds this cause.
+        line = "The change did not fail yet that fails also on main."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_yet_that_a_word_in_us_or_is_opens_a_clause(self):
+        # Catches: mutant "-us/-is is a noun": "status" and "analysis" read as plural nouns, so "yet that status is" opens no
+        # clause and "did not break" reaches the claim after it.
+        rows = [
+            "The change did not break yet that status is red on main too.",
+            "The change did not break yet that analysis is red on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_yet_that_failures_fail_is_a_hedge_not_a_claim(self):
+        # Catches: mutant "fail is no noun verb": "fail" drops out of the verbs a plural noun takes, so "yet" opens a clause
+        # and the hedge reads as a claim.
+        line = "I have not proven yet that failures fail on 32b5f8b8e too."
+        self.assert_allowed(line)
+
+    def test_pe_green_yet_that_a_plural_noun_with_also_or_still_is_a_hedge(self):
+        # Catches: mutant "no adverb skip": "also" or "still" between a plural noun and its verb is no skip, so "yet" opens a
+        # clause and the hedge reads as a claim.
+        rows = [
+            "I have not proven yet that failures also fail on 32b5f8b8e.",
+            "I have not proven yet that errors still exist on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_a_lone_plural_noun_after_yet_that_does_not_crash(self):
+        # Catches: mutant "no rest guard": a plural noun with no word after it indexes past its words, so the check crashes
+        # on "No proof yet that failures".
+        self.assert_allowed("No proof yet that failures")
+
+    def test_pe_green_yet_that_master_is_a_hedge_not_a_claim(self):
+        # Catches: mutant "master is no base": "master" drops out of the base names, so "yet" opens a clause and the hedge
+        # reads as a claim.
+        self.assert_allowed("I have not proven yet that master also fails on 32b5f8b8e.")
+
+    def test_pe_green_yet_that_origin_is_a_hedge_not_a_claim(self):
+        # Catches: mutant "origin is no base": "origin" drops out of the base names, so "yet" opens a clause and the hedge
+        # reads as a claim.
+        self.assert_allowed("I have not proven yet that origin/main also fails on 32b5f8b8e.")
+
+    def test_pe_green_an_error_word_is_no_failure_for_the_claim_after_it(self):
+        # Catches: mutant "prior fail reads any failure": "error" in the sentence before counts as a failure, so "It is
+        # pre-existing." after it is read as the claim.
+        self.assert_allowed("I added error handling. It is pre-existing.")
+
+    def test_pe_green_a_noun_subject_after_a_failure_is_no_claim(self):
+        # Catches: mutant "no pronoun subject": the claim after a failure needs a pronoun subject, so "The guard is
+        # pre-existing." after "One job failed." is read as the claim.
+        self.assert_allowed("One job failed. The guard is pre-existing.")
+
+    def test_pe_green_already_there_needs_a_failure_in_its_own_sentence(self):
+        # Catches: mutant "already needs no own fail": "already there" with a base named reads as a claim with no failure in
+        # its own sentence.
+        self.assert_allowed("One job failed. It was already there before this change.")
+
+    def test_pe_red_a_noun_after_pre_existing_carries_no_failure(self):
+        # Catches: mutant "carry needs no word after": "It is pre-existing" with a noun after it takes the failure before it,
+        # so the mutant refuses both rows, which the built code allows.
+        rows = [
+            "One job failed. It is pre-existing code.",
+            "The lint failed. It's pre-existing code.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_a_fix_or_pass_word_closes_the_failure(self):
+        # Catches: mutant "no fix/pass check": a fix or pass word in the failure's clause does not close it, so "It is
+        # pre-existing in the repo." after a passing test is read as the claim.
+        rows = [
+            "The failing test now passes. It is pre-existing in the repo.",
+            "I fixed the failing test, and it is on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_a_fixed_failure_gives_no_carry_to_a_noun_claim(self):
+        # Catches: no mutant of the set. A fixed failure takes no carry to "pre-existing" with a noun after it.
+        rows = [
+            "I fixed the failing test. It is pre-existing code that I reformatted.",
+            "Fixed the broken link. It is pre-existing content.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_pin_a_negated_pass_word_closes_no_failure(self):
+        # Catches: mutant "negated pass still closes": "not passing" counts as a pass that closes the failure, so "It is
+        # pre-existing." after it passes.
+        self.assert_blocked("The failing test is still not passing. It is pre-existing.",
+                            "The failing test is still not passing. It is pre-existing.")
+
+    def test_pe_pin_kept_claims_with_no_run_stay_refused(self):
+        # Control, no mutant: a claim with "in main" and no run stays refused, and "yet that is also failing" keeps its claim.
+        rows = [
+            "One job failed. It is pre-existing in main.",
+            "The change did not fail yet that is also failing on 32b5f8b8e too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_its_form_with_no_failure_or_a_negator_is_no_claim(self):
+        # Control: the 's form stays no claim with no failure before it, or with a negator in its clause.
+        rows = [
+            "Nothing failed. It's pre-existing.",
+            "The lint failed. It's not pre-existing.",
+            "That's pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     # Pins: green on the built code. Each row's claim sits after a word that the clause cut splits at, with a negator before
     # that word, so the negator reaches the claim only when the cut is gone. Each row goes red on that removal.

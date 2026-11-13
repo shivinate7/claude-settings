@@ -741,7 +741,8 @@ def answered_problem(text):
 # - "already red" (fails, broken, there, present), in a sentence that names a base or "before this change".
 #   "Already red on the old code" names neither.
 # - a failure word, "too", "also" or "as well", and "on" or "at" a sha or a base. A clause that starts with the
-#   ref ("..., on main too") takes the failure word from an earlier clause.
+#   ref ("..., on main too") takes the failure word from an earlier clause, when that failure is open: no fix or pass
+#   word in its clause (_open_failure). "It is pre-existing." takes it from the sentence before (PRE_PRONOUN_SUBJECT_RE).
 # Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
 # list) exempts it. The sentences and clauses are the parser's (lint/_clause.py, see _pre_clauses); a clause also ends at
 # a lead-in word of the parser's lists and at "which".
@@ -760,6 +761,16 @@ SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
 BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
 BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE_REF, re.I)
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+# A later clause that opens with a pronoun and a verb, then the ref ("..., and it does on <sha> too"), is a ref clause.
+FAIL_REF_CLAUSE_RE = re.compile(
+    r"(?:(?:it|this|that|they|these|those)\s+(?:also\s+)?(?:does|do|did|is|are|was|were|has|have)(?:\s+so|\s+also)?\s+)?"
+    r"(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+# The claim a failure in the sentence before carries: "It is pre-existing." or "It's pre-existing.", with a pronoun for its
+# subject and no noun after the word (PRE_DESCRIBES_AFTER_RE). The failure is open: no fix or pass word in its clause.
+PRIOR_FAIL_RE = re.compile(r"\b(?:fail\w*|red|broken)\b", re.I)
+PRE_PRONOUN_SUBJECT_RE = re.compile(
+    r"\s*(?:(?:it|this|that|they|these|those)\s+(?:is|was|are|were)\s+|(?:it|this|that)['\u2019]s\s+)(?:\w+\s+)?$", re.I)
+CLOSED_FAIL_RE = re.compile(r"\b(?:fix(?:ed|es)|resolve[ds]|repair(?:ed|s)|pass(?:es|ed|ing)|green)\b", re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 # _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
 # subordinators, relatives) cut each of those again, where _clause.lead_opens_clause says the word opens a clause: "yet" and
@@ -806,28 +817,48 @@ def _unnegated(clause, pos):
     return not ANSWERED_NEGATOR_RE.search(clause[:pos])
 
 
-def _claims_pre_existing(sentence):
-    """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
+def _open_failure(clause, pattern=FAILURE_RE):
+    """True when `clause` holds a failure word (`pattern`) and no fix or pass word (CLOSED_FAIL_RE), each with no negator
+    before it in the clause: "I fixed the failing test" and "the failing test now passes" name no open failure."""
+    return (any(_unnegated(clause, m.start()) for m in pattern.finditer(clause))
+            and not any(_unnegated(clause, m.start()) for m in CLOSED_FAIL_RE.finditer(clause)))
+
+
+def _claims_pre_existing(sentence, prior_fails=False):
+    """True when `sentence` holds a pre-existing claim with no negator in its clause before it. `prior_fails`: the sentence
+    before it on the line names a failure, so "It is pre-existing." after "One job failed." is one claim."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
-    if not FAILURE_RE.search(plain):
+    if not FAILURE_RE.search(plain) and not prior_fails:
         return False
+    own_fail = bool(FAILURE_RE.search(plain))
     names_base = bool(BASE_WORD_RE.search(plain))
     earlier_fail = False
     for clause in _pre_clauses(plain):
         for m in PRE_EXISTING_RE.finditer(clause):
-            if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
+            if not _unnegated(clause, m.start()):
+                continue
+            if own_fail and _pre_existing_describes_failure(clause, m):
+                return True
+            if (not own_fail and PRE_PRONOUN_SUBJECT_RE.fullmatch(clause[:m.start()])
+                    and PRE_DESCRIBES_AFTER_RE.match(clause, m.end())):
                 return True
         for m in ALREADY_RE.finditer(clause):
-            if names_base and _unnegated(clause, m.start()):
+            if own_fail and names_base and _unnegated(clause, m.start()):
                 return True
         fail = FAILURE_RE.search(clause)
         if fail:
             if TOO_RE.search(clause) and FAIL_REF_RE.search(clause) and _unnegated(clause, fail.start()):
                 return True
-            earlier_fail = earlier_fail or _unnegated(clause, fail.start())
-        elif earlier_fail and TOO_RE.search(clause) and FAIL_REF_RE.match(clause.strip()):
+            earlier_fail = earlier_fail or _open_failure(clause)
+        elif earlier_fail and TOO_RE.search(clause) and FAIL_REF_CLAUSE_RE.match(clause.strip()):
             return True
     return False
+
+
+def _names_unnegated_failure(sentence):
+    """True when a clause of `sentence` names an open failure (_open_failure): a failure word of PRIOR_FAIL_RE."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
+    return any(_open_failure(c, PRIOR_FAIL_RE) for c in _pre_clauses(plain))
 
 
 def _names_main_run(kept):
@@ -847,9 +878,11 @@ def pre_existing_problem(text):
             continue
         if fence:
             continue
-        sentences = [body[a:b] for a, b in _clause.sentences(body, [False] * len(body))
+        blanked = QUOTED_RE.sub(lambda q: " " * len(q.group()), body)
+        sentences = [body[a:b] for a, b in _clause.sentences(blanked, [False] * len(body))
                      if not body[a:b].rstrip("*_)\"' ").endswith("?")]
-        if not any(_claims_pre_existing(s) for s in sentences):
+        prior = [False] + [_names_unnegated_failure(s) for s in sentences[:-1]]
+        if not any(_claims_pre_existing(s, p) for s, p in zip(sentences, prior)):
             continue
         if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body)):
             continue

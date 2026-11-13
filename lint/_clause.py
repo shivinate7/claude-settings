@@ -285,11 +285,32 @@ def opens_with_joiner(text):
 _SUBJECT_WORDS = _PRONOUNS + DETERMINERS
 
 
+_NOUN_VERBS = ("exist", "exists", "persist", "remain", "remains", "happen", "happens", "fail", "break")
+_NOUN_ADVERBS = ("also", "still")
+
+
+def _bare_noun(tokens):
+    """True when the words after "that" open with a base name (main, master, origin) or a plural noun with no determiner
+    (failures, errors) that a form of be or a verb of _NOUN_VERBS follows, also or still allowed between: a complementizer
+    ("yet that failures also fail"), not "that test fails". A word of VERBS ("that does"), or in -ss, -us or -is
+    ("process", "status", "analysis"), is no plural noun. A word in -s that no such verb follows is a verb ("that breaks
+    on", "that fails also on")."""
+    word = tokens[0]
+    if word in ("main", "master", "origin"):
+        return True
+    if not word.endswith("s") or word.endswith(("ss", "us", "is")) or word in VERBS:
+        return False
+    rest = tokens[1:]
+    while rest and rest[0] in _NOUN_ADVERBS:
+        rest = rest[1:]
+    return bool(rest) and (rest[0] in VERBS or rest[0] in _NOUN_VERBS)
+
+
 def _opens_with_subject(tokens):
     """True when `tokens` open with a pronoun or a determiner. "that" counts only when no pronoun or determiner follows it:
     "that test fails" opens with a subject, "that the failure is" opens with a complementizer."""
     if tokens[:1] == ["that"]:
-        return len(tokens) > 1 and tokens[1] not in _SUBJECT_WORDS
+        return len(tokens) > 1 and tokens[1] not in _SUBJECT_WORDS and not _bare_noun(tokens[1:])
     return bool(tokens) and tokens[0] in _SUBJECT_WORDS
 
 

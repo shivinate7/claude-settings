@@ -468,6 +468,24 @@ class LeadOpensClauseTests(unittest.TestCase):
         self.assertFalse(clause.lead_opens_clause("yet", " sure whether the failure is pre-existing"),
                          "lead_opens_clause: yet + sure opens a clause")
 
+    def test_yet_before_that_and_a_bare_noun_is_an_adverb(self):
+        # Catches: "yet" before "that failures" opens a clause, since a bare noun after "that" reads as a subject.
+        for after in (" that failures are pre-existing", " that main also fails on 32b5f8b8e", " that errors exist"):
+            with self.subTest(after=after):
+                self.assertFalse(clause.lead_opens_clause("yet", after), "lead_opens_clause: yet + that + noun opens a clause")
+
+    def test_yet_before_that_and_a_singular_noun_still_opens_a_clause(self):
+        # Control: "that test fails" keeps "that" as a demonstrative subject, so "yet" joins two clauses.
+        self.assertTrue(clause.lead_opens_clause("yet", " that test fails"),
+                        "lead_opens_clause: yet + that test stopped opening a clause")
+
+    def test_yet_before_that_and_a_verb_or_a_ss_noun_still_opens_a_clause(self):
+        # Catches: a word in -s after "that" reads as a plural noun, so "yet that breaks" and "yet that process is" open no
+        # clause and a negator before "yet" reaches the claim after it.
+        for after in (" that breaks on 32b5f8b8e too", " that fails on main too", " that process is red"):
+            with self.subTest(after=after):
+                self.assertTrue(clause.lead_opens_clause("yet", after), "lead_opens_clause: yet + that + verb is an adverb")
+
     def test_yet_before_that_is_an_adverb(self):
         # Catches: "yet" before "that" opens a clause, so "no" never reaches the claim after it.
         self.assertFalse(clause.lead_opens_clause("yet", " that the failure is pre-existing"),
@@ -477,6 +495,69 @@ class LeadOpensClauseTests(unittest.TestCase):
         # Control: "yet" before "the" is a join on the current code, and stays one: the pin "did not start yet the failure" holds.
         self.assertTrue(clause.lead_opens_clause("yet", " the failure is pre-existing"),
                         "lead_opens_clause: yet + the no longer opens a clause")
+
+
+class BareNounTests(unittest.TestCase):
+    """_clause._bare_noun, and lead_opens_clause for "yet that" through it. The word after "that" makes a plural noun when a
+    verb follows it (also or still may come between), and a verb, a base name or a word in -ss, -us or -is is no plural
+    noun. A lone noun with no word after it is no noun, and the parser raises nothing on it."""
+
+    def test_master_is_a_base_name_after_that(self):
+        # Catches: mutant "master is no base": "master" drops out of the base names, so "yet that master also fails" opens a
+        # clause and the hedge reads as a claim.
+        self.assertTrue(clause._bare_noun(["master"]), "_bare_noun: master is no base name")
+        self.assertFalse(clause.lead_opens_clause("yet", " that master also fails on 32b5f8b8e"),
+                         "lead_opens_clause: yet + that master opens a clause")
+
+    def test_origin_is_a_base_name_after_that(self):
+        # Catches: mutant "origin is no base": "origin" drops out of the base names, so "yet that origin/main also fails" opens
+        # a clause and the hedge reads as a claim.
+        self.assertTrue(clause._bare_noun(["origin"]), "_bare_noun: origin is no base name")
+        self.assertFalse(clause.lead_opens_clause("yet", " that origin/main also fails on 32b5f8b8e"),
+                         "lead_opens_clause: yet + that origin/main opens a clause")
+
+    def test_a_lone_plural_noun_with_no_word_after_it_raises_nothing(self):
+        # Catches: mutant "no rest guard": a plural noun with no word after it indexes past its words, so the call raises.
+        try:
+            noun = clause._bare_noun(["failures"])
+            clause.lead_opens_clause("yet", " that failures")
+        except IndexError as e:
+            self.fail("_bare_noun or lead_opens_clause: a lone plural noun with no word after it raised %r" % e)
+        self.assertFalse(noun, "_bare_noun: a plural noun with no verb after it reads as a noun")
+
+    def test_a_plural_noun_before_fail_is_a_noun(self):
+        # Catches: mutant "fail is no noun verb": "fail" drops out of the verbs a plural noun takes, so "yet that failures fail"
+        # opens a clause and the hedge reads as a claim.
+        self.assertTrue(clause._bare_noun(["failures", "fail", "on", "32b5f8b8e"]),
+                        "_bare_noun: a plural noun before fail reads as no noun")
+        self.assertFalse(clause.lead_opens_clause("yet", " that failures fail on 32b5f8b8e too"),
+                         "lead_opens_clause: yet + that failures fail opens a clause")
+
+    def test_a_word_in_us_or_is_is_no_plural_noun(self):
+        # Catches: mutant "-us/-is is a noun": "status" and "analysis" read as plural nouns, so "yet that status is" opens no
+        # clause and the negator before "yet" reaches the claim after it.
+        for word in ("status", "analysis", "process"):
+            with self.subTest(word=word):
+                self.assertFalse(clause._bare_noun([word, "is", "red"]),
+                                 "_bare_noun: a word in -ss, -us or -is reads as a plural noun")
+                self.assertTrue(clause.lead_opens_clause("yet", " that %s is red on main too" % word),
+                                "lead_opens_clause: yet + that + a word in -ss, -us or -is opens no clause")
+
+    def test_a_verb_after_that_is_no_plural_noun(self):
+        # Catches: mutant "VERBS word is a noun": "does" after "that" reads as a plural noun, so "yet that does also fail" opens
+        # no clause and the negator before "yet" reaches the claim after it.
+        self.assertFalse(clause._bare_noun(["does", "also", "fail", "on", "main"]),
+                         "_bare_noun: a verb after that reads as a plural noun")
+        self.assertTrue(clause.lead_opens_clause("yet", " that does also fail on main"),
+                        "lead_opens_clause: yet + that + a verb opens no clause")
+
+    def test_a_plural_noun_with_also_before_its_verb_is_a_noun(self):
+        # Catches: mutant "no adverb skip": "also" between a plural noun and its verb is no skip, so "yet that failures also
+        # fail" opens a clause and the hedge reads as a claim.
+        self.assertTrue(clause._bare_noun(["failures", "also", "fail", "on", "32b5f8b8e"]),
+                        "_bare_noun: also between a plural noun and its verb is not skipped")
+        self.assertFalse(clause.lead_opens_clause("yet", " that failures also fail on 32b5f8b8e"),
+                         "lead_opens_clause: yet + that failures also fail opens a clause")
 
 
 class LexiconTests(unittest.TestCase):
