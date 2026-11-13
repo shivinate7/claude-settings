@@ -453,8 +453,9 @@ def _expand(text: str, table: dict, as_target: bool = False) -> str:
         value = table.get(use.group(1) or use.group(2))
         return use.group(0) if value is None or (splits and _TWO_WORDS.search(value)) else value
 
-    def known(name):   # a name the table lacks is read from the environment, as `_expanded` reads `$VAR`
-        value = table.get(name, os.environ.get(name, UNSET))
+    def known(name):   # a name never assigned is read from the environment, as `_expanded` reads `$VAR`; one the
+        # command set to a value the guard cannot read (`D=$(mktemp -d)`) is not, since the shell gives it its real value
+        value = table[name] if name in table else os.environ.get(name, UNSET)
         return None if value is not UNSET and splits and _TWO_WORDS.search(value) else value
     return _VAR_USE.sub(read, expand_default_words(text, known, lambda word: _VAR_USE.sub(read, word)))
 
@@ -523,12 +524,13 @@ def _value_of(parts, table: dict) -> str:
 
 def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None:
     """Set `name` in `table` to the value `parts` read as. A value that holds `$` or a backtick, or that is
-    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too."""
+    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too. It is
+    kept as None, so it is told apart from a name never assigned: only that one reads the environment."""
     value = _value_of(parts, table)
     if "$" in value or "`" in value or opens_group:
-        table.pop(name, None)
+        table[name] = None
     elif plus:
-        if name in table:
+        if table.get(name) is not None:
             table[name] += value
     else:
         table[name] = value
@@ -606,7 +608,7 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 for name, value in names.items():
                     if value is None and quoted:
                         scope.pop(name, None)
-                    elif value is not None and (quoted or name not in table):
+                    elif value is not None and (quoted or table.get(name) is None):
                         scope[name] = value   # the child expands a verbatim body; the parent, any other
                 out.append(_resolve_into(_like(src, src[i:body_end]), scope, depth + 1)[0])
                 out.append(src[body_end:line_end])
@@ -1247,6 +1249,7 @@ def _join_path(head: str, tail: str) -> str:
 
 
 _PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the repo, so nothing under it is judged
+_PY_CWD = "\0cwd"   # a name bound to the working folder: told apart from an unknown name, which names no repo path
 _PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory")
 
 
@@ -1290,15 +1293,18 @@ def _py_up(paths, steps: int):
     return out
 
 
-def _py_is_cwd(node):
-    """True for the working folder of the call: `os.getcwd()`, `Path.cwd()`, `str(...)` or `Path(...)` of one."""
+def _py_is_cwd(node, env=None):
+    """True for the working folder of the call: `os.getcwd()`, `Path.cwd()`, a name bound to one (`env`),
+    `str(...)` or `Path(...)` of one."""
     import ast
+    if isinstance(node, ast.Name):
+        return env is not None and env.get(node.id) == [_PY_CWD]
     if not isinstance(node, ast.Call):
         return False
     name = _py_call_name(node)
     if name in ("getcwd", "cwd"):
         return not node.args
-    return (name == "str" or name in _PATH_CTORS) and len(node.args) == 1 and _py_is_cwd(node.args[0])
+    return (name == "str" or name in _PATH_CTORS) and len(node.args) == 1 and _py_is_cwd(node.args[0], env)
 
 
 def _py_glue(left, right):
@@ -1316,7 +1322,7 @@ def _py_concat(node, env):
     if _py_temp_head(node, env):
         return [_PY_TEMP]
     right = _py_paths(node.right, env)
-    if _py_is_cwd(node.left):
+    if _py_is_cwd(node.left, env):
         return [path for path in (_py_glue(None, piece) for piece in right) if path] if right else []
     left = _py_paths(node.left, env)
     if not left or not right:
@@ -1335,7 +1341,7 @@ def _py_fstring(node, env):
     for index, piece in enumerate(node.values):
         if isinstance(piece, ast.Constant):
             options = [piece.value]
-        elif index == 0 and _py_is_cwd(piece.value):
+        elif index == 0 and _py_is_cwd(piece.value, env):
             at_working_folder = True
             continue
         else:
@@ -1362,7 +1368,7 @@ def _py_paths(node, env):
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
-        return list(env.get(node.id, ()))
+        return [value for value in env.get(node.id, ()) if value != _PY_CWD]
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _py_concat(node, env)
     if isinstance(node, ast.JoinedStr):
@@ -1436,7 +1442,7 @@ def _py_env_at(tree, script: str = ""):
         for end, name, value, node in events:
             if end > (call.lineno, call.col_offset):
                 break
-            values = _py_paths(value, env)
+            values = _py_paths(value, env) or ([_PY_CWD] if _py_is_cwd(value, env) else [])
             if id(node) in top:
                 env[name] = values
             else:

@@ -1816,9 +1816,10 @@ from shared_names import config_dir  # noqa: E402  the one home, shared with the
 
 
 UNSET = object()   # what a `default_word_lookup` returns for a name that is not set
-# `${NAME:-word}`, `${NAME-word}`, `${NAME:?word}`, `${NAME?word}`. The word holds no brace, so a nested
-# `${D:-${E:-x}}` is not matched whole. `:+` and `+` are no match: they stay as written.
-DEFAULT_WORD = re.compile(r"\$\{([A-Za-z_]\w*)(:?)([-?])([^{}]*)\}")
+# `${NAME:-word}`, `${NAME-word}`, `${NAME:?word}`, `${NAME?word}`. The word may hold a braced use one level
+# deep (`${HOME}/.claude`), so a nested `${D:-${E:-x}}` is not matched whole. `:+` and `+` are no match: they
+# stay as written.
+DEFAULT_WORD = re.compile(r"\$\{([A-Za-z_]\w*)(:?)([-?])((?:\$\{[^{}]*\}|[^{}])*)\}")
 
 
 def expand_default_words(text: str, lookup, expand_word=lambda word: word) -> str:

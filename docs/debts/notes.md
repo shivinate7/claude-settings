@@ -2274,3 +2274,5 @@
 - frozen-default-nested: a nested default `${D:-${E:-x}}` is not read by `expand_default_words`, so a frozen path named only that way is allowed. Decision: frozen-path-resolves-shell-vars. Fix: none — rare and harmless.
 - frozen-default-plus: `${D:+word}` is not read, so a frozen path named only as its word is allowed. Decision: frozen-path-resolves-shell-vars. Fix: none — rare and harmless.
 - builder-py-os-sep-glue: `os.getcwd() + os.sep + 'tests/x.py'` reads as no path, so a builder's write to it is allowed. Decision: builders-cannot-edit-tests. Fix: none — rare and harmless.
+- frozen-default-assign: `${D:=w}` is not read, so a frozen path named only as its word is allowed. Decision: frozen-path-resolves-shell-vars. Fix: none — rare and harmless.
+- builder-py-format-join: a `%` or `.format` join of the working folder (`'%s/tests/x.py' % os.getcwd()`) reads as no path, so a builder's write to it is allowed. Decision: builders-cannot-edit-tests. Fix: none — rare and harmless.
