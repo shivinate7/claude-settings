@@ -319,7 +319,8 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # as it was, so `D=x >/dev/null` still sets D. An unquoted `$D` whose value holds two words is an
 # ambiguous redirect target that writes nothing, so it stays as written there (unless IFS is set).
 # `${D:-w}`, `${D-w}` and `${D:?w}` read from the table as a value, or as the word when D is unset (`:-` also
-# when empty); a name the table lacks stays as written, and `_expanded` reads the environment for it.
+# when empty). A name the table lacks reads from the environment in `known`; one the table forgot (a value from `$(...)`)
+# stays as written. `_expanded` reads no default form.
 # RESIDUAL GAP: a value from `$(...)`, backticks, `read`, a nested `${D:-${E:-x}}`, `${D:+w}`, a loop variable,
 # `eval '...'`, or an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. An
 # assignment in a pipeline stage or a background job (`D=x | cat`, `D=x &`) is kept here, though the
@@ -456,6 +457,8 @@ def _expand(text: str, table: dict, as_target: bool = False) -> str:
     def known(name):   # a name never assigned is read from the environment, as `_expanded` reads `$VAR`; one the
         # command set to a value the guard cannot read (`D=$(mktemp -d)`) is not, since the shell gives it its real value
         value = table[name] if name in table else os.environ.get(name, UNSET)
+        if value is None:   # a forgotten name has no value to search: the form stays as written
+            return None
         return None if value is not UNSET and splits and _TWO_WORDS.search(value) else value
     return _VAR_USE.sub(read, expand_default_words(text, known, lambda word: _VAR_USE.sub(read, word)))
 

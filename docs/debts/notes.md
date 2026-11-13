@@ -2276,3 +2276,4 @@
 - builder-py-os-sep-glue: `os.getcwd() + os.sep + 'tests/x.py'` reads as no path, so a builder's write to it is allowed. Decision: builders-cannot-edit-tests. Fix: none — rare and harmless.
 - frozen-default-assign: `${D:=w}` is not read, so a frozen path named only as its word is allowed. Decision: frozen-path-resolves-shell-vars. Fix: none — rare and harmless.
 - builder-py-format-join: a `%` or `.format` join of the working folder (`'%s/tests/x.py' % os.getcwd()`) reads as no path, so a builder's write to it is allowed. Decision: builders-cannot-edit-tests. Fix: none — rare and harmless.
+- frozen-default-forgotten: `D=$(false); echo x > ${D:-<frozen>}/hooks/guard.py` (a name the table forgot, word frozen) is allowed, since the guard cannot read the substitution's value; the shell takes the word, so the write is real (hooks/guard_frozen.py `known`). Decision: frozen-path-resolves-shell-vars. Fix: none — rare and harmless.
