@@ -29,6 +29,7 @@ case's folders sit under it.
 """
 
 import atexit
+import collections
 import hashlib
 import json
 import os
@@ -561,6 +562,26 @@ class NoStateFile(unittest.TestCase):
         assert_named(self, codes, ctx, "the same call naming the broken inbox", home.sid + ".inbox.md", home, line=2)
 
 
+# The hook's own opens, logged by a sitecustomize that the shim's PYTHONPATH puts first. One line per open().
+OPEN_LOGGER = '''import builtins
+import os
+
+_open = builtins.open
+
+
+def _logged_open(file, *args, **kwargs):
+    log = os.environ.get("STATE_OPENS_LOG")
+    if log and isinstance(file, (str, bytes, os.PathLike)):
+        with _open(log, "a", encoding="utf-8") as handle:
+            handle.write(os.fsdecode(file) + "\\n")
+    return _open(file, *args, **kwargs)
+
+
+builtins.open = _logged_open
+'''
+FilterRun = collections.namedtuple("FilterRun", "starts before after opened")
+
+
 class PreFilterCost(unittest.TestCase):
     """The cost the decision states (docs/decisions/state-file-parse-check.md, Cost): a call that names neither
     .json nor the handoff folder starts no Python, a call that names one starts one, and the hook writes no file.
@@ -571,13 +592,16 @@ class PreFilterCost(unittest.TestCase):
         found = [c for c in hook_commands("Bash") if "state_parse_check" in c]
         return found[0] if found else None
 
-    def run_filter(self, home, tool, tool_input, response):
-        """Run the state check's registered command with a recording shim first on PATH. Return (starts, files
-        before the call, files after it), each file as its path and sha256."""
+    def run_hook(self, home, tool, tool_input, response):
+        """Run the state check's registered command with a recording shim first on PATH, and a sitecustomize that
+        logs each file the hook opens. Return a FilterRun: the starts, the files before the call and after it (each
+        as its path and sha256), and the paths the hook opened."""
         # On an old commit no command is registered. Running none starts no Python, so the cost asserts give the red.
         command = self.state_command() or "exit 0"
-        shims =tempfile.mkdtemp(prefix="shim-", dir=RUN)
+        shims = tempfile.mkdtemp(prefix="shim-", dir=RUN)
         log = os.path.join(shims, "starts.log")
+        opens = os.path.join(shims, "opens.log")
+        write(os.path.join(shims, "sitecustomize.py"), OPEN_LOGGER)
         for name in ("python3", "python"):
             shim = os.path.join(shims, name)
             write(shim, '#!/bin/sh\necho start >> %s\nexec %s "$@"\n' % (shlex.quote(log), shlex.quote(sys.executable)))
@@ -586,7 +610,8 @@ class PreFilterCost(unittest.TestCase):
         compact = json.dumps({"session_id": home.sid, "cwd": home.work, "tool_name": tool, "tool_input": tool_input,
                               "tool_response": response}, separators=(",", ":"))
         env = dict(os.environ, CLAUDE_CONFIG_DIR=home.cfg, HOME=home.root, PYTHONDONTWRITEBYTECODE="1",
-                   PATH=shims + os.pathsep + os.environ.get("PATH", ""))
+                   PATH=shims + os.pathsep + os.environ.get("PATH", ""), STATE_OPENS_LOG=opens,
+                   PYTHONPATH=os.pathsep.join(filter(None, [shims, os.environ.get("PYTHONPATH")])))
 
         def listing():
             return sorted((os.path.join(d, n), hashlib.sha256(read_bytes(os.path.join(d, n))).hexdigest())
@@ -597,7 +622,13 @@ class PreFilterCost(unittest.TestCase):
                               env=env, cwd=home.work, timeout=60)
         self.assertEqual(done.returncode, 0, "the filter must never block: %r" % done.stderr[:160])
         starts = len(read_text(log).splitlines()) if os.path.exists(log) else 0
-        return starts, before, listing()
+        opened = read_text(opens).splitlines() if os.path.exists(opens) else []
+        return FilterRun(starts, before, listing(), opened)
+
+    def run_filter(self, home, tool, tool_input, response):
+        """(starts, files before the call, files after it) from run_hook."""
+        run = self.run_hook(home, tool, tool_input, response)
+        return run.starts, run.before, run.after
 
     @SHELL_ONLY
     def test_a_call_naming_no_state_file_starts_no_python_and_a_json_call_starts_one(self):
@@ -623,6 +654,22 @@ class PreFilterCost(unittest.TestCase):
                 starts, before, after = self.run_filter(home, "Write", {"file_path": target, "content": "x"}, {})
                 self.assertEqual(starts, 1, "scope: the hook must run on %s" % name)
                 self.assertEqual(before, after, "the hook wrote or changed a file while judging %s" % name)
+
+    @SHELL_ONLY
+    def test_a_call_naming_25_json_files_reads_at_most_20_and_each_once(self):
+        home = Home()
+        names = ["f%02d.json" % n for n in range(1, 26)]
+        for name in names:
+            write(os.path.join(home.work, name), '{"a": 1,}\n')
+        # The command names the 25 files and is not run, so the files stay as written.
+        run = self.run_hook(home, "Bash", {"command": "tee " + " ".join(names)}, {"stdout": "", "stderr": ""})
+        self.assertEqual(run.starts, 1, "scope: the hook must run on the call")
+        reads = collections.Counter(os.path.basename(p) for p in run.opened if os.path.basename(p) in names)
+        self.assertGreater(sum(reads.values()), 0, "scope: the hook must read at least one of the 25 files")
+        self.assertLessEqual(sum(reads.values()), 20,
+                             "a call naming 25 .json files read %d of them" % sum(reads.values()))
+        for name in names:
+            self.assertLessEqual(reads[name], 1, "%s was read %d times in one call" % (name, reads[name]))
 
 
 class ScannerTraps(unittest.TestCase):
