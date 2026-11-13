@@ -9,5 +9,8 @@ the same turn that it rotates a standing session, which happens only when one go
   <date and time>.
 - Batch runner (integration batch, CI waits, merge tool runs under the coordinator's grant, archiving lanes whose topic has no queued step):
   "<session title>", <session id>, since <date and time>.
+- Arbiter (decider only; makes rulings and grants, each marked as its own, for its own repo
+  only; the coordinator starts one only on the owner's grant): "<session title>", <session id>,
+  since <date and time>. It compacts in place. Keep this line only while an arbiter exists.
 
 Lanes are not on the roster. The coordinator holds lane state.
