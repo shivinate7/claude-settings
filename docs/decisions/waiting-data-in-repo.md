@@ -1,8 +1,8 @@
-# The waiting page's git copy is a backup, not the store
+# The page's git copy is a backup, not the store
 
 ## The ruling
 
-The waiting page's database is its one store, and git is its backup for recovery and account moves. Decision `waiting-page-one-store` (the one-store decision) sets this, and it replaces the earlier line here that git is each artifact's home. The one-store decision covers the waiting page only. The rules below for other registered artifacts stand as written.
+The page's database is its one store, and git is its backup for recovery and account moves. Decision `waiting-page-one-store` (the one-store decision) sets this, and it replaces the earlier line here that git is each artifact's home. The one-store decision covers the page only. The rules below for other registered artifacts stand as written.
 
 - Owner, 2026-11-02 14:58 CST (feedback fb-1458-2): "A", which picks option a of coordinator event e7ccdec6. An artifact is published only from a file in a repo, and listed in that repo's registry.
 - Owner, 2026-11-02 14:56 CST (feedback fb-1456-1): artifacts are torn down and spun up as the owner switches accounts. Each must be cross-referencable across accounts. Committing them to GitHub is accepted.

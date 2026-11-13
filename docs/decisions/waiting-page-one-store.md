@@ -11,7 +11,7 @@ Basis: owner R28, 2026-11-11 11:50 CST (restart plan item 3.14, `docs/plans/rest
 - Route B (the owner's own site) is the fallback. A measured problem in the same account triggers it. See "What triggers route B".
 - Mechanized: the timely export is a check, never a skill step (owner, 11:24 CST). The Stop check enforces it, and Mechanism step 1 closes its cloud-writer miss. The copy steps in `skills/waiting-page/reference/copies-and-accounts.md` are the run the check asks for.
 
-This record rewrites `waiting-data-in-repo` (the git-copy decision) in part: its line that git is each artifact's home no longer holds for the waiting page.
+This record rewrites `waiting-data-in-repo` (the git-copy decision) in part: its line that git is each artifact's home no longer holds for the page.
 
 Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the owner's rulings then chose among them):
 
