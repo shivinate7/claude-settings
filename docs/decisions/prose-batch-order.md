@@ -15,3 +15,6 @@ Outcome protected: main never says a thing that is not yet true. The mix is free
 - Skill `ci-hygiene`, step 8 (Batch lanes), points here for the mix.
 - Roadmap ruling `prose-batch-order` (step `backlog-drain`) holds the owner's words. The plan reading is restart-plan 168159d3, 3.13.
 - Decision `no-merge-during-batch-ci` keeps its own prose-only entry rule (`--express`). This record does not change it.
+
+Kind: process
+Home: skills/ci-hygiene/SKILL.md
