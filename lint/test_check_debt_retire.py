@@ -155,6 +155,99 @@ class Case(unittest.TestCase):
         return [line.split("\t")[0][0] for line in sh(self.dir, "git", "diff", "--name-status", "-M", self.base, self.head).splitlines()]
 
 
+class Isolated(Case):
+    """An isolated run (the merge tool and the CLI) gives the scratch worktree the checkout's installed packages (decision debt-close-runs-retire)."""
+
+    NEEDS_DEPS = ("import os, sys\n"
+                  "sys.exit(0 if os.path.isdir(os.path.join('node_modules', 'marker')) else 1)\n")
+
+    def deps_repo(self, nested=False):
+        retire = "Delete the helper. Check: `tests/test_deps.py`" + (" and `tests/test_deps_sub.py`." if nested else ".")
+        self.repo(debts={"d-deps": retire})
+        self.change(write={"tests/test_deps.py": self.NEEDS_DEPS, "package.json": "{}\n", ".gitignore": "node_modules/\n",
+                           **({"sub/package.json": "{}\n", "tests/test_deps_sub.py": self.NEEDS_DEPS.replace("'node_modules'", "'sub', 'node_modules'")}
+                              if nested else {})})
+        self.base = self.head
+        self.change(rm=["docs/debts/d-deps.md"])
+        for pre in ("", "sub") if nested else ("",):
+            put(os.path.join(self.dir, pre, "node_modules", "marker", "x"), "x")
+
+    def isolated(self, where=None):
+        return D.check(where or self.dir, self.base, head=self.head, isolate=True)
+
+    def fresh_worktree(self):
+        """A detached worktree of the head with no node_modules of its own: the shape the merge tool runs a Retire check in."""
+        wt = os.path.join(self.folder, "wt")
+        sh(self.dir, "git", "worktree", "add", "-q", "--detach", wt, self.head)
+        self.addCleanup(sh, self.dir, "git", "worktree", "remove", "--force", wt)
+        return wt
+
+    def test_i1_installed_packages_reach_the_scratch_worktree(self):
+        self.deps_repo()
+        self.assertEqual(pairs(self.isolated()), [], "a scratch run did not see the checkout's node_modules")
+
+    def test_i2_a_nested_package_folder_gets_its_packages_too(self):
+        self.deps_repo(nested=True)
+        self.assertEqual(pairs(self.isolated()), [], "a nested node_modules did not reach the scratch worktree")
+
+    def test_i2b_a_nested_package_folder_without_packages_is_red(self):
+        self.deps_repo(nested=True)
+        shutil.rmtree(os.path.join(self.dir, "sub", "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "the nested test passed without sub/node_modules")
+
+    def test_i3_a_checkout_with_no_packages_still_runs_the_test_and_it_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "a test that fails with no packages stopped being red")
+
+    def test_i4_a_real_red_test_stays_red_with_packages_linked(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        self.assertEqual(pairs(self.isolated()), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i5_the_scratch_link_does_not_remove_the_checkouts_packages(self):
+        self.deps_repo()
+        self.isolated()
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "node_modules", "marker", "x")), "cleanup deleted the real node_modules")
+
+    def test_i6_a_fresh_worktree_of_an_installed_checkout_gets_the_checkouts_packages(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [], "a fresh worktree did not reach the installed checkout's node_modules")
+
+    def test_i6b_a_fresh_worktree_with_no_packages_anywhere_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(self.dir, "node_modules")), "scope: the checkout still has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "a test with no packages anywhere stopped being red")
+
+    def test_i6c_the_worktrees_own_packages_win_over_the_checkouts(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        os.makedirs(os.path.join(wt, "node_modules"))  # wt's own install, without the marker
+        self.assertFalse(os.path.exists(os.path.join(wt, "node_modules", "marker")), "scope: wt's own install has the marker")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "the checkout's packages replaced the worktree's own")
+
+    def test_i6d_a_real_red_test_in_a_fresh_worktree_stays_red(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i7_a_relative_checkout_path_links_the_packages(self):
+        self.deps_repo()
+        here = os.getcwd()
+        os.chdir(self.dir)
+        self.addCleanup(os.chdir, here)
+        self.assertTrue(os.path.isfile(os.path.join("node_modules", "marker", "x")), "scope: the checkout has no packages")
+        self.assertEqual(pairs(self.isolated(".")), [], "a relative checkout path linked node_modules to itself")
+
+
 class Closes(Case):
     """A debt file deleted between base and head is a close, and its Retire check runs on the head."""
 
