@@ -3,10 +3,13 @@ FAMILY = "readonly-shell-write"
 # A read-only agent's shell write. An agent whose agent_type is in READ_ONLY (hooks/agent_brief.py, the one home of the
 # read-only roles, read here by import and never typed) is refused a write in its shell call: a redirect (>, >>, 2>file,
 # &>) to a target that is not a null device and not under the calling session's own scratchpad; tee to a file other than
-# /dev/null; touch; mktemp that is not -u. The same forms inside an ssh remote command are refused too, and no scratchpad
-# exemption applies there, since that path sits on the remote box. Incident (2026-11-12): a read-only audit agent wrote
-# files over ssh and in the shell, and no guard stopped it. Decision guard-guards-mistakes-only: the guard stops a write
-# Claude could make by mistake. A call with no agent_id is never judged, and a writing role keeps its verdict.
+# a null device; touch; mktemp that is not -u. The null device is /dev/null on Bash, and NUL or $null on PowerShell.
+# On Bash NUL is a file name, so a redirect to it writes. A > inside [[ ]], (( )) or $(( )) is a comparison, and
+# /dev/stdout, /dev/stderr and /dev/tty are streams, so none of those writes a file. The same forms inside an ssh
+# remote command are refused too, and no scratchpad exemption applies there, since that path sits on the remote box.
+# Incident (2026-11-12): a read-only audit agent wrote files over ssh and in the shell, and no guard stopped it.
+# Decision guard-guards-mistakes-only: the guard stops a write Claude could make by mistake. A call with no agent_id
+# is never judged, and a writing role keeps its verdict.
 
 RO_RULE = "readonly-shell-write"
 RO_AGENT = "a3e9c0d17b52f4a68"          # an agent's id on the payload, in the shape AGENT_ID accepts (see s07779)
@@ -69,6 +72,20 @@ ro_refuse("readonly-shell-write: a relative > redirect from a repository cwd is 
 ro_refuse("readonly-shell-write: a PowerShell > redirect to a file is refused", "Get-ChildItem > " + RO_PROBE,
           tool="PowerShell")
 
+# NUL is a file name on Bash: bash has no NUL device, so the redirect creates a file named NUL (or nul).
+ro_refuse("readonly-shell-write: a Bash 2>NUL redirect makes a file named NUL, so it is refused", "ls 2>NUL")
+ro_refuse("readonly-shell-write: a Bash > nul redirect makes a file named nul, so it is refused", "ls > nul")
+ro_refuse("readonly-shell-write: a Bash >NUL redirect with no space makes a file named NUL, so it is refused",
+          "ls >NUL")
+
+# A block device is a disk, not a null device. A real redirect after a comparison still writes.
+ro_refuse("readonly-shell-write: a redirect to a block device, /dev/sda, is refused", "echo x > /dev/sda")
+ro_refuse("readonly-shell-write: a redirect after a [[ ]] test is refused", "[[ a == b ]] && echo y > out.txt")
+ro_refuse("readonly-shell-write: a redirect after $(( )) arithmetic is refused", "echo $((1+1)) > out.txt")
+# A [[ or (( inside quotes is text, and the redirect after the quote still writes.
+ro_refuse("readonly-shell-write: a [[ inside double quotes does not hide a redirect after it", 'echo "[[" > out.txt')
+ro_refuse("readonly-shell-write: a (( inside single quotes does not hide a redirect after it", "echo '((' > out.txt")
+
 # A write chained after a read is still a write: the deny holds for every segment.
 ro_refuse("readonly-shell-write: ls && touch x is refused, the touch is chained", "ls && touch x")
 ro_refuse("readonly-shell-write: a read chained with a redirect is refused", "cat f && echo y > " + RO_PROBE)
@@ -121,9 +138,10 @@ ro_allow("readonly-shell-write: 2>/dev/null discards to the null device", "ls 2>
 ro_allow("readonly-shell-write: both streams to the null device are allowed", "ls > /dev/null 2>&1")
 ro_allow("readonly-shell-write: tee to /dev/null writes no file", "ls | tee /dev/null")
 ro_allow("readonly-shell-write: mktemp -u prints a name and creates nothing", "mktemp -u /tmp/ro-probe.XXXXXX")
-ro_allow("readonly-shell-write: 2>NUL is the Windows null device, allowed", "ls 2>NUL")
 ro_allow("readonly-shell-write: PowerShell 2>$null is the null device, allowed", "Get-ChildItem 2>$null",
          tool="PowerShell")
+ro_allow("readonly-shell-write: PowerShell ls 2>$null is the null device, allowed", "ls 2>$null", tool="PowerShell")
+ro_allow("readonly-shell-write: PowerShell ls 2>NUL is the null device, allowed", "ls 2>NUL", tool="PowerShell")
 
 ro_allow("readonly-shell-write: a > inside double quotes is text, allowed", 'echo "a > b"')
 ro_allow("readonly-shell-write: a > inside single quotes is text, allowed", "grep '>' f")
@@ -141,6 +159,15 @@ ro_allow("readonly-shell-write: a comment opener in a heredoc body is text, allo
          "cat <<'EOF'\n# note > x\nEOF")
 ro_allow("readonly-shell-write: a double-quoted string over two lines with a line starting > is text, allowed",
          'echo "first\n> second"')
+
+# A > that a shell reads as a comparison, or that goes to a stream or the terminal, writes no file.
+ro_allow("readonly-shell-write: a > comparison inside $(( )) arithmetic is not a redirect, allowed", "echo $((3 > 2))")
+ro_allow("readonly-shell-write: a > string comparison inside [[ ]] is not a redirect, allowed",
+         '[[ "a" > "b" ]] && echo y')
+ro_allow("readonly-shell-write: a > comparison inside (( )) is not a redirect, allowed", "(( 3 > 2 )) && echo y")
+ro_allow("readonly-shell-write: a redirect to /dev/stderr is a stream, allowed", "echo x > /dev/stderr")
+ro_allow("readonly-shell-write: a redirect to /dev/stdout with no space is a stream, allowed", "echo x >/dev/stdout")
+ro_allow("readonly-shell-write: a redirect to /dev/tty is the terminal, not a file, allowed", "echo x > /dev/tty")
 
 # ---- E. Allowed for a read-only agent: writes into its own scratchpad, the session that owns it.
 ro_allow("readonly-shell-write: a read-only agent's redirect into its own scratchpad is allowed",
