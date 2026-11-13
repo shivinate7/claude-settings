@@ -1138,9 +1138,10 @@ class InPlaceForms(unittest.TestCase):
 
 
 class FenceHelperPins(unittest.TestCase):
-    """feedback_guard.unfenced() and is_grant() keep their main results. The handoff check reads the same fence
-    rule through a shared loop (decision state-file-parse-check), so these pins sit beside the check's cases.
-    They pass on main by design: they are the control that the shared loop must keep."""
+    """feedback_guard.unfenced() and is_grant() hold their fence results: a fence indented up to three spaces,
+    four spaces or a tab hides its text, an unclosed fence hides the rest of the text, and a grant word inside a
+    fence is no grant. The handoff check reads the same fence loop, so these pins catch a change to that loop
+    that moves either caller."""
 
     @staticmethod
     def fg():
