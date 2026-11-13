@@ -21,7 +21,9 @@
 //             (a deleted record keeps its number), and in each RETIRED list. A shallow clone or an
 //             unreadable history refuses. Then runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
 //             the trailer for the claim commit. Writes the tree.
-//   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
+//   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. Also (and --claim too, before it
+//             writes) refuse a cite of a pending record in a tracked text file that cite.scanGlobs does not read or
+//             cite.excludeGlobs covers, with its file, line and the entry to change. On
 //             the default branch, also refuse any pending record. Off it, refuse a
 //             record numbered on the branch and a renamed numbered record, against the base
 //             branch's tree. A removed record is allowed. A number that a `Record-claim:` commit
@@ -31,16 +33,28 @@
 // All take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
-import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, lstatSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, posix, dirname } from "node:path";
+import { join, resolve, relative, isAbsolute, posix, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
 // ---------------------------------------------------------------- config
 
+// The files the rewrite and the dangling-cite check read when cite.scanGlobs is unset.
+const DEFAULT_SCAN_GLOBS = ["**/*.md"];
+// The config path a repo keeps, named in a refusal when --config points outside the root.
+const REPO_CONFIG_PATH = ".github/stamp.json";
+
 export function loadConfig(path) {
+  const config = parseConfig(path);
+  // Where the repo keeps this file, so a refusal can say which file to edit. Not a config field.
+  Object.defineProperty(config, "configPath", { value: path, enumerable: false, configurable: true });
+  return config;
+}
+
+function parseConfig(path) {
   const config = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(config.kinds)) {  // [] is allowed: a repo with no records
     throw new Error("config.kinds must be an array");
@@ -447,7 +461,7 @@ function resolveCite(config, byId, groups) {
 function rewriteCites(root, config, byId, files) {
   if (!config.cite) return 0;
   const pattern = new RegExp(config.cite.pattern, "g");
-  const scan = makeMatcher(config.cite.scanGlobs ?? ["**/*.md"]);
+  const scan = makeMatcher(config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS);
   const exclude = makeMatcher(config.cite.excludeGlobs ?? []);
   let touched = 0;
   for (const rel of files.filter((f) => scan(f) && !exclude(f))) {
@@ -497,6 +511,97 @@ function nearMissCites(rel, text, config, pattern, prefixBySlug) {
   return out;
 }
 
+// ---------------------------------------------------------------- a pending cite nothing rewrites
+// --claim rewrites a pending slug's cites only in a file that cite.scanGlobs reads and
+// cite.excludeGlobs does not cover. A cite of a pending slug in any other tracked text file stays
+// `[[slug]]` after the claim, and a check elsewhere in the repo then goes red with no line that says
+// why. So --claim and --check refuse here, before anything is written, and name the file, the line
+// and the config entry to change. The match is the rewrite's own (rewriteCites skips no code span,
+// fence, frontmatter or link target), so a pending cite in any of them refuses too. A file that
+// teaches the syntax writes a placeholder slug that is not a pending cite. A file git does not
+// track, a symlink, a binary file (a NUL byte) and a file over UNREAD_MAX_BYTES are not read.
+// Without git, no file is tracked and nothing is checked.
+const UNREAD_MAX_BYTES = 4 * 1024 * 1024;
+const UNREAD_LINES_SHOWN = 5;
+
+function trackedFiles(root) {
+  try {
+    return gitOut(root, ["ls-files", "-z"]).toString("utf8").split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
+  if (!pendingSlugs.size) return [];
+  const scanGlobs = config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS;
+  const excludeGlobs = config.cite.excludeGlobs ?? [];
+  const scan = makeMatcher(scanGlobs);
+  const exclude = makeMatcher(excludeGlobs);
+  // A config outside the root is the merge tool's temp copy of the base branch's config. That path
+  // is gone after the claim, and the edit belongs on the base branch, so name the repo's own path.
+  let cfgPath = REPO_CONFIG_PATH;
+  let baseNote = "";
+  if (config.configPath) {
+    const inside = relative(root, resolve(config.configPath));
+    if (inside && !inside.startsWith("..") && !isAbsolute(inside) && !inside.includes(":")) {
+      cfgPath = inside.split("\\").join("/");
+    } else {
+      baseNote = ` The config read here is outside the repo: the merge tool's copy of the base branch's config. So the fix must land on the base branch's ${REPO_CONFIG_PATH} first.`;
+    }
+  }
+  const found = [];
+  for (const rel of trackedFiles(root)) {
+    const scanned = scan(rel);
+    const excluded = exclude(rel);
+    if (scanned && !excluded) continue; // read by the rewrite and by the dangling-cite check
+    const abs = join(root, rel);
+    let buf;
+    try {
+      const st = lstatSync(abs);
+      if (!st.isFile() || st.size > UNREAD_MAX_BYTES) continue;
+      buf = readFileSync(abs);
+    } catch { continue; }
+    if (buf.includes(0)) continue;
+    const text = buf.toString("utf8").replace(/\r\n/g, "\n");
+    const hits = [];
+    for (const m of text.matchAll(pattern)) {
+      const slug = m[config.cite.slugGroup ?? 1];
+      if (!pendingSlugs.has(slug)) continue;
+      if (config.cite.prefixGroup && m[config.cite.prefixGroup] !== prefixBySlug.get(slug)) continue;
+      // Two cites on one line are one place in the file, so the line is reported once.
+      const line = text.slice(0, m.index).split("\n").length;
+      if (!hits.length || hits[hits.length - 1].line !== line) hits.push({ slug, line });
+    }
+    if (hits.length) found.push({ rel, scanned, excluded, hits });
+  }
+
+  // The printed list is the whole cite.scanGlobs to write: the list read now (the default when it is
+  // unset, so .md files stay scanned) plus every file this refusal names outside it.
+  const added = found.filter((f) => !f.scanned).map((f) => f.rel);
+  const fullList = `[${[...scanGlobs, ...added].map((g) => JSON.stringify(g)).join(", ")}]`;
+  const listNote = `cite.scanGlobs then reads ${fullList}${added.length > 1 ? ", with each file this refusal names" : ""}.`
+    + (config.cite.scanGlobs == null ? ` The list is unset now and reads the default, so write it out with the default kept.` : "");
+  const syntaxOnly = "If the text only teaches the cite syntax, write each example with a placeholder slug that is not a pending cite.";
+
+  return found.map(({ rel, scanned, excluded, hits }) => {
+    const first = hits[0];
+    const more = hits.slice(1, UNREAD_LINES_SHOWN).map((h) => h.line);
+    const rest = hits.length - 1 > more.length ? `, and ${hits.length - 1 - more.length} more` : "";
+    const also = hits.length > 1 ? ` Also at line ${more.join(", ")}${rest}.` : "";
+    const where = `${rel}:${first.line} cites pending record "${first.slug}".${also}`;
+    if (excluded) {
+      const entry = excludeGlobs.find((g) => globToRegExp(g).test(rel));
+      const narrow = `narrow that entry in ${cfgPath} so it no longer covers "${rel}"`;
+      const fix = scanned
+        ? `Fix: ${narrow}, and the claim passes.`
+        : `The file is also outside cite.scanGlobs, so two steps are needed: ${narrow}, and add "${rel}" to cite.scanGlobs. ${listNote} The claim passes only after both.`;
+      return `${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. ${fix}${baseNote} ${syntaxOnly}`;
+    }
+    return `${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${rel}" to cite.scanGlobs in ${cfgPath}. ${listNote}${baseNote} ${syntaxOnly}`;
+  });
+}
+
 // ---------------------------------------------------------------- structural validation, shared
 // by stamp() (which refuses to write on top of it) and --check (which adds the branch question,
 // below, to it). One implementation of "is this record file sound" for both, so they cannot
@@ -505,6 +610,7 @@ function validate(root, config) {
   const problems = [];
   const bySlug = new Map();
   const prefixBySlug = new Map();
+  const pendingSlugs = new Set();
   const byKind = new Map();
 
   for (const kind of config.kinds) {
@@ -527,6 +633,7 @@ function validate(root, config) {
         problems.push(`${rel} has an id this tool does not recognise as pending or numbered — malformed record`);
       }
       if (rec.pending) {
+        pendingSlugs.add(rec.slug);
         for (const field of kind.requireFieldsOnPending) {
           if (!rec[field]) problems.push(`${rel} has no \`${field}\`; it cannot be claimed in order`);
         }
@@ -546,7 +653,7 @@ function validate(root, config) {
 
   if (config.cite) {
     const pattern = new RegExp(config.cite.pattern, "g");
-    const scan = makeMatcher(config.cite.scanGlobs ?? ["**/*.md"]);
+    const scan = makeMatcher(config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS);
     const exclude = makeMatcher(config.cite.excludeGlobs ?? []);
     for (const rel of walk(root).filter((f) => scan(f) && !exclude(f))) {
       const { text } = readFileEol(join(root, rel));
@@ -559,6 +666,7 @@ function validate(root, config) {
       }
       problems.push(...nearMissCites(rel, text, config, pattern, prefixBySlug));
     }
+    problems.push(...unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug));
   }
 
   return { problems, bySlug, byKind };
