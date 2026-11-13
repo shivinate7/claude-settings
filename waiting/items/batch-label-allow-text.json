@@ -41,10 +41,10 @@
   ],
   "owner": "lane batch-label-setter (session_013NEJKz9DMAhnNimZfuBt2L)",
   "ref": "lane batch-label-setter, PR #2871, Nov 12, 13:37 CST",
-  "reply": "Reopened 13:54 CST: your 13:49 CST b is filed, but I removed the saved answer when I closed the item, and the lane's settings edit reads only that saved answer. Please save b again; nothing else changes.",
+  "reply": "Closed 11:12 CST Nov 13 by triage: you picked b at 11:06 CST. The lane checked your saved answer (counted n=618 choice=b) and edited that one settings.json entry in PR #2871, commit cdbb04d40. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Batch label: keep or widen allow text",
-  "status": "open",
+  "status": "closed",
   "title": "Set the batch label without widening your auto-mode allow text",
   "why": "The allow text in the settings file is your own text."
 }

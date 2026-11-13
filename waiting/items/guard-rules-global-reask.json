@@ -34,6 +34,7 @@
   "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
   "pick": "a",
   "ref": "your 11:03 CST answer and question on item 606; lane 11:05 CST",
+  "reply": "Closed 11:12 CST Nov 13 by triage: you answered none of these and asked why everything is not installed in every repo. Item 703 puts the answer in the item and asks again. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Two guard rules: global or not",
   "shown": [
@@ -54,7 +55,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "Keep the two guard rules in the global CLAUDE.md?",
   "why": "You asked why these would not be global when hooks are in every repo. The difference is below. This replaces 606."
 }
