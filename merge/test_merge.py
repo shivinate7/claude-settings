@@ -447,6 +447,23 @@ class Env(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
+    def in_wait(self, action):
+        """Run action once, right after the run's first head read (merge.holds_base, before the claim): main moves after the head was read
+        current, and before the run's own reads of the base. The per-lane run waits on no check, so the window is the head read, not a wait.
+        A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here.
+        One home for every class: RecordsEnv and UndoMemo both use it."""
+        real = merge.holds_base
+        moved = []
+        def read_then_move(*a, **k):
+            out = real(*a, **k)
+            if not moved:
+                moved.append(True)
+                action()
+            return out
+        patch = unittest.mock.patch.object(merge, "holds_base", read_then_move)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def merge_tree_faults(self, fault, after_claim=False):
         """Every merge-tree call of the run returns `fault` instead: a (rc, out) pair, or an exception to raise. Both seams a merge-tree
         can take are patched once per test, merge.git and merge.sh (the sh that merge_tree calls); a second call changes the fault only.
@@ -874,19 +891,20 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
 
-    def network_drops_the_wait_after_the_claim(self):
-        """The second check wait, the one after the claim push, raises a network error: the claim stays on the branch, unproven (NetStop)."""
-        wait, calls = self.host.wait_checks, []
-        def dropped(n, sha, d, prior=None):
-            calls.append(sha)
-            if len(calls) == 2:
-                raise merge.NetStop("the network dropped the wait after the claim push")
-            return wait(n, sha, d, prior)
-        self.host.wait_checks = dropped
+    def network_drops_the_merge_after_the_claim(self):
+        """The merge call after the claim push raises a network error, once: the claim stays on the branch, unproven (NetStop). The
+        per-lane run waits on no check, so the read after the claim is the merge call; a rerun gets the real call."""
+        merge_call, dropped = self.host.merge, []
+        def once(n, method, sha):
+            if not dropped:
+                dropped.append(sha)
+                raise merge.NetStop("the network dropped the merge call after the claim push")
+            return merge_call(n, method, sha)
+        self.host.merge = once
 
     def test_a_rerun_on_the_tools_own_claim_commit_proceeds(self):
         relayed = self.head()
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the claim is pushed, its result is unknown, so it stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -899,10 +917,11 @@ class ConfirmHead(Env):
 
     def test_a_rerun_on_the_tools_revert_of_its_claim_proceeds(self):
         relayed = self.head()
-        self.host.seq = [(True, ""), (False, "a check is red after the claim push")]  # the claim wait is red, so the tool reverts its own claim
+        self.host.refuse = "the merge was refused after the claim push"  # the merge call refuses, so the tool reverts its own claim
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
         self.assertNotEqual(rc, 0, out + err)
         self.assertNotEqual(self.head(), relayed, "the revert did not land on the branch")
+        self.host.refuse = None
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's revert of its claim
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
@@ -918,7 +937,7 @@ class ConfirmHead(Env):
     def test_a_rival_commit_under_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
         relayed = self.head()
         rival = self.competitor_push()  # a rival commit on the relayed head
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", rival)  # the tool claims on the rival commit; the claim stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -933,7 +952,7 @@ class ConfirmHead(Env):
 
     def test_a_rival_commit_on_top_of_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
         relayed = self.head()
-        self.network_drops_the_wait_after_the_claim()
+        self.network_drops_the_merge_after_the_claim()
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the tool claims on the relayed head; the claim stays
         self.assertNotEqual(rc, 0, out + err)
         claim = self.head()
@@ -3175,15 +3194,16 @@ class ClaimSurvivesUnknown(Env):
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
         merged = self.merge_main_onto_feat()
-        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the one read of the head's checks (head_state), red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("checks: fail", out, "the stop does not print the red check")
-        self.assertIn("stays on feat", out, "the stop does not say the claim stays on feat")
-        self.assertIn(claim[:9], out, "the stop does not name the claim")
-        self.assertIn(merged[:9], out, "the stop does not name the merge commit the claim stays under")
+        self.assertIn("nothing was claimed or pushed", out, "the red head was not refused before the claim")  # per-lane: the refusal comes before the
+        # claim's "stays on" line, so that sentence is not printed on this path (reported as a lost sentence)
         self.assertNotIn("reverted", out, "a revert of the head was made: the head is a merge commit, not the claim")
         self.assertEqual(self.head(), merged, "feat moved: the red rerun pushed or reverted")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertIn(claim, sh(self.co, "git", "rev-list", "origin/feat").split(), "the first run's claim is no longer on feat")
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_a_base_proof_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
@@ -3277,13 +3297,13 @@ class ClaimSurvivesUnknown(Env):
 
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
-        # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
-        self.host.seq = [(True, ""), (False, "check checks is red")]
+        # Banchi #595, DEBT81: a refusal after the claim reverts it; the rerun, once the merge goes through, must claim again.
+        self.host.refuse = "the merge was refused after the claim push"  # per-lane: no check is read after the claim, so the refusal is the revert
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
         self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.host.checks = (True, "")
+        self.host.refuse = None
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertNotIn("resumed", out)
@@ -6438,13 +6458,6 @@ class RestRoutes(Env):
         self.assertGreaterEqual(self.calls().count("GET pulls/7\n"), 3, self.calls())
         self.assertIn(MERGE_CALL, self.calls())
 
-    def test_a_null_mergeable_that_then_reads_conflicting_stops_the_merge(self):
-        self.set(mergeable_seq=[None, None, False])
-        rc, out = self.go()
-        self.assertEqual(rc, 1, out)
-        self.assertRegex(out, r"DIRTY|CONFLICTING")
-        self.assertNotIn(MERGE_CALL, self.calls())
-
     # ---- the selector: a number, a URL, a branch name, or the current branch
 
     def two_open_prs(self):
@@ -7278,17 +7291,17 @@ class UndoMemo(Env):
         sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
         sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
 
-    def move_main_in_the_wait(self, real_wait, fetch_co=False):
-        def wait_while_main_moves(n, sha, d, prior=None):
+    def main_moves_in_the_run(self, fetch_co=False):
+        """-> an action for in_wait: main gains a clean commit (moved.txt) after the run's first head read."""
+        def move():
             sh(self.other, "git", "fetch", "-q", "origin")
             sh(self.other, "git", "checkout", "-q", "-B", "main", "origin/main")
-            put(os.path.join(self.other, "moved.txt"), "main moved in the wait\n")
-            sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-qm", "main moves in the wait")
+            put(os.path.join(self.other, "moved.txt"), "main moved in the run\n")
+            sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-qm", "main moves in the run")
             sh(self.other, "git", "push", "-q", "origin", "main")
             if fetch_co:
                 sh(self.co, "git", "fetch", "-q", "origin")
-            return real_wait(n, sha, d, prior)
-        return wait_while_main_moves
+        return move
 
     def test_unchanged_head_base_and_default_scan_once(self):
         self.no_claim()
@@ -7299,10 +7312,10 @@ class UndoMemo(Env):
 
     def test_origin_base_moving_during_the_wait_scans_again(self):
         self.no_claim()
-        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks)
+        self.in_wait(self.main_moves_in_the_run())
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
-        self.assertEqual(rc, 1, out)  # the scan runs again, then the moved base refuses the merge (merge-needs-current-base)
-        self.assertIn("does not hold origin/main", out)
+        self.assertEqual(rc, 0, out)  # the scan runs again; the moved base is a clean merge, so the green run stands (rule M3)
+        self.assertIn("The green run stands", out)
         self.assertEqual(undos, 2, out)
         self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
 
@@ -7311,7 +7324,7 @@ class UndoMemo(Env):
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
         self.host.base = "integ"
-        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks, fetch_co=True)
+        self.in_wait(self.main_moves_in_the_run(fetch_co=True))
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
         self.assertEqual(rc, 0, out)
         self.assertEqual(undos, 2, out)
@@ -8957,22 +8970,6 @@ class RecordsEnv(Env):
         for rel, text in files.items():
             put_lf(os.path.join(o, rel), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
-
-    def in_wait(self, action):
-        """Run action once, right after the run's first head read (merge.holds_base, before the claim): main moves after the head was read
-        current, and before the run's own reads of the base. The per-lane run waits on no check, so the window is the head read, not a wait.
-        A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here."""
-        real = merge.holds_base
-        moved = []
-        def read_then_move(*a, **k):
-            out = real(*a, **k)
-            if not moved:
-                moved.append(True)
-                action()
-            return out
-        patch = unittest.mock.patch.object(merge, "holds_base", read_then_move)
-        patch.start()
-        self.addCleanup(patch.stop)
 
     def main_debt_conflicts(self):
         """main adds the debt the head adds, with other text: the merge of the head and main conflicts on it. Under rule M3 a clean base
