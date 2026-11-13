@@ -16962,6 +16962,28 @@ class RunState(Env):
         self.assertEqual(rc, 0, text)
         self.assertEqual([line for line in lines if line.startswith(self.FIRST)], [], "a fan-in job is named as the first red:\n" + text)
 
+    def test_the_newest_row_of_a_job_decides_its_state_whichever_row_is_listed_first(self):
+        for order in ("older first", "newer first"):
+            with self.subTest(order=order):
+                failed = {**run_rows(("test", "failure", RUN_T_B))[0], "id": 11}  # the first attempt, the older id
+                passed = {**run_rows(("test", "success", RUN_T_C))[0], "id": 12}  # the re-run, the newer id, which counts
+                rc, lines, text, _ = self.read([failed, passed] if order == "older first" else [passed, failed])
+                self.assertEqual(lines, [self.STATE + "all green"], text)  # no first red line: the newer row is green
+                self.assertEqual(rc, 0, text)
+
+    def test_a_finished_job_with_an_odd_conclusion_is_unknown_not_clear(self):
+        for conclusion in ("action_required", "stale", "startup_failure"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", conclusion, RUN_T_B), ("e2e", None, None)))
+                self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: no state line, though e2e has not finished
+                self.assertIn(f"job test ended {conclusion}", lines[0], text)  # it names the job and its conclusion
+
+    def test_a_red_fan_in_beside_a_running_job_reads_running_and_names_no_first_red(self):
+        rc, lines, text, _ = self.read(run_rows(("all-jobs-passed", "failure", RUN_T_B), ("x", None, None)))
+        self.assertIn(self.STATE + "running", lines, "no running state line was printed:\n" + text)  # scope first: the read ran
+        self.assertEqual(rc, 0, text)
+        self.assertEqual([line for line in lines if line.startswith(self.FIRST)], [], "the red fan-in job is named as the first red:\n" + text)
+
     def test_the_first_red_line_gives_the_end_time_in_us_central_by_date(self):
         for ended, hhmm in (("2026-11-13T21:40:00Z", "15:40 CST"), ("2026-07-01T22:30:00Z", "17:30 CDT")):
             with self.subTest(ended=ended):
