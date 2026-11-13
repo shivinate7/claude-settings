@@ -2497,6 +2497,47 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(["Close q_max #969?"]))])
                 self.assertIsNone(out)
 
+    def test_qm_green_labelled_writer_passes_a_send_to_its_bare_id(self):
+        # Catches: a page writer label "Triage (id)" compared whole, so a send to the bare id is no send to the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id=self.WRITER)),
+                            ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_the_writer_name_in_a_label_does_not_count(self):
+        # Catches: a send to the name "Triage" counted as a send to the writer, because the name is a word of the
+        # label "Triage (id)". Only the id in the label names the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id="Triage")), ("to", self.send(to="Triage"))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_to_the_whole_label_does_not_count(self):
+        # Catches: a send to the whole label string counted as a send to the writer, because the label contains
+        # itself. Only the id in the label names the writer.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id=labelled)), ("to", self.send(to=labelled))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_labelled_writer_ack_of_a_bare_id_send_keeps_the_turn(self):
+        # Catches: the writer's ack of a send to its bare id starting a new turn when the page names the writer by
+        # label. The ack must match the id the label names, so the send before it stays in the turn.
+        labelled = "Triage (%s)" % self.WRITER
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
     def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
         # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
         # so the reply that follows it has no send and blocks.
