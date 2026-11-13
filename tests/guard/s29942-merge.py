@@ -65,6 +65,17 @@ repo_case("--repo-dir naming this checkout is allowed from another directory", "
           f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --confirm", REPO_B, TX_A)
 repo_case("a cd into this checkout is allowed from another directory", "allow", f"cd '{REPO_A}' && {MERGE_SHIM} 5 --confirm", REPO_B, TX_A)
 repo_case("no flag and this working directory is allowed", "allow", f"{MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+# `merge <pr> --ready` pushes the records page to the pull request's branch, from the checkout it acts in, as --confirm's draft step does. It takes
+# the same repo proof as --confirm: the checkout must be the repo the own record names, and a flag, a cd or the working directory decides which.
+repo_case("--ready from another checkout's repo is denied", "deny", f"{MERGE_SHIM} 5 --ready", REPO_B, TX_A)
+repo_case("--ready with --repo-dir naming another checkout is denied", "deny", f"{MERGE_SHIM} --repo-dir '{REPO_B}' 5 --ready", REPO_A, TX_A)
+repo_case("--ready with -C naming another checkout is denied", "deny", f"{MERGE_SHIM} -C '{REPO_B}' 5 --ready", REPO_A, TX_A)
+repo_case("--ready after a cd into another checkout is denied", "deny", f"cd '{REPO_B}' && {MERGE_SHIM} 5 --ready", REPO_A, TX_A)
+repo_case("--ready with a record that proves no repo is denied", "deny", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_NONE)
+# Controls: a lane marks its own draft ready once, from its own repo, and the proof passes, as --confirm's does.
+repo_case("--ready from this checkout's repo is allowed", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_A)
+repo_case("--ready with --repo-dir naming this checkout is allowed from another directory", "allow",
+          f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", REPO_B, TX_A)
 # gh-write-cloud: the merge tool is no gh write, so a cloud merge it runs is allowed. merge-confirm-repo also judges it, so these run in
 # REPO_A with the lane record that names its repo: the allow is then gh-write-cloud's own, not a refusal of a missing record.
 for _command in ("merge 12 --confirm", MERGE_SHIM + " 12 --confirm"):
