@@ -1512,6 +1512,174 @@ class Slugs(unittest.TestCase):
         self.assertIn("slugs", load_probes().GROUPS)
 
 
+class LiveHooks(unittest.TestCase):
+    """The hooks group: the clone's settings.json `.hooks` against the live $HOME/.claude/settings.json `.hooks`.
+    hooks.SessionStart is ignored on both sides, since a cloud install rewrites it (install.sh). The fixtures read this
+    checkout's settings.json at test time, so the hooks are the real full-size set and no case pastes them."""
+
+    SOURCE = os.path.join(os.path.dirname(HERE), "settings.json")
+    NEW_COMMAND = "python3 hooks/changed.py"
+    # The SessionStart entry a cloud install writes, shortened. Its command text is unique to this class.
+    REFRESH = {"matcher": "startup|resume",
+               "hooks": [{"type": "command", "command": "i=$(cat); bash -s -- --cloud", "timeout": 60}]}
+
+    def source(self):
+        """This checkout's settings.json as a new dict, so a case edits its own copy."""
+        with open(self.SOURCE, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    @staticmethod
+    def text(doc):
+        return json.dumps(doc, indent=2)
+
+    @staticmethod
+    def other_event(doc):
+        """The first event other than SessionStart."""
+        return next(event for event in doc["hooks"] if event != "SessionStart")
+
+    @staticmethod
+    def escaped(text):
+        """`text` as the pretty-printed JSON writes it, so a command with quotes still finds its line."""
+        return json.dumps(text)[1:-1]
+
+    @staticmethod
+    def changed(out):
+        """The item lines that add or remove text, without their indent. The `---` and `+++` headers are not changes."""
+        return [line[2:] for line in out.splitlines()[1:]
+                if line[2:3] in ("+", "-") and not line.startswith(("  ---", "  +++"))]
+
+    def clone(self, text):
+        """A claude-settings clone whose settings.json holds `text`; with no settings.json when `text` is None."""
+        repo = Repo(self)
+        return repo.write("settings.json", text) if text is not None else repo.write("README.md")
+
+    def live(self, text):
+        """A HOME folder whose ~/.claude/settings.json holds `text`; with no file when `text` is None."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        if text is not None:
+            os.makedirs(os.path.join(home, ".claude"))
+            with open(os.path.join(home, ".claude", "settings.json"), "w", encoding="utf-8") as handle:
+                handle.write(text)
+        return home
+
+    def probe(self, repo, home):
+        """(exit code, stdout, stderr) of the hooks group on `repo` with HOME at `home`. Repo.probe passes no env."""
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}  # the probe reads $HOME/.claude, per the spec
+        env["HOME"] = env["USERPROFILE"] = home  # USERPROFILE is the home that expanduser reads on Windows
+        done = subprocess.run([sys.executable, PROBES, "hooks", repo.root], capture_output=True, text=True, env=env)
+        return done.returncode, done.stdout, done.stderr
+
+    def check(self, clone_text, live_text):
+        return self.probe(self.clone(clone_text), self.live(live_text))
+
+    def test_identical_hooks_are_in_shape(self):
+        clone, live = self.source(), self.source()
+        live.setdefault("permissions", {}).setdefault("allow", []).append("Bash(cloud-only:*)")  # outside .hooks: not read
+        reversed_keys = json.loads(self.text(live), object_pairs_hook=lambda pairs: dict(reversed(pairs)))
+        for name, doc in (("the same hooks", live), ("the same hooks, keys in reverse order", reversed_keys)):
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(doc))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_session_start_only_difference_is_in_shape(self):
+        def without_session_start(doc):
+            doc["hooks"].pop("SessionStart")
+            return doc
+
+        rewritten = self.source()
+        rewritten["hooks"]["SessionStart"] = [entry for entry in rewritten["hooks"]["SessionStart"]
+                                              if "startup" not in entry.get("matcher", "")] + [self.REFRESH]
+        cases = (("live rewritten as a cloud install writes it", self.source(), rewritten),
+                 ("live without SessionStart", self.source(), without_session_start(self.source())),
+                 ("clone without SessionStart", without_session_start(self.source()), self.source()))
+        for name, clone, live in cases:
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(live))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_changed_command_in_another_event_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        old = live["hooks"][event][0]["hooks"][0]["command"]
+        live["hooks"][event][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)  # scope first: the verdict, then the lines it names
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(all(line.startswith("  ") for line in out.splitlines()[1:]), out)
+        changed = self.changed(out)
+        self.assertTrue(any(self.escaped(self.NEW_COMMAND) in line for line in changed), out)  # the live command
+        self.assertTrue(any(self.escaped(old) in line for line in changed), out)  # the clone's command
+        self.assertFalse(any('"SessionStart"' in line for line in out.splitlines()[1:]), out)
+
+    def test_a_hook_event_missing_live_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        command = live["hooks"].pop(event)[0]["hooks"][0]["command"]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any(('"%s"' % event) in line for line in changed), out)
+        self.assertTrue(any(self.escaped(command) in line for line in changed), out)
+
+    def test_an_extra_live_event_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["Notification"] = [{"hooks": [{"type": "command", "command": self.NEW_COMMAND}]}]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any('"Notification"' in line for line in changed), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in changed), out)
+
+    def test_a_session_start_difference_beside_a_real_change_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["SessionStart"] = [self.REFRESH]
+        live["hooks"][self.other_event(live)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        items = out.splitlines()[1:]
+        self.assertFalse(any('"SessionStart"' in line or self.REFRESH["hooks"][0]["command"] in line for line in items), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)
+
+    def test_a_live_file_that_is_missing_is_unknown(self):
+        code, out, err = self.check(self.text(self.source()), None)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_invalid_json_on_either_side_is_unknown(self):
+        good = self.text(self.source())
+        for side, clone, live in (("live", good, "{ not json"), ("clone", "{ not json", good)):
+            with self.subTest(side):
+                code, out, err = self.check(clone, live)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_a_clone_without_settings_json_is_na(self):
+        code, out, err = self.probe(self.clone(None), self.live(self.text(self.source())))
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: n/a"), err or out)
+
+    def test_no_hooks_on_either_side_is_in_shape(self):
+        empty = self.text({"hooks": {}})
+        code, out, err = self.check(empty, empty)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_registered_in_groups(self):
+        self.assertIn("hooks", load_probes().GROUPS)
+
+    def test_probes_md_has_a_row_that_runs_the_hooks_group(self):
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            rows = [line for line in handle.read().splitlines()
+                    if line.startswith("|") and "compliance_probes.py hooks" in line]
+        self.assertTrue(rows, "probes.md has no table row that runs `compliance_probes.py hooks`")
+
+
 def live_anchors():
     """The anchors of the live shared rules, read through rule_audit on each call: no case writes one."""
     return rule_audit.claude_md_anchors(rule_audit.rule_text())
