@@ -21,7 +21,8 @@ HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # th
 HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
 HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
 HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
-# The rule text a refusal with no agent_id prints, as it reads on bcbeaa26a. The printed reason holds it whole.
+# The rule text a refusal with no agent_id prints, as the guard printed it before this change. The printed reason
+# holds it whole.
 HM_TODAY_REASON = (
     "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
@@ -161,11 +162,11 @@ HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
 HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
 HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
 # A refusal to an agent names the agent's own red-run path in its absolute form, under the primary, and says
-# EnterWorktree may be refused for a subagent. Read from home, a relative form nests inside the home and is
+# EnterWorktree may be refused for an agent. Read from home, a relative form nests inside the home and is
 # refused, so only the absolute form is the remedy. Either spelling of the primary is accepted.
 HM_OWN_RED_ABS = tuple(slash(os.path.join(root, ".claude", "worktrees", "agent-" + HM_AGENT + "-red"))
                        for root in (HMMAIN, os.path.realpath(HMMAIN)))
-HM_AGENT_CARRIES = (HM_OWN_RED_ABS, "may be refused for a subagent")
+HM_AGENT_CARRIES = (HM_OWN_RED_ABS, "may be refused for an agent")
 hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
         HMADD + HMAGENT_SIB_RED, carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,), **HMAG)
 hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
