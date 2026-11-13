@@ -495,13 +495,17 @@ def read_lines(path):
         return handle.read().splitlines()
 
 
-def fake_installer(case, name, fail_until=None):
+def fake_installer(case, name, fail_until=None, hang_for=None):
     """The install stand-in of a cloud refresh: an executable that appends one `ran` line to its log on each run. With
-    fail_until, it exits 3 with a stderr line until that file exists. Returns (command path, log path). POSIX only, so a
-    case that runs it skips on Windows with NT_NO_STUB."""
+    fail_until, it exits 3 with a stderr line until that file exists. With hang_for, it writes its pid to <script>.pid,
+    sleeps hang_for seconds, then logs `done`: a run killed at its bound logs `ran` and never `done`. Returns (command
+    path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB."""
     script = os.path.join(case, name)
     log = os.path.join(case, name + ".log")
     lines = ["#!/bin/sh", "printf 'ran\\n' >> %s" % shlex.quote(log)]
+    if hang_for is not None:
+        lines += ["printf '%%s\\n' $$ > %s" % shlex.quote(script + ".pid"), "sleep %d" % hang_for,
+                  "printf 'done\\n' >> %s" % shlex.quote(log)]
     if fail_until:
         lines.append("if [ ! -e %s ]; then echo 'fake install broke' >&2; exit 3; fi" % shlex.quote(fail_until))
     lines.append("exit 0")
@@ -1702,6 +1706,32 @@ class RefreshNotice(MailCase):
                          "a move after a failed install did not retry the install: %d runs" % len(read_lines(log)))
         self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
                       "the retried install printed no 'refreshed' line: %r" % lines)
+
+    def test_a_hung_install_is_killed_at_the_bound_and_the_turn_says_refresh_failed(self):
+        store = self.store()
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        fast, fast_log = fake_installer(self.case, "install-fast")
+        hung, hung_log = fake_installer(self.case, "install-hung", hang_for=5)
+        with mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", 2):
+            control = self.cloud_machine(store, "c", "sess-c", fast)
+            control_lines = turn(control)
+            self.assertIn("main moved to %s; refreshed" % SHA_A, control_lines,
+                          "control: an install that ends within the bound printed no 'refreshed' line: %r" % control_lines)
+            receiver = self.cloud_machine(store, "b", "sess-b", hung)
+            lines = turn(receiver)
+        self.assertTrue(os.path.exists(hung + ".pid"),
+                        "control: the hung install never started, so there was nothing to kill: %r" % lines)
+        self.assertNotIn("done", read_lines(hung_log),
+                         "the hung install ran to its end past the bound, so the turn waited for it: log %r"
+                         % read_lines(hung_log))
+        with open(hung + ".pid", encoding="utf-8") as handle:
+            pid = int(handle.read().strip())
+        with self.assertRaises(ProcessLookupError, msg="the hung install's process outlived the turn: pid %d" % pid):
+            os.kill(pid, 0)
+        self.assertIn(UNKNOWN + "refresh failed: the install ran past 2 s", lines,
+                      "a hung install printed no 'refresh failed' line for the bound: %r" % lines)
+        installed = MAIL_MODULE.read_installed(receiver.env)
+        self.assertEqual(installed, {}, "a hung install wrote its sha as installed: %r" % installed)
 
     def test_the_refresh_path_starts_only_the_install_and_no_timer_or_sleep(self):
         store = self.store()
