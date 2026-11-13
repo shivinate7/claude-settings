@@ -104,7 +104,7 @@ a turn end in these cases:
     homed to a file or a step. When the cwd is in no git repo, the check passes and a systemMessage
     says so;
   - answer-finding-needs-home (roadmap step answer-finding-needs-step). A `[question] -> answered` item, open or
-    closed, whose text after `->` holds a DEFECT_WORDS word needs a home in that same text: `step:<slug>`
+    closed, whose text after `->` holds a DEFECT_WORDS word (gap, wrong, broken, missing, stale) needs a home in that same text: `step:<slug>`
     whose step file some branch holds, or a debt or ruling file some branch tracks (Homes.problem, read as a
     task or a ruling home). A home on a sibling item is no home. The item text only; the chat transcript is not
     read. Risk kind: likely risk. Incident: owner feedback fb-1238-1, Nov 11 12:40 CST, a question answered in
@@ -216,8 +216,8 @@ KIND_WORDS = {"question": "answered", "note": "noted (closed: a tracked file, st
               "repo": "repo:<owner>/<name>"}
 EXAMPLE_KIND = "note"  # a key of KIND_WORDS
 EXAMPLE_HOME = "noted"
-# A `[question] -> answered` item naming one of these (whole words, any case) names a defect or a proposed fix.
-DEFECT_WORDS = re.compile(_WORD % r"gap|wrong|broken|missing|stale|should|needs\s+to|fix", re.IGNORECASE)
+# A `[question] -> answered` item naming one of these (whole words, any case) names a defect or gap.
+DEFECT_WORDS = re.compile(_WORD % r"gap|wrong|broken|missing|stale", re.IGNORECASE)
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
@@ -535,10 +535,11 @@ class Homes:
         A home is a `step:<slug>` or a path in the item's own text that `problem` accepts as a task or a ruling
         home. Never reads another item or the chat."""
         text = rest.partition("->")[2]
-        if home_word(rest) != "answered" or not DEFECT_WORDS.search(text):
+        word = ruling_home._unwrap(home_word(rest)).rstrip(":,;.").lower()  # as closed_problem reads a home word
+        if word != KIND_WORDS["question"] or not DEFECT_WORDS.search(text):
             return None
         for word in text.split():
-            word = ruling_home._unwrap(word).split("#", 1)[0].rstrip(":,;.")
+            word = word.lstrip("([*`\"'").rstrip(")]*`\"':,;.").split("#", 1)[0]  # a home wrapped in ( ), ** or [ ]
             if not (STEP_HOME.fullmatch(word) or "/" in word):
                 continue
             if any(self.problem(item_id, kind, "[%s] -> %s" % (kind, word)) is None for kind in ("task", "ruling")):
