@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-13T04:12:00Z",
+  "context": "Goal: CI runs only what can find a new defect.\nProblem (rule): the nightly run in claude-settings has found nothing the push runs had not already found, yet your R61 pick keeps it running whenever main is red.\nBased on (measured): 45 nightly runs since 2026-09-30: 22 passed, 15 were cancelled, 8 failed, and each of the 8 failures was on a commit whose push run had already failed (read 22:11 CST from GitHub's run list).\nBased on (ruling): R61, your pick b at 15:29 CST Nov 12: skip the nightly when main's newest commit is already green.\nDeparts from: main runs a nightly at 03:17 UTC \u2014 option a removes it.\nWhy yours: it changes a schedule you set today.",
+  "home": "step ci-hygiene-refresh",
+  "id": "drop-nightly-ci",
+  "kind": "decision",
+  "n": 683,
+  "options": [
+    {
+      "gain": "No run that found nothing in 45 nights, and free runner slots.",
+      "how": "Remove the nightly schedule in claude-settings and from the CI-upkeep skill's advice; a run can still be started by hand.",
+      "id": "drop",
+      "key": "a",
+      "label": "Drop the nightly, keep a manual run (recommended)",
+      "lose": "A break from an outside change, such as a runner image or a dependency, shows only at the next push."
+    },
+    {
+      "gain": "No change.",
+      "how": "No change.",
+      "id": "keep-r61",
+      "key": "b",
+      "label": "Keep R61 as is: skip when green",
+      "lose": "It still runs on a red main, where it adds nothing."
+    },
+    {
+      "gain": "Saves paid minutes, since only private repos pay for runner minutes.",
+      "how": "Private repos drop the nightly; public repos keep it under R61.",
+      "id": "split-by-visibility",
+      "key": "c",
+      "label": "Off in private repos, kept in public ones",
+      "lose": "Two rules for one thing, and the public nightly still found nothing. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "owner chat with the retrospective 22:11 CST Nov 12; retrospective 22:11 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Drop the nightly CI run",
+  "status": "open",
+  "title": "Should the nightly CI run be dropped?",
+  "why": "It changes a CI schedule your R61 pick set."
+}
