@@ -30,11 +30,13 @@ import functools
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -2300,8 +2302,13 @@ class PinnedHarness(Job):
 
     def run_step(self, steps, *args, env=None, log=None, launch=()):
         """One run of `steps` (step texts) through the copied install, with its own log. -> (rc, verdict lines, output and log)."""
+        return self.run_steps([steps], *args, env=env, log=log, launch=launch)
+
+    def run_steps(self, steps, *args, env=None, log=None, launch=()):
+        """One run of the job's `steps` (a list of step texts, all in one workflow) through the copied install, with its own log.
+        -> (rc, verdict lines, output and log)."""
         log = log or self.log
-        rc, lines, out = self.run_job(steps, args=args, script=self.ci_job, launch=launch,
+        rc, lines, out = self.run_job(*steps, args=args, script=self.ci_job, launch=launch,
                                       env={"CLAUDE_CONFIG_DIR": self.cfg, "VERDICT_LOG": log, **(env or {})})
         text = ""
         if os.path.exists(log):  # no step ran under a usage error, so no log exists then
@@ -2431,7 +2438,7 @@ class PinnedHarness(Job):
         resolves to. The clone's origin is this bare repo. -> the stable head's sha."""
         home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, home, True)
-        bare = os.path.join(home, "origin.git")
+        bare = self.bare = os.path.join(home, "origin.git")
         subprocess.run(["git", "init", "-q", "--bare", bare], check=True, env=ENV)
         head = git_in(self.source, "rev-parse", at)
         git_in(self.source, "push", bare, "%s:refs/heads/stable" % head)
@@ -2439,9 +2446,9 @@ class PinnedHarness(Job):
         return head
 
     @staticmethod
-    def drift_lines(text, pin):
-        """The ste-changed lines that name the stale pin `pin` by its first 7 characters."""
-        return [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+    def drift_lines(text, pin, action="ste-lint"):
+        """The ste-changed lines that name the pin `pin` of `action` by its first 7 characters."""
+        return [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins %s at %s" % (action, pin[:7]))]
 
     def test_a_stale_ste_lint_pin_under_step_fails_the_step_and_exits_one(self):  # action-pins-follow-sessions: drift is FAIL
         pin = self.add_ste_lint()  # the pin is the first commit; the source HEAD after it is the stable head
@@ -2454,15 +2461,17 @@ class PinnedHarness(Job):
         self.assertNotIn("Unknown whether it matches", drift[0], "the stale pin read as unknown, not drift\n" + text)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale ste-lint pin under --step did not FAIL the named step and exit 1\n" + text)
 
-    def test_a_stale_ste_lint_pin_under_lint_exits_three_and_fails(self):  # action-pins-follow-sessions: --lint keeps exit 3
+    def test_a_stale_ste_lint_pin_under_lint_passes_with_a_note(self):  # action-pins-follow-sessions: --lint drift is a note
         pin = self.add_ste_lint()
         self.publish_stable()
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
-        drift = self.drift_lines(text, pin)
-        self.assertEqual(len(drift), 1, "scope: no line names the stale pin under --lint\n" + text)
-        self.assertEqual((rc, self.verdicts(lines)), (3, ["FAIL"]), "a stale ste-lint pin under --lint did not exit 3 with FAIL\n" + text)
+        self.assertIn("ste-changed: pin note: CI pins ste-lint at %s" % pin[:7], text,
+                      "scope: no drift note names the stale pin under --lint\n" + text)
+        self.assertTrue(any(ln.startswith("PASS") and "ste-changed: pin note: " in ln for ln in lines),
+                        "the stale pin under --lint did not put its drift on the PASS line as a note\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a stale ste-lint pin under --lint did not PASS with a note and exit 0\n" + text)
 
     def test_a_stable_head_pin_under_step_passes_with_no_drift(self):  # green control: the pin is the stable head
         self.add_ste_lint()
@@ -2491,14 +2500,14 @@ class PinnedHarness(Job):
         self.assertNotIn("Unknown whether it matches", drift[0], "the stale pin read as unknown, not drift\n" + text)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale pin with no stable branch did not FAIL the step under --step, exit 1\n" + text)
 
-    def test_a_stale_ste_lint_pin_with_no_stable_branch_exits_three_under_lint(self):  # fallback: --lint keeps exit 3
+    def test_a_stale_ste_lint_pin_with_no_stable_branch_passes_with_a_note_under_lint(self):  # fallback: --lint drift is a note
         pin = self.add_ste_lint()  # no publish_stable, as above
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
-        drift = self.drift_lines(text, pin)
-        self.assertEqual(len(drift), 1, "scope: no line judges the stale pin under --lint against the local copy\n" + text)
-        self.assertEqual((rc, self.verdicts(lines)), (3, ["FAIL"]), "a stale pin with no stable branch did not exit 3 with FAIL under --lint\n" + text)
+        self.assertIn("ste-changed: pin note: CI pins ste-lint at %s" % pin[:7], text,
+                      "scope: no drift note judges the stale pin under --lint against the local copy\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a stale pin with no stable branch did not PASS with a note under --lint\n" + text)
 
     def test_a_pin_equal_to_the_local_copy_passes_with_no_stable_branch(self):  # fallback: no drift against the local copy
         self.add_ste_lint()
@@ -2515,6 +2524,161 @@ class PinnedHarness(Job):
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a stable head at the pin did not win over a local copy that differs\n" + text)
+
+    OLD_STE_CHANGED = ("#!/usr/bin/env python3\n"
+                       "# main's copy from before a stable head judged a pin: it reads no compare variable and judges no pin.\n"
+                       "import sys\n"
+                       "sys.exit(0)\n")
+
+    def pin_with_old_ste_changed(self):
+        """A commit holding add_ste_lint's ste-lint files, with bin/ste-changed replaced by main's old copy, which judges no pin.
+        The source's main stays at the lint edit, so the stable head and the clone's HEAD are past the pin. -> the pin's sha."""
+        self.add_ste_lint()
+        ste_files = git_in(self.source, "rev-parse", "HEAD~1")  # add_ste_lint's first commit: the files the pin holds
+        git_in(self.source, "checkout", "-qb", "old-copy", ste_files)
+        path = os.path.join(self.source, "bin", "ste-changed")
+        write_lf(path, self.OLD_STE_CHANGED)
+        os.chmod(path, 0o755)  # the pinned step runs it as a program
+        git_in(self.source, "add", "bin/ste-changed")
+        git_in(self.source, "commit", "-qm", "main's old bin/ste-changed")
+        pin = git_in(self.source, "rev-parse", "HEAD")
+        git_in(self.source, "checkout", "-q", "main")
+        return pin
+
+    def blocking_fetch_env(self, signal_pipe, gate_pipe):
+        """PATH with a git stub first. Its `fetch origin stable` runs the real fetch, writes a line to `signal_pipe`, and waits
+        for a line on `gate_pipe` before it returns, so a test can hold one run between its fetch and its read of FETCH_HEAD.
+        Every other git call runs the real git. Posix only."""
+        bin_dir = tempfile.mkdtemp(prefix="gitblock-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, bin_dir, True)
+        script = ('#!/bin/sh\n'
+                  'if [ "$1" = fetch ] && [ "$4" = stable ]; then\n'
+                  '  "%(git)s" "$@" || exit $?\n'
+                  '  echo fetched > "%(signal)s"\n'
+                  '  read _ < "%(gate)s"\n'
+                  '  exit 0\n'
+                  'fi\n'
+                  'exec "%(git)s" "$@"\n') % {"git": shutil.which("git"), "signal": signal_pipe, "gate": gate_pipe}
+        path = os.path.join(bin_dir, "git")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(script)
+        os.chmod(path, 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+
+    def test_a_pinned_tree_with_an_old_ste_changed_cannot_pass_a_stale_pin_under_step(self):  # the pin's own copy judges no pin
+        pin = self.pin_with_old_ste_changed()
+        head = self.publish_stable()  # the stable branch at the lint edit, past the pin
+        self.assertNotEqual(pin, head, "scope: the pin is the stable head, so there is no drift to judge")
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "a pin whose tree holds main's old ste-changed passed a stale pin under --step\n" + text)
+
+    def test_a_pinned_tree_with_an_old_ste_changed_cannot_pass_a_stale_pin_with_no_stable_branch(self):  # fallback: clone HEAD judges
+        pin = self.pin_with_old_ste_changed()  # no publish_stable: no stable head reads
+        self.assertNotEqual(pin, git_in(self.source, "rev-parse", "HEAD"),
+                            "scope: the pin is the clone's HEAD, so there is no drift to judge")
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "a pin whose tree holds main's old ste-changed passed a stale pin with no stable branch\n" + text)
+
+    def test_a_caller_set_compare_variable_cannot_pass_a_stale_pin_with_no_stable_branch(self):
+        """ci-job strips the caller's STE_CHANGED_COMPARE_TO, which names what a pin is judged against, as it strips the pin
+        note's variable (bin/ci-job run_step). The pin is then judged against the clone's HEAD, and still differs."""
+        pin = self.add_ste_lint()  # no publish_stable
+        self.assertNotEqual(pin, git_in(self.source, "rev-parse", "HEAD"),
+                            "scope: the pin is the clone's HEAD, so there is no drift to judge")
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main",
+                                        env={"STE_CHANGED_COMPARE_TO": pin})
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "a caller's STE_CHANGED_COMPARE_TO made a stale pin read as no drift with no stable branch\n" + text)
+
+    def test_a_caller_set_clone_variable_does_not_change_the_fallback(self):  # control: the fallback names its own clone
+        pin = self.add_ste_lint()  # no publish_stable
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        not_a_clone = tempfile.mkdtemp(prefix="not-a-clone-", dir=RUN_FOLDER)  # no git clone here
+        self.addCleanup(shutil.rmtree, not_a_clone, True)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main",
+                                        env={"STE_CHANGED_CLONE": not_a_clone})
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "a caller's STE_CHANGED_CLONE changed how the fallback judged a stale pin\n" + text)
+
+    def test_a_moving_ste_lint_ref_beside_a_stale_zizmor_pin_still_judges_the_zizmor_pin(self):
+        """Reviewer probe D: the ste-lint step on the moving ref `stable` ran its ste-changed in the stable tree, which has no
+        .git, so every pin read "unknown, not a git clone" and the job exited 0. The stale zizmor pin beside it is judged by the
+        clone, and the job exits 1 under --step."""
+        self.add_ste_lint()
+        self.publish_stable()  # stable = HEAD: the ste-lint files, and the strict zizmor run.sh that pin_a is stale against
+        write_lf(os.path.join(self.root, ".github", "workflows", "checks.yml"),
+                 "jobs:\n  checks:\n    steps:\n"
+                 "      - uses: shivinate7/claude-settings/actions/ste-lint@stable\n"
+                 "      - uses: shivinate7/claude-settings/actions/zizmor@%s\n" % self.pin_a)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@stable")
+        rc, lines, text = self.run_steps([ste, self.zizmor_step(self.pin_a)], "--step", "STE lint", "--base", "origin/main")
+        judged = self.drift_lines(text, self.pin_a, action="zizmor")
+        self.assertEqual(len(judged), 1, "scope: no line judges the stale zizmor pin\n" + text)
+        self.assertNotIn("Unknown whether it matches", judged[0], "the stale zizmor pin read as unknown, not judged\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "a stale zizmor pin beside a moving ste-lint ref did not FAIL the job under --step\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the blocking git stub and its named pipes are posix only")
+    def test_two_runs_in_one_clone_do_not_read_each_others_fetched_stable_head(self):
+        """Run A fetches the stable branch at the pin and is held before it reads FETCH_HEAD. Run B, in the same clone, fetches the
+        branch after it moved to the lint edit, and finishes. A still judges its pin against the head it fetched, so it PASSes; a
+        read of the shared FETCH_HEAD would judge it against B's head and FAIL."""
+        pin = self.add_ste_lint()
+        head = git_in(self.source, "rev-parse", "HEAD")
+        self.assertNotEqual(pin, head, "scope: the stable branch moves from the pin to the lint edit, so the two runs differ")
+        self.publish_stable(at=pin)
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        args = ("--step", "STE lint", "--base", "origin/main")
+        pipes = tempfile.mkdtemp(prefix="fetch-gate-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, pipes, True)
+        signal_pipe, gate_pipe = os.path.join(pipes, "fetched"), os.path.join(pipes, "gate")
+        os.mkfifo(signal_pipe)
+        os.mkfifo(gate_pipe)
+        argv, env = self.job_call(ste, args=args, script=self.ci_job,
+                                  env={"CLAUDE_CONFIG_DIR": self.cfg, "VERDICT_LOG": os.path.join(self.logs, "run-a.log"),
+                                       **self.blocking_fetch_env(signal_pipe, gate_pipe)})
+        run_a = subprocess.Popen(argv, cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        def reap():
+            if run_a.poll() is None:
+                run_a.kill()
+                run_a.wait()
+        self.addCleanup(reap)
+        fd = os.open(signal_pipe, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            ready = select.select([fd], [], [], 120)[0]  # a hang guard for the test, not a timing assert
+            self.assertTrue(ready, "run A never reached its stable fetch")
+            os.read(fd, 64)
+        finally:
+            os.close(fd)
+        git_in(self.source, "push", "-q", "-f", self.bare, "%s:refs/heads/stable" % head)  # the stable branch moves on
+        rc_b, lines_b, text_b = self.run_step(ste, *args, log=os.path.join(self.logs, "run-b.log"))
+        self.assertEqual((rc_b, self.verdicts(lines_b)), (1, ["FAIL"]),
+                         "scope: run B did not see the moved stable head, so the two runs do not differ\n" + text_b)
+
+        def release():
+            with open(gate_pipe, "w", encoding="utf-8") as gate:  # blocks until run A's stub opens the gate
+                gate.write("go\n")
+        opener = threading.Thread(target=release, daemon=True)
+        opener.start()
+        opener.join(120)
+        self.assertFalse(opener.is_alive(), "run A never reached its gate")
+        out_a, _ = run_a.communicate(timeout=120)
+        lines_a = [ln for ln in out_a.splitlines() if not ln.startswith("log=")]
+        log_a = os.path.join(self.logs, "run-a.log")
+        text_a = open(log_a, encoding="utf-8").read() if os.path.exists(log_a) else ""
+        self.assertEqual((run_a.returncode, self.verdicts(lines_a)), (0, ["PASS"]),
+                         "run A judged its pin against the stable head run B fetched, not the one it fetched\n" + out_a + text_a)
 
     def test_a_zizmor_pin_runs_its_own_run_sh_and_not_the_local_copy(self):
         rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())  # R67: no flag
