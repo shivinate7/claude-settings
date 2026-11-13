@@ -77,7 +77,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
-  The runner keeps only the merge itself and the CI wait for it. The merge lock serializes the merge. It hands the rest to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds only as rule `roles-orchestrator-never-builds` allows:
+  Of the merge work, the runner keeps only the merge itself and the CI wait for it. The merge lock serializes the merge. It hands the rest of that work to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds only as rule `roles-orchestrator-never-builds` allows:
   - Each PR close comes from the PR ledger's replaced lines (decision `pr-ledger`, read by `merge --reviewed`; the act is in decision `session-tiers`, archiving lanes), with its comment: one agent per close. A step close stays with triage.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
   - Long reads go to agents: `merge --reviewed --root`, and the job minutes of a run. The agent returns the verdict, never the stream.
