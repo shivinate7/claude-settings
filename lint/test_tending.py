@@ -25,9 +25,12 @@ Shapes this file assumes, pinned in one place (the adapter `verdicts_of`, and th
   - command line: python3 lint/tending.py --point P [--store S] [--root R]. Exit 1 for a live store with a stale
     item that its close step cannot fix, or for a malformed contract. Exit 0 otherwise.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -611,6 +614,19 @@ class CloseMarksOnlyItsOwnStaleLineTests(unittest.TestCase):
             self.assertEqual(f.read(), "- D1 until 2020-01-01 [closed]\n- D1 until 2099-01-01\n",
                              "close marked a line whose own verdict is not stale")
 
+    def test_dict_verdict_does_not_close_lines_that_share_an_id(self):
+        # Two open lines share the id F1. A dict verdict {id: verdict} gives one verdict for the id, so it must not
+        # rewrite either line. If that route is dropped, close refuses the dict or ignores it: no line changes.
+        runner, text = load_runner(), "- F1 a\n- F1 b\n"
+        rows = line_rows(runner, entry("home-held"), text, make_repo({}))
+        self.assertEqual([ident for _, ident, _ in rows], ["F1", "F1"],
+                         "scope: the two lines are not both open items with id F1: %r" % (rows,))
+        try:
+            out = runner.close(entry("home-held"), text, {"F1": "stale"})
+        except (TypeError, ValueError):
+            return  # the dict route is dropped, and close refuses it: no line is rewritten
+        self.assertEqual(out, text, "a dict verdict rewrote a line that shares its id with a stale line: %r" % out)
+
 
 class UnknownShapeTests(unittest.TestCase):
     """Ruling D: a live-store line that starts like an item but that the item regex does not match is reported
@@ -752,6 +768,76 @@ class ByteOrderMarkTests(unittest.TestCase):
         result = run_cli(probe_tree(close="none"), root)
         self.assertEqual(result.returncode, 1, "a store whose first item carries a byte-order mark and is stale "
                          "exited %d, not 1: the item was dropped" % result.returncode)
+
+
+class ReadsOncePerRunTests(unittest.TestCase):
+    """Cost (the runner's docstring, Cost): one run lists the refs once, and reads each distinct home once, however
+    many files its store holds. Counted as the git process starts of one in-process `main` run."""
+
+    def counted_run(self, root, store):
+        """(exit code, git subcommands started) for `main --point merge-check` over one live store `probe`."""
+        runner = load_runner()
+        CountingPopen.started = []
+        with mock.patch.object(runner.layout, "tending", return_value={"probe": store}), \
+                mock.patch.object(subprocess, "Popen", CountingPopen), contextlib.redirect_stdout(io.StringIO()):
+            code = runner.main(["--point", "merge-check", "--root", root])
+        return code, [git_subcommand(argv) for argv in CountingPopen.started]
+
+    def eight_file_store(self):
+        """A live decisions store of 8 files that all name one home, lint/held.py, which is tracked."""
+        files = {"docs/decisions/d%02d.md" % n: "- D%d decided. Home: lint/held.py\n" % n for n in range(8)}
+        files["lint/held.py"] = "x\n"
+        return make_git_repo(files)
+
+    def test_store_of_several_files_lists_refs_once_per_run(self):
+        code, started = self.counted_run(self.eight_file_store(), entry("home-held", close="none", where="decisions"))
+        self.assertEqual(code, 0, "scope: the all-true store exited %d, not 0" % code)
+        self.assertIn("for-each-ref", started, "scope: the run listed no refs, so the count below proves nothing")
+        self.assertLessEqual(started.count("for-each-ref"), 1,
+                             "an 8-file store listed the refs %d times in one run, not once" % started.count("for-each-ref"))
+
+    def test_store_of_several_files_reads_each_home_once_per_run(self):
+        code, started = self.counted_run(self.eight_file_store(), entry("home-held", close="none", where="decisions"))
+        self.assertEqual(code, 0, "scope: the all-true store exited %d, not 0" % code)
+        self.assertIn("cat-file", started, "scope: the run read no home, so the count below proves nothing")
+        self.assertLessEqual(started.count("cat-file"), 1,
+                             "an 8-file store read its one home %d times in one run, not once" % started.count("cat-file"))
+
+    def test_empty_store_lists_refs_at_most_once(self):
+        # A control for the empty state: a store folder with no item file. It may start no git read, and never two.
+        files = {"docs/decisions/.keep": "\n", "lint/held.py": "x\n"}
+        code, started = self.counted_run(make_git_repo(files), entry("home-held", close="none", where="decisions"))
+        self.assertEqual(code, 0, "scope: the empty store exited %d, not 0" % code)
+        self.assertLessEqual(started.count("for-each-ref"), 1,
+                             "an empty store listed the refs %d times in one run, not at most once" % started.count("for-each-ref"))
+        self.assertLessEqual(started.count("cat-file"), 1,
+                             "an empty store read a home %d times in one run, not at most once" % started.count("cat-file"))
+
+
+class DecisionsHomeFormTests(unittest.TestCase):
+    """The decisions store reads the home lines hooks/ruling_home.py reads: HOME_RE, the `home:` form with an optional
+    bullet, in any case. An item regex that misses such a line is silence, so each form must yield a row."""
+
+    FORMS = ("Home: lint/held.py", "- Home: lint/held.py", "home: lint/held.py", "- home: lint/held.py")
+
+    def test_decisions_item_regex_matches_every_form_the_resolver_reads_as_a_home(self):
+        ruling = hook_module("ruling_home")
+        item = re.compile(layout_data()["tending"]["decisions"]["item"], re.M)
+        for line in self.FORMS:
+            with self.subTest(line=line):
+                self.assertIsNotNone(ruling.HOME_RE.search(line),
+                                     "scope: the resolver does not read %r as a home" % line)
+                self.assertIsNotNone(item.search(line),
+                                     "the decisions item regex misses %r, which the resolver reads as a home" % line)
+
+    def test_each_home_form_gets_a_row_or_an_unknown(self):
+        decisions, runner = layout_data()["tending"]["decisions"], load_runner()
+        root = make_git_repo({"lint/held.py": "x\n"})
+        for line in self.FORMS:
+            with self.subTest(line=line):
+                rows = line_rows(runner, decisions, line + "\n", root)
+                self.assertEqual(len(rows), 1, "the decisions store gave %d row(s) for %r, not one: the line is silent"
+                                 % (len(rows), line))
 
 
 if __name__ == "__main__":
