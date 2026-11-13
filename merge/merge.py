@@ -570,7 +570,7 @@ def blame_debt_lane(wt, base_ref, host, info, debt, found):
         if lane is None:
             return
         record_in_block(host, info["branch"], add_blamed=[lane])
-    except (Stop, debt.Unknown) as e:
+    except (Stop, debt.Unknown, subprocess.TimeoutExpired, OSError) as e:
         say(f"merge: no blame was stored for the debt refusal: {e} {DEBT_CITE}")
         return
     say(f"merge: blame stored: #{lane} is the one lane that closes each debt refused below. To take it off the batch, run: merge --batch-drop {block['name']} {lane}")
