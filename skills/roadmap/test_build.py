@@ -28,6 +28,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 import build  # noqa: E402
 import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
+import guard_merge  # noqa: E402  the guard's lane-form rule (_on_lane_form), which the ready-pull case reads (hooks/guard_merge.py)
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -4953,6 +4954,71 @@ class IdleLanes(UpkeepFixture):
                                  "a stale draft with no head sha printed a joint line")
                 self.assertNotIn("session_a (c1; topic -)", entries,
                                  "a stale draft with no head sha released its lane as a plain line")
+
+    def test_a_stale_draft_on_a_step_a_live_row_of_another_session_holds_gets_no_joint_line(self):
+        # session_c works on s1 under its own row, so s1 is live on another session and the stale draft on s1 is not the
+        # lane's alone. session_b is the control.
+        self.land({"s1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        working = session_row("session_c", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:s1", self.REPO,
+                              status_bucket=BUCKET_WORKING)
+        self.publish(sessions=[self.idle_lane("session_a", "s1", idle_since=self.created_before(26 * 60)), working,
+                               self.idle_lane("session_b", "c2")],
+                     pulls=[self.stale_pull(101, "s1", hours=25), self.stale_pull(102, "lane/c2")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual(steps["s1"].get("status"), "done", "scope: s1 is not done")
+        self.assertIn("s1", build.live_work(str(self.live), steps, self.SLUG)["liveSteps"],
+                      "scope: no live row holds s1, so the other session does not hold it")
+        entries = self.reported()
+        self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: the lane with no live row on its step printed no joint line")
+        self.assertEqual(self.joint_for(entries, "session_a"), [],
+                         "a stale draft on a step another session's live row holds printed a joint line")
+
+    def test_a_stale_draft_beside_a_doing_step_already_in_marks_gets_no_joint_line(self):
+        # The doing step `it` is under the lane, and a merged pull (landedPulls) puts it in marks, so it reads landed but
+        # not done. Any doing step holds the lane, and the draft titled for it names that step. session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "it": {"status": "doing", "order": 3, "lane": "session_a"}})
+        self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2")],
+                     pulls=[self.stale_pull(101, "lane/c1", title="it follow-up"), self.stale_pull(102, "lane/c2")],
+                     landed=[self.pull_row(2800, "it", merged=True)])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual((steps["it"].get("status"), steps["it"].get("lane")), ("doing", "session_a"),
+                         "scope: it is not a doing step under session_a")
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertEqual(build.pull_landed_marks(self.repo, build.main_ref(self.repo, "main"), steps, work), {"it": ["#2800"]},
+                         "scope: the merged pull does not put it in marks")
+        entries = self.reported()
+        self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: the lane with no doing step printed no joint line")
+        self.assertEqual(self.joint_for(entries, "session_a"), [],
+                         "a doing step under the lane, already in marks, did not hold the lane off its joint line")
+
+    def test_a_stale_draft_beside_a_ready_pull_on_a_lane_suffix_gets_no_joint_line(self):
+        # lane/c1-r2 is a lane pull by the guard's rule (_on_lane_form counts lane/<slug>-*), and it is ready, not a draft.
+        # session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2")],
+                     pulls=[self.stale_pull(101, "lane/c1"), self.stale_pull(103, "lane/c1-r2", draft=False),
+                            self.stale_pull(102, "lane/c2")])
+        self.assertTrue(guard_merge._on_lane_form("lane/c1-r2", ["c1"]), "scope: the guard does not count lane/c1-r2 as c1's pull")
+        entries = self.reported()
+        self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: the stale draft with no suffix pull printed no joint line")
+        self.assertEqual(self.joint_for(entries, "session_a"), [],
+                         "a stale draft beside a ready lane/<slug>-r2 pull printed a joint line")
+
+    def test_a_stale_draft_whose_head_is_not_a_full_sha_gets_no_joint_line(self):
+        # A head is the full 40 hex digits. session_b has one, the control, and prints the line. A 40-hex head on the
+        # draft prints it too, which the last step checks.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        for head in ("xyz", "e" * 39):
+            with self.subTest(head=head):
+                self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2")],
+                             pulls=[self.stale_pull(101, "lane/c1", head=head), self.stale_pull(102, "lane/c2")])
+                entries = self.reported()
+                self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: a full-sha head printed no joint line")
+                self.assertEqual(self.joint_for(entries, "session_a"), [], "a head of %r printed a joint line" % head)
+        self.publish(sessions=[self.idle_lane("session_a", "c1")], pulls=[self.stale_pull(101, "lane/c1", head="e" * 40)])
+        self.assertEqual(len(self.joint_for(self.reported(), "session_a")), 1,
+                         "a 40-hex head on a stale draft printed no joint line")
 
     def test_a_stale_draft_whose_title_names_a_doing_step_gets_no_joint_line(self):
         # c5 is doing and the draft's title names it, so the draft is the step's live PR, not a stale one. session_b is
