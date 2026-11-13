@@ -761,7 +761,7 @@ if __name__ == "__main__":
             here = os.path.abspath(sys.argv[2])
             if set_waiting_page(here, sys.argv[3]):
                 sys.exit(0)
-            print(waiting_page(here))
+            print(waiting_page(here, _tree_keys(here)))  # the checkout's own page, as set_waiting_page judged it
             sys.exit(1)
         except (LayoutError, OSError) as err:
             print("layout: %s" % err, file=sys.stderr)
