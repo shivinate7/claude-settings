@@ -163,7 +163,7 @@
 - lane-slug-part-code-refused: any N plus one to three digits, such as the part code N12, is refused as a lane number (hooks/guard.py LANE_NUMBER)
 - lane-slug-piped-body-unread: a piped body such as echo ... | gh pr create -F - is not read (hooks/guard.py) Fix: none — rare and harmless. Until: 2026-11-24
 - lane-slug-tag-messages-unchecked: the lane-slug rule does not read tag messages (lane-slug message readers) Fix: none — rare and harmless. Until: 2026-11-25
-- late-workflow-reads-green: a workflow GitHub creates after the settle read is missed, so the head reads green without it (the merge tool's head check read at confirm) Fix: none — rare and harmless. Until: 2026-11-19
+- late-workflow-reads-green: a workflow GitHub creates after the settle read is missed, so the head reads green without it (the merge tool's settle read) Fix: none — rare and harmless. Until: 2026-11-19
 - linked-nm-ancestor-link: a stray linked node_modules in an ancestor folder gives an accepted false alarm for npm in a child folder (hooks/guard_push_delete.py). Decision: guard-linked-node-modules Fix: none — rare and harmless. Until: 2026-11-20
 - linked-nm-bare-word-false-alarms: a bare word match refuses harmless text such as echo npm ci and git rm -r --cached node_modules/x (hooks/guard_push_delete.py). Decision: guard-linked-node-modules Fix: none — rare and harmless. Until: 2026-11-21
 - linked-nm-other-deletes: find -delete, Get-ChildItem | Remove-Item, cmd rmdir /s, rimraf, cd node_modules && rm -rf x and -Recurse:$true are not read as recursive deletes into a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules Fix: none — owner decides (decision guard-linked-node-modules). Until: 2026-11-22
