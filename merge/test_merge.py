@@ -11112,12 +11112,13 @@ class RedMainBrake(Env):
     def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
         # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
         rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-checks.yml")],
-                             {909: [main_job("checks", "failure", 20)]})
+                             {909: [main_job("checks", "failure", 20)], 910: ran_suites_jobs()})
         self.merged(rc, out)
 
     def test_runs_are_judged_per_workflow_file_not_per_name(self):
         # the workflow's name changed in the same file: the newer run is the verdict
-        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")], {911: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")],
+                             {911: [main_job("checks", "failure", 20)], 912: ran_suites_jobs()})
         self.merged(rc, out)
 
     def green_run_of(self, event):
@@ -11138,9 +11139,10 @@ class RedMainBrake(Env):
         self.assertIn("checks: fail", out)
 
     def test_a_green_push_run_without_the_red_job_does_not_clear_an_older_red_schedule_run(self):
-        # a schedule run is judged in its own group; a newer green push of another group clears it only when it passes every job of it
+        # a schedule run is judged in its own group; a newer green push of another group clears it only when it passes every job of it.
+        # The push run ran its suites, but not the red job: its `checks` is absent.
         rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")],
-                                  {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success")]})
+                                  {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success"), main_job("checks-macos", "success", 30)]})
         self.refused(rc, out, before)
         self.assertIn("run 920", out)
         self.assertIn("checks: fail", out)
@@ -11218,10 +11220,12 @@ class RedMainBrake(Env):
     def test_a_red_job_the_green_run_lacks_or_did_not_pass_is_red_not_unknown_when_the_workflow_read_fails(self):
         # A certain red needs no workflow file: a green run that lacks a red job, or did not pass it, clears nothing whatever the if:.
         # The read fails here and must not turn the red into unknown. The control is the test above: a green run that passed the red job needs the file.
+        # Each green run passes `checks`, so it ran its suites; the red job is the one it lacks or skipped.
         red_run = main_run(1310, "failure", event="schedule")
         red_jobs = [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")]
-        for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
-                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
+        for variant, green_jobs in (("the red job is missing", [main_job("checks", "success", 20), main_job("all-jobs-passed", "skipped")]),
+                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("checks", "success", 20),
+                                                                main_job("all-jobs-passed", "skipped")])):
             with self.subTest(variant=variant):
                 rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
                                           text_fail="HTTP 500: Internal Server Error (fake contents read)")
@@ -11354,7 +11358,7 @@ class RedMainBrake(Env):
 
     def test_a_dynamic_event_run_is_not_judged(self):
         # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
-        rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")], {925: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")], {925: [main_job("checks", "failure", 20)], 924: ran_suites_jobs()})
         self.merged(rc, out)
 
     def test_base_events_are_the_keys_of_the_events_file(self):
@@ -11363,7 +11367,7 @@ class RedMainBrake(Env):
             self.assertEqual(set(merge.Host.BASE_EVENTS), set(json.load(f)))
 
     def test_a_pull_request_run_is_not_judged(self):
-        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)], 916: ran_suites_jobs()})
         self.merged(rc, out)
 
     def test_a_newer_run_in_progress_is_skipped_for_the_latest_completed_one(self):
@@ -11429,7 +11433,7 @@ class RedMainBrake(Env):
 
     def test_the_green_main_preview_line_has_no_refusal_clause(self):
         # a green base refuses nothing, so its line names no refusal and no flag
-        rc, out, _ = self.go([main_run(908, "success")], {}, confirm=False)
+        rc, out, _ = self.go([main_run(908, "success")], {908: ran_suites_jobs()}, confirm=False)
         self.assertEqual(rc, 0, out)
         line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
         self.assertEqual(len(line), 1, out)
@@ -11499,18 +11503,18 @@ class RedMainBrake(Env):
     # Guards, which pass on the current code: the green control beside each red case, and the rules the re-run must leave alone.
     def test_an_attempt_one_run_still_going_waits_its_turn_under_an_older_green_run(self):
         # the same shape as the red cases at attempt 1: a newer run still going waits its turn, so the green run beneath it is the verdict
-        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {})
+        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {1300: ran_suites_jobs()})
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1301/jobs", self.host.reads, "a run in progress is not judged, so it is not read")
 
     def test_a_run_with_no_run_attempt_field_is_attempt_one(self):
         running = main_run(1301, None, status="in_progress")
         del running["run_attempt"]
-        rc, out, _ = self.go([running, main_run(1300, "success")], {})
+        rc, out, _ = self.go([running, main_run(1300, "success")], {1300: ran_suites_jobs()})
         self.merged(rc, out)
 
     def test_a_re_run_in_flight_older_than_a_completed_green_run_leaves_the_verdict_to_that_run(self):
-        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {})
+        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {1303: ran_suites_jobs()})
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
