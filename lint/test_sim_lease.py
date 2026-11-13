@@ -673,12 +673,12 @@ class MemoryBrake(LeaseCase):
         pid = self.spawn().pid
         self.assert_refused_on_memory(self.take("duo", pid), 90.0, "slot 1")
 
-    def test_memory_busy_refuses_slot_2_while_slot_1_is_held(self):
+    def test_memory_busy_refuses_a_second_duo_take(self):
         self.set_and_check(50.0)
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1 at 50%")
         self.set_and_check(90.0)
-        self.assert_refused_on_memory(self.take("duo", second.pid), 90.0, "slot 2")
+        self.assert_refused_on_memory(self.take("duo", second.pid), 90.0, "second duo take")
 
     def test_an_unreadable_memory_grants_a_take_when_the_brake_is_loaded(self):
         self.set_memory_unreadable()
