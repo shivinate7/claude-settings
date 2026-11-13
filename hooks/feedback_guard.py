@@ -961,11 +961,16 @@ def page_form_problem(text, items, homes, pages, session):
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
-    out, seen = [], {}
+    out, seen, copies = [], {}, {}
+    for n, b in enumerate(blocks):
+        copies.setdefault((b["stamp"], norm(b["text"])), []).append(n)
     for n, b in enumerate(blocks):
         text = norm(b["text"])
         seen[text] = seen.get(text, 0) + 1
-        if not b["items"] and n in burst:
+        # A heading repeated with the same stamp and quote is one message: an item under any copy covers it,
+        # and the first copy reports it once.
+        same = copies[(b["stamp"], text)]
+        if n == same[0] and any(i in burst for i in same) and not any(blocks[i]["items"] for i in same):
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         grant = is_grant(text)
         for found in (answer_problem(b, text, seen[text], homes, pages),
