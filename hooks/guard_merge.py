@@ -288,7 +288,9 @@ BARE_MERGE_REASON = (
 
 
 DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create. "
-                   "Only the batch's integration PR goes ready; CI skips drafts.")
+                   "Only the batch's integration PR goes ready; CI skips drafts. "
+                   "Remedy: run `gh pr create --draft --title <t> --body <b>`, or call the MCP create_pull_request tool "
+                   "with draft set to true.")
 
 
 # `gh pr create` flags that take a value; the next token is data, never a flag.
@@ -1076,7 +1078,7 @@ ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is the batch runner: run get_session (no argument) alone in its own "
+    "Remedy: if this session is the batch runner, call get_session (no argument) alone in its own "
     "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
@@ -1158,9 +1160,9 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 REPO_REASON = (
     "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
     "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
-    "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
+    "Remedy: if that repo is this session's own, call get_session (no argument) alone in its own turn, then retry. "
     "Otherwise hand the pull request to a batch runner whose cs-repo tags name the repo "
-    "(list_sessions, tag cs-build:batch-runner). "
+    "(call list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
 )
 
