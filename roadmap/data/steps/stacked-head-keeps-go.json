@@ -1,0 +1,14 @@
+{
+ "id": "stacked-head-keeps-go",
+ "title": "A stacked batch whose head moves only by merging its base's fix keeps its go and head lint (EXPRESS)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retro 12:53 CST Nov 13: today batch 138 stacks on red batch 137; a head that moves only by the base's fix should not need a new go or a full CI run.",
+ "source": "retrospective 12:53 CST Nov 13; owner 12:48 CST to runner 10: \"im pretty sure all this is being solved\"",
+ "note": "EXPRESS (R55 merge flow), todo, no lane yet. When a stacked batch's head moves only by merging its base's fix, the merge tool proves the head diff equals that fix and keeps the go and the head lint; CI runs only the jobs that read the fix's files. Basis, read by meaning: decision test-strategy-reset (no duplicate runs) and plan R62. A guard or check change: a build lane (test-author, builder, reviewer). Related, not the same: stacked-base-merge-keeps-record (the review record stays live after a clean merge of the base) and busy-file-stacked-batches. Past rulings checked first.",
+ "updatedAt": "2026-11-13T12:53:59-06:00"
+}
