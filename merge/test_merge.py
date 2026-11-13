@@ -17508,6 +17508,85 @@ def printed_review_lines(out):
     """Every line --reviewed prints: the headers and the per-repo lines. A failed read prints none of them."""
     return [l for l in out.splitlines() if l.startswith(("repo ",) + REVIEWED_LINE_STARTS)]
 
+class HoldsHeadVerdicts(ReviewEnv):
+    """Host.holds_head's verdict, which `merge --reviewed --root` and the batch build read: GitHub's compare of head...other, where ahead or
+    identical holds, and any failed read raises Stop. Each case scripts the compare answer from the history in the clone, so the answer and git
+    agree before the verdict is judged. The head the clone lacks (only refs/pull/9/head holds it) takes its verdict; a head no remote holds reads
+    unknown, never clear."""
+
+    def setUp(self):
+        super().setUp()
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        self.A = sh(o, "git", "rev-parse", "origin/main").strip()
+        self.B1 = self.commit_on("lane-b", self.A, "b1.txt", "b1\n")
+        self.B = self.commit_on("lane-b", self.B1, "b2.txt", "b2\n")  # B contains B1, which contains A: B is ahead of A
+        self.C = self.commit_on("lane-c", self.A, "c.txt", "c\n")  # C and B split from A: diverged
+        self.X = self.commit_on("pull-9", self.A, "x.txt", "x\n")  # X is on refs/pull/9/head alone: the clone never fetches it
+        sh(o, "git", "push", "-q", "origin", "lane-b", "lane-c", "pull-9:refs/pull/9/head")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def commit_on(self, branch, start, path, text):
+        """One commit on `branch` (reset to `start`) that adds `path`, in the other clone. -> its sha."""
+        sh(self.other, "git", "checkout", "-q", "-B", branch, start)
+        put(os.path.join(self.other, path), text)
+        sh(self.other, "git", "add", "-A")
+        sh(self.other, "git", "commit", "-q", "-m", path)
+        return sh(self.other, "git", "rev-parse", "HEAD").strip()
+
+    def is_ancestor(self, a, b):
+        return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=self.co, capture_output=True).returncode == 0
+
+    def truth(self, head, other):
+        """GitHub's status for compare head...other, from the history in the clone."""
+        if head == other:
+            return "identical"
+        if self.is_ancestor(head, other):
+            return "ahead"
+        return "behind" if self.is_ancestor(other, head) else "diverged"
+
+    def verdict(self, head, other, status):
+        """Host.holds_head(head, other) on a host whose compare of that pair answers `status`. Run from the clone, as merge runs."""
+        host = PullsHost([], {}, compares={(head, other): status})
+        prior = os.getcwd()
+        os.chdir(self.co)
+        try:
+            return host.holds_head(head, other)
+        finally:
+            os.chdir(prior)
+
+    def test_a_head_the_other_contains_holds(self):
+        self.assertEqual(self.truth(self.A, self.B), "ahead", "setup: B is not ahead of A")
+        self.assertTrue(self.verdict(self.A, self.B, "ahead"), "A is contained in B, so B holds A")
+
+    def test_an_identical_head_holds(self):
+        self.assertTrue(self.verdict(self.B, self.B, "identical"), "B is identical to itself, which holds")
+
+    def test_a_head_the_other_lacks_does_not_hold(self):
+        self.assertEqual(self.truth(self.B, self.A), "behind", "setup: A is not behind B")
+        self.assertFalse(self.verdict(self.B, self.A, "behind"), "B is not contained in A, so A does not hold B")
+
+    def test_a_diverged_head_does_not_hold(self):
+        self.assertEqual(self.truth(self.C, self.B), "diverged", "setup: C and B are not diverged")
+        self.assertFalse(self.verdict(self.C, self.B, "diverged"), "C is not contained in B, so B does not hold C")
+
+    def test_a_head_the_clone_lacks_takes_its_verdict(self):
+        absent = subprocess.run(["git", "cat-file", "-e", self.X + "^{commit}"], cwd=self.co, capture_output=True)
+        self.assertNotEqual(absent.returncode, 0, "setup: the clone already holds X, so it does not lack it")
+        self.assertTrue(self.verdict(self.A, self.X, "ahead"), "X contains A, so X holds A, though the clone has to fetch X to say so")
+
+    def test_a_head_no_remote_holds_reads_unknown_never_clear(self):
+        nowhere = "1" * 40  # no remote and no clone holds this head
+        host = PullsHost([], {}, compares={(nowhere, self.B): "ahead"})  # gh says ahead, but the clone cannot read the head
+        prior = os.getcwd()
+        os.chdir(self.co)
+        try:
+            with self.assertRaises(merge.Stop, msg="a head no remote holds read as clear, not unknown"):
+                host.holds_head(nowhere, self.B)
+        finally:
+            os.chdir(prior)
+
+
 class ReviewedRoots(ReviewEnv):
     """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
     then that repo's reviewed lines, then at most one batch line after them. A root whose read or config fails prints one line in its place,
@@ -17531,6 +17610,23 @@ class ReviewedRoots(ReviewEnv):
         rc, out, err = self.run_args(*argv, hosts=hosts)
         self.assertNotIn("unrecognized arguments", err, "the parser refuses --root under --reviewed")
         return rc, out, err
+
+    def test_a_root_build_makes_no_gh_compare_call_for_its_batch_line(self):
+        # handin-cannot-drop (the cost behind runner 10's 12-minute --reviewed --root): the batch line's held check made one gh compare per
+        # (done pull request, other open pull request on the base), so 8 done and 12 open cost 96 calls. Its held check reads the clone
+        # instead, so this build makes none. Scope first: the eight done lines print, so the build read the list it counts.
+        heads = {n: "123456789abc"[n - 1] * 40 for n in range(1, 13)}  # twelve full heads, one per pull request
+        pulls = [batch_pull(n, heads[n]) for n in range(1, 13)]
+        comments, rows = [], {}
+        for n in range(1, 9):  # the first eight are done, ready, with CI green
+            comments += [record_of(n, heads[n]), lint_of(n, heads[n])]
+            rows[heads[n]] = green()
+        host = root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
+        self.assertEqual(sum(1 for l in out.splitlines() if l.startswith("#") and " done: " in l), 8,
+                         "the eight done lines are not all printed, so the count proves nothing: %s" % out)
+        self.assertEqual(host.compare_reads, [], "--reviewed --root made %d gh compare calls for 8 done and 12 open pull requests, not 0"
+                         % len(host.compare_reads))
 
     def roots_with_done(self, alpha_read=None, bravo_read=None):
         """Both roots, each with one done pull request, number 5. A read keyword (`pulls_error` or `comments_error`) fails that root's read."""
