@@ -2645,6 +2645,11 @@ NO_RECORD_PRINTED = re.compile(r"(?i)no (review )?record\b[^\n]*\bprinted")  # a
 NO_LINT_LINE = re.compile(r"(?i)\bno lint\b|\bnot linted\b")  # a stderr line that says no lint ran
 NO_JOB_REASON = re.compile(r"(?i)\bchecks\b[^\n]{0,60}\bjob\b")  # the reason, when the workflow has no checks job
 NO_FILE_REASON = re.compile(r"(?i)\bworkflows?\b")  # the reason, when the head tree has no workflow folder or file
+# A checks job line with a trailing comment (and a lone quote in it): the job is named, and ci-job --plan reads it as no checks job.
+CHECKS_COMMENT_WORKFLOW = ("name: checks\non: push\njobs:\n  checks:  # don't read this comment as the job's name\n    runs-on: ubuntu-latest\n"
+                           "    steps:\n      - run: echo lint\n")
+# `checks` named only in a comment line: no job of that name, so no lint runs.
+COMMENT_ONLY_WORKFLOW = "name: checks\non: push\njobs:\n  # checks:  the job is named in this comment only\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo lint\n"
 
 
 class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
@@ -2849,6 +2854,120 @@ class ReviewRecordLint(CiJobStub, tm.ReviewEnv):
         rc, out, err = self.record("7", "--review-record", *self.flags())
         self.assert_one_lint_run("main", head, out + err)
         self.assertEqual(rc, 0, out + err)
+
+    def draft_state_refusal(self, rows):
+        """Runs the record and `merge --lane-lint 7` on the same draft rows of the live head. Each reads the draft once, runs no lint, and refuses
+        with one exit and one unknown line. -> the record's stderr."""
+        head = self.head()
+        self.use_ci_job(PASSING, 0)
+        self.host.draft_rows, self.host.draft_reads = {head: rows}, []
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the record did not read the live head's draft runs: " + out + err)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a draft read that is not a pass: " + out + err)
+        self.assertNotEqual(rc, 0, "a draft read that is not a pass printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a draft read that is not a pass: " + out)
+        self.assertIn("unknown, not a pass", err, "the refusal does not say the draft run is unknown: " + err)
+        self.host.draft_reads = []
+        mrc, mout, merr = self.run_args("7", "--lane-lint")
+        self.assertEqual(self.lint_calls(), [], "--lane-lint ran the lint past a draft read that is not a pass: " + mout + merr)
+        self.assertEqual(mrc, rc, "--lane-lint exits %s on this draft read, the record exits %s: %s" % (mrc, rc, mout + merr))
+        self.assertIn("unknown, not a pass", merr, "--lane-lint does not read this draft read as unknown: " + merr)
+        return err
+
+    def test_a_checks_line_with_a_trailing_comment_names_the_job_so_the_lint_runs_and_refuses(self):
+        # ci-job --plan exits 2 on this line, and the stub exits 2 the same way: the lint must run, and the refusal must come before any record prints.
+        self.set_feat_workflow(CHECKS_COMMENT_WORKFLOW)
+        self.use_ci_job(UNKNOWN, 2)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertNotEqual(rc, 0, "a checks line with a trailing comment printed a record with no lint: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on an unknown lint: " + out)
+        self.assertIn("unknown, not a pass", err, "the refusal does not say the lint is unknown: " + err)
+
+    def test_a_comment_that_names_checks_is_no_job_so_the_record_prints_unlinted(self):  # the control
+        self.set_feat_workflow(COMMENT_ONLY_WORKFLOW)
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times, want 0: a comment is no checks job" % len(self.lint_calls()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assert_one_no_lint_line(err, NO_JOB_REASON)
+
+    def test_a_skipped_touched_job_refuses_the_record_as_lane_lint_does_and_never_says_wait(self):
+        err = self.draft_state_refusal([tm.draft_row("touched", "skipped")])
+        self.assertIn("skipped", err, "the refusal does not name the skipped job: " + err)
+        self.assertNotIn("Wait for it", err, "the refusal tells the reader to wait for a skipped job, which no run will finish: " + err)
+
+    def test_a_head_with_no_touched_job_refuses_the_record_as_lane_lint_does(self):
+        err = self.draft_state_refusal([tm.draft_row("checks")])
+        self.assertIn("lane-touched-tests", err, "the refusal does not name the job that did not run: " + err)
+
+    def test_a_guard_refusal_runs_no_lint_and_prints_no_record(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        self.host.changed = [("merge/merge.py", "modified", 1)]  # a guard path, which --guard no refuses
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran before the guard refusal: " + out + err)
+        self.assertNotEqual(rc, 0, "a guard change under --guard no printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a guard refusal: " + out)
+        self.assertIn("Guard or check", err, "the refusal is not the guard one: " + err)
+        # The control: a change that no guard path holds lints once and prints.
+        self.host.changed = [("README.md", "modified", 0)]
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_kind_refusal_runs_no_lint_and_prints_no_record(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        self.host.changed = [("notes/todo.txt", "modified", 1)]  # not a doc, so --kind docs-only is false
+        rc, out, err = self.record("7", "--review-record", *self.flags("--kind", "docs-only"))
+        self.assertEqual(self.lint_calls(), [], "the lint ran before the kind refusal: " + out + err)
+        self.assertNotEqual(rc, 0, "a diff that breaks --kind docs-only printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a kind refusal: " + out)
+        self.assertIn("Kind:", err, "the refusal is not the kind one: " + err)
+        # The control: a doc-only diff lints once and prints.
+        self.host.changed = [("README.md", "modified", 0)]
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags("--kind", "docs-only"))
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_record_that_restarts_the_review_runs_no_lint_and_prints_no_record(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        earlier = tm.record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"), head=head)
+        self.host.review_comments = lambda since: {7: [earlier]}  # an earlier record on this pull request reached round 2
+        rc, out, err = self.record("7", "--review-record", *self.flags())  # round 1 again: a restart
+        self.assertEqual(self.lint_calls(), [], "the lint ran before the restart refusal: " + out + err)
+        self.assertNotEqual(rc, 0, "a record that restarts the review printed a record: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a restart refusal: " + out)
+        self.assertIn("restarts the review", err, "the refusal is not the restart one: " + err)
+        # The control: a record that goes past the earlier top round lints once and prints.
+        self.clear_lint_log()
+        rc, out, err = self.record("7", "--review-record", *self.flags("--round", "2:reviewer:sonnet:PASS", "--round", "3:reviewer:sonnet:PASS"))
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_the_record_lint_waits_for_the_pushed_head_with_its_wait_line_on_stderr_and_none_on_stdout(self):
+        # The record's stdout holds the record alone, so the wait line that fetch_pr_head prints must go to stderr.
+        stale = self.head()
+        self.commit_feat({"lane-push.txt": "a lane pushes a commit\n"})
+        pushed = self.head()
+        self.assertNotEqual(stale, pushed, "the case pushed nothing")
+        self.host = LagHost(self.co, self.other, stale, LAG_POLLS, tm.Clock())  # GitHub shows the stale head for LAG_POLLS reads
+        self.use_ci_job(PASSING, 0)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = merge.lane_lint(self.co, "7", self.host, review_record=True, want_head=pushed)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint ran %d times, want once: %s" % (len(self.lint_calls()), err.getvalue()))
+        self.assertIn(WAIT_LINE, out.getvalue() + err.getvalue(), "the record lint did not wait for GitHub to show the pushed head")
+        self.assertEqual(rc, 0, "the record lint refused after GitHub showed the pushed head: " + err.getvalue())
+        self.assertNotIn(WAIT_LINE, out.getvalue(), "the wait line went to stdout, where the record is read from:\n" + out.getvalue())
+        self.assertIn(WAIT_LINE, err.getvalue(), "the wait line is not on stderr")
 
 
 class RunFolderSweep(unittest.TestCase):
