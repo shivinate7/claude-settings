@@ -1924,6 +1924,16 @@ test("inside a tier, the newest item comes first, and rank still leads", async (
   assert.deepEqual(by["tier-stands"], ["rank-old", "rank-new"], "rank must still lead age");
 });
 
+// A group sits at its newest member's time, as the Answered section does; an item with no valid date sinks to the bottom of its tier.
+test("inside a tier, a group sits at its newest member, and an undated item comes last", async (t) => {
+  const items = [
+    mk("solo-mid", 1, { added: at(5) }), mk("solo-old", 2, { added: at(1) }), mk("undated", 3, { added: "garbage" }),
+    mk("grp-old", 4, { added: at(2), group: "g" }), mk("grp-new", 5, { added: at(9), group: "g" }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["grp-new", "grp-old", "solo-mid", "solo-old", "undated"]);
+});
+
 test("a group stays together at its best member's rank", async (t) => {
   const items = [
     mk("solo-0", 1, { added: at(3), rank: 0 }), mk("grp-a", 2, { added: at(1), rank: 5, group: "g" }),
@@ -1978,7 +1988,7 @@ test("the skill answers a comment by rewriting the item, never in a comment thre
 // below the new items and folds until the owner unfolds it. lastSend here is a closed item's last answer.
 const SENT_AT = at(10);
 const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { choice: "a", at: SENT_AT, note: "" } });
-const sectionIds = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
+const idsInSection = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
 const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
@@ -1986,7 +1996,7 @@ const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
   const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "calm"), ["fresh-new", "seen-old"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
   assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
@@ -2112,7 +2122,7 @@ test("a sunk task with no steps and no command, taken to Change, labels its fold
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
   const seen = mk("seen-ranked", 1, { added: at(5), rank: 1 }), fresh = mk("fresh-ranked", 2, { added: at(20), rank: 2 });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "calm"), ["fresh-ranked", "seen-ranked"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-ranked", "seen-ranked"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
 });
 
@@ -2120,7 +2130,7 @@ test("a seen item with a draft keeps its options open and still sinks", async (t
   const seen = mk("draft-seen", 1, { added: at(5) }), fresh = mk("draft-fresh", 2, { added: at(20) });
   const storage = { "waiting.draft": JSON.stringify({ [seen.id]: { choice: "b" } }) };
   const page = await open(t, { items: [seen, fresh, sentItem()], storage }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "calm"), ["draft-fresh", "draft-seen"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["draft-fresh", "draft-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.equal(await optsShown(page, seen), true, "a seen item with a draft is folded");
 });
@@ -2128,7 +2138,7 @@ test("a seen item with a draft keeps its options open and still sinks", async (t
 test("a seen stood pick sinks under a new one in Pick stands, and its options stay open", async (t) => {
   const seen = mk("stand-seen", 1, { added: at(5), stands: true }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "stands"), ["stand-fresh", "stand-seen"]);
+  assert.deepEqual(await idsInSection(page, "stands"), ["stand-fresh", "stand-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen stood pick is not marked seen");
   assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
 });
@@ -2136,7 +2146,7 @@ test("a seen stood pick sinks under a new one in Pick stands, and its options st
 test("with no answer anywhere, nothing is seen and Whenever stays newest first", async (t) => {
   const older = mk("no-send-old", 1, { added: at(5) }), newer = mk("no-send-new", 2, { added: at(20) });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "calm"), ["no-send-new", "no-send-old"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["no-send-new", "no-send-old"]);
   for (const it of [older, newer]) {
     assert.notEqual(await seenOf(page, it), "true", `${it.id} is marked seen with no lastSend`);
     assert.equal(await optsShown(page, it), true, `${it.id} folds with no lastSend`);
@@ -2148,7 +2158,7 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   const solo = mk("g-solo", 1, { added: at(8) });
   const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
   const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
-  assert.deepEqual(await sectionIds(page, "calm"), ["g-new", "g-old", "g-solo"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"]);
   assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
