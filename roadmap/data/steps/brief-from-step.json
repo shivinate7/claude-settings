@@ -1,0 +1,14 @@
+{
+ "id": "brief-from-step",
+ "title": "Lane briefs are built by a tool from the step file and the governing rulings' own words, then checked against the rulings store before the lane starts (EXPRESS)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3zemFrPdTzdnwhpVi",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 13:37 CST Nov 13, relayed by the retrospective: \"we need briefs to be improved then, greatly, that cna be a huge lift\". Evidence: the 12:07 \"close after merge\" brief was stricter than the owner's Nov 9 words.",
+ "source": "owner 13:37 CST Nov 13, via retrospective and coordinator 13:39 CST",
+ "note": "EXPRESS, doing, lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi, started 13:39 CST). (1) A tool builds each lane brief from its step file, with the governing rulings quoted in their own words and times from the rulings store, the files, the done-check and the failure classes. (2) A model-judged check reads the finished brief against the store before the lane starts and flags a dropped or narrowed ruling. The lane reads first, builds only the gap: past-ruling-on-send, brief-reads-owner-rulings (PR #2944), lane-brief-cites-grant (doing), lane-brief-template-gaps (PR #3237). Past rulings not checked by triage.",
+ "updatedAt": "2026-11-13T13:41:41-06:00"
+}
