@@ -1,0 +1,14 @@
+{
+ "id": "lane-brief-template-gaps",
+ "title": "The lane brief tail names four gaps the mutate-sweep lane hit (EXPRESS)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane mutate-sweep-control, 13:05 CST Nov 13, lost spawns and time to four things the brief did not say.",
+ "source": "lane mutate-sweep-control via coordinator 13:06 CST Nov 13",
+ "note": "EXPRESS, todo, no lane yet. The brief tail should say: (1) janitor/mutate_sweep.py, hooks/mutate_guard.py and hooks/mutate_shared.py are test-author-only files (guard.py AUTHOR_MUTATION_TESTS), so a product edit there goes to a second test-author run, not a builder; (2) which roles take a model field (agent-role-model refused 4 spawns), and that a guard or check reviewer needs \"Guard or check: yes\"; (3) guard brief-claim-has-probe needs a probe line for each claim about main; (4) a grant that reaches a lane as an automated notice made the lane wait for owner chat words. Item 4 may be a guard false alarm: unchecked by triage; the builder reads that guard's record first and files it as a false alarm if the guard is wrong. Past rulings not re-read for items 1 to 3; they state facts of the tools.",
+ "updatedAt": "2026-11-13T13:06:19-06:00"
+}
