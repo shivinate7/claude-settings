@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Cases for the Stop check that refuses a stop after an ArtifactData write to the waiting page when no
-export has landed since (roadmap step waiting-export-check). Standard library only, and no test runner.
+"""Cases for the Stop check that refuses a stop after an ArtifactData write to the waiting page, or a wake (a
+Send on it), when no export has landed since (roadmap step waiting-export-check). Standard library only, and no
+test runner.
 
 Run it from the repository root:
 
@@ -686,6 +687,114 @@ def case_n17_writer_write_by_path_to_items_blocks():
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
 
 
+# --------------------------------------------------------------------------- wake cases (a Send on the waiting page)
+
+WAKE_HEADER = "[Artifact comment sent to Claude]"  # the banner a Send opens its turn with
+WAKE = (WAKE_HEADER + "\nArtifact: " + PAGE_URL + "\nSent to Claude at: 2026-11-05T19:00:00Z\n\n"
+        "=== BEGIN ARTIFACT COMMENT 0123456789abcdef ===\n> Saved: pick-1 = a\n"
+        "=== END ARTIFACT COMMENT 0123456789abcdef ===\n")
+
+
+def case_w1_wake_blocks_when_copy_is_older_than_the_wake():
+    """The anchor: a writer's Send wakes it and the newest copy commit is older than the wake. No page write is
+    in the transcript, so the block can only come from the wake."""
+    root = base_repo("w1")
+    records = [owner(at(18, 50)), owner(at(19), WAKE)]
+    check("W1 scope: the newest copy commit is the 17:00 one", newest_copy(root, FOLDER) == at(17),
+          newest_copy(root, FOLDER))
+    check("W1 scope: the transcript has no ArtifactData call", ARTIFACT_TOOL not in json.dumps(records))
+    expect_block("W1", run_stop("w1", root, records), (SCRIPT,))
+
+
+def case_w2_copy_commit_after_the_wake_passes():
+    """W1 with one change: a copy commit at 20:00, after the wake at 19:00. The control wakes at 20:30, after
+    that commit, so it still blocks."""
+    root = roadmap_repo("w2", [(at(17), item(FOLDER, 1)), (at(20), item(FOLDER, 2)),
+                               (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
+    check("W2 scope: the newest copy commit is the 20:00 one", newest_copy(root, FOLDER) == at(20),
+          newest_copy(root, FOLDER))
+    expect_block("W2 control", run_stop("w2-late", root, [owner(at(18, 50)), owner(at(20, 30), WAKE)]), (SCRIPT,))
+    expect_pass("W2", run_stop("w2", root, [owner(at(18, 50)), owner(at(19), WAKE)]))
+
+
+def case_w3_same_export_after_the_wake_passes():
+    """W1 with one change: an export run after the wake prints `same`. The control runs it at 18:40, before the
+    wake, and it still blocks."""
+    root = base_repo("w3")
+    early = [owner(at(18, 50))] + export_run(at(18, 40), verdict="same") + [owner(at(19), WAKE)]
+    expect_block("W3 control", run_stop("w3-early", root, early), (SCRIPT,))
+    late = [owner(at(18, 50)), owner(at(19), WAKE)] + export_run(at(19, 5), verdict="same")
+    expect_pass("W3", run_stop("w3", root, late))
+
+
+def case_w4_refused_export_after_the_wake_still_blocks():
+    """W1 with one change: an export run after the wake exits 1 with a refusal and no `same` line."""
+    records = [owner(at(18, 50)), owner(at(19), WAKE)] + export_run(at(19, 5), verdict="refused - 1 find(s)",
+                                                                   exit_code=1)
+    expect_block("W4", run_stop("w4", base_repo("w4"), records), (SCRIPT,))
+
+
+def case_w5_crashed_export_after_the_wake_still_blocks():
+    """W1 with one change: an export run after the wake crashes with a traceback and no verdict line."""
+    trace = "Traceback (most recent call last):\n  File \"export_page.py\", line 9, in <module>\nKeyError: 'items'\n"
+    crash = [call(at(19, 5), "e1", "Bash", {"command": EXPORT_CMD}), result(at(19, 6), "e1", trace, True)]
+    records = [owner(at(18, 50)), owner(at(19), WAKE)] + crash
+    expect_block("W5", run_stop("w5", base_repo("w5"), records), (SCRIPT,))
+
+
+def case_w6_wake_by_a_session_that_is_not_the_writer_passes():
+    """W1 with one change: the transcript names another session as the page writer. The control names this
+    session, and it blocks."""
+    root = base_repo("w6")
+    records = [owner(at(18, 50)), owner(at(19), WAKE)]
+    expect_block("W6 control", run_stop("w6-writer", root, records), (SCRIPT,))
+    expect_pass("W6", run_stop("w6", root, records, writer="session_other"))
+
+
+def case_w7_wake_with_no_writer_named_and_no_export_run_passes():
+    """No meta/page writer is named. The control has an export run before the wake, which makes this session the
+    writer, and it blocks. The subject has no export run, so the writer is unknown and the wake passes."""
+    root = base_repo("w7")
+    before = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1")
+    expect_block("W7 control", run_stop("w7-run", root, before + [owner(at(19), WAKE)], writer=None), (SCRIPT,))
+    expect_pass("W7", run_stop("w7", root, [owner(at(18, 50)), owner(at(19), WAKE)], writer=None))
+
+
+def case_w8_header_mid_text_is_no_wake():
+    """W1 with one change: the user record mentions the banner after other text, so it does not begin with it.
+    The control opens with the banner, and it blocks."""
+    root = base_repo("w8")
+    mention = "The last wake was " + WAKE_HEADER + " and nothing was exported after it."
+    check("W8 scope: the mention holds the banner and does not begin with it",
+          WAKE_HEADER in mention and not mention.startswith(WAKE_HEADER), mention)
+    expect_block("W8 control", run_stop("w8-head", root, [owner(at(18, 50)), owner(at(19), WAKE)]), (SCRIPT,))
+    expect_pass("W8", run_stop("w8", root, [owner(at(18, 50)), owner(at(19), mention)]))
+
+
+def case_w9_sidechain_wake_is_ignored():
+    """W1 with one change: the wake is in a sidechain record. The control has it on the main chain, and it blocks."""
+    root = base_repo("w9")
+    expect_block("W9 control", run_stop("w9-main", root, [owner(at(18, 50)), owner(at(19), WAKE)]), (SCRIPT,))
+    expect_pass("W9", run_stop("w9", root, [owner(at(18, 50)), rec(at(19), "user", WAKE, sidechain=True)]))
+
+
+def case_w10_full_size_transcript_with_a_wake_blocks():
+    """The full-size state: a few thousand records, with the wake last."""
+    records = [owner(at(18))] + [say(at(18), "filler %d" % k) for k in range(FULL_SIZE)] + [owner(at(19), WAKE)]
+    check("W10 scope: the transcript holds %d or more records" % FULL_SIZE, len(records) > FULL_SIZE, len(records))
+    expect_block("W10", run_stop("w10", base_repo("w10"), records), (SCRIPT,))
+
+
+def case_w11_copy_commit_older_than_the_wake_still_blocks():
+    """The copy has a commit at 18:30, before the wake at 19:00. A commit that is not newer than the wake
+    clears nothing."""
+    root = roadmap_repo("w11", [(at(17), item(FOLDER, 1)), (at(18, 30), item(FOLDER, 2)),
+                                (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
+    check("W11 scope: the newest copy commit is the 18:30 one", newest_copy(root, FOLDER) == at(18, 30),
+          newest_copy(root, FOLDER))
+    expect_block("W11", run_stop("w11", root, [owner(at(18, 50)), owner(at(19), WAKE)]), (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -776,6 +885,17 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_w1_wake_blocks_when_copy_is_older_than_the_wake,
+    case_w2_copy_commit_after_the_wake_passes,
+    case_w3_same_export_after_the_wake_passes,
+    case_w4_refused_export_after_the_wake_still_blocks,
+    case_w5_crashed_export_after_the_wake_still_blocks,
+    case_w6_wake_by_a_session_that_is_not_the_writer_passes,
+    case_w7_wake_with_no_writer_named_and_no_export_run_passes,
+    case_w8_header_mid_text_is_no_wake,
+    case_w9_sidechain_wake_is_ignored,
+    case_w10_full_size_transcript_with_a_wake_blocks,
+    case_w11_copy_commit_older_than_the_wake_still_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
