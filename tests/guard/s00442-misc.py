@@ -183,6 +183,12 @@ ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch dive
 ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
 ARCHINC_OPENLIST_QMAX = os.path.join(ROOT, "archinc-openlist-qmax")          # q_max's open pull request list is a server error; claude-settings' answers
 ARCHINC_OPENLIST_SETTINGS = os.path.join(ROOT, "archinc-openlist-settings")  # claude-settings' open pull request list is a server error; q_max's answers
+ARCHINC_OPENLIST403_QMAX = os.path.join(ROOT, "archinc-openlist-403-qmax")  # q_max's open pull request list answers 403; claude-settings' answers
+ARCHINC_OPENLIST404_SETTINGS = os.path.join(ROOT, "archinc-openlist-404-settings")  # claude-settings' open pull request list answers 404; q_max's answers
+ARCHINC_PULLS403 = os.path.join(ROOT, "archinc-pulls-403")  # the pull request list of the branch in q_max answers 403
+ARCHINC_PULLS404 = os.path.join(ROOT, "archinc-pulls-404")  # the pull request list of the branch in q_max answers 404
+ARCHINC_REPO403 = os.path.join(ROOT, "archinc-repo-403")  # q_max's own read, its default branch, answers 403
+ARCHINC_COMPARE403 = os.path.join(ROOT, "archinc-compare-403")  # the compare of the branch in q_max answers 403
 ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
 ARCHDRAFT_SLOW = os.path.join(ROOT, "archdraft-slow")          # an open draft of the slug in q_max, behind main, and a branch ahead there; each compare of q_max sleeps
 ARCHINC_CLOSEDALONE = os.path.join(ROOT, "archinc-closed-alone")  # the branch's pull request was closed, and no pull request replaced it
@@ -798,9 +804,10 @@ def parse(argv):
     return path, fields, flags
 
 
+ACCESS_403 = "GitHub access to this repository is not enabled for this session. Use add_repo to request access."  # the 403 an unattached repo answers, as measured
 def api_error(code, message):
     if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
-        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, {403: "Forbidden", 404: "Not Found"}.get(code, "Internal Server Error")))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
@@ -874,6 +881,8 @@ else:
     if state.get("repo_mode") and re.fullmatch(r"repos/[^/{}]+/[^/{}]+", path):  # the repo's own read: its default branch
         if state["repo_error"] == "server":
             api_error(500, "repo read broke")
+        if state["repo_error"] == "forbidden":  # the repo is not attached to this session: its own read answers 403
+            api_error(403, ACCESS_403)
         if state["repo_error"] == "missing":  # the repo is not on GitHub: its own read answers 404
             api_error(404, "Not Found")
         print(json.dumps({"full_name": path[len("repos/"):], "default_branch": state["default_branch"]}))
@@ -883,6 +892,10 @@ else:
         if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
             if state["pulls_error"][1] == "server":
                 api_error(500, "pulls read broke")
+            if state["pulls_error"][1] == "forbidden":
+                api_error(403, ACCESS_403)
+            if state["pulls_error"][1] == "missing":
+                api_error(404, "Not Found")
             print("<html>a page that is not JSON</html>")
             sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
@@ -923,6 +936,8 @@ else:
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
+        if status == "forbidden":  # the repo is not attached to this session: the compare answers 403
+            api_error(403, ACCESS_403)
         if status == "missing":  # the branch is not in this repo: GitHub answers 404
             api_error(404, "Not Found")
         if status == "network":  # no HTTP status at all: a refused connection
@@ -951,11 +966,11 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
-    lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
+    lane spans repos: `compares` (its containment reads; "server" is a 500, "forbidden" a 403, "missing" a 404, "network" a refused
     connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
-    own read names; main when unset), `repo_error` ("server": its own read fails with 500; "missing": with 404), `compare_delay_s` (seconds each of its
+    own read names; main when unset), `repo_error` ("server": its own read fails with 500; "forbidden": with 403; "missing": with 404), `compare_delay_s` (seconds each of its
     compare reads sleeps before it answers) and `pulls_error`
-    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
+    ([state, "server", "forbidden", "missing" or "junk"]: a list read of that state fails with that answer). A repo's answers replace the
     top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -1334,6 +1349,13 @@ def build_fixtures():
     # The open pull request list of one repo fails and the other's answers, so the archive's first read that fails names its repo.
     make_fake_gh(ARCHINC_OPENLIST_QMAX, "main", repos=arch_pair(qmax={"pulls_error": ["open", "server"]}))
     make_fake_gh(ARCHINC_OPENLIST_SETTINGS, "main", repos=arch_pair(settings={"pulls_error": ["open", "server"]}))
+    # An unattached repo answers 403 (measured), and a repo gh cannot find answers 404. Each one fails its own read only.
+    make_fake_gh(ARCHINC_OPENLIST403_QMAX, "main", repos=arch_pair(qmax={"pulls_error": ["open", "forbidden"]}))
+    make_fake_gh(ARCHINC_OPENLIST404_SETTINGS, "main", repos=arch_pair(settings={"pulls_error": ["open", "missing"]}))
+    make_fake_gh(ARCHINC_PULLS403, "main", repos=arch_pair(qmax={"pulls_error": ["all", "forbidden"]}))
+    make_fake_gh(ARCHINC_PULLS404, "main", repos=arch_pair(qmax={"pulls_error": ["all", "missing"]}))
+    make_fake_gh(ARCHINC_REPO403, "main", repos=arch_pair(qmax={"repo_error": "forbidden"}))
+    make_fake_gh(ARCHINC_COMPARE403, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "forbidden"}}))
     # Each compare of q_max sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The two branches are behind main, so a
     # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
     make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={
