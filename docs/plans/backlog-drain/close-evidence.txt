@@ -63,7 +63,7 @@ PR	evidence	body_read	owner_hits	needs_home	disposition	second_review_or_note	st
 2714	superseded	yes	owner 12:49-12:55 Nov 11; R36 filed; 12:55 word and coordinator 07:33 pick not on main	needs-home: decision agent-output-terse-line.md, 07:33 pick	keep-open	closing strands 2885 (base is its branch)	agent-asks-become-refusals	ancestor of 2885 (stands only if 2885 stays keep)
 2723	superseded	yes	none	none	close-ok		fan-prose-handoffs	ancestor chain to 2753
 2727	superseded	yes	coordinator pick 07:37 CST Nov 12	needs-home: pick (low, process)	keep-open	2948 is stacked on 2727; merge 2727 first, then retarget 2948	fan-prose-debts	superseded by 2948 (outside group, 2 conflicts with main); becomes keep if 2948 closes
-2733	superseded	yes	owner pick page item 463 a, 2026-11-09 13:09 CST (mutation harness)	needs-home: item 463 a quote (only in PR diff); 3-run/75 min cap unruled	close-after-home-filed		fan-code-workflows	ancestor of 2920
+2733	superseded	yes	owner pick page item 463 a, 2026-11-09 13:09 CST (mutation job)	needs-home: item 463 a quote (only in PR diff); 3-run/75 min cap unruled	close-after-home-filed		fan-code-workflows	ancestor of 2920
 2735	superseded	yes	coordinator pick 07:31 CST Nov 12; decision notes-name-their-fix	needs-home: pick; decision new in PR	close-after-home-filed		fan-prose-debts	ancestor of 2757
 2744	superseded	yes	none	none	close-ok		fan-prose-handoffs	ancestor of 2753
 2748	superseded	yes	owner 13:20 Nov 7 queue fix; coordinator 07:31, 14:56 Nov 12; decision agent-report-shas-resolve	needs-home: all four	close-after-home-filed		fan-prose-unmapped-5	inside 2913
