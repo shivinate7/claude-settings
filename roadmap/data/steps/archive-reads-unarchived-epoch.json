@@ -1,0 +1,14 @@
+{
+ "id": "archive-reads-unarchived-epoch",
+ "title": "Batch runner skips a lane whose get_session shows unarchived_epoch above 0",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "merge --idle-lanes (#3108) holds an unarchived lane only when the live file carries unarchived_epoch on its row. The 02:26 CST file carries it on 1 of 1700 rows. Expected harm: the owner unarchives lane X, X is not on keepSessions, the report lists X, and the runner archives it again. That is the original incident.",
+ "source": "lane merge-runs-idle-lanes, round 3 limit 1, 02:56 CST Nov 13",
+ "note": "Two parts. (a) Triage writes unarchived_epoch from get_session on each idle lane row at each live-file refresh. (b) One sentence in decision session-tiers, plus the runner's archive step: the runner already runs get_session on each lane line alone before archiving, and it skips a lane whose ccr.external_metadata.unarchived_epoch is above 0. (b) closes the gap without the file. Guard-adjacent: goes to a lane.",
+ "updatedAt": "2026-11-13T02:57:36-06:00"
+}
