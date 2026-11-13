@@ -3,6 +3,7 @@
 Saves fixture reads in a folder, runs the publisher, then loads its file through build.live_work, the reader
 the build uses.
 """
+import datetime
 import json
 import pathlib
 import subprocess
@@ -18,6 +19,13 @@ import _test_temp  # noqa: E402  test-temp-standard (lint/_test_temp.py)
 import build  # noqa: E402
 
 RUN_FOLDER = None
+DAY = 86400
+# live_work reads the wall clock, so every time in a fixture is an offset from now, never a fixed date.
+NOW = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+
+
+def iso(seconds=0):
+    return (NOW + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def setUpModule():
@@ -44,8 +52,8 @@ class PublishLive(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp(dir=RUN_FOLDER))
         self.save("open_p1.json", [pull(7, "lane-x"), pull(9, "s2")])
-        self.save("closed_p1.json", [pull(20, "old", "2026-10-01T00:00:00Z"), pull(21, "new", "2026-11-12T00:00:00Z", True),
-                                     pull(22, "other-base", "2026-11-12T00:00:00Z", base="dev")])
+        self.save("closed_p1.json", [pull(20, "old", iso(-40 * DAY)), pull(21, "new", iso(-DAY), True),
+                                     pull(22, "other-base", iso(-DAY), base="dev")])
         self.save("sess_p1.json", [sess("session_a", "SESSION_STATUS_IDLE", "2026-11-13T09:00:00Z", ["cs-repo:o/r", "cs-step:s1"]),
                                    sess("session_b", "SESSION_STATUS_RUNNING", "2026-11-13T09:30:00Z", ["cs-repo:o/r"])])
         self.save("sess_p2.json", [sess("session_c", "SESSION_STATUS_IDLE", "2026-11-13T08:00:00Z")])  # tags absent
@@ -53,9 +61,10 @@ class PublishLive(unittest.TestCase):
                                 "sessions": [{"id": "session_b", "unarchived_epoch": 1789000000}, {"id": "session_a"}],
                                 "keepSessions": [{"id": "session_a", "reason": "r"}]})
         (self.dir / "held.txt").write_text("# runner list\n9  # nine\n", encoding="utf-8")
-        (self.dir / "readat.txt").write_text("2026-11-13T10:00:00Z\n", encoding="utf-8")
+        (self.dir / "readat.txt").write_text(iso() + "\n", encoding="utf-8")
         self.save("pages.json", {"open": 1, "closed": 1, "sess": 2})
         (self.dir / "items" / "items").mkdir(parents=True)
+        (self.dir / "items" / ".complete").write_text("", encoding="utf-8")  # the copy flow's all-pages-read marker
         self.save("items/items/1.json", {"n": 1, "status": "open", "home": "h", "extra": "dropped"})
         self.save("items/items/2.json", {"data": {"n": 2, "status": "open", "home": "h", "lane": None}})
 
@@ -64,7 +73,7 @@ class PublishLive(unittest.TestCase):
 
     def run_pub(self):
         return subprocess.run([sys.executable, "-I", str(HERE / "publish_live.py"), "--dir", str(self.dir),
-                               "--landed-since", "2026-10-30T12:20:00Z"], capture_output=True, text=True)
+                               "--landed-since", iso(-10 * DAY)], capture_output=True, text=True)
 
     def published(self):
         done = self.run_pub()
@@ -84,12 +93,15 @@ class PublishLive(unittest.TestCase):
         self.assertNotIn("reviewLog", json.dumps(raw))
         self.assertEqual(sorted(r["number"] for r in raw["landedPulls"]), [5, 21])
         landed = {r["number"]: r for r in raw["landedPulls"]}
-        self.assertEqual(landed[21]["closed_at"], "2026-11-12T00:00:00Z")
-        self.assertEqual(landed[5]["closed_at"], "2026-11-13T10:00:00Z")  # a prev row with none is stamped with this read
+        self.assertEqual(landed[21]["closed_at"], iso(-DAY))
+        self.assertEqual(landed[5]["closed_at"], iso())  # a prev row with none is stamped with this read
         self.assertEqual([r["n"] for r in raw["items"]], [1, 2])
         self.assertEqual(raw["items"][0], {"n": 1, "status": "open", "home": "h"})
         live = build.live_work(str(self.dir / "live.json"), {}, "o/r")
-        self.assertEqual((live["read"], live["skipped"]), ("2026-11-13T10:00:00Z", []))
+        self.assertEqual((live["read"], live["skipped"]), (iso(), []))
+        # a fresh readAt, so the build reads every part: none of them is unknown
+        self.assertEqual((live["staleWhy"], live["pullWhy"], live["itemsWhy"]), (None, None, None))
+        self.assertEqual([r["n"] for r in live["pageItems"]], [1, 2])
         self.assertEqual({p["number"]: p["held"] for p in live["pulls"]}, {7: False, 9: True})
         self.assertEqual([r["id"] for r in live["laneSessions"]], ["session_a", "session_b", "session_c"])
         self.assertEqual(sorted(r["number"] for r in live["landedPulls"]), [5, 21])
@@ -104,14 +116,28 @@ class PublishLive(unittest.TestCase):
         self.assertIn(message, done.stderr)
         self.assertFalse((self.dir / "live.json").exists())
 
-    def test_missing_items_folder_omits_the_key(self):
+    def test_items_without_the_complete_marker_are_left_out(self):
+        (self.dir / "items" / ".complete").unlink()  # a partial copy: the cursor may have lost a page
+        raw = self.published()
+        self.assertNotIn("items", raw)
+        self.assertTrue(build.live_work(str(self.dir / "live.json"), {}, "o/r")["itemsWhy"].startswith("unknown"))
+        (self.dir / "live.json").unlink()
         for path in sorted((self.dir / "items").glob("**/*.json")):
             path.unlink()
         (self.dir / "items" / "items").rmdir()
         (self.dir / "items").rmdir()
-        raw = self.published()
-        self.assertNotIn("items", raw)
-        self.assertTrue(build.live_work(str(self.dir / "live.json"), {}, "o/r")["itemsWhy"].startswith("unknown"))
+        self.assertNotIn("items", self.published())
+
+    def test_an_empty_items_folder_with_the_marker_is_no_items(self):
+        for path in sorted((self.dir / "items").glob("**/*.json")):
+            path.unlink()
+        self.assertEqual(self.published()["items"], [])
+
+    def test_missing_held_file_stops_and_an_empty_one_holds_nothing(self):
+        (self.dir / "held.txt").unlink()
+        self.stops("held.txt")
+        (self.dir / "held.txt").write_text("", encoding="utf-8")
+        self.assertEqual([p["held"] for p in self.published()["pulls"]], [False, False])
 
     def test_hold_lines(self):
         (self.dir / "held.txt").write_text("#9\n# comment\n7 # seven\n", encoding="utf-8")
@@ -151,18 +177,21 @@ class PublishLive(unittest.TestCase):
 
     def test_landed_rows_expire_after_14_days(self):
         self.save("prev.json", {"landedPulls": [
-            {"number": 5, "branch": "b5", "merged": True, "closed_at": "2026-10-30T10:00:00Z"},
-            {"number": 6, "branch": "b6", "merged": True, "closed_at": "2026-10-30T10:00:01Z"}]})
-        raw = self.published()  # readAt 2026-11-13T10:00:00Z: the cut is 2026-10-30T10:00:00Z
+            {"number": 5, "branch": "b5", "merged": True, "closed_at": iso(-14 * DAY)},
+            {"number": 6, "branch": "b6", "merged": True, "closed_at": iso(-14 * DAY + 1)}]})
+        raw = self.published()  # the cut is 14 days before readAt
         self.assertEqual(sorted(r["number"] for r in raw["landedPulls"]), [5, 6, 21])
-        self.save("prev.json", {"landedPulls": [{"number": 5, "branch": "b5", "closed_at": "2026-10-30T09:59:59Z"}]})
+        self.save("prev.json", {"landedPulls": [{"number": 5, "branch": "b5", "closed_at": iso(-14 * DAY - 1)}]})
         self.assertEqual(sorted(r["number"] for r in self.published()["landedPulls"]), [21])
 
     def test_landed_window_compares_instants(self):
-        self.save("closed_p1.json", [pull(21, "a", "2026-11-06T13:00:00Z", True)])
+        self.save("closed_p1.json", [pull(21, "a", iso(-3 * DAY), True)])
+        # the same moment plus one hour, written in a -06:00 zone: the pull closed an hour before it, so it is outside
+        since = (NOW - datetime.timedelta(days=3) + datetime.timedelta(hours=1)).astimezone(
+            datetime.timezone(datetime.timedelta(hours=-6))).isoformat()
         done = subprocess.run([sys.executable, "-I", str(HERE / "publish_live.py"), "--dir", str(self.dir),
-                               "--landed-since", "2026-11-06T12:00:00-06:00"], capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, done.stderr)  # 13:00Z is before 18:00Z: outside the window
+                               "--landed-since", since], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
         landed = json.loads((self.dir / "live.json").read_text(encoding="utf-8"))["landedPulls"]
         self.assertEqual([r["number"] for r in landed], [5])
 

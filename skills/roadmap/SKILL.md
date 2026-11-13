@@ -69,9 +69,11 @@ The Status tab's Live work line shows each open project thread's state (asking i
 ready for review, failed, stopped) and the open pull requests, folded to one line of counts. Its body
 lists the threads, the pull requests and the branches. The roadmap build script cannot reach project threads or
 GitHub, so the publisher reads them just before the build and passes one file. Triage saves each tool result into one
-folder (page files, `pages.json` with the page count of each list, `prev.json`, `held.txt`, `readat.txt`; the file's docstring lists them) and runs the tracked
-`publish_live.py`. It makes no network call, fails on a missing or gapped page, and writes `held` (the runner's hold
-list; a line ALL holds every pull), each idle row's `idle_since` and `unarchived_epoch` carried from `prev.json`:
+folder (page files, `pages.json` with the page count of each list, `prev.json`, `held.txt`, `readat.txt`, and
+`items/` with `items/.complete`; use a new folder each run; the file's docstring lists them) and runs the tracked
+`publish_live.py`. It makes no network call and fails on a missing or gapped page or a missing `held.txt`. It writes
+`held` (the runner's hold list; a line ALL holds every pull), `idle_since` on each idle row (from its `updated_at`) and
+`unarchived_epoch` (carried from `prev.json`):
 
     python3 ~/.claude/skills/roadmap/publish_live.py --dir READS --landed-since ISO
 

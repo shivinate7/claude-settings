@@ -8,15 +8,17 @@ It makes no network call. Triage saves each tool result verbatim into READS firs
   open_p<N>.json    list_pull_requests (open, base main) pages, raw arrays. Pages count 1..N, N as in pages.json.
   closed_p<N>.json  the same tool, state closed. Adds merged_at and closed_at.
   sess_p<N>.json    list_sessions pages, raw arrays, until has_more is false.
-  items/**/*.json   ArtifactData list of the waiting page, each doc a bare object or {"data": {...}}. Optional.
+  items/**/*.json   ArtifactData list of the waiting page, each doc a bare object or {"data": {...}}, with
+                    items/.complete once every page was copied. Optional.
   prev.json         the previous live file: landedPulls, keepSessions, each session's unarchived_epoch.
-  held.txt          one pull number per line, "#" comments allowed; a line ALL holds every open pull. Optional.
+  held.txt          one pull number per line, "#" comments allowed; a line ALL holds every open pull. Required;
+                    an empty file means no holds.
   readat.txt        the ISO time, with zone, of the reads.
 A missing, gapped or short page list (against pages.json), a held.txt line that is not a number, #N, ALL or a
 comment ("#" then a space, or a bare "#"), an idle_since with no
 zone, an unarchived_epoch that is not a JSON int, or an item or pull number that is not an int stops the run with a
-message and writes nothing. No held.txt means no holds. No items/ folder leaves `items` out of the file, so the
-build reads the items as unknown, never as none.
+message and writes nothing. No items/.complete leaves `items` out of the file, so the build reads the items as
+unknown, never as none or as a cut list.
 Output: {readAt, pulls, branches, sessions, items, landedPulls, keepSessions}. A pull row has `held`. A session
 row has `tags` (never absent), and `idle_since` on an IDLE row: its updated_at, which stands in for "last did
 anything". `unarchived_epoch` is carried from prev.json only (a row with none stays without the key). landedPulls
@@ -85,8 +87,10 @@ def need(row, *path):
 def held_set(folder):
     """The held pull numbers as text, or "ALL". A line is a number, "#N", ALL, or a comment starting "# "."""
     path = folder / "held.txt"
+    if not path.exists():
+        raise Stop("held.txt is missing: save the runner's list, or an empty file for no holds")
     held = set()
-    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines() if path.exists() else [], 1):
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if re.match(r"#(\s|$)", line.strip()):
             continue
         word = re.sub(r"^#(?=\d)", "", line.split(" #")[0].strip())
@@ -152,7 +156,8 @@ def build(folder, since):
             row["unarchived_epoch"] = epochs[row["id"]]
         sessions[row["id"]] = row
     items = []
-    for path in sorted((folder / "items").glob("**/*.json")) if (folder / "items").is_dir() else []:
+    items_read = (folder / "items" / ".complete").exists()
+    for path in sorted((folder / "items").glob("**/*.json")) if items_read else []:
         doc = load(path)
         if isinstance(doc, dict) and "data" in doc and "n" not in doc:
             doc = doc["data"]
@@ -163,7 +168,7 @@ def build(folder, since):
         items.append({k: doc[k] for k in ITEM_KEYS if k in doc})
     result = {"readAt": read_at, "pulls": pulls, "branches": [], "sessions": list(sessions.values()),
               "landedPulls": list(landed.values()), "keepSessions": prev.get("keepSessions", [])}
-    if (folder / "items").is_dir():
+    if items_read:
         result["items"] = items
     return result
 
