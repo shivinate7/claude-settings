@@ -8,10 +8,10 @@
   "options": [
     {
       "gain": "No guard without an incident; no false refusal.",
-      "how": "#2071 is rebuilt with the splitting fix only.",
+      "how": "Drop the guard; nothing else to build. Main has no splitting code the fix could change, so #2071 closes after the ledger.",
       "id": "drop",
       "key": "a",
-      "label": "Drop the guard, keep the `$( )` fix (triage's pick)",
+      "label": "Drop the guard; nothing else to build (triage's pick)",
       "lose": "A runner that drops `--root` is not caught."
     },
     {
@@ -31,7 +31,7 @@
     {
       "id": "drop",
       "key": "a",
-      "label": "Drop the guard, keep the `$( )` fix (triage's pick)"
+      "label": "Drop the guard; nothing else to build (triage's pick)"
     },
     {
       "id": "keep",

@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T17:52:00Z",
+  "context": "Goal: q_max merges cost fewer runner minutes.\nProblem (cost): each merge to main re-runs the full suite on a tree its batch PR run already proved, about 94 runner-min and 15 min per merge (runner 11 audit). q_max D-695 and D-537 say full CI on main, so skipping needs your word.\nBased on (ruling): claude-settings ci-once-per-batch (your 21:16 CST Nov 12), which skipped the same repeat run at home.\nDeparts from: q_max main, which runs the full suite on every push \u2014 a skips it when the batch PR run proved the same tree.",
+  "home": "q_max decisions D-695 and D-537",
+  "id": "pick-qmax-skip-push-suite",
+  "kind": "decision",
+  "n": 722,
+  "options": [
+    {
+      "gain": "About 94 runner-min and 15 min saved per merge.",
+      "how": "q_max skips the push-to-main suite on a tree its batch PR run proved.",
+      "id": "yes",
+      "key": "a",
+      "label": "Skip it, like home (recommended)",
+      "lose": "A tree changed after the batch run gets no second full run on main."
+    },
+    {
+      "gain": "Main is proven by its own run.",
+      "how": "q_max keeps D-695 and D-537 as they are.",
+      "id": "no",
+      "key": "b",
+      "label": "Keep full CI on main",
+      "lose": "About 94 runner-min and 15 min spent per merge."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 11:48 CST Nov 13, runner 11 child-repo CI audit",
+  "repo": "shivinate7/claude-settings",
+  "short": "q_max: skip the push-to-main suite",
+  "shown": [
+    {
+      "id": "yes",
+      "key": "a",
+      "label": "Skip it, like home (recommended)"
+    },
+    {
+      "id": "no",
+      "key": "b",
+      "label": "Keep full CI on main"
+    }
+  ],
+  "status": "open",
+  "title": "In q_max, skip the full suite on push to main when the batch PR run already proved the same tree?",
+  "why": "Overturns q_max records D-695 and D-537, which need your word."
+}
