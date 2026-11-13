@@ -15,7 +15,10 @@ machine runs its hooks, lint and agents out of it, so an edit there is live for 
   - Passes: the pointer's own `.git`; a linked worktree, under `.claude/worktrees/` or elsewhere; a target
     outside the pointer; an unreadable or missing pointer; Read and Grep. Artifact and ArtifactData are not
     writes and pass.
-  - A shell write is not judged.
+  - A Bash write is judged by the same predicate (a redirect, `tee`, `sed -i`, `cp`, a python or node script that
+    opens a pointer file for writing). Reopened 2026-11-12: lane `decision-watch-finds-transcript` (PR 3054)
+    edited `hooks/decision_watch.py` with `sed -i` and a `python3` heredoc in the pointer checkout, and the Edit-tool
+    rule never saw it. A write the scanner cannot read (a script that builds the path at run time) still passes.
 - **Liftability.** An owner override (the `owner-override` decision, the owner's typed override) lifts a direct
   pointer path while the pointer is a plain checkout. Two cases lift nothing:
   - The pointer is the live pinned checkout or the main mirror. `is_frozen` then covers every file in it, and
