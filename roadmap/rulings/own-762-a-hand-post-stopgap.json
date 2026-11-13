@@ -1,0 +1,10 @@
+{
+ "id": "own-762-a-hand-post-stopgap",
+ "at": "2026-11-13T14:24:00-06:00",
+ "title": "A lane may hand-post the review record lines the tool printed, until PR #3235 lands",
+ "ruling": "Owner 14:24 CST, page item 762 a: allow the stopgap until #3235 lands. A lane hand-posts only the exact lines `merge --review-record` printed, with the footer, through the GitHub tool, then reads the record back. Nothing typed. Ends when #3235 merges.",
+ "quote": "762 a",
+ "source": "Owner page save 14:24 CST Nov 13 (comment thread 56da503a, typed by the owner; answers pick-<id>); filed by triage 14:26 CST Nov 13.",
+ "status": "open",
+ "step": "review-record-failed-post"
+}

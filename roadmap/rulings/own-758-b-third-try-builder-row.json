@@ -1,0 +1,10 @@
+{
+ "id": "own-758-b-third-try-builder-row",
+ "at": "2026-11-13T14:24:00-06:00",
+ "title": "The builder's third try runs on the builder's own row (Sonnet), not Opus",
+ "ruling": "Owner 14:24 CST, page item 758 b: run the builder's third try (after a round 2 FAIL, brief carries `Round 3 of 3`) on the builder's own row, Sonnet, not Opus. It REWRITES rule roles-third-round-steps-up (\"Third try: Opus\") and the agent-model-cap row; the reviewer's round 3 already runs Sonnet high (ruling own-r3-reviewer-sonnet-high). Rule and decision text, and the guard, must stop saying a builder third try may run Opus. Done-check: `git grep -niE \"third try[^.]{0,80}opus|round 3 of 3[^.]{0,80}opus\" -- agents docs/decisions CLAUDE.md skills hooks` finds no live line.",
+ "quote": "758 b",
+ "source": "Owner page save 14:24 CST Nov 13 (comment thread 56da503a, typed by the owner; answers pick-<id>); filed by triage 14:26 CST Nov 13.",
+ "status": "open",
+ "step": "model-layout-to-table"
+}

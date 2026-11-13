@@ -1,0 +1,10 @@
+{
+ "id": "own-759-b-label-allow-entry",
+ "at": "2026-11-13T14:24:00-06:00",
+ "title": "The auto-mode allow list gets one entry for `merge --batch-label <pr>`",
+ "ruling": "Owner 14:24 CST, page item 759 b: add one allow entry for `merge --batch-label <pr>`. He chose it knowing the option was labelled as going against \"a repo changes to fit a shared tool, never the tool to fit a repo\" and was not the recommended pick. The old 618 b (widen \"Merge Tool Read Checks\") belonged to the ruled-out design and is not the entry. The entry names the label write only: open PR, head branch starts with `batch-`, any other PR refused (lane reading, unread by triage).",
+ "quote": "759 b",
+ "source": "Owner page save 14:24 CST Nov 13 (comment thread 56da503a, typed by the owner; answers pick-<id>); filed by triage 14:26 CST Nov 13.",
+ "status": "open",
+ "step": "batch-label-setter"
+}

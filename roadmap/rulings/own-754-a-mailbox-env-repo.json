@@ -1,0 +1,10 @@
+{
+ "id": "own-754-a-mailbox-env-repo",
+ "at": "2026-11-13T14:24:00-06:00",
+ "title": "Add the session-mailbox store to the cloud environment's GitHub repo list",
+ "ruling": "Owner 14:24 CST, page item 754 a: add session-mailbox to the cloud environment's GitHub repo list, so every cloud session can use mail. This is the owner's word for attaching that second repo (rule: no role attaches a second repo with push without his word). Who edits the environment's repo list is open: triage has no check that it can (the list is an environment setting, docs topic github.access); the item names the owner's own step if no session can.",
+ "quote": "754 a",
+ "source": "Owner page save 14:24 CST Nov 13 (comment thread 56da503a, typed by the owner; answers pick-<id>); filed by triage 14:26 CST Nov 13.",
+ "status": "open",
+ "step": "mail-send-cloud-auth"
+}
