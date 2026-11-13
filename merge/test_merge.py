@@ -7443,6 +7443,22 @@ class MethodSafeRetry(unittest.TestCase):
             self.assertEqual(lock.acquire("main", 600), "c1")
         self.assertEqual(len(posts), 2)
 
+    def test_a_patch_flagged_idempotent_on_host_api_is_resent_after_a_502(self):  # a PATCH that sets a value: a resend writes the same value
+        seq = [(1, self.ERR), (0, "{}")]
+        calls = []
+        def sh(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return seq[min(len(calls), len(seq)) - 1]
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        reply = None
+        with unittest.mock.patch.object(merge, "sh", sh):
+            try:
+                reply = host.api("pulls/7", method="PATCH", body={"body": "b"}, idempotent=True)
+            except merge.NetStop:  # a 502 that is not resent stops the call: the count below names the cause
+                pass
+        self.assertEqual(len(calls), 2, "a PATCH flagged idempotent was not resent after its 502")
+        self.assertEqual(reply[0], 0, "the resent PATCH flagged idempotent did not succeed")
+
     def test_host_gh_still_retries_a_get_on_a_502(self):
         calls = []
         def sh(args, cwd=None, input=None, env=None):
