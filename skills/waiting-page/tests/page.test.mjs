@@ -209,7 +209,7 @@ test("the list has three tiers read from holds and by, then Pick stands last", a
   const page = await open(t, { items }); if (!page) return;
   const order = await page.evaluate(() => [...document.querySelectorAll("section.tier")].map((s) => [s.id, s.querySelector("h2").textContent.replace(/\d+$/, ""), [...s.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
   assert.deepEqual(order, [
-    ["tier-holds", "Blocking", ["hold-old", "hold-new"]],
+    ["tier-holds", "Blocking", ["hold-new", "hold-old"]],
     ["tier-due", "Upcoming", ["due-soon", "due-late"]],
     ["tier-calm", "Whenever", ["calm-dec", "calm-task"]],
     ["tier-stands", "Pick stands", ["stands-1"]],
@@ -331,8 +331,8 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
-      // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
-      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
+      // The newest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
+      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-27T00:00:00Z" }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null, pageHtml: withSentMove("stay") }); if (!page) return;
     await noAnchor(page);
@@ -1907,7 +1907,7 @@ test("inside a tier, rank overrides age, and an item with no rank sorts after th
     mk("old-none", 3, { added: at(2) }), mk("new-none", 4, { added: at(6) }),
   ];
   const page = await open(t, { items }); if (!page) return;
-  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "old-none", "new-none"]);
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "new-none", "old-none"]);
 });
 
 // Owner ruling page-newest-first, 2026-11-12 21:37 CST: inside a tier the newest ask comes first.
@@ -2133,10 +2133,10 @@ test("a seen stood pick sinks under a new one in Pick stands, and its options st
   assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
 });
 
-test("with no answer anywhere, nothing is seen and Whenever stays oldest first", async (t) => {
+test("with no answer anywhere, nothing is seen and Whenever stays newest first", async (t) => {
   const older = mk("no-send-old", 1, { added: at(5) }), newer = mk("no-send-new", 2, { added: at(20) });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["no-send-old", "no-send-new"]);
+  assert.deepEqual(await tierIds(page, "calm"), ["no-send-new", "no-send-old"]);
   for (const it of [older, newer]) {
     assert.notEqual(await seenOf(page, it), "true", `${it.id} is marked seen with no lastSend`);
     assert.equal(await optsShown(page, it), true, `${it.id} folds with no lastSend`);
@@ -2144,10 +2144,11 @@ test("with no answer anywhere, nothing is seen and Whenever stays oldest first",
 });
 
 test("a group with one new member is new as a whole, so a seen item in its tier sinks under it", async (t) => {
-  const solo = mk("g-solo", 1, { added: at(3) });
+  // Newer than the group's oldest member, so under newest first only the seen sink puts it last.
+  const solo = mk("g-solo", 1, { added: at(8) });
   const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
   const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["g-old", "g-new", "g-solo"]);
+  assert.deepEqual(await tierIds(page, "calm"), ["g-new", "g-old", "g-solo"]);
   assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
@@ -2393,7 +2394,8 @@ for (const value of ["stay", "sink"]) {
 
 // Case 2, sink: a card sent on this visit moves to the Answered section, folded. The next open card takes its slot in the tier.
 test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
-  const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
+  // The sent card is the newest, so it heads its tier; the next open card takes its slot. Newest first puts o1 above o2.
+  const sent = mk("send-sink", 1, { added: at(3) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(1) });
   const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
   // A note gives the sunk card a fold with something in it; a fold with nothing to hide would say something false.
   await choose(page, sent, "a");
@@ -2530,7 +2532,7 @@ test("an open card answered on the page stays in its tier until reload, and a fr
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
   await card(page, it).locator(".receipt").waitFor();
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the card answered on the open page left its tier before reload");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [other.id, it.id], "the card answered on the open page left its tier before reload");
   const again = await open(t, { items: [it, other], answers: await answers(page) }); if (!again) return;
   assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n} is not in the Answered section after a reload`);
   assert.deepEqual(await cardsIn(again, "#tier-calm"), [other.id], "after a reload the open item is not alone in its tier");
@@ -2562,7 +2564,7 @@ test("in the Answered section, a group sinks only when every member is answered;
   const half = [mk("half-ans", 1, { group: "half", added: at(5) }), mk("half-open", 2, { group: "half", added: NEW_ADDED })];
   const all = [mk("all-a", 3, { group: "all", added: at(6) }), mk("all-b", 4, { group: "all", added: at(7) })];
   const page = await open(t, { items: [...half, ...all], answers: { ...answerOf(half[0]), ...answerOf(all[0]), ...answerOf(all[1]) } }); if (!page) return;
-  assert.deepEqual(await cardsIn(page, "#tier-calm #group-half"), half.map((x) => x.id), "the half-answered group is not whole in its tier");
+  assert.deepEqual(await cardsIn(page, "#tier-calm #group-half"), [half[1].id, half[0].id], "the half-answered group is not whole in its tier");
   assert.equal(await page.locator(`#tier-answered #item-${half[0].id}`).count(), 0, "the answered member of a half-answered group sank");
   assert.equal(await sectionOf(page, all[0]), "tier-answered", "the fully answered group is not in the Answered section");
   assert.deepEqual(await cardsIn(page, "#tier-answered #group-all"), all.map((x) => x.id), "the fully answered group did not sink whole, as one frame");
@@ -2686,7 +2688,7 @@ test("Answered section: a Send made before the first receipts snapshot keeps its
   await page.evaluate(() => window.__releaseReceipts());
   await page.waitForFunction(() => feed.receipts === true);
   assert.equal(await sectionOf(page, it), "tier-calm", `No. ${it.n}, answered before the receipts came, left its tier when they arrived`);
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the open page re-sorted when the receipts arrived");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [other.id, it.id], "the open page re-sorted when the receipts arrived");
 });
 
 test("Answered section: a fully answered group's bundle head reads Answered together, not Answer these together", async (t) => {
@@ -5127,7 +5129,7 @@ test("an item stored with no id field shows no warning, sorts by n, and is answe
   const page = await open(t, { items: [], rawItems }); if (!page) return;
   assert.equal(await card(page, { id: "k29" }).count(), 1, "no card for the item");
   assert.equal(await warn(page, "k29").count(), 0, "a warning shows for an item with no id field");
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k29", "high"], "the card is not sorted by n among its items");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["high", "k29", "low"], "the card is not sorted by n among its items");
   await choose(page, { id: "k29" }, "b");
   await send(page);
   await written(page);
@@ -5143,7 +5145,7 @@ test("an item whose id field differs from its key shows no warning, sorts by n, 
   const page = await open(t, { items: [], rawItems }); if (!page) return;
   assert.equal(await card(page, { id: "k30" }).count(), 1, "no card for the item");
   assert.equal(await warn(page, "k30").count(), 0, "a warning shows for an id field that differs from the key");
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k30", "high"], "the card is not sorted by n among its items");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["high", "k30", "low"], "the card is not sorted by n among its items");
   await choose(page, { id: "k30" }, "a");
   await send(page);
   await written(page);
@@ -5509,7 +5511,7 @@ const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { con
 // On a Send, the anchor is the first card whose bottom is below the band's top, skipping a sent card whose top is above it. The anchor keeps its top,
 // and the cards below it rise by what the sent cards drop.
 const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
-const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits.", added: `2026-10-0${n}T00:00:00Z` }));
+const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits." }));
 // Scrolls so the card's top or bottom edge sits `offset` px below the band's top edge. A negative offset puts it above the band.
 const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
   const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
@@ -5531,10 +5533,12 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
   }
   return null;
 }, sent.map((it) => "item-" + it.id));
+// The page lists a tier newest first, so a case whose cards sit in array order stamps each item's added day from its place: the first item is the newest.
+const inArrayOrder = (items) => items.map((it, i) => ({ ...it, added: at(28 - i) }));
 // Scroll anchoring stays off unless the case asks for it.
 // sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
 const openSend = async (t, { items, width, height, scheme, anchored, sentMove, timers }) => {
-  const page = await open(t, { items, scheme, timers, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
+  const page = await open(t, { items: inArrayOrder(items), scheme, timers, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -5771,7 +5775,7 @@ const watchLoads = (page) => page.evaluate(() => {
 // Focus on a radio of a card below the sent card (or above it, as a control), then a Send that sinks the sent card. Returns what the reader sees.
 async function sinkWithFocusBelow(t, { focusOn }) {
   const sent = mk("rec-sent", 4), radio = mk("rec-radio", 5), frame = mk("rec-frame", 6, { designs: [{ slug: "s1", label: "Option a" }] });
-  const page = await open(t, { items: [...LEADS, sent, radio, frame, ...FILLER], designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
+  const page = await open(t, { items: inArrayOrder([...LEADS, sent, radio, frame, ...FILLER]), designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   const target = focusOn === "above" ? LEADS[0] : radio, radioId = "o-" + target.id + "-a";
@@ -5958,7 +5962,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
 
 test("a rail jump after Send lands on its card", async (t) => {
   const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
-  const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
+  const page = await open(t, { items: inArrayOrder(items), viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
