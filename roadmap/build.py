@@ -118,6 +118,12 @@ def git(repo, *args):
                           encoding="utf-8", errors="surrogateescape")
 
 
+def merge_parents(repo):
+    """The commits a merge in progress is bringing in, or [] when none is."""
+    merge_head = pathlib.Path(repo, git(repo, "rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
+    return merge_head.read_text().split() if merge_head.is_file() else []
+
+
 def shown(path):
     """A path for a message: non-UTF8 bytes survive git's surrogateescape, so print them as U+FFFD."""
     return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
@@ -129,8 +135,9 @@ def staged_entries(repo, folder):
     Before the first commit there is no HEAD to diff, so every indexed file counts as added.
     """
     entries = []
+    # --no-abbrev: the blob is compared with a merge parent's full blob id.
     if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0:
-        fields = git(repo, "diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
+        fields = git(repo, "diff", "--cached", "--raw", "--no-abbrev", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
                      folder).stdout.split("\0")
         for meta, path in zip(fields[0::2], fields[1::2]):
             _, mode, _, blob, _ = meta.split(" ", 4)
@@ -144,23 +151,35 @@ def staged_entries(repo, folder):
 
 
 def staged_top_level_json(repo, folder):
-    """(mode, blob, path) for each staged .json directly in folder, as load() reads them."""
+    """(mode, blob, path) for each staged .json directly in folder, the files a reader of that folder globs."""
     return [e for e in staged_entries(repo, folder)
             if str(pathlib.PurePosixPath(e[2]).parent) == folder and e[2].endswith(".json")]
 
 
 def staged_unparsable_rulings(repo):
-    """Refusal lines for each staged roadmap/rulings/*.json that is empty or not valid JSON, read from the index.
+    """Refusal lines for each staged roadmap/rulings/*.json that the ruling reader (lint/ruled_store.py) would drop.
 
-    Only the commit's own adds and changes count, so a broken ruling already on HEAD never blocks another
-    writer's commit.
+    That is a blob that is not strict UTF-8, is empty, is not valid JSON (NaN and Infinity included), or is not
+    a JSON object. The blob is read from the index as bytes. Only the commit's own adds and changes count, so a
+    broken ruling already on HEAD never makes this check refuse another writer's commit. A merge's own
+    parent holding the identical blob excuses it, as steps are excused; a ruling the merge edits is checked.
     """
+    def reject(name):
+        raise ValueError(f"{name} is not valid JSON")
+
+    parents = merge_parents(repo)
     refused = []
     for _, blob, path in staged_top_level_json(repo, RULINGS_PATH):
+        if any(git(repo, "rev-parse", "-q", "--verify", f"{rev}:{path}").stdout.strip() == blob for rev in parents):
+            continue
+        raw = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", blob], capture_output=True).stdout
         try:
-            json.loads(git(repo, "cat-file", "blob", blob).stdout)
-        except ValueError as e:
+            body = json.loads(raw.decode("utf-8"), parse_constant=reject)
+        except ValueError as e:  # UnicodeDecodeError is a ValueError
             refused.append(f"{shown(path)} does not parse as JSON: {e}")
+            continue
+        if not isinstance(body, dict):
+            refused.append(f"{shown(path)} is not a JSON object")
     return refused
 
 
@@ -182,9 +201,7 @@ def staged_notes_over_cap(repo):
         return d if isinstance(d, dict) else None
 
     bases = ["HEAD"] if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
-    merge_head = pathlib.Path(repo, git(repo, "rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
-    if merge_head.is_file():
-        bases += merge_head.read_text().split()
+    bases += merge_parents(repo)
     steps, refused = {}, []
     for mode, blob, path in staged_top_level_json(repo, STEPS_PATH):
         p = pathlib.PurePosixPath(path)
