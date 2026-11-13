@@ -188,9 +188,8 @@ def closes(wt, base_ref, head):
     return debt, closed, head, mb, tracked
 
 
-def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout):
-    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close."""
-    slug = os.path.basename(old)[:-3]
+def close_retire(wt, base_ref, head, mb, debt, old, new):
+    """(slug, Retire text read at base) of a closed debt, or SKIP when the rename is no close. The one reader of a close's Retire: judge_close and unprovable_closes both call it."""
     try:
         lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
     except Unknown:
@@ -198,6 +197,31 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
     text = retire_text(lines)
     if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
         return SKIP
+    return os.path.basename(old)[:-3], text
+
+
+def unprovable_closes(wt, base_ref, head="HEAD"):
+    """[Finding(slug, "unprovable", text)] for each close whose Retire names no runnable test file that `head` tracks. Raises Unknown.
+    Static: it runs no test and reads no cite. A lane PR runs only the `touched` job, which selects no test for a deleted debt, so a `Retire-run:`
+    cite cannot prove such a close before the batch refuses it (decision debt-close-runs-retire)."""
+    got = closes(wt, base_ref, head)
+    if not got:
+        return []
+    debt, closed, head, mb, tracked = got
+    found = []
+    for old, new in closed:
+        one = close_retire(wt, base_ref, head, mb, debt, old, new)
+        if one is not SKIP and not spans(one[1], tracked):
+            found.append(Finding(one[0], "unprovable", "debt %s closes with a Retire that names no runnable test file. Retire: %s" % (one[0], one[1] or "(no Retire line)")))
+    return found
+
+
+def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout):
+    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close."""
+    read = close_retire(wt, base_ref, head, mb, debt, old, new)
+    if read is SKIP:
+        return SKIP
+    slug, text = read
     todo = spans(text, tracked)
     if todo:
         got = None
