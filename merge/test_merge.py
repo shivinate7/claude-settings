@@ -16932,6 +16932,26 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual(rc, 1, err)
         self.assert_fails_alone(line, 7, r"^unknown \(")
 
+    def test_batch_head_unreadable_freeze_block_is_unknown_never_pass(self):
+        # Control: a readable batch whose head conflicts with #7 FAILs it, so the FAIL the case reads below comes from the unreadable block alone.
+        # Catches: a batch pull request whose frozen block the tool cannot read, taken as no batch, which lets #7 read PASS while its merge with the
+        # batch head conflicts. The line is unknown, never PASS.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        clash = self.git_commit(fx.main2, {"a.txt": "batch\n"})
+        self.push_batch(clash)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main, so the case would test main")
+        self.assertEqual(self.merges(fx.clean, clash), (1, True), "fixture: #7 does not conflict with the batch head, so the case has no clash")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, clash)])
+        self.assertTrue(self.line_of(lines, 7).startswith("#7 FAIL: "), "control: a readable batch that conflicts with #7 does not fail it:\n" + err)
+        two_blocks = freeze_body(freeze_inner(self.BATCH, [(6, clash)])) * 2  # two begin and two end markers: parse_freeze cannot read the body
+        unreadable = batch_pull(9, clash, draft=True, head_ref=merge.integration_branch(self.BATCH), body=two_blocks)
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [unreadable])
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: "), f"release-check passed #7 with the open batch's freeze block unread: {line}\n{err}")
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(line, 7, r"^unknown \(")
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
