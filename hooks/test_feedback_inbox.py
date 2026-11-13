@@ -4669,7 +4669,7 @@ def case_question_box_answer_is_saved_like_a_typed_message():
 
 QUESTION_TEXT = "Approve and publish the settings.json ruling now?"
 LATER_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
-REMEDY_MARK = "The check reads the inbox file"  # the block refusal's remedy starts here
+REMEDY_MARK = "The check reads the feedback log"  # the block refusal's remedy starts here
 
 
 def case_question_box_saves_the_answer_and_never_the_question():
