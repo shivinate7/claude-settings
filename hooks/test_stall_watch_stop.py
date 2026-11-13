@@ -2609,7 +2609,7 @@ def CI80_ready_with_repo_flag_before_the_number_waits_on_the_number():
 @case
 def CI81_ready_and_merge_with_repo_flag_close_the_wait_on_the_number():
     """CI81. gh pr ready -R <repo> N, then gh pr merge -R <repo> N, closes the wait on N: passes. Control: the -R
-    wait alone blocks, and a merge of PR 1111 with -R does not close it"""
+    wait alone blocks, and a merge of another PR with -R does not close it"""
     repo = "%s/%s" % (CI_OWNER, CI_REPO)
     wait = [ready(command="gh pr ready -R %s %s" % (repo, CI_PR))]
     return (["merge with -R of the waited PR: " + p
@@ -2635,7 +2635,7 @@ def CI82_ready_by_pull_url_waits_on_the_number_in_it():
 def CI83_merge_with_only_flags_and_flag_values_is_bare_and_closes_the_wait():
     """CI83. gh pr merge with only flags and their values, and no PR number, is bare, so it closes the wait on N:
     --squash --body "x", --squash --body-file notes.md and --squash --subject "Fix" each pass. Control: a merge
-    with --body "x" and PR 1111 closes nothing, and the wait on N blocks"""
+    with --body "x" and another PR's number closes nothing, and the wait on N blocks"""
     wait = [ready()]
     problems = []
     for flags in ('--squash --body "x"', "--squash --body-file notes.md", '--squash --subject "Fix"'):
@@ -2736,7 +2736,7 @@ def CI91_short_value_flags_and_author_email_skip_their_value_and_the_merge_close
 @case
 def CI92_session_value_is_not_read_as_the_pr():
     """CI92. merge --session 12 N (the merge tool) and gh pr merge --session 12 N read N as the PR, not 12: on the
-    wait on N each closes it, passes. On the wait on PR 1111 neither closes it: it blocks and names 1111, not N"""
+    wait on N each closes it, passes. On the wait on another PR neither closes it: it blocks and names that PR, not N"""
     wait, other = [ready()], [ready(number=CI_OTHER_PR)]
     problems = []
     for call_text in ("merge --session 12 %s" % CI_PR, "gh pr merge --session 12 %s" % CI_PR):
@@ -2750,7 +2750,7 @@ def CI92_session_value_is_not_read_as_the_pr():
 @case
 def CI93_match_head_commit_value_is_not_read_as_the_pr():
     """CI93. gh pr merge --match-head-commit 1234567 N reads N as the PR, not the SHA prefix: on the wait on N it
-    closes it, passes. On the wait on PR 1111 it leaves it open: blocks and names 1111, not N"""
+    closes it, passes. On the wait on another PR it leaves it open: blocks and names that PR, not N"""
     wait, other = [ready()], [ready(number=CI_OTHER_PR)]
     call_text = "gh pr merge --match-head-commit 1234567 %s" % CI_PR
     return (["wait on N: " + p for p in silent_with_control(wait + [shell(call_text)], wait)]
