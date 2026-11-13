@@ -17,8 +17,8 @@ the file `mail/refresh/<owner>-<repo>/main.md` ("main moved to <sha>"), in one c
 (send_refresh). A cloud session (CLAUDE_CODE_REMOTE=true) that sees the ref move reads each notice in the grep a moved
 read runs anyway, so the read costs no process. A sha it has not installed runs MAILBOX_REFRESH_COMMAND once, as one argv
 with no shell, and then writes the one file `refresh-installed` in the cache. No timer, no new long-lived process, and
-nothing on a turn where the ref has not moved. Cost per merge: 1 ls-remote, 1 fetch, 1 commit, 1 push. Cost per session:
-one install per new sha, started only after a move.
+nothing on a turn where the ref has not moved. Cost per merge: 9 git processes (1 ls-remote, 1 fetch, 5 tree reads and writes, 1 commit-tree, 1 push). Cost per session:
+one install per new sha, started only after a move; a failed or cut install is retried at the next prompt.
 """
 import hashlib
 import json
@@ -53,10 +53,11 @@ BODY_LIMIT = 160  # characters of a message's first body line that the wake line
 WAKE_MAX_NAMED = 5  # new messages one poll names in full; the rest count in one "more new" line
 BASELINE_RETRY_SECONDS = 300  # how long a failed start read is retried before `mail wait` gives up with exit 2
 REFRESH_DIR = "mail/refresh/"  # one folder per repo: <owner>-<repo>/main.md holds "main moved to <sha>"
-NOTICE = re.compile(r"main moved to ([0-9a-f]{40,64})")
+NOTICE = re.compile(r"main moved to ([0-9a-f]{40})")
 NOTICE_HIT = re.compile(r"^mail/refresh/([A-Za-z0-9._-]+)/main\.md$")
 REFRESH_STATE = "refresh-installed"  # in the cache: one "<slug> <sha>" line per notice the last good install covered
-REFRESH_BOUND = 20  # seconds the install may run; unmeasured. The git bounds add up to 10 s and the prompt hook ends at 30 s
+REFRESH_BOUND = 15  # seconds the install may run; unmeasured. Git's 10 s, this bound and a 5 s margin (the stop's grace) fill the prompt hook's 30 s
+REFRESH_GRACE = 2  # seconds a cut install gets after SIGTERM, so its EXIT trap can release its lock, before SIGKILL
 REFRESH_DEFAULT = ("bin", "refresh-from-main")  # under the config dir: the cloud install, copied there by install.sh
 TRIES = 6  # a send's first push and at most 5 retries, each only after a non-fast-forward
 
@@ -419,9 +420,36 @@ def _wait_bounded(child, seconds):
     return child.wait()
 
 
+def stop_install(child):
+    """Ends an install that still runs: SIGTERM to its group, REFRESH_GRACE seconds for its EXIT trap, then SIGKILL to the
+    group, which also takes a grandchild that ignored the TERM. Windows has no group: terminate, then kill."""
+    if child.poll() is not None:
+        return
+    try:
+        if WINDOWS:
+            child.terminate()
+        else:
+            os.killpg(child.pid, signal.SIGTERM)
+    except OSError:
+        pass
+    try:
+        child.wait(timeout=REFRESH_GRACE)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        if WINDOWS:
+            child.kill()
+        else:
+            os.killpg(child.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    child.wait()
+
+
 def run_install(env):
     """The install command alone as one argv (no arguments, no shell), bounded to REFRESH_BOUND seconds. Raises MailError
-    with the cause. A run past its bound is killed with its process group, so no install outlives the prompt."""
+    with the cause. Whatever ends the wait (the bound, an error, a normal exit), the install is stopped in the finally, so
+    none outlives the prompt."""
     with tempfile.TemporaryFile() as errors:  # a file, not a pipe: a grandchild that holds a pipe open would block a read
         try:
             child = _nowindow.Popen([refresh_command(env)], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -429,17 +457,12 @@ def run_install(env):
         except OSError as error:
             raise MailError("cannot start the install: %s" % error)
         try:
-            code = _wait_bounded(child, REFRESH_BOUND)
-        except subprocess.TimeoutExpired:
             try:
-                if WINDOWS:
-                    child.kill()
-                else:
-                    os.killpg(child.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            child.wait()
-            raise MailError("the install ran past %d s" % REFRESH_BOUND)
+                code = _wait_bounded(child, REFRESH_BOUND)
+            except subprocess.TimeoutExpired:
+                raise MailError("the install ran past %d s" % REFRESH_BOUND)
+        finally:
+            stop_install(child)
         if code:
             errors.seek(0)
             lines = [line.strip() for line in errors.read().decode("utf-8", errors="replace").splitlines() if line.strip()]
@@ -465,33 +488,35 @@ def write_installed(env, shas):
 
 
 def refresh_lines(env, posted):
-    """The lines a refresh adds to a moved read. Cloud only. `posted` is scan's {slug: notice line}. A notice whose sha is
-    not the one installed runs the install once for all of them, and the shas are recorded only after it succeeds. A bad
-    notice runs nothing and prints "mail unknown". Never raises: a failed refresh is advisory."""
+    """(lines, ok): what a refresh adds to a moved read, and whether the read may be saved as done. Cloud only. `posted` is
+    scan's {slug: notice line}. A notice whose sha is not the one installed runs the install once for all of them, and the
+    shas are recorded only after it succeeds. A bad notice runs nothing, prints "mail unknown" and is ok: a retry cannot
+    mend it. A failed or cut install is not ok, so the caller retries it at its next prompt. Never raises: a failed refresh
+    is advisory."""
     if not is_cloud(env) or not posted:
-        return []
+        return [], True
     try:
         shas = {}
         for slug, line in sorted(posted.items()):
             match = NOTICE.fullmatch(line)
             if not match:
-                return ["mail unknown: the refresh notice of %s is not 'main moved to <sha>'" % slug]
+                return ["mail unknown: the refresh notice of %s is not 'main moved to <sha>'" % slug], True
             shas[slug] = match.group(1)
         done = read_installed(env)
         new = {slug: sha for slug, sha in shas.items() if done.get(slug) != sha}
         if not new:
-            return []
+            return [], True
         run_install(env)
         write_installed(env, dict(done, **shas))
-        return ["main moved to %s; refreshed" % sha for _, sha in sorted(new.items())]
+        return ["main moved to %s; refreshed" % sha for _, sha in sorted(new.items())], True
     except Exception as error:
-        return ["mail unknown: refresh failed: %s" % " ".join(str(error).split())[:160]]
+        return ["mail unknown: refresh failed: %s" % " ".join(str(error).split())[:160]], False
 
 
 def send_refresh(env, repo_slug, sha):
     """Mail the refresh notice of `repo_slug`: one commit on the mail ref that replaces mail/refresh/<slug>/main.md with
     "main moved to <sha>". Retries a non-fast-forward as bin/mail send does. Raises MailError when it was not sent."""
-    if not safe(repo_slug) or "/" in repo_slug or not re.fullmatch(r"[0-9a-f]{40,64}", sha or ""):
+    if not safe(repo_slug) or "/" in repo_slug or not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
         raise MailError("bad repo name or sha")
     path = "%s%s/main.md" % (REFRESH_DIR, repo_slug)
     for _ in range(TRIES):
@@ -518,12 +543,13 @@ def turn_start_lines(payload, env):
         if saved.get("tip") != tip:
             fetch(env, FETCH_BOUND)
             messages, posted = scan(env, tip, addrs, notices=is_cloud(env))
-            saved = {"tip": tip, "messages": messages}
-            tmp = "%s.%d" % (path, os.getpid())
-            with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(saved, handle)
-            os.replace(tmp, path)
-            return render(messages, time.time()) + refresh_lines(env, posted)
+            lines, refreshed = refresh_lines(env, posted)
+            if refreshed:  # a failed or cut refresh leaves the listing unsaved, so the next prompt retries it
+                tmp = "%s.%d" % (path, os.getpid())
+                with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+                    json.dump({"tip": tip, "messages": messages}, handle)
+                os.replace(tmp, path)
+            return render(messages, time.time()) + lines
         return render(saved["messages"], time.time())
     except Exception as error:  # a MailError, or a bug: advisory, so it never blocks the prompt
         return ["mail unknown: %s" % error]
@@ -712,7 +738,7 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
                 messages, posted = scan(env, now_tip, addrs, run_git, notices=is_cloud(env))
                 fresh = [m for m in messages if m["id"] not in seen]
                 tip = now_tip
-                for line in refresh_lines(env, posted):  # a refresh is no mail: the wait goes on
+                for line in refresh_lines(env, posted)[0]:  # a refresh is no mail: the wait goes on
                     print(line)
                 if fresh:
                     for message in fresh[:WAKE_MAX_NAMED]:

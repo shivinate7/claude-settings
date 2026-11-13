@@ -2271,3 +2271,10 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- refresh-install-kill-leaves-lock: an install ended by SIGKILL can leave its lock; the SIGTERM grace in hooks/mail.py `stop_install` lets its EXIT trap release it first, so only a grace that runs out leaves one. Decision: session-messages.
+- refresh-retries-each-prompt: a failed or cut refresh is retried at each prompt, so while GitHub raw is unreachable every prompt pays up to 10 s of curl (bin/refresh-from-main, hooks/mail.py `turn_start_lines`). Fix: none — rare and harmless. Decision: session-messages.
+- refresh-cloud-session-installs-twice: a new cloud session installs twice, at SessionStart and at its first moved prompt, because `refresh-installed` is absent until a prompt installs (hooks/mail.py `refresh_lines`). Fix: none — one extra install. Decision: session-messages.
+- refresh-midturn-waits-for-prompt: a mid-turn session with no prompt and no `mail wait` refreshes only at its next prompt or waiter wake (hooks/mail.py). Decision: session-messages.
+- refresh-concurrent-install: a turn start and `mail wait` can run the install at once, as there is no install lock, so a false "refresh failed" can print (hooks/mail.py `run_install`). Fix: none — rare and harmless. Decision: session-messages.
+- refresh-missing-source-reads-installed: install.sh exits 0 on a missing source, so bin/refresh-from-main can record a failed install as installed (install.sh, hooks/mail.py `write_installed`). Decision: session-messages.
+- wait-poll-without-pidfd-untested: the fallback poll of `mail wait` on a system without pidfd (`_wait_bounded` fallback to `child.wait(timeout)`) has no test (hooks/mail.py, hooks/test_mail_wait.py). Decision: session-messages.

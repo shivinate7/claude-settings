@@ -2735,14 +2735,19 @@ def after_merge(root, cmds):
         ok = ok and not c
     return ok
 
+REFRESH_REPO = "shivinate7-claude-settings"  # mail.repo_slug form of shivinate7/claude-settings
+
 def refresh_mail(root, sha):
-    """Mail the new main sha to every cloud session (decision session-messages, "Refresh mail"). Never fails the merge."""
+    """Mail the new main sha to every cloud session (decision session-messages, "Refresh mail"). Only a merge in
+    REFRESH_REPO sends: the install pulls that repo's main. Never fails the merge."""
     if os.environ.get("MAILBOX_REPO"):
         try:
             import mail  # hooks/mail.py, on sys.path from the top of this file
             slug = mail.repo_slug(root)
             if not slug:
                 raise mail.MailError("no origin url")
+            if slug != REFRESH_REPO:
+                return
             mail.send_refresh(dict(os.environ), slug, sha)
         except Exception as e:
             say("merge: refresh mail was not sent: " + " ".join(str(e).split())[:160])
