@@ -563,7 +563,8 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_clear_writer, scratchpad_copier_of, scratchpad_folder_writer, scratchpad_owner_of,
+            scratchpad_record_writer, scratchpad_writer_of,
             SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
         _loading = "guard_pointer"
@@ -6203,9 +6204,10 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an
     `rm` names is judged but not recorded. A `cp` or `mv` destination carries the record of its source: a copy
     of another agent's file is no read of it. The caller's record goes on a destination whose source lies
-    outside the scratchpad, and on a `cp` destination whose source has no record. A first write, a
-    rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed."""
+    outside the scratchpad, and on a `cp` destination whose source has no record. A copy of another agent's file
+    also records its copier: only a run reads the writer, and a write over the file or a removal reads the owner,
+    the copier else the writer (`scratchpad_owner_of`). A first write, a rewrite of its own file and a file that
+    no longer exists pass. Run once the call's other rules passed."""
     agent, session, files, removed, moved, copied = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
@@ -6219,18 +6221,31 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
             return agent if source in seen else writer_after(source, seen + (full,))
         return agent
 
+    def copier_after(full, seen=()):
+        # The agent that copied a file whose writer is another agent. A copy carries the writer of its source and
+        # names the copier, who may write over it and remove it. An `mv` of such a copy keeps its copier.
+        if full in copied:
+            return agent if after[full] != agent else ""
+        source = moved.get(full)
+        if not source or not under_session_scratchpad(source, session):
+            return ""
+        if source in files and source not in removed:
+            return "" if source in seen else copier_after(source, seen + (full,))
+        return scratchpad_copier_of(source, session)
+
     for full in files:
         after[full] = writer_after(full)
+    copiers = {full: copier_after(full) for full in files}
     if not agent:
         for full in files:
             if full in moved and full not in copied and under_session_scratchpad(moved[full], session):
-                scratchpad_record_writer(full, session, after[full])
+                scratchpad_record_writer(full, session, after[full], copiers[full])
             else:
                 scratchpad_clear_writer(full, session)
         return
     taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
-        writer = scratchpad_writer_of(full, session)
+        writer = scratchpad_owner_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed and not taken:
@@ -6244,7 +6259,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     def record_writers():
         for full in files:
             if full not in removed:
-                scratchpad_record_writer(full, session, after[full])
+                scratchpad_record_writer(full, session, after[full], copiers[full])
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
