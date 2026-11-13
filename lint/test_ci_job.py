@@ -2176,9 +2176,9 @@ class PinnedHarness(Job):
     does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too. The zizmor
     run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still exports where
     os.symlink is refused. Under the flag a step's CLAUDE_SETTINGS_DIR is its own pin's tree, else the job's one pin's, and
-    only then the caller's value is replaced: a step with no pin keeps the caller's value. A step's own env: wins even when
-    that pin's tree cannot be made; a no-sha ste-lint step takes no pin tree; a job with two pins gives its plain steps the
-    caller's value, else this checkout."""
+    only then the caller's value is replaced. A `uses:` step with no sha, or a step in a job with no pin or two different pins,
+    keeps the caller's value (else this checkout); a plain step in a one-pin job takes that pin's tree. A step's own env: wins
+    even when that pin's tree cannot be made."""
 
     git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
     lane = LintTools.lane
