@@ -5638,7 +5638,8 @@ class GhHalf(Env):
 
     def test_known_limit_a_required_check_red_after_the_head_read_still_gets_the_merge_call(self):
         # KNOWN LIMIT, not a goal: the head is read once, before the claim and the merge call. A required check that turns red after that
-        # read is not seen again, so the merge call still goes out. GitHub's own required-check gate is the only check after the read.
+        # read is not seen again, so the merge call still goes out. Whether GitHub refuses that PUT for the merging identity is unproven
+        # here: this fixture's PUT always succeeds, so the case proves only what the tool sends.
         self.set(checks_seq=[[("checks", "pass", "")], [("checks", "fail", "https://x/checks")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
