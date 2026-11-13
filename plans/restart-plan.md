@@ -1004,6 +1004,32 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      and skill that no row names.
   Home: skill roadmap (the page's tabs); docs/map/.
 
+- **R66. Plan backlog-drain sorts every built but unbatched PR to a final state.** Read 09:55 CST Nov 13
+  (lost-lanes audit, Explore sonnet): 356 of 410 open lane PRs held built work in no batch. 179 had a
+  done record, 59 an open, bad or stale record, and 118 no record. 155 of their lanes were archived.
+  Read 10:41 CST: 53 steps hold 2 or more of them, 199 PRs in all. Owner 10:41 CST: work under 48 h
+  is "all fresh work and may be repeats". Older work "is probably also still valid but needs a quick
+  glanc eover". He added: "i'm worried now that we spawned multiple lanes that did the same work".
+  Owner 10:45 CST, page item 691: "Yeah approved A". It replaces item 690.
+  1. Step lane-step-dup-check refuses a lane brief or a new session for a step that has an open lane
+     PR, unless the brief says "continues #N" or "replaces #N".
+  2. A script writes one ledger, roadmap/backlog/lost-prs.json, on the record branch. It writes one row
+     per PR: step, state, age, files touched, verdict (keep, duplicate, rebuild, merged). It reruns at each batch
+     review (step lost-work-sweep). The rows with no final verdict give the one number that the
+     coordinator, the batch runner and the retrospective report.
+  3. Within each step group, `git cherry` or patch-id marks a PR whose change is on main or in a newer
+     PR as a duplicate. It closes with a pointer to the kept PR.
+  4. One fresh Sonnet reviewer per remaining step group, and one per older lone PR, reads the diff
+     against main and today's rulings. It picks keep, rebuild or close.
+  5. The batch runner batches the keep rows that read done, newest first. A keep row without a done
+     record gets one fresh Sonnet round 1. An archived lane is unarchived only when its own answer is
+     needed (owner 10:39 CST: "the lanes can easily be unarchived and then messaged").
+  6. Finish line: no row lacks a final verdict, and step lost-work-sweep keeps it so at each batch.
+  One lane, backlog-drain, runs it under the coordinator. The batch runner only batches. Until part 2
+  lands, the shared number is the batch runner's read: open lane PRs in no batch, from plain
+  `merge --reviewed` (402 at 10:42 CST, 108 of them done).
+  Home: steps lane-step-dup-check, lost-work-sweep and handin-cannot-drop.
+
 ## Stage 5. Resume lanes
 
 Under the new flow, once stage 3 and the settled parts of stage 4 land. An open part holds nothing: D1,
