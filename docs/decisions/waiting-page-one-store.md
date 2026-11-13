@@ -22,12 +22,12 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the own
 | C. The page database is the store, git is a derived backup | Chosen. Costs nothing to build. Its gap is the backup's age, which has no set bound. The export check holds a page write to a later copy commit, except a cloud writer until Mechanism step 1 lands. |
 | D. Page on claude.ai, no `db`, git through a connector | Ruled out: custom connectors are not allowed (owner, 12:10 CST). |
 
-## Why C is enough today (read from `skills/waiting-page/page.html`, checked on origin/main at commit 36807ad19a)
+## Why C is enough today (read from `skills/waiting-page/page.html`, checked on origin/main at commit 7dd44c41c)
 
-- The Questions tab reads the database live (`onSnapshot`, 3185-3197). A lane's write shows at once. The page does not drift from the store, because the page is the store's view.
+- The Questions tab reads the database live (`onSnapshot`, 3214-3226). A lane's write shows at once. The page does not drift from the store, because the page is the store's view.
 - What drifts is the backup. The writer copies it by hand at each wake (`skills/waiting-page/reference/copies-and-accounts.md`). On 2026-11-11 it went 11 hours stale because the Stop check
-  missed a cloud writer. The cause is a code read, and its red case is the first act of step `waiting-export-miss-cloud`: `hooks/feedback_guard.py` 1353-1355 matches the writer id against the bare session id only. The step note for this decision measured the copy 58 items behind the database at 12:40 CST (577 against 519).
-- The Status tab is baked into the page and changes only on a republish (`page.html` 1018-1019, 3201-3206). That lag is the republish, not the database.
+  missed a cloud writer. The cause is a code read, and its red case is the first act of step `waiting-export-miss-cloud`: `hooks/feedback_guard.py` 1353-1355 compares the page's writer value with the session id and the remote session id by equality, and the page stores "Triage (session_...)". The step note for this decision measured the copy 58 items behind the database at 12:40 CST (577 against 519).
+- The Status tab is baked into the page and changes only on a republish (`page.html` 1019-1020, 3230-3235). That lag is the republish, not the database.
 - It is unknown which of these the owner saw as stale data. The two accounts, which he winds down before a switch, are the only case where the database and git must agree.
 
 ## What triggers route B
@@ -43,7 +43,7 @@ Each is a measured event in the same account, never a guess. The one who meets i
 Each act that cannot be undone or costs money needs one owner yes, asked by the coordinator at the step that does it. The acts are a Cloudflare account (free plan), a GitHub token mint, a deploy, the access gate, and deleting the old claude.ai page. A custom domain or a paid plan costs money and is not planned.
 
 - A Worker (Cloudflare) serves the page and an API. It holds a GitHub token as a Worker secret, so no token sits in a page. It reads and writes `waiting/<collection>/<id>.json` on the record branch through the GitHub API.
-- The Worker writes only what the page writes today: `answers/` and `asks/` records, the `dismissed` read mark on an item or an ask, and the delete of `receipts/<id>` on Undo (`page.html` 2382 for the delete, 2810 for the dismissed write).
+- The Worker writes only what the page writes today: `answers/` and `asks/` records, the `dismissed` read mark on an item or an ask, and the delete of `receipts/<id>` on Undo (`page.html` 2411 for the delete, 2839 for the dismissed write).
 - The page polls the Worker, which asks GitHub with a conditional read. The wake from a save has no claude.ai `comments`. A webhook to a session's `watch_url` is likely blocked, because its signing secret is sealed to the artifact service (decision `session-messages`, line 37). Unmeasured.
 - An access gate is part of the route. Without it, anyone with the URL could write answers.
 - The token is scoped to the repo, and a fine-grained token cannot be limited to one branch. Decision `main-branch-protection`, ruling r, rules a ruleset for main that is not yet built.
