@@ -1234,6 +1234,13 @@ class Stale(unittest.TestCase):
         self.assert_not_named_in_both_shapes([item], [("lane-answer", answer_for("lane-answer", 359))],
                                              "lane-answer", "an open busy-lane item with a last answer and a kept answer")
 
+    def test_a_routed_closed_item_with_a_kept_answer_is_not_named(self):
+        # Closing at routing (SKILL.md, "Route and close", the busy-lane path): the item closes with its home and keeps `lane`,
+        # `lastAnswer` and answers/<id> until the receiver's done report. The kept answer is the routed state, so no remedy names it.
+        item = decision_item(366, "routed-answer", lane=LANE, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_not_named_in_both_shapes([item], [("routed-answer", answer_for("routed-answer", 366))],
+                                             "routed-answer", "a routed closed item (lane set, kept until the done report) with a kept answer")
+
     def test_a_closed_arbiter_ruling_with_an_overturn_answer_is_not_named(self):
         self.assert_not_named_in_both_shapes([decision_item(360, "ruling-answer", arbiter=True, pick="a")],
                                              [("ruling-answer", answer_for("ruling-answer", 360, choice="overturn", note="reopen"))],
@@ -1307,6 +1314,30 @@ class Stale(unittest.TestCase):
                 r = self.items_run(current, items_arg, {}, answers=answers_arg)
                 got = kept_lines(r.stdout)
                 self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with a kept answer, got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
+    def test_full_size_routed_items_are_not_named_and_closed_items_without_a_lane_still_are(self):
+        # 40 routed closed items (lane set, answer kept until the done report) beside 40 closed items with no lane. Only the 40 with no lane are named.
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # closed, routed: lane set, answer kept: not named
+            item_id, n = "routed-%03d" % i, 1600 + i
+            items.append(decision_item(n, item_id, lane=LANE, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT}))
+            answers.append((item_id, answer_for(item_id, n)))
+        for i in range(40):  # closed, no lane, answer kept: named, in item order
+            item_id, n = "plain-%03d" % i, 1700 + i
+            items.append(decision_item(n, item_id))
+            answers.append((item_id, answer_for(item_id, n)))
+            want.append(kept_line(n, item_id))
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with no lane, got %d:\n%s"
                                  % (len(got), r.stdout + r.stderr))
                 for line, prefix in zip(got, want):
                     self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
