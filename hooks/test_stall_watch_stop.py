@@ -56,7 +56,8 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
   keeps it open and voids the check-ins before it. A `CI unknown` line (still running included) closes nothing.
 - A merge closes the wait only when it names the waited PR: `gh pr merge <N>` or `gh pr close <N>` in Bash or
   PowerShell, `bin/merge <N>` or `merge <N>` (the merge tool), or a GitHub MCP merge_pull_request with that
-  pullNumber. A merge that names another PR, or no PR, closes nothing.
+  pullNumber. A bare `gh pr merge` or `gh pr close` (no number, so gh aims at the current branch's PR) also
+  closes it. A merge that names another PR closes nothing, and an MCP merge with no pullNumber closes nothing.
 - A check-in is a later call of send_later, create_trigger, CronCreate or ScheduleWakeup. A check-in whose
   tool_result is an error does not count; one with no result yet, or a good result, does. An open wait with no
   check-in after its anchor (the newest ready call or red verdict) blocks, and the reason names the PR.
@@ -2389,13 +2390,18 @@ def CI58_gh_pr_merge_chained_after_git_push_closes_the_wait():
 
 
 @case
-def CI59_merge_that_names_no_pr_closes_nothing():
-    """CI59. a gh pr merge with no PR number, or a GitHub MCP merge with no pullNumber, names no PR, so it blocks
-    and the reason names the waited PR. Control: gh pr merge of the waited PR passes"""
-    return ["bare gh pr merge: " + p for p in expect_block([ready(), shell("gh pr merge --squash")])] + [
-        "MCP merge with no pullNumber: " + p
-        for p in expect_block([ready(), tool_call(MCP_MERGE, {"owner": CI_OWNER, "repo": CI_REPO})])] + [
-        "control: " + p for p in expect_silent([ready(), shell("gh pr merge %s --squash" % CI_PR)])]
+def CI59_bare_gh_pr_merge_or_close_closes_the_wait():
+    """CI59. gh pr merge or gh pr close with no PR number aims at the current branch's PR, so it closes the wait:
+    passes. A GitHub MCP merge with no pullNumber names no PR, so it blocks. Control: gh pr merge of another PR
+    blocks, and the reason names only the waited PR"""
+    return (["bare gh pr merge: " + p for p in expect_silent([ready(), shell("gh pr merge --squash")])]
+            + ["bare gh pr close: " + p
+               for p in expect_silent([ready(), shell("gh pr close --delete-branch")])]
+            + ["MCP merge with no pullNumber: " + p
+               for p in expect_block([ready(), tool_call(MCP_MERGE, {"owner": CI_OWNER, "repo": CI_REPO})])]
+            + ["control, other PR: " + p
+               for p in expect_block([ready(), shell("gh pr merge %s --squash" % CI_OTHER_PR)],
+                                     not_named=[CI_OTHER_PR])])
 
 
 @case
