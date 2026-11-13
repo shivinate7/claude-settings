@@ -16331,8 +16331,8 @@ class ReviewedList(CloudSession, ReviewEnv):
                 self.assertEqual(host.posted, [], "a session with no batch-runner role posted a marker: %s" % out)
                 self.assertEqual(rc, 0, out + err)
                 self.assertEqual(list_line(self, out, 7), want, "the PR's line differs from the batch runner's: %s" % out)
-                self.assertEqual(sum(1 for l in out.splitlines() if l == "lane mail not sent: no batch-runner role"), 1,
-                                 "want one `lane mail not sent: no batch-runner role` line: %s" % out)
+                self.assertEqual(sum(1 for l in out.splitlines() if l == "merge: lane mail not sent: no batch-runner role"), 1,
+                                 "want one `merge: lane mail not sent: no batch-runner role` line: %s" % out)
 
     def test_a_failed_pulls_read_exits_one_and_lists_nothing(self):
         host, rc, out, err = self.listing([], pulls_error="reading pulls from GitHub failed")
