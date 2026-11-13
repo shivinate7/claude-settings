@@ -14,6 +14,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
+  It archives each other finished session it started at its next wake, once it has read the report, and a lane it decides to stop (ruling R46; decision `session-tiers`, Archiving scope).
+  The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
@@ -46,7 +48,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and the rulings store, one file per owner ruling, from the owner's quoted words with their time (ruling R59,
   a ruling governs at once; `lint/ruled_store.py` checks the store). It sends the coordinator the ready list.
   It closes the build's stale drafts once, then at each batch (decision `stalled-steps`; step
-  `stale-draft-joint-pass`). It may run agents.
+  `stale-draft-joint-pass`). It keeps the list of the sessions the coordinator starts, and nudges a silent lane on a step
+  others wait on once (rulings R54 and R56). It writes each Opus grant on the step. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives the lanes `merge --idle-lanes --live <file>` lists, for the coordinator (ruling R46, whoever starts a session archives it; decision `session-tiers`, Archiving scope). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
@@ -70,13 +73,13 @@ A spawner is a session that starts its own agents. Each session role is a set of
   terminal, never to a log only. A runner that merges a second checkout runs `~/.claude/bin/merge -C <checkout> <pr> --confirm`,
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
-  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step.
+  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
   posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the
   four-point check, writes its handoff to `roadmap/outbox/<slug>-handoff.md` and tags itself archive-ready
   (ruling R46). The owner never reads a lane: it sends each owner act and question to its parent with the
-  exact line. It marks each part that is ruled but not built "ruled, not built".
+  exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 
