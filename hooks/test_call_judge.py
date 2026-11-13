@@ -517,7 +517,7 @@ def case_explore_row_is_vetoed():
     # An Explore spawn on a model that is neither sonnet nor opus is the Explore row of agent-model-cap,
     # a model guard. No override lifts it.
     constant = getattr(override, "NO_OVERRIDE", None) if override is not None else None
-    for label, model in (("haiku", "haiku"), ("no model field", None)):
+    for label, model in (("haiku", "haiku"), ("no model field", None), ("a blank model", "   "), ("a tab model", "\t")):
         r = run_hook(spawn_input("Explore", model=model), answer=FLAG, pass_=(SID_A, TIMED))
         d = r.deny() or {}
         check("explore: a flagged spawn on %s stays denied under a timed override" % label,
