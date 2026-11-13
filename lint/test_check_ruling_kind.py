@@ -325,9 +325,8 @@ class RulingKindTests(unittest.TestCase):
         self.assert_fails(REC, "found 2")
 
     # A body paragraph that starts "Home:" is prose. The record's Home field is the footer's, the Home
-    # line under its Kind line. Measured on the decision `batch-build-log-kept` (branch
-    # batch-build-log-kept-r2, 15389191a): a body paragraph "Home: `state/` is removed by no sweep..."
-    # sits above its real "Kind: process" and "Home: merge/merge.py" footer, and the lint refuses it.
+    # line under its Kind line. Each BODY_HOMES paragraph sits above a real "Kind: process" and
+    # "Home: merge/merge.py" footer, so the lint must not read it as a second Home field.
     BODY_HOMES = (
         "Home: `state/` is removed by no sweep. Checked with `grep -rn 'batch-build' janitor/*.py`.",
         "Home: unmeasured. Nothing in the repo says who removes the log.",
