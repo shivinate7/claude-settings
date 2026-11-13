@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": null,
   "why": "lint/stale_cites.py cited_excerpt sends the top 40 lines for a `read path::name` cite. It should use defined_line, as `test path::name` cites do, so records can cite merge.py by symbol and stop going stale at each line move. Found by lane claims-backing-repoint (#1765).",
-  "note": "Waits under the owner's 21:42 CST hold (item 384): it does not drain the queue. Slug from the coordinator; title written by triage from the coordinator's description. Filed from the coordinator, 21:51 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:51:00-06:00"
+  "note": "Waits under the owner's 21:42 CST hold (item 384): it does not drain the queue. Slug from the coordinator; title written by triage from the coordinator's description. Filed from the coordinator, 21:51 CST Nov 7. Gap from lane stale-cites-read-symbol (#3146), coordinator 11:22 CST Nov 13: the cited_excerpt form `test path::name` shows only the def line for a symbol below line 40, so the reader sees no body. Fold into this step: extend the symbol read to the test form.",
+  "updatedAt": "2026-11-13T11:24:29-06:00"
 }
