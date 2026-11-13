@@ -42,7 +42,7 @@ A fix round is a fresh isolated spawn from the branch head (decision `lanes-star
 
 The test-author and the builder each get their own isolated worktree (decision `lanes-start-in-tool-worktrees`; rule `parallelism-each-own-checkout`: each agent in its own checkout). They never share one worktree. A test commit lands on the lane branch before the builder starts. The builder's worktree then starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit. An amend, or a commit after `cherry-pick -n` or `merge --squash`, is the builder's own commit holding test files, so the builder-diff guard refuses the builder's next commit. The builder reports the test change it needs, and the lane gives that change to a test-author. The guard is right (decision `builders-cannot-edit-tests`: builders cannot edit tests).
 
-On an iPhone app, the builder runs its own app build. Another session's running build does not block it: the one-build rule counts only builds of the builder's own session. A `bin/sim-test` run is the exception: it waits on the Mac-wide lock, and the builder waits, never skips (skill `ios-apps`, "Sharing the Mac").
+On an iPhone app, the builder runs its own app build. Another session's running build does not block it: the one-build rule counts only builds of the builder's own session. A `bin/sim-test` run is the exception: it waits up to 300 s for the Mac-wide lock, then exits 1 with no run. The builder runs it again, never skips it (skill `ios-apps`, "Sharing the Mac").
 
 ## Report
 
