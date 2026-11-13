@@ -192,6 +192,17 @@ def role_list_problems() -> list:
     return list(_guard.role_list_drift(ROOT))
 
 
+def round_row_problems() -> list:
+    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift), named by the record's
+    path, and one line when the record holds its role table and no round row (a missing table, or a header with no row): the guard then reads
+    no round row and runs on its fallback. [] when the record cannot be read: role_list_problems reports that as unknown."""
+    record = os.path.join(ROOT, LANE_RECORD)
+    lines = ["%s: %s." % (record, line) for line in _guard.role_round_drift(ROOT)]
+    if _guard.role_model_table(ROOT) is not None and _guard.role_round_table(ROOT) is None:
+        lines.append("%s: the record holds no round row, so the guard runs on its built-in fallback." % record)
+    return lines
+
+
 def main(argv) -> int:
     files = argv or sorted(
         glob.glob(os.path.join(ROOT, "agents", "*.md"))
@@ -223,7 +234,7 @@ def main(argv) -> int:
                 print("%s:%d: %s" % (path, line, problem))
                 bad = 1
     if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
-        for line in role_list_problems():
+        for line in role_list_problems() + round_row_problems():
             print(line)
             bad = 1
     return bad
