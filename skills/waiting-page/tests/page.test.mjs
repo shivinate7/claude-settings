@@ -3465,24 +3465,27 @@ const rplLast = async (page) => (await rplKeys(page)).at(-1);
 // Whether the page sends a wake comment with these words, once it has or at 3 s. Never throws, so a missing comment fails by name.
 const wakeHas = (page, words) => page.waitForFunction((w) => window.__sent.some((s) => String(s.text).includes(w)), words, { timeout: 3000 }).then(() => true, () => false);
 // Whether the line under the reply's thread holds the words, once it shows them or at 3 s. Never throws.
-const rplLineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector(".replyend .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
-// Presses Reply on the answered ask and waits for its box. A Reply that is not there fails by name.
+// scope: the holder of the line, such as `.replyend[data-end="item.<id>"]`. The default is the first thread's end.
+const rplLineHas = (page, words, scope = ".replyend") => page.waitForFunction(([w, s]) => { const l = document.querySelector(s + " .sline"); return !!l && l.textContent.includes(w); }, [words, scope], { timeout: 3000 }).then(() => true, () => false);
+// A reply box's id selector. A root ask id has no dot; an item's thread key, "item.<id>", has one, so each dot is escaped.
+const rplSel = (pre, root) => "#" + pre + String(root).replace(/[^A-Za-z0-9_-]/g, (c) => "\\" + c);
+// Presses Reply on a thread (its root ask id, or "item.<id>") and waits for its box. A Reply that is not there fails by name.
 async function openReply(page, root) {
-  await mustHave(page, `#reply-${root}`, "Reply control on the answered ask");
-  await page.click(`#reply-${root}`);
-  await mustHave(page, `#rt-${root}`, "reply box");
+  await mustHave(page, rplSel("reply-", root), "Reply control for " + root);
+  await page.click(rplSel("reply-", root));
+  await mustHave(page, rplSel("rt-", root), "reply box");
 }
 // Presses Send reply in the open box, then waits for its write. The button must be on, so a press that cannot go fails by name.
 async function sendReply(page, root) {
-  await mustHave(page, `#rs-${root}`, "Send reply button");
-  assert.equal(await page.locator(`#rs-${root}`).isDisabled(), false, "Send reply is off with the reply typed");
+  await mustHave(page, rplSel("rs-", root), "Send reply button");
+  assert.equal(await page.locator(rplSel("rs-", root)).isDisabled(), false, "Send reply is off with the reply typed");
   const before = (await askWrites(page)).length;
-  await page.click(`#rs-${root}`);
+  await page.click(rplSel("rs-", root));
   await waitAskWrites(page, before + 1);
 }
 async function replyTo(page, root, text) {
   await openReply(page, root);
-  await page.fill(`#rt-${root}`, text);
+  await page.fill(rplSel("rt-", root), text);
   await sendReply(page, root);
 }
 
@@ -3702,6 +3705,371 @@ test("reply to an answer: a refused reply keeps focus in the reply form", async 
   assert.equal(refused, true, "the refused reply's hint does not say Not saved");
   const active = await page.evaluate(() => { const a = document.activeElement; return a && a !== document.body ? a.id || a.tagName : "BODY"; });
   assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
+});
+
+test("reply to an answer: an answered reply in an ask thread has its header read 'Answer from <owner>', not an array index", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  // The answer's header follows the reply's box in the thread (askMine), so it is the next sibling. The reply's box is there first, so an absent header is the defect.
+  await mustHave(page, `#${RPL_DEEP.id}`, "the answered reply in the thread of " + RPL_ROOT);
+  await mustHave(page, `#${RPL_DEEP.id} + p.lhead`, "the answer header of the reply " + RPL_DEEP.id);
+  const head = (await page.locator(`#${RPL_DEEP.id} + p.lhead`).textContent()) ?? "";
+  assert.ok(head.trim().startsWith("Answer from lane tier-fold"), "the answer header of " + RPL_DEEP.id + " reads " + JSON.stringify(head.trim()) + ", not Answer from lane tier-fold");
+});
+
+// ---------------------------------------------------------------- reply to an item (step item-reply-back)
+// Contract: docs/design/item-reply-back-notes.md, sections 1-8 and 10; the mockup is docs/design/item-reply-back.html.
+// An item reply is one new asks/<id> record {id, text, at, item}, with no re. It shares the ask reply's box, Send, Undo, lock and wake comment.
+// Its thread key is "item." + the item id, so its controls are #reply-item.<id>, #rt-item.<id> and so on. rplSel escapes the dot.
+const IRP_TEXT = "Please add option C to the rail guard review";
+const IRP_DRAFT = "Half a thought about the rail guard";
+// Before the visit (VISIT_AT) and after the last answer (ANSWERED_AT): a reply that is not new, so its card stays folded at load.
+const IRP_OLD = "2026-10-26T12:00:00Z";
+// An owed item: open, no answer, with the session's reply. An owed card never folds, so its Reply is in view at load.
+const IRP_OWED = mk("irp-owed", 2, { added: at(6), reply: "I added option C. Pick again." });
+// An answered item with the session's reply, folded at load.
+const IRP_ANS = mk("irp-ans", 1, { added: at(5), reply: "Thanks, noted.", replied: IRP_OLD });
+// An open item with no reply: no thread, so no Reply.
+const IRP_NONE = mk("irp-none", 3, { added: at(7) });
+const irpKey = (it) => "item." + it.id;
+const irpCard = (page, it) => mustHave(page, `#item-${it.id}`, `the card of No. ${it.n}`);
+// Whether a control shows: visible once it is, or at 3 s. A folded card's Reply is in the DOM but hidden, so only visibility counts.
+const irpShows = (page, sel) => page.locator(sel).first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+// Whether a control shows now, with no wait. For a control that must not show.
+const irpShownNow = (page, sel) => page.locator(sel).isVisible();
+
+test("reply to an item, case 1: Reply shows on an owed item and on an answered item once its fold opens, and never on an item with no reply", async (t) => {
+  const page = await open(t, { items: [IRP_OWED, IRP_ANS, IRP_NONE], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  // Each card is on the page before its Reply is looked for, so an absent Reply is a missing one.
+  await irpCard(page, IRP_OWED);
+  assert.equal(await irpShows(page, rplSel("reply-", irpKey(IRP_OWED))), true, `Reply does not show on the owed No. ${IRP_OWED.n}`);
+  await irpCard(page, IRP_ANS);
+  assert.equal(await irpShownNow(page, rplSel("reply-", irpKey(IRP_ANS))), false, `Reply shows on the folded answered No. ${IRP_ANS.n}`);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  await fold.click();
+  assert.equal(await irpShows(page, rplSel("reply-", irpKey(IRP_ANS))), true, `Reply does not show on the answered No. ${IRP_ANS.n} once its fold opens`);
+  await irpCard(page, IRP_NONE);
+  assert.equal(await page.locator(rplSel("reply-", irpKey(IRP_NONE))).count(), 0, `Reply shows on No. ${IRP_NONE.n}, which has no reply`);
+});
+
+test("reply to an item, case 2: Send reply writes one asks record {id, text, at, item} with no re, and the item record is never written", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const log = await page.evaluate(() => window.__log);
+  const writes = log.filter((l) => l[0] === "set" || l[0] === "update" || l[0] === "delete");
+  assert.deepEqual(writes.map((l) => [l[0], l[1]]), [["set", "asks"]], "Send reply made these writes: " + JSON.stringify(writes.map((l) => [l[0], l[1]])));
+  const [, , key, body] = writes[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "item", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, IRP_TEXT, "the text is not the owner's words");
+  assert.equal(body.item, IRP_OWED.id, "item is " + JSON.stringify(body.item) + ", not the item " + IRP_OWED.id);
+  assert.match(body.at, RPL_ISO, "at is not an ISO time: " + body.at);
+  assert.equal(log.some((l) => l[2] === IRP_OWED.id), false, "the item record was written or deleted");
+});
+
+test("reply to an item, case 3: the wake comment reads 'Replied on the waiting page. Writer: <writer>. Ask <id> on item No. <n>, owned by <owner>: <text>.'", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} on item No. ${IRP_OWED.n}, owned by ${IRP_OWED.owner}: ${IRP_TEXT}.`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an item, case 4: while its item is on the page, an item reply is not in the Asks list, the ask count, or an orphan row", async (t) => {
+  const rec = { id: "ask-irp-rec", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_OWED.id, owner: IRP_OWED.owner };
+  const plain = { id: "ask-irp-plain", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [rec.id]: rec, [plain.id]: plain } }, storage: VISIT }); if (!page) return;
+  // Its item is on the page before the Asks list is read, so an absent record is the rule and not a missing card.
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator("#askList").getByText(IRP_TEXT).count(), 0, "the Asks list shows the item reply " + rec.id);
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the ask count is " + (await page.textContent("#askCount")).trim() + ", not 1: it counts the item reply");
+  assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, "an orphan row shows for the item reply " + rec.id + " while its item is on the page");
+});
+
+test("reply to an item, case 5: the item reply shows in its thread as a your-reply inset after the item's Reply, and the session's answer follows it", async (t) => {
+  // The answer's owner differs from the item's owner, so the words name the session that answered.
+  const rec = { id: "ask-irp-thr", text: IRP_TEXT, at: "2026-10-29T08:00:00Z", item: IRP_OWED.id, owner: "lane tier-fold", answered: "2026-10-29T09:00:00Z", reply: "Option C joins the rail guard review." };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#item-${IRP_OWED.id} .myreply`, `your-reply inset in the thread of No. ${IRP_OWED.n}`);
+  const order = await page.evaluate((id) => {
+    const rp = document.getElementById("rp-" + id), mine = document.querySelector("#item-" + id + " .myreply");
+    return { after: !!rp && !!mine && !!(rp.compareDocumentPosition(mine) & Node.DOCUMENT_POSITION_FOLLOWING), mine: mine ? mine.textContent : "", card: document.getElementById("item-" + id).innerText };
+  }, IRP_OWED.id);
+  assert.ok(order.mine.includes(IRP_TEXT), "the your-reply inset does not hold the words: " + JSON.stringify(order.mine));
+  assert.equal(order.after, true, "your reply does not follow the item's Reply in No. " + IRP_OWED.n);
+  const at = order.card.indexOf("Option C joins the rail guard review.");
+  assert.ok(at >= 0, "the session's answer does not show in No. " + IRP_OWED.n);
+  assert.ok(at > order.card.indexOf(IRP_TEXT), "the session's answer does not follow your reply in No. " + IRP_OWED.n);
+  assert.ok(order.card.includes("Reply from lane tier-fold"), "the answer's words do not say Reply from lane tier-fold");
+});
+
+test("reply to an item, case 6: a new answer on an item's reply marks the sunk card New reply and opens its folded fold", async (t) => {
+  const rec = { id: "ask-irp-new", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "Option C is in the review." };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  assert.equal(await markName(page, IRP_ANS), NEW_MARK, `No. ${IRP_ANS.n} draws no New reply mark for the new answer to its reply`);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `No. ${IRP_ANS.n} stays folded for the new answer to its reply`);
+});
+
+test("reply to an item, case 7: Undo deletes only the item's reply record and puts the words back in the reopened box", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const key = await rplLast(page);
+  await mustHave(page, "#askUndo", "Undo control on the item reply's line");
+  await page.click("#askUndo");
+  await waitAskDeletes(page, 1);
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete").map((l) => [l[1], l[2]]));
+  assert.deepEqual(dels, [["asks", key]], "Undo deleted " + JSON.stringify(dels) + ", not only the reply " + key);
+  await mustHave(page, rplSel("rt-", irpKey(IRP_OWED)), "reply box after Undo");
+  assert.equal(await page.inputValue(rplSel("rt-", irpKey(IRP_OWED))), IRP_TEXT, "Undo did not put the words back in the reply box");
+  assert.equal(await rplLineHas(page, "Undone. Your reply is back in the box, not sent.", `.replyend[data-end="${irpKey(IRP_OWED)}"]`), true, "the item's line does not say it was undone");
+  assert.equal(await wakeHas(page, `Undone on the waiting page. Ask ${key} is withdrawn.`), true, "no withdrawn wake for the item reply " + key);
+});
+
+test("reply to an item, case 7: an item reply's Undo count holds Send ask off, with the hint that says so", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, ASK_TEXT);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send ask is on while the item reply's Undo count runs");
+  assert.match((await page.textContent("#askHint")) ?? "", /Send turns on when the Undo count ends\./, "the Ask box does not say why Send ask is off");
+});
+
+test("reply to an item, case 7: an ask's Undo count holds the item's Send reply off, with the reply's hint that says so", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await sendTyped(page, ASK_TEXT);
+  await openReply(page, irpKey(IRP_OWED));
+  await page.fill(rplSel("rt-", irpKey(IRP_OWED)), IRP_TEXT);
+  await mustHave(page, rplSel("rs-", irpKey(IRP_OWED)), "Send reply button");
+  assert.equal(await page.locator(rplSel("rs-", irpKey(IRP_OWED))).isDisabled(), true, "Send reply is on while the ask's Undo count runs");
+  assert.match((await page.textContent(rplSel("rh-", irpKey(IRP_OWED)))) ?? "", /Send reply turns on when the Undo count ends\./, "the item's reply box does not say why Send reply is off");
+});
+
+test("reply to an item, case 8: a reply closed as a draft keeps its words under waiting.replyDraft.item.<id>, and after a reload", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  const key = irpKey(IRP_OWED);
+  await openReply(page, key);
+  await page.fill(rplSel("rt-", key), IRP_DRAFT);
+  await mustHave(page, rplSel("rx-", key), "Close button of the item's reply box");
+  await page.click(rplSel("rx-", key));
+  const draftKey = "waiting.replyDraft.item." + IRP_OWED.id;
+  const kept = await page.evaluate((k) => localStorage.getItem(k), draftKey);
+  assert.equal(kept, IRP_DRAFT, "Close did not keep the words under " + draftKey + ": " + JSON.stringify(kept));
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await openReply(page, key);
+  assert.equal(await page.inputValue(rplSel("rt-", key)), IRP_DRAFT, "the draft did not survive the reload");
+});
+
+test("reply to an item, case 9: an item reply whose item is no longer on the page is its own row, 'Re: an item no longer on this page', and counts while it has no reply", async (t) => {
+  const gone = { id: "ask-irp-gone", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: "closed-item-x", owner: "test thread" };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [gone.id]: gone } }, storage: VISIT }); if (!page) return;
+  // The open item is on the page, so the closed item is the only one missing from it.
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#row-${gone.id}`, "row of the item reply whose item is closed");
+  const line = page.locator(`#row-${gone.id} .reline`);
+  const lineText = (await line.count()) ? (await line.first().textContent()).trim() : "";
+  assert.equal(lineText, "Re: an item no longer on this page", "the row of the closed item's reply has the line " + JSON.stringify(lineText));
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the ask count does not count the closed item's reply while it has no reply");
+});
+
+test("reply to an item, case 10:a folded sunk card shows its waiting reply line outside the fold, and its fold words read 'the reply and your reply'", async (t) => {
+  const wait = { id: "ask-irp-fwait", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [wait.id]: wait } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${IRP_ANS.n} is not folded at load`);
+  // The waiting reply is a direct child of the card, beside the fold and not in its body, so it shows with the fold shut.
+  await mustHave(page, `#item-${IRP_ANS.id} > p.fwait`, "waiting reply line outside the fold of No. " + IRP_ANS.n);
+  assert.equal(await page.locator(`#item-${IRP_ANS.id} > p.fwait`).first().isVisible(), true, "the waiting reply line is not shown with the fold shut, in No. " + IRP_ANS.n);
+  const show = (await fold.locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show your note, the reply and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
+});
+
+test("reply to an item, case 11: once the item's reply has its answer, the fold words read 'the replies and your reply'", async (t) => {
+  // answered before the visit, so the answer is not new and the fold stays shut: only the words change.
+  const rec = { id: "ask-irp-fans", text: IRP_TEXT, at: "2026-10-25T08:00:00Z", item: IRP_ANS.id, owner: "lane tier-fold", answered: IRP_OLD, reply: "Option C is in the review." };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  const show = (await fold.locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show your note, the replies and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
+});
+
+// ---------------------------------------------------------------- reply to an item on its line (step item-reply-back, notes section 11)
+// An item that is one line (a routed open item, or a closed item on the page) keeps his reply and the answer to it in its thread, and ends
+// the thread with Reply, then Mark read. A line read at load comes back to unread when an answer to his reply is later than its Mark read.
+// While his reply waits, Mark read is off, so a read line never hides a waiting reply. The Asks row "Re: an item no longer on this page"
+// is only for a reply whose item has left the store.
+const IRP_BACK = "Option C joins the rail guard review.";
+// Answered and filed with his reply, so it is one line in Answered. Its filing (APR_FILED) and answer (answerOf) come from routedOver().
+const IRP_ROUTED = mk("irp-routed", 4, { added: at(8), reply: "Filed with the rail guard review." });
+const IRP_ROUTED_REC = { id: "ask-irp-rt", text: IRP_TEXT, at: "2026-10-29T08:00:00Z", item: IRP_ROUTED.id, owner: "lane tier-fold", answered: "2026-10-29T09:00:00Z", reply: IRP_BACK };
+// A closed item on the page is its line, with its filing. Each case below adds its own mark or reply.
+const IRP_CLOSED = { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: "Filed as step ask-phase-out." };
+// Marked read at 11-09 16:00. Its answer to his reply comes after that.
+const IRP_CL_READ = mk("irp-cl-read", 5, { ...IRP_CLOSED, dismissed: "2026-11-09T16:00:00Z" });
+const IRP_CL_READ_REC = { id: "ask-irp-cl-read", text: IRP_TEXT, at: "2026-11-09T17:00:00Z", item: IRP_CL_READ.id, owner: "lane tier-fold", answered: "2026-11-10T08:00:00Z", reply: IRP_BACK };
+// The same line, with its answer before the Mark read: the line stays read.
+const IRP_CL_EARLY_REC = { ...IRP_CL_READ_REC, id: "ask-irp-cl-early", at: "2026-11-09T10:00:00Z", answered: "2026-11-09T12:00:00Z" };
+// Unread, with his reply waiting.
+const IRP_CL_WAIT = mk("irp-cl-wait", 6, IRP_CLOSED);
+const IRP_CL_WAIT_REC = { id: "ask-irp-cl-wait", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_WAIT.id, owner: "lane tier-fold" };
+// Marked read at load, with his reply waiting: the line comes back to Answered.
+const IRP_CL_READ_WAIT = mk("irp-cl-rw", 7, { ...IRP_CLOSED, dismissed: "2026-11-09T16:00:00Z" });
+const IRP_CL_READ_WAIT_REC = { id: "ask-irp-cl-rw", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_READ_WAIT.id, owner: "lane tier-fold" };
+// On the page as its line, with his reply waiting.
+const IRP_CL_ON = mk("irp-cl-on", 8, IRP_CLOSED);
+const IRP_CL_ON_REC = { id: "ask-irp-cl-on", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_ON.id, owner: "lane tier-fold" };
+// Opens the page with the open card first (open() waits for it), then the items given, and the records given as stored asks.
+const irpOpen = (t, items, asks = {}, over = {}) => open(t, { items: [IRP_OWED, ...items], dbExtra: { asks }, storage: VISIT, ...over });
+// The routed item's answer and filing. APR_FILED is read when a case runs, not when this file loads.
+const routedOver = () => ({ answers: answerOf(IRP_ROUTED), receipts: { [IRP_ROUTED.id]: APR_FILED } });
+
+test("reply to an item, case 12: a routed item's line shows his reply in its thread, and the session's answer after it", async (t) => {
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  await page.click(`#lrow-${IRP_ROUTED.id}`);
+  const line = `#line-${IRP_ROUTED.n}`;
+  await mustHave(page, `${line} .myreply`, `his reply in the line of No. ${IRP_ROUTED.n}`);
+  const text = await page.locator(line).innerText();
+  assert.ok(text.includes(IRP_TEXT), `the line of No. ${IRP_ROUTED.n} does not show his reply`);
+  assert.ok(text.includes(IRP_BACK), `the line of No. ${IRP_ROUTED.n} does not show the session's answer`);
+  assert.ok(text.indexOf(IRP_BACK) > text.indexOf(IRP_TEXT), `the answer is not after his reply in the line of No. ${IRP_ROUTED.n}`);
+});
+
+test("reply to an item, case 13: a routed item's line ends its thread with Reply, then Mark read", async (t) => {
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  await page.click(`#lrow-${IRP_ROUTED.id}`);
+  await mustHave(page, `#line-${IRP_ROUTED.n} ${rplSel("reply-", irpKey(IRP_ROUTED))}`, `Reply on the line of No. ${IRP_ROUTED.n}`);
+  const end = await page.evaluate(([n, rid]) => {
+    const reply = document.getElementById(rid), line = document.getElementById("line-" + n);
+    const mark = line ? [...line.querySelectorAll("button")].find((b) => /^Mark read: /.test(b.getAttribute("aria-label") || "")) : null;
+    const thread = reply ? reply.closest(".replyend") : null;
+    return {
+      mark: !!mark,
+      sameEnd: !!thread && !!mark && mark.closest(".replyend") === thread,
+      after: !!reply && !!mark && !!(reply.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  }, [IRP_ROUTED.n, "reply-" + irpKey(IRP_ROUTED)]);
+  assert.equal(end.mark, true, `the line of No. ${IRP_ROUTED.n} has no Mark read`);
+  assert.equal(end.sameEnd, true, `Reply and Mark read are not in one thread end on No. ${IRP_ROUTED.n}`);
+  assert.equal(end.after, true, `Mark read does not come after Reply on No. ${IRP_ROUTED.n}`);
+});
+
+test("reply to an item, case 14, control: a routed item's reply stays out of the Asks list and gets no row of its own", async (t) => {
+  const plain = { id: "ask-irp-plain-r", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC, [plain.id]: plain }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  // The plain ask's row shows the Asks list is drawn, so an absent record is the rule and not a list still loading.
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator("#askList").getByText(IRP_TEXT).count(), 0, "the Asks list shows the routed item's reply");
+  assert.equal(await page.locator(`#row-${IRP_ROUTED_REC.id}`).count(), 0, "the routed item's reply has a row of its own in the Asks list");
+});
+
+test("reply to an item, case 15: an answer to his reply that comes after the closed line's Mark read brings the line back to unread", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ], { [IRP_CL_READ_REC.id]: IRP_CL_READ_REC }); if (!page) return;
+  const line = `#tier-answered #line-${IRP_CL_READ.n}`;
+  await mustHave(page, line, `line of No. ${IRP_CL_READ.n} in Answered, unread again after its answer`);
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${IRP_CL_READ.n},`) }).count(), 1, `the line of No. ${IRP_CL_READ.n} has no Mark read, so it is still read`);
+});
+
+test("reply to an item, case 16, control: an answer that came before the closed line's Mark read leaves the line read, behind Show read items", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ], { [IRP_CL_EARLY_REC.id]: IRP_CL_EARLY_REC }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold that holds the read line");
+  assert.equal(await page.locator(`#tier-answered #line-${IRP_CL_READ.n}`).count(), 0, `the read line of No. ${IRP_CL_READ.n} is in Answered`);
+});
+
+test("reply to an item, case 17: a closed line whose reply waits has no Mark read on its row, and its opened Mark read is off with the reason", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_WAIT], { [IRP_CL_WAIT_REC.id]: IRP_CL_WAIT_REC }); if (!page) return;
+  const n = IRP_CL_WAIT.n, markBtn = (scope) => scope.getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) });
+  await mustHave(page, `#tier-answered #line-${n}`, `line of No. ${n} in Answered`);
+  assert.equal(await markBtn(page.locator(`#tier-answered #line-${n}`)).count(), 0, `Mark read is on the folded line of No. ${n} while its reply waits`);
+  await page.click(`#lrow-${IRP_CL_WAIT.id}`);
+  const opened = page.locator(`#line-${n}`);
+  assert.equal(await markBtn(opened).count(), 1, `the opened line of No. ${n} has no Mark read to be off`);
+  assert.equal(await markBtn(opened).getAttribute("aria-disabled"), "true", `Mark read on the opened line of No. ${n} is on while its reply waits`);
+  const why = await page.evaluate(() => ASK_DIS_OFF);
+  assert.ok((await opened.innerText()).includes(why), `the opened line of No. ${n} does not say why Mark read is off`);
+});
+
+test("reply to an item, case 18: a closed line read at load comes back to Answered while his reply waits, so a read line never hides a waiting reply", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ_WAIT], { [IRP_CL_READ_WAIT_REC.id]: IRP_CL_READ_WAIT_REC }); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_CL_READ_WAIT.n}`, `line of No. ${IRP_CL_READ_WAIT.n} in Answered, back while his reply waits`);
+});
+
+test("reply to an item, case 19: a reply to a closed item whose line is on the page has no Asks row and no 'no longer on this page' line", async (t) => {
+  const plain = { id: "ask-irp-plain-c", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await irpOpen(t, [IRP_CL_ON], { [IRP_CL_ON_REC.id]: IRP_CL_ON_REC, [plain.id]: plain }); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_CL_ON.n}`, `line of No. ${IRP_CL_ON.n} on the page`);
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator(`#row-${IRP_CL_ON_REC.id}`).count(), 0, `the Asks list has a row for his reply to No. ${IRP_CL_ON.n}, whose line is on the page`);
+  assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, `a row says No. ${IRP_CL_ON.n} is no longer on this page, while its line is`);
+});
+
+// A folded line has class withd only when it has a side press (Mark read). At 390 wide withd hides Show answer (page.html, .askc.folded.withd .frow .fgo).
+test("reply to an item, case 20: a folded line whose reply waits has no withd class, and its Show answer is drawn at 390 wide", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_WAIT], { [IRP_CL_WAIT_REC.id]: IRP_CL_WAIT_REC }, { viewport: { width: 390, height: 800 } }); if (!page) return;
+  const n = IRP_CL_WAIT.n, line = `#tier-answered #line-${n}`;
+  await mustHave(page, line, `line of No. ${n} in Answered`);
+  // Scope first: the folded row has no Mark read, so the line has no side press.
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) }).count(), 0, `Mark read is on the folded line of No. ${n} while its reply waits`);
+  const cls = (await page.getAttribute(`#line-${n}`, "class")) ?? "";
+  assert.equal(cls.split(/\s+/).includes("withd"), false, `the folded line of No. ${n} has class withd with no side press: ${cls}`);
+  await mustHave(page, `#lrow-${IRP_CL_WAIT.id} .fgo`, `Show answer on the folded line of No. ${n}`);
+  const box = await page.locator(`#lrow-${IRP_CL_WAIT.id} .fgo`).boundingBox();
+  assert.ok(box && box.width > 2, `Show answer on the folded line of No. ${n} is ${box ? box.width : 0}px wide at 390, clipped out of sight`);
+});
+
+// Control for case 20: a folded line with a Mark read keeps its side press, so it keeps class withd.
+test("reply to an item, case 20, control: a folded line with Mark read keeps its withd class at 390 wide", async (t) => {
+  const plain = mk("irp-cl-plain", 9, IRP_CLOSED);
+  const page = await irpOpen(t, [plain], {}, { viewport: { width: 390, height: 800 } }); if (!page) return;
+  const n = plain.n, line = `#tier-answered #line-${n}`;
+  await mustHave(page, line, `line of No. ${n} in Answered`);
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) }).count(), 1, `the folded line of No. ${n} has no Mark read to be its side press`);
+  const cls = (await page.getAttribute(`#line-${n}`, "class")) ?? "";
+  assert.equal(cls.split(/\s+/).includes("withd"), true, `the folded line of No. ${n} lost class withd though it has a side press: ${cls}`);
+});
+
+// The reply hint of an owed card names only controls the card has. A decision card has an options group, not "Your pick" or "Mark done" (page.html, syncReplyForm).
+test("reply to an item, case 21: the reply hint of an owed decision card names no control it lacks, so it does not say Your pick or Mark done", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await openReply(page, irpKey(IRP_OWED));
+  const hk = rplSel("rh-", irpKey(IRP_OWED));
+  await mustHave(page, hk, "hint of the owed card's reply box");
+  const hint = (await page.textContent(hk)) ?? "";
+  // Scope first: the reply hint of a card that is owed, which always says where the reply goes.
+  assert.ok(hint.includes("Your reply goes to"), "the reply hint of owed No. " + IRP_OWED.n + " does not say where the reply goes: " + JSON.stringify(hint));
+  assert.equal(/Your pick|Mark done/.test(hint), false, `the reply hint of owed No. ${IRP_OWED.n} names a control its card does not have: ${JSON.stringify(hint)}`);
+});
+
+// Control for case 21: an owed task card keeps the words its hint gives for a task, Mark done below answers it.
+const IRP_TASK = { ...TASK, id: "irp-task", n: 9, title: "Add the rail guard step", added: at(6), reply: "I added the step. Check again." };
+test("reply to an item, case 21, control: the reply hint of an owed task card still says Mark done below answers it", async (t) => {
+  const page = await open(t, { items: [IRP_TASK], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_TASK);
+  await openReply(page, irpKey(IRP_TASK));
+  const hk = rplSel("rh-", irpKey(IRP_TASK));
+  await mustHave(page, hk, "hint of the owed task's reply box");
+  const hint = (await page.textContent(hk)) ?? "";
+  assert.ok(hint.includes(`No. ${IRP_TASK.n} stays open: Mark done below answers it.`), `the reply hint of owed task No. ${IRP_TASK.n} does not say Mark done below answers it: ${JSON.stringify(hint)}`);
 });
 
 // ---------------------------------------------------------------- Mark read on an answered ask (step ask-dismiss)
