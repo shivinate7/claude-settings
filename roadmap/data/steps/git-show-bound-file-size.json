@@ -1,0 +1,14 @@
+{
+ "id": "git-show-bound-file-size",
+ "title": "A hook refuses `git show <rev>:<path>` of a file over a size cap unless the output is bounded",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "An unbounded git show of a large file dumps hundreds of kilobytes into a session and wastes its reading (a 238 KB dump by backlog-drain).",
+ "source": "Coordinator 15:36 CST Nov 13, from the backlog-drain mistake (its record names the incident). Rule tokens-never-load-whole-doc.",
+ "note": "Filed 15:36 CST Nov 13. A guard: refuse `git show <rev>:<path>` of a file over a size cap unless the output is piped to something bounded (head, sed range). The cap is a cost line, measured, not a fixed number (owner R37). The guard that would have stopped the mistake is this step. A guard change: test-author red case first, builder, reviewer; the incident record is the lane's to cite. Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:36:15-06:00"
+}

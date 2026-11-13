@@ -1,0 +1,14 @@
+{
+ "id": "cancelled-run-blame-unknown",
+ "title": "The blame walk reads a cancelled main run as unknown, never as a skip, and names a re-run first",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A commit whose main run was cancelled has no verdict, so the walk can blame the wrong merge.",
+ "source": "Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), R42 part 2 fix-after, via the coordinator 15:36 CST Nov 13; read at main 59da758a3. Item (d).",
+ "note": "Filed 15:36 CST Nov 13. File and symbol: merge/merge.py base_state and breaking_line, the walk over main's push runs of `checks` (about L1543-1550 per retro; the lane did not re-read it). It steps over cancelled runs. Main's six R42 merge commits (1476f3491, 7ff000630, f1b8031f1, e11e5ef04, 15431d2ec, 59da758a3) had four cancelled runs, one gone, one running at 15:34 CST (an audit agent's read). Fix: a cancelled run reads as unknown; the walk names a re-run (gh run rerun) before any blame. Test: a cancelled run between a green and a red run, red on main. A check change: test-author red case first, builder, reviewer. Overlaps: blame-on-finished-red-job, runner-blame-one-merge, lint-clash-blames-wrong-pr (check before a lane starts). Past rulings not checked; measures are the lane's and retro's, unread by triage.",
+ "updatedAt": "2026-11-13T15:36:15-06:00"
+}

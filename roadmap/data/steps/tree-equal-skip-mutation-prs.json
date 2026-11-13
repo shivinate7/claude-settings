@@ -1,0 +1,14 @@
+{
+ "id": "tree-equal-skip-mutation-prs",
+ "title": "Build the tree-equal push skip (R61/R62) and run mutation_report on lane PRs, each with a test first",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Equal-tree pushes rerun CI for nothing, and the mutation report never runs on a lane PR, so a weak test passes unseen.",
+ "source": "Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), R42 part 2 fix-after, via the coordinator 15:36 CST Nov 13; read at main 59da758a3. Item (e).",
+ "note": "Filed 15:36 CST Nov 13. Files: .github/workflows/checks.yml (push job gating) and actions/mutation-report. Retro read that the tree-equal push skip is not built and that mutation_report never runs on a lane PR; the lane did not measure it. Fix: a push run whose tree equals an already-green run's tree is a pass; mutation_report runs on lane PRs; each with a test first. Overlaps: push-skip-proven-tree, push-skip-partial-run-record, same-pr-tree-equal-record, mutation-report-child-adoption (check before a lane starts). A CI change: ci-hygiene skill applies. Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:36:15-06:00"
+}

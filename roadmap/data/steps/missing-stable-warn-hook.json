@@ -1,0 +1,14 @@
+{
+ "id": "missing-stable-warn-hook",
+ "title": "hooks/session_start.sh prints one WARN line at SessionStart when origin has no stable branch",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A session silently runs on main when the stable branch is missing, so nobody learns the child repos run unpinned.",
+ "source": "Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), R42 part 2 fix-after, via the coordinator 15:36 CST Nov 13; read at main 59da758a3. Item (f). Completes P9 (coordinator 13:03 CST Nov 12), one WARN and a fall back to main.",
+ "note": "Filed 15:36 CST Nov 13. install.sh on main falls back (fall_back_to_main, about L458 on the old lane head); hooks/session_start.sh prints no WARN: its bounded_fetch adds the stable refspec only when ls-remote lists it, and the pin logic falls back to origin/main quietly (builder read, ad0e8d66b). Fix: one WARN line at SessionStart when origin has no stable, once per session, with a test in hooks/test_session_start.py. Departs from nothing. Note: stable does not exist until a green main run (coordinator 15:36). Past rulings not checked.",
+ "updatedAt": "2026-11-13T15:36:15-06:00"
+}
