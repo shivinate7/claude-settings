@@ -250,8 +250,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
-                       design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
-                       covers it. The general override, `opus [role] <time>` or a step grant lifts the
+                       refuter or an Explore's `Audit:` marker covers it. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
@@ -311,7 +310,8 @@ Other tools, in `judge` order:
                        the round forms, `Fix check`, `Round N of 3 (fix check)` and the role-model
                        sentence. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
-                       above-row refusal; no override lifts the no-model refusal. A Workflow
+                       above-row refusal; no override lifts the no-model refusal or a reviewer's Round 3 on Opus,
+                       whose reason carries no override line. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
@@ -348,7 +348,8 @@ Other tools, in `judge` order:
                        (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
                        role. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
-                       exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
+                       exactly the effort of its lane kind's row in the decision record (lane_kind_row; the kind
+                       is read from the line after the Grant line, lane_kind), or whose prompt's first non-blank line does not
                        start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
                        (shared_names.grant_line_holds_words). The prompt is
                        the whole brief, the Grant line first. A lane tag is
@@ -366,7 +367,8 @@ Other tools, in `judge` order:
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
                        `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
-                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
+                       stripped, counts as missing, and so does a `model` whose family is not the model of the lane
+                       kind's row. A call with no lane tag passes. The deny reason names both
                        fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
@@ -2909,19 +2911,25 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
     CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
 )
-# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
-LANE_EFFORT = "medium"
+# The three lane kinds and the model-table row of each (decision agent-model-cap). The row is the one home of a lane's model and
+# effort: lane_kind_row reads it. LANE_KIND_FALLBACK is what a start is judged against when the record cannot be read, as
+# ROLE_ROUND_FALLBACK stands in for a round row; lint/check_agent_models.py reads it from here and checks each row of the record against it.
+LANE_KIND_LABELS = {"guard": "lane, guard or check", "product": "lane, product code or design", "docs": "lane, docs"}
+LANE_KIND_FALLBACK = {"guard": ("sonnet", "high"), "product": ("sonnet", "medium"), "docs": ("sonnet", "low")}
+LANE_KIND_DEFAULT = "product"   # a lane with no kind marker
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
+from shared_names import DOCS_LANE_MARKER, LANE_TAG, REVIEW_GUARD_MARKER, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
-    "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
+    "A lane starts with the effort field set to the effort of its kind's row in decision agent-model-cap and the whole brief as "
+    "its prompt. The kind is read from the line after the Grant line: `%s` for a guard or check lane, `%s` for a docs "
+    "lane, and no marker for a product code or design lane. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
-    "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
+    "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % (REVIEW_GUARD_MARKER, DOCS_LANE_MARKER)
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
@@ -3067,16 +3075,47 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
+def marker_line(line: str, marker: str) -> bool:
+    """True when `line` starts with `marker` after any leading spaces or tabs, case-sensitive, and the marker ends at the end of the
+    line, whitespace or a full stop: `Guard or check: no` and `yesterday` are no marker. The ending rule of review_guard_marked."""
+    text = line.lstrip(" \t")
+    return text.startswith(marker) and (text[len(marker):] or " ")[0] in " \t\r."
+
+
+def lane_kind(prompt) -> str:
+    """The kind of a lane from its start prompt: the line after the Grant line (the second non-blank line) is REVIEW_GUARD_MARKER for
+    "guard", DOCS_LANE_MARKER for "docs", and any other line, or none, is LANE_KIND_DEFAULT. A prompt that is not text has the default."""
+    lines = [ln for ln in prompt.splitlines() if ln.strip()] if isinstance(prompt, str) else []
+    second = lines[1] if len(lines) > 1 else ""
+    if marker_line(second, REVIEW_GUARD_MARKER):
+        return "guard"
+    return "docs" if marker_line(second, DOCS_LANE_MARKER) else LANE_KIND_DEFAULT
+
+
+def lane_kind_row(kind: str):
+    """(model word, effort word) of the lane kind's row in the decision record, read from the pointer checkout, else
+    LANE_KIND_FALLBACK[kind] when there is no pointer, the record cannot be read, or it holds no readable row for the kind.
+    The one reader of the lane rows: lane-effort-pin and lane-start-settings both judge a start against it."""
+    text = _role_record_text(pointer_checkout())
+    for line in (text or "").splitlines():
+        cells = [cell.strip().replace("`", "") for cell in line.strip().strip("|").split("|")]
+        if line.lstrip().startswith("|") and len(cells) >= 3 and cells[0] == LANE_KIND_LABELS[kind]:
+            model, effort = ROLE_FIRST_WORD.match(cells[1]), ROLE_FIRST_WORD.match(cells[2])
+            if model and effort and model.group(1).lower() in ROLE_MODEL_RANK:
+                return model.group(1).lower(), effort.group(1).lower()
+    return LANE_KIND_FALLBACK[kind]
+
+
 def lane_effort_hit(tool: str, tool_input) -> str:
     """What breaks the lane start of a create_session call that tags a lane, or "": the effort field when it
-    is not exactly LANE_EFFORT, else the prompt's first non-blank line when it is not a Grant line
+    is not exactly the effort of its kind's row (lane_kind_row), else the prompt's first non-blank line when it is not a Grant line
     (LANE_GRANT_MARKER, then the owner's words: grant_line_holds_words). A lane tag is any tag that, stripped and casefolded, is
     LANE_TAG; `tags` may be one string. A call with no lane tag is not judged. A missing prompt has no
     Grant line."""
     if not is_lane_create_session(tool, tool_input):
         return ""
     effort = tool_input.get("effort")
-    if effort != LANE_EFFORT:
+    if effort != lane_kind_row(lane_kind(tool_input.get("prompt")))[1]:
         return "effort: " + str(effort if effort else "(none)")
     prompt = tool_input.get("prompt")
     first = next((ln.strip() for ln in prompt.splitlines() if ln.strip()), "") if isinstance(prompt, str) else ""
@@ -3106,17 +3145,17 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
 def lane_start_settings_hit(tool: str, tool_input) -> str:
     """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
     A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
-    stripped. A call with no lane tag is not judged."""
+    stripped; a model counts as missing too when its family is not the model of the lane kind's row (lane_kind_row). A call with no lane tag is not judged."""
     if not is_lane_create_session(tool, tool_input):
         return ""
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
+    if "model" not in missing and role_model_rank(tool_input["model"]) != ROLE_MODEL_RANK.index(
+            lane_kind_row(lane_kind(tool_input.get("prompt")))[0]):
+        missing.insert(0, "model")  # a model that is not the kind's row's model
     return ", ".join(missing)
 
 
-# A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
-# note try-marker-sunset.
-BUILDER_MARKERS = ("round", "try")
 # The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
 from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
 _MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
@@ -3159,11 +3198,6 @@ def brief_markers(brief) -> list:
     """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
     without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
     return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
-
-
-def builder_third_round(brief) -> bool:
-    """True when a brief holds a builder's third-round marker, in either spelling."""
-    return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
 # BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
@@ -3578,9 +3612,9 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
-    that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
+    that starts with the marker, or the brief's first line, counts. A reviewer's
     frontmatter model is haiku, so a reviewer on a later-round or fix-verifier brief must name sonnet. A reviewer on either that names Opus
-    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
+    passes here and is refused by the role model row (round 3, role_model_one) or the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -3617,10 +3651,6 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
-    if role == "builder" and builder_third_round(prompt):
-        want = role_round_model(rounds, role, "3")
-        if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
-            return "Builder round 3 runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     return ""
 
 
@@ -3636,6 +3666,9 @@ ROLE_TABLE_MAX = 256 * 1024
 ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
+# The rows whose first cell is a multi-word label, read whole: the three lane kinds and the batch runner. Any other row whose first
+# cell is not role words names no role.
+ROLE_ROW_LABELS = tuple(LANE_KIND_LABELS.values()) + ("batch runner",)
 ROLE_DEFAULT = "general-purpose"
 # A reviewer brief whose round has a round row above the reviewer's row (a `Round N of 3` marker, a guard marker line, a
 # fix verifier brief) may run on that row's model: role_round_table reads the rows, and ROLE_ROUND_FALLBACK stands in for any row the
@@ -3705,7 +3738,11 @@ def role_model_table(pointer_root):
             continue
         names = [part.strip() for part in ROLE_PARENTHETICAL.sub("", cells[0]).replace("`", "").split(",")]
         word = ROLE_FIRST_WORD.match(cells[1].replace("`", ""))
-        if not all(ROLE_WORD.match(name) for name in names) or not word or word.group(1).lower() not in ROLE_MODEL_RANK:
+        if cells[0] in ROLE_ROW_LABELS:  # a multi-word row label read whole, never split on its comma
+            names = [cells[0]]
+        elif not all(ROLE_WORD.match(name) for name in names):
+            continue
+        if not word or word.group(1).lower() not in ROLE_MODEL_RANK:
             continue
         for name in names:
             table.setdefault(name, word.group(1).lower())
@@ -3716,14 +3753,13 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, no `1 other` entry and none for the builder, whose third try runs on its own row). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
-ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
+ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a reviewer's round in ROLE_ROUND_NO_OPUS above its row is refused by role_model_one
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
-                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
-                              (("builder", "3", "other"), "opus")])
+                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet")])
 
 
 def _role_record_text(pointer_root):
@@ -3977,6 +4013,27 @@ def reviewer_free_rounds(rounds, row):
     return tuple(sorted(found, key=int))
 
 
+# A reviewer's round in ROLE_ROUND_NO_OPUS runs on its round row's model and never above it, Opus included: the refusal is
+# never lifted and its reason names no override (owner ruling of 2026-11-13 14:05 CST, decision agent-model-cap).
+ROLE_ROUND_NO_OPUS = ("3",)
+ROLE_ROUND_NO_OPUS_MATCH = "round no opus, role "   # the matched text of that refusal, which never_lifted and the refusal's call read
+ROLE_ROUND_NO_OPUS_REASON = (
+    "Rule (configuration): a reviewer's round %s runs on %s and on no higher model, Opus included. "
+    "Remedy: use %s. (decision agent-model-cap)"
+)
+
+
+def reviewer_no_opus(rounds, prompt, named) -> str:
+    """The refusal reason for a reviewer brief that holds a `Round N of 3` marker of a round in ROLE_ROUND_NO_OPUS when the model's
+    rank `named` is Opus or higher and above that round's row, else "". A lower model above the row is refused by the row's own remedy. The row is role_round_model's, so no model name is copied."""
+    for kind, n in brief_markers(prompt):
+        if kind.lower() == "round" and n in ROLE_ROUND_NO_OPUS:
+            want = role_round_model(rounds, "reviewer", n)
+            if want and named >= len(ROLE_MODEL_RANK) - 1 and named > ROLE_MODEL_RANK.index(want):
+                return ROLE_ROUND_NO_OPUS_REASON % (n, want.capitalize(), want)
+    return ""
+
+
 def role_model_one(tool_input):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
@@ -4001,6 +4058,8 @@ def role_model_one(tool_input):
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
+        if role == "reviewer" and (no_opus := reviewer_no_opus(rounds, tool_input.get("prompt"), named)):
+            return no_opus, ROLE_ROUND_NO_OPUS_MATCH + model, False
         if named == top or row is None:
             return "", "", False
         if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
@@ -4225,25 +4284,20 @@ def load_full(reading) -> list:
 
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
-    "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
-    "reviewer, the refuter, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
+    "only on the owner's typed override or grant for this spawn, except Plan, the designer, the refuter "
+    "and an Explore whose brief's first line carries the `%s` marker "
     "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
-    "Round 3 brief names sonnet."
+    "Round 3 brief and a builder's Round 3 brief name sonnet."
 ) % EXPLORE_AUDIT_MARKER
-OPUS_BUILDER_REASON = (
-    OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try, after review round 2 failed."
-)
-OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
+OPUS_STANDING_ROLES = ("Plan", "designer", REFUTER_ROLE)
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
-    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (the same marker
-    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
-    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    is the role Plan, designer or refuter, or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer or a builder on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
             return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
@@ -4255,8 +4309,6 @@ def opus_without_grant(tool_input) -> bool:
         return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
-        return False
-    if role == "builder" and builder_third_round(brief):
         return False
     # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles and the
     # builder stay exact-case, as they were.
@@ -6688,6 +6740,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
     if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
+            or role_model_check(tool, tool_input)[1].startswith(ROLE_ROUND_NO_OPUS_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
     if tool in SHELL_TOOLS:
@@ -6834,13 +6887,13 @@ def judge(payload) -> None:
                LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
                floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
-    # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
+    # 9b. Step-up: a reviewer's second round on Sonnet. A reviewer's third round passes here on Sonnet or Opus;
+    # the role model row (9b3, role_model_one) then refuses Opus.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
+    # 9b2. The lane effort pin: a lane starts with the effort field at its kind's effort and the whole brief as its
     # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
     # may mean another start.
     lane_prompt = lane_effort_hit(tool, tool_input)
@@ -6860,13 +6913,13 @@ def judge(payload) -> None:
         refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
-    # The override lifts the above-row refusal and never the no-model one (never_lifted).
+    # The override lifts the above-row refusal and never the no-model one or a reviewer's Round 3 on Opus (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:
         record(tool, "noted", "agent-role-model-unread", role_matched)
     if role_reason:
-        refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
+        refuse(tool, "deny", "agent-role-model", role_reason, role_matched, bare=role_matched.startswith(ROLE_ROUND_NO_OPUS_MATCH))
 
     # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
@@ -6883,7 +6936,7 @@ def judge(payload) -> None:
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+               OPUS_SPAWN_REASON
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
                   if opus_unread else ""),
                opus_model,

@@ -150,7 +150,7 @@ OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only i
 # grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
 # refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (decision agent-model-cap).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
-              "general-purpose", "claude")
+              "general-purpose", "claude", "design-reviewer")
 # The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
 ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 LOG_REASON_MAX = 300

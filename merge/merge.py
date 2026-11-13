@@ -5626,8 +5626,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--grant: the PR in the grant must be the pull request number")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;
-        # the last round may run Opus by the owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
+        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet,
+        # round 3 included (owner, 2026-11-13 14:05 CST); only a granted round 4 may run Opus. Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check:
             fix_model = review_round_model(REVIEW_FIX_ROW)
             if a.fix_check[2].lower() != fix_model:
@@ -5635,8 +5635,8 @@ def main(argv, host=None, lock=None, hosts=None):
         for n, role, model, _verdict in a.round:  # parse_review below refuses any fourth round with no --grant
             if role == REVIEW_ROLES[0] and n >= 2:
                 want = review_round_model(n)
-                if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
-                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
+                if want not in model.lower() and not (n >= 4 and "opus" in model.lower()):
+                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only a granted round 4 may run opus (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")

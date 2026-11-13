@@ -15,8 +15,8 @@ family than its role's row in the role table (pin_row_problem), each agent body 
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
 each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
 `disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
-docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
-with the guard's LANE_EFFORT.
+docs/decisions/agent-model-cap.md when the effort cell of one of its three lane rows (guard or check, product code or design, docs)
+does not start with the effort of that kind in the guard's LANE_KIND_FALLBACK.
 """
 import glob
 import importlib.util
@@ -34,10 +34,17 @@ _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hook
 _guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
-LANE_EFFORT = _guard.LANE_EFFORT
+LANE_KIND_LABELS = _guard.LANE_KIND_LABELS
+LANE_KIND_FALLBACK = _guard.LANE_KIND_FALLBACK
 REMOTE_SERVER = _guard.REMOTE_SERVER
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
-LANE_ROW = re.compile(r"^\|\s*lane\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
+
+def lane_row_pattern(label: str):
+    """The row of one lane kind: its first cell is the label, whole, and the effort cell is the third."""
+    return re.compile(r"^\|\s*" + re.escape(label) + r"\s*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
+
+
+LANE_ROWS = {kind: lane_row_pattern(label) for kind, label in LANE_KIND_LABELS.items()}
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # The self-model rules. An agent runs the model its spawn names, so its body must not state a model as its own. A
 # sentence is a run of text up to `.`, `!` or `?` before a space, wrapped lines included. A chunk of sentences ends at
@@ -168,15 +175,19 @@ def is_lane_record(path: str) -> bool:
     return os.path.abspath(path).endswith(os.sep + LANE_RECORD)
 
 
-def lane_effort_problem(text: str) -> str:
-    """Why the lane row's effort cell is not the lane effort, or "" when it is."""
-    rows = LANE_ROW.findall(text)
-    if len(rows) != 1:
-        return "needs one `lane` row with a model and an effort cell, found %d" % len(rows)
-    if not rows[0].startswith(LANE_EFFORT):
-        return "the `lane` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
-            LANE_EFFORT, rows[0])
-    return ""
+def lane_effort_problems(text: str) -> list:
+    """One line per lane kind whose row is missing or twice there, or whose effort cell does not start with the kind's effort
+    (the guard's LANE_KIND_FALLBACK). [] when all three rows are right. Each line names its row."""
+    problems = []
+    for kind, label in LANE_KIND_LABELS.items():
+        rows = LANE_ROWS[kind].findall(text)
+        effort = LANE_KIND_FALLBACK[kind][1]
+        if len(rows) != 1:
+            problems.append("needs one `%s` row with a model and an effort cell, found %d" % (label, len(rows)))
+        elif not rows[0].startswith(effort):
+            problems.append("the `%s` row's effort cell must start with %r (the guard's LANE_KIND_FALLBACK), found %r" % (
+                label, effort, rows[0]))
+    return problems
 
 
 def role_list_problems() -> list:
@@ -215,8 +226,7 @@ def main(argv) -> int:
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
         if is_lane_record(path):
-            problem = lane_effort_problem(text)
-            if problem:
+            for problem in lane_effort_problems(text):
                 print("%s: %s." % (path, problem))
                 bad = 1
         elif frontmatter(text) is None:
