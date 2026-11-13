@@ -7,7 +7,7 @@ FAMILY = "readonly-shell-write"
 # On Bash NUL is a file name, so a redirect to it writes. A > inside [[ ]], (( )) or $(( )) is a comparison, and
 # /dev/stdout, /dev/stderr and /dev/tty are streams, so none of those writes a file. The same forms inside an ssh
 # remote command are refused too, and no scratchpad exemption applies there, since that path sits on the remote box.
-# Incident (2026-11-12): a read-only audit agent wrote files over ssh and in the shell, and no guard stopped it.
+# Why: a read-only audit agent could write files over ssh or in the shell by mistake.
 # Decision guard-guards-mistakes-only: the guard stops a write Claude could make by mistake. A call with no agent_id
 # is never judged, and a writing role keeps its verdict.
 
