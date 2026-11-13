@@ -130,6 +130,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
+    "builder-bash-test-write": "the PostToolUse check on a builder's Bash or PowerShell call: a test path it changed is blocked, the reason gives the undo route and names no path; a builder's product change, a test-author's, the main session's and a clean tree pass; git status is read once per builder call; a call git cannot read logs unread; and the settings entry runs the check only for a builder",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",

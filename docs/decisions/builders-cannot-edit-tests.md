@@ -4,12 +4,13 @@
 
 A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
+Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. Two more read a builder's shell command, as early warnings:
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route: restore a changed test file, delete a new one. No override lifts it.
 - A builder's SubagentStop. A test change refuses the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It refuses. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
 - A builder's Bash or PowerShell call that writes a test path. It refuses with `builder-test-edit`, the same reason as the write tool. The shell check below says what it reads.
+- A builder's Bash or PowerShell call that leaves a test path changed, read after the call (PostToolUse). It refuses the call's result, with the undo route and a stop-and-report. No override lifts it.
 
 An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
 
@@ -67,6 +68,7 @@ The shell check does not replace the act. The act stays a test path in the build
 - Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
 - Landed: 2026-11-02.
 - Cost: no process, no file written, no timer. A builder's shell call that runs python or node by a file name reads that file once, at most 256 KB. A python file over that size is parsed at most `_PY_PREFIX_TRIES` times. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does (unmeasured). A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
+- After the call (PostToolUse, rule `builder-bash-test-write`): a builder's Bash or PowerShell call that left a test path in its worktree has its result refused, whatever script wrote it (basis: a builder wrote 64 `tests/guard` files with a script that computed its paths; only the stop check refused). `judge_shell_write` in `hooks/guard.py` reads each changed path with `is_builder_test_rel`. No override lifts it. A status git cannot answer logs `builder-bash-test-write-unread` and allows. A merge, rebase or cherry-pick that stopped on a conflict (a state in `BUILDER_CONFLICT_STATES`) brings the other side's files in: with no unmerged test path, the call logs `builder-bash-test-write-merging`, noted, and is allowed, and the merge-aware commit and stop check judges the change. An unmerged test path is still refused. The refusal names the merge-abort step only in a merge. Cost: at most one process start and one `git status` per builder Bash or PowerShell call, none for any other session (a `case` in the settings entry stops it before python starts). A call that left a test path adds file reads only: the `.git` entry to find the git dir, then at most one existence check per state name. No git call, no file written, no timer. A failed read counts as no state, so the refusal stands.
 
 Kind: process
 Home: hooks/guard.py
