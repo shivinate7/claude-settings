@@ -2,15 +2,27 @@
 
 Mockup: `docs/design/wakes-on-card.html`. Screen: `skills/waiting-page/page.html` (2f738dabf, the head of
 pwr-item-names-wakers-b). Designer kind: informed.
-Deep links: `#s=page|place-dest|accent|count|bad-say|bad-none`, `&w=all|390|800|1280`, `&t=light|dark`,
-`&lab=off`, `&hide=<state>,...`. Each option state has a Hide control. Each wakes span has the id `wakes-<n>`.
-The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules in `#newcss`.
+Deep links: `#s=page|ids|count|top-row|place-dest|muted|accent|bad-say|bad-none`, `&w=all|390|800|1280`,
+`&t=light|dark`, `&lab=off`, `&hide=<state>,...`. `page` draws the picks together. Each option has its own
+state and its own Hide control. The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new
+rules in `#newcss`.
+
+| Item | Option | State | Focus id |
+|---|---|---|---|
+| 1 | Ids on screen (pick) | `#s=ids` | `wakes-12` |
+| 1 | Count | `#s=count` | `wakes-12` |
+| 2 | Top row (pick) | `#s=top-row` | `wakes-12` |
+| 2 | Beside "Lands in" | `#s=place-dest` | `wakes-12` |
+| 3 | Muted text (pick) | `#s=muted` | `wakes-12` |
+| 3 | Lane weight and colour | `#s=accent` | `wakes-12` |
+| 4 | Say so (pick) | `#s=bad-say` | `item-16` |
+| 4 | Draw nothing | `#s=bad-none` | `item-16` |
 
 ## Sizes and themes
 
 - The same set as `last-answer-notes.md`: phone 390, mid 800, wide 1280; light and dark. `data-theme` on
   the root sets one; `prefers-color-scheme` sets the default.
-- Checked headless (Chrome through Playwright): 6 states, widths 390, 480, 800 and 1280, 2 themes. No
+- Checked headless (Chrome through Playwright): 9 states, widths 390, 480, 800 and 1280, 2 themes. No
   horizontal scroll in any frame, and no `.top`, `.dest` or `.card` wider than its box. Each focus id is
   found, and No. 15 (no `wakes`) draws no span. `lint/label_once.py` prints nothing for each state.
 
@@ -25,7 +37,7 @@ The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules
 
 ## 1. Ids on screen, or a count
 
-- Ids (pick), `#s=page`: "your answer wakes session_01KM4QW8ZT3VH9RB2NXC and session_01KM7FD2PA5YJ0SG6TLE".
+- Ids (pick), `#s=ids`: "your answer wakes session_01KM4QW8ZT3VH9RB2NXC and session_01KM7FD2PA5YJ0SG6TLE".
   Gain: the owner sees exactly which sessions his Send wakes, and can match an id with a session list. It is
   the brief's copy. Loss: about 30 characters of machine text per id. This departs from house guidance
   `ux-machine-text-hidden` (an id shows only in a closed disclosure), as `c190-task-command-notes.md` item 1
@@ -37,7 +49,7 @@ The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules
 
 ## 2. Where it shows
 
-- Top row (pick), `#s=page`: one span in `.top`, after the lane and wait span. Gain: `buildCard` builds the
+- Top row (pick), `#s=top-row`: one span in `.top`, after the lane and wait span. Gain: `buildCard` builds the
   top row before both early returns (a receipt card, and a sunk answered card), so one code site draws it on
   every card form. On a wide screen it adds no height. Loss: at 390 two ids wrap to two or three short lines
   in the top row, above the title.
@@ -47,7 +59,7 @@ The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules
 
 ## 3. Weight and colour
 
-- The top row's own muted text (pick), `#s=page`. Gain: it reads as a fact about the answer, below the
+- The top row's own muted text (pick), `#s=muted`. Gain: it reads as a fact about the answer, below the
   title in rank. Loss: it is quieter than "waits on lane", which sits beside it.
 - The lane's weight and accent (`.onlane`), `#s=accent`. Gain: the brief's "same style as the lane line".
   Loss: `.onlane` is bold accent because it says the item waits on something. `wakes` does not hold the
@@ -79,7 +91,8 @@ The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules
   `if (lane && wt)`), add one `top.append(h("span", { class: "onwakes", id: "wakes-" + it.id }, text))` when
   `wakesOf(it)` is not `null`, where `text` is the copy below. One text run: never split the ids into child
   elements, or `label_once.py` names "your answer wakes" as a repeated label.
-- `buildRuling`: its top row draws the same span after the `ruled` span. An Overturn wakes the same sessions.
+- `buildRuling`: its top row draws the same span after the `ruled` span, or after the Answered pill on a saved
+  ruling. An Overturn wakes the same sessions.
   Not drawn in the mockup.
 - CSS, after the `.onlane` rules: `.onwakes { min-width: 0; overflow-wrap: anywhere; }`. No colour and no
   weight: it takes the muted 14px of `.top`. No new token.
@@ -105,5 +118,10 @@ The mockup draws with page.html's own `<style>` at 2f738dabf, plus the new rules
 - Fixed: the first draft set each id in its own mono span, and `label_once.py` named "your answer wakes" three
   times. Now one text run. Fixed: the not-valid copy was two clauses long; now one.
 - Detector (`impeccable detect`): no finding. It reads the harness markup only; the cards are drawn by script.
+
+Questions from the critique, not blocking:
+- Should the writer store a plain session name beside each id (triage, coordinator), so the line reads in
+  the owner's words? That is a change to the item fields, outside this lane.
+- Should a ruling card show the line too (item 5 says yes; not drawn)?
 
 Items 1 and 3 depart from house guidance or the brief. Item 1 needs the owner's grant.

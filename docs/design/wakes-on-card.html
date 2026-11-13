@@ -34,16 +34,22 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
   <h1>Waiting page, lane pwr-wakes-on-card: the sessions an answer wakes, on the card</h1>
   <div class="row" id="rowS"><span>State</span>
     <button data-s="page">Page: picks together</button>
-    <button data-s="place-dest">Beside "Lands in"</button>
-    <button data-s="accent">Lane weight and colour</button>
+    <button data-s="ids">Ids on screen</button>
     <button data-s="count">Count, ids on hover</button>
+    <button data-s="top-row">In the top row</button>
+    <button data-s="place-dest">Beside "Lands in"</button>
+    <button data-s="muted">Muted text</button>
+    <button data-s="accent">Lane weight and colour</button>
     <button data-s="bad-say">Bad list: say so</button>
     <button data-s="bad-none">Bad list: draw nothing</button>
   </div>
   <div class="row" id="rowH"><span>Options</span>
-    <button class="hide" data-hide="place-dest" data-name="Beside Lands in"></button>
-    <button class="hide" data-hide="accent" data-name="Lane weight"></button>
+    <button class="hide" data-hide="ids" data-name="Ids"></button>
     <button class="hide" data-hide="count" data-name="Count"></button>
+    <button class="hide" data-hide="top-row" data-name="Top row"></button>
+    <button class="hide" data-hide="place-dest" data-name="Beside Lands in"></button>
+    <button class="hide" data-hide="muted" data-name="Muted"></button>
+    <button class="hide" data-hide="accent" data-name="Lane weight"></button>
     <button class="hide" data-hide="bad-say" data-name="Bad list: say so"></button>
     <button class="hide" data-hide="bad-none" data-name="Bad list: nothing"></button>
   </div>
@@ -54,7 +60,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=page|place-dest|accent|count|bad-say|bad-none</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Each wakes span has the id <code>wakes-&lt;n&gt;</code>. Drawn from page.html at 2f738dabf. Notes: wakes-on-card-notes.md.</p>
+  <p>Deep links: <code>#s=page|ids|count|top-row|place-dest|muted|accent|bad-say|bad-none</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Each wakes span has the id <code>wakes-&lt;n&gt;</code>. Drawn from page.html at 2f738dabf. Notes: wakes-on-card-notes.md.</p>
 </header>
 <main id="stage"></main>
 
@@ -1170,12 +1176,14 @@ function chrome(railHtml, listHtml, n) {
 const chipOf = (it, st) => ({ n: it.n, title: it.title, st });
 
 /* ---------- States ---------- */
-const STATES = ["page", "place-dest", "accent", "count", "bad-say", "bad-none"];
+const STATES = ["page", "ids", "count", "top-row", "place-dest", "muted", "accent", "bad-say", "bad-none"];
 const PICK = { place: "top", mode: "ids", bad: "say", strong: false };
+// Each option state draws the picks, changed only on its own axis, and its tags name that option.
+const NAMES = { page: "", ids: "ids on screen", count: "count, ids on hover", "top-row": "in the top row", "place-dest": "beside Lands in", muted: "muted text", accent: "lane weight and colour" };
 function screen(s) {
-  if (s === "page" || s === "place-dest" || s === "accent" || s === "count") {
+  if (s in NAMES) {
     const cfg = { ...PICK, place: s === "place-dest" ? "dest" : "top", strong: s === "accent", mode: s === "count" ? "count" : "ids" };
-    const name = { page: "", "place-dest": "beside Lands in", accent: "lane weight and colour", count: "count, ids on hover" }[s];
+    const name = NAMES[s];
     const t = (x) => name ? name + ", " + x : x;
     const cards = [
       openCard(TWO, { ...cfg, tag: t("two ids") }),
