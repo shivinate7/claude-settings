@@ -974,6 +974,9 @@ class Selector(unittest.TestCase):
     def test_an_absolute_bashx_basename_exits_1_naming_its_line(self):
         self.run_line_exits_1("/bin/bashx lint/test_x.sh", a="lint/test_x.sh")
 
+    def test_an_absolute_path_outside_the_interpreter_dirs_exits_1(self):
+        self.run_line_exits_1("/tmp/bash lint/test_x.sh", a="lint/test_x.sh")
+
     # The real checks.yml at HEAD, the full-size state. Its shell-macos job runs the duo-fold harness by /bin/bash, so
     # touching that test must read the line, not fail on it.
     def test_the_real_checks_yml_at_head_reads_the_shell_macos_bin_bash_line(self):
