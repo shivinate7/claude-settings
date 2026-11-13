@@ -1,0 +1,11 @@
+{
+ "id": "mail-read-receipt",
+ "at": "2026-11-13T09:06:00-06:00",
+ "title": "Read receipts are built in our own mailbox, not raised upstream",
+ "ruling": "Owner 09:06 CST Nov 13, answering the retrospective's draft of D19 and D20 (no read receipt on messages between sessions): D20 leaves the upstream raise; the git mailbox gives a sender a read receipt. Home: decision session-messages, hooks/mail.py.",
+ "quote": "D20 -- i'm pretty sure read receipts exist, and anyways we're leaving anthropic's messaging system for our own right? can't we add read receipts there",
+ "source": "owner chat 09:06 CST Nov 13, relayed by the retrospective 09:07 CST",
+ "status": "open",
+ "supersedes": [],
+ "step": "mail-read-receipt"
+}
