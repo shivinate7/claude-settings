@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Fold or open the iPhone Duo simulator through hinge, then read the angle back and check it.
+#
+#   duo-fold <udid> <folded|open>
+#
+# The shared tool in bin/, called by every repo that uses the iPhone Duo.
+# Exit 0: the Duo reads the posture's angle. Exit 1: a refusal, with a `duo-fold:` line on stderr saying why. Exit 64: wrong arguments.
+# A hinge move that exits non-zero is unknown, not a refusal: its confirm can time out after the fold landed.
+# The script notes the failure on stderr, still reads the angle, and judges that alone. It does not retry.
+# Why the read-back: a reused Duo can sit open, and a cold boot can come up at another angle, so a fold that hinge reports as
+# done is not yet a fold that was checked. The check is one line, a plain decimal number, within hinge's own confirm tolerance
+# (kAngleTolerance in hinge v0.3.0 hinge_helper.m) of 0 (folded) or 180 (open).
+# This is the one home for the Duo fold. It stands alone and is bash 3.2-safe, for macOS /bin/bash.
+#
+# Env: HINGE (the hinge tool; unset = fetch the pinned hinge), DUO_FOLD_WORK (where the fetch clones; default
+# ${TMPDIR:-/tmp}/duo-fold), DUO_FOLD_LOG (a file that gets hinge's own output; unset = hinge's output goes to stderr).
+# Sourced, it defines the constants and functions and does nothing else.
+
+# hinge v0.3.0 (MIT), pinned: it folds the iPhone Duo simulator and captures the display that hosts the UI.
+DUO_FOLD_HINGE_REPO="https://github.com/artemnovichkov/hinge"
+DUO_FOLD_HINGE_SHA="afb8f0bd277cb12187f0844a79542cbac35e7385"
+DUO_FOLD_TOLERANCE="0.5"
+# The whole reading: optional blanks around one plain decimal number (sign allowed), no other text.
+DUO_FOLD_ANGLE_RE='^[[:blank:]]*(-?[0-9]+(\.[0-9]+)?)[[:blank:]]*$'
+# The last refusal's reason, for a caller that wants it in its own failure line.
+# shellcheck disable=SC2034  # set for a sourcing caller to read
+DUO_FOLD_REASON=""
+
+# Sets DUO_FOLD_REASON, prints it on stderr, returns 1.
+# shellcheck disable=SC2034  # set for a sourcing caller to read
+_duo_fold_refuse() {
+  DUO_FOLD_REASON="$*"
+  echo "duo-fold: $*" >&2
+  return 1
+}
+
+# duo_fold_fetch_hinge [work dir]: clones hinge at the pinned sha under the work dir and sets HINGE to its tool.
+duo_fold_fetch_hinge() {
+  local work="${1:-${DUO_FOLD_WORK:-${TMPDIR:-/tmp}/duo-fold}}" log="${DUO_FOLD_LOG:-/dev/stderr}"
+  mkdir -p "$work" || return 1
+  [[ -d "$work/hinge/.git" ]] || git clone "$DUO_FOLD_HINGE_REPO" "$work/hinge" >>"$log" 2>&1 || return 1
+  git -C "$work/hinge" checkout "$DUO_FOLD_HINGE_SHA" >>"$log" 2>&1 || return 1
+  HINGE="$work/hinge/skills/hinge/scripts/hinge"
+  [[ -x "$HINGE" ]] || return 1
+}
+
+# _duo_fold_move <udid> <close|open>: the hinge move, its output to DUO_FOLD_LOG or stderr.
+_duo_fold_move() {
+  if [[ -n "${DUO_FOLD_LOG:-}" ]]; then
+    "$HINGE" -d "$1" "$2" >>"$DUO_FOLD_LOG" 2>&1
+  else
+    "$HINGE" -d "$1" "$2" >&2
+  fi
+}
+
+# duo_fold <udid> <folded|open>: returns 0 when the Duo reads the posture's angle, 1 on a refusal, 64 on wrong arguments.
+duo_fold() {
+  local udid posture move target angle num moved='' nl=$'\n'
+  if [[ $# -ne 2 || ( "$2" != folded && "$2" != open ) ]]; then
+    echo "usage: duo-fold <udid> <folded|open>" >&2
+    return 64
+  fi
+  udid="$1"
+  posture="$2"
+  if [[ "$posture" == folded ]]; then move=close target=0; else move=open target=180; fi
+  # hinge's helper builds for arm64 only; refuse before any hinge call or fetch.
+  if [[ "$(uname -m)" != arm64 ]]; then
+    _duo_fold_refuse "uname -m is $(uname -m), not arm64: hinge's helper builds for arm64 only, so $udid was not set $posture"
+    return 1
+  fi
+  if [[ -z "${HINGE:-}" ]]; then
+    duo_fold_fetch_hinge || { _duo_fold_refuse "could not fetch hinge at $DUO_FOLD_HINGE_SHA; $udid was not set $posture"; return 1; }
+  fi
+  if ! _duo_fold_move "$udid" "$move"; then
+    moved=" (hinge $move had failed)"
+    echo "duo-fold: hinge $move failed on $udid; reading the angle anyway" >&2
+  fi
+  if [[ -n "${DUO_FOLD_LOG:-}" ]]; then
+    angle="$("$HINGE" -d "$udid" get 2>>"$DUO_FOLD_LOG")" || { _duo_fold_refuse "hinge could not read the angle of $udid$moved"; return 1; }
+  else
+    angle="$("$HINGE" -d "$udid" get)" || { _duo_fold_refuse "hinge could not read the angle of $udid$moved"; return 1; }
+  fi
+  if [[ "$angle" == *"$nl"* ]] || ! [[ "$angle" =~ $DUO_FOLD_ANGLE_RE ]]; then
+    _duo_fold_refuse "the angle of $udid reads '${angle//$nl/\\n}', not a single number; wanted $posture ($target)$moved"
+    return 1
+  fi
+  num="${BASH_REMATCH[1]}"
+  if ! awk -v a="$num" -v t="$target" -v tol="$DUO_FOLD_TOLERANCE" 'BEGIN { d = a - t; if (d < 0) d = -d; exit (d <= tol) ? 0 : 1 }'; then
+    _duo_fold_refuse "the angle of $udid reads '$angle', not $target within $DUO_FOLD_TOLERANCE; wanted $posture$moved"
+    return 1
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  duo_fold "$@"
+  exit $?
+fi

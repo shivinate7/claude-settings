@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `docs/design/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), `duo-fold`, which folds the iPhone Duo and reads the angle back, and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`, `playwright-setup`). Callers pin them by commit SHA. |
@@ -88,6 +88,24 @@ rm -f "$f"
 exit 0
 ```
 
+Also set these as environment variables in the same cloud environment menu. They are
+the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
+but a session can start without them. Measured in another session: the SessionStart refresh
+rewrites `settings.json` after Claude Code reads it.
+
+* `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
+* `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
+* `MAILBOX_REPO=https://github.com/shivinate7/session-mailbox.git` (decision `session-messages`)
+
+The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
+`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
+script's `playwright install` without that path downloads a second copy to the default cache,
+which sessions never read. Install only when the browser that the pinned Playwright needs is
+missing from `/opt/pw-browsers`. Agents never install a browser (decision
+`playwright-install-once`).
+
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
@@ -95,12 +113,22 @@ install.sh also writes a `SessionStart` hook that re-runs it, so each new or res
 re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 `CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
 
+A repo's own `.claude/settings.json` hooks, deny rules, and `SessionStart` hooks do not run in a
+project's cloud thread. The docs say repo hooks run "outside a project thread" in
+[Setup scripts vs. SessionStart hooks](https://code.claude.com/docs/en/cloud-environments#setup-scripts-vs-sessionstart-hooks).
+So a repo that needs a `SessionStart` hook or its own deny rule for setup or safety must provision
+in the environment setup script instead. A guard that must hold in project threads belongs in this
+repo's guard, `hooks/guard.py`: it still loads there, while the repo's own settings did not
+(measured 2026-11-03 in a project thread). Whether the `SessionStart` refresh above runs in project
+threads is not measured.
+
 ## Verify the install
 
 * `/context`, in any session, lists `~/.claude/CLAUDE.md` and the imported file under
   **Memory files**.
 * `/status` shows the `shiv-stylisms` output style.
-* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`.
+* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`. If
+  it prints nothing, set the variable as an environment variable, as above.
 * On Windows in copy mode, check `~\.claude\claude-settings-install.log` for a dated line from
   the last run.
   The line reads `settings.json=<mode> agents/lint=<mode>`. A mode is `symlink`, `copy`, or `kept`.
@@ -133,22 +161,50 @@ before the merge, waits for CI on the claim commit, reverts the claim if a step 
 then merges. The repo's own opt-in is the `merge` block of its stamp config, see "The merge
 tool contract" in `actions/stamp/README.md`.
 
-Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
+Run it from inside the repo, or name the repo's checkout with `-C PATH` (`--repo-dir PATH`), with `gh`, `git`, `node` and Python 3 on PATH:
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
+merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
+merge --reviewed --root DIR [--root DIR ...]
+                        the same list for each repo checkout DIR, one block each, then one batch line per repo:
+                        `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                        one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
+                        failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
+                        `__main__.Class.name`, so its file is best-effort). No lock, no merge, no post. No match prints the clear line only
+                        when every read succeeded and nothing is unknown. Unknown, exit 1, never clear. A failed read prints only `unknown`; the other causes list the matches too:
+                        - a failed read;
+                        - a --run whose failing lines give no case and no file at all;
+                        - a --run with a failed job whose own log gives no case and no file, an empty log too (the all-jobs-passed rollup is skipped);
+                        - a --run with a failed job that has a failing line naming no case or file (a unittest summary line apart);
+                        - a --run with a job that is not success, skipped, neutral or failure, such as timed out, cancelled or still running;
+                        - a PR with a patch-less changed file, only while a case is queried and that PR has no match.
+                        --file alone is fine beside a patch-less file. An empty value is a usage error.
+                        Limits. A case matches only when its text sits whole in one `+` line; a case a --run names also matches a context line. A name built from pieces or with escapes never matches.
+                        A --case matches a context line only when a --run names the same case. --file finds a fix elsewhere, in guard or product code or far from the case line. --run finds it only when a failing line names its file, or the case name is on an added line or in the patch's context lines. --file is an exact path after normpath.
+                        It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
+                        Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
+                        For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
+merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
+                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
+                        live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
+                        reads `#N PASS (lint unknown at cap)`) and not FAIL, clean merge with the base, and a stacked base's PR in the call
+                        and passing. A check that cannot run is a FAIL, so a missing line is never a pass. Exit 0 only when all PASS.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
 `merge --help` lists every flag except `--dev`.
+
+A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write `--confirm`).
 
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
@@ -157,6 +213,22 @@ merge --dev ...         run the checkout's own tree, not origin main
   neither, it clones the public repo into a temporary folder. The checkout must have `origin`
   set to `shivinate7/claude-settings`. Any other result stops before a pull request read. A
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
+* **Another checkout.** A batch runner that merges in a second checkout runs
+  `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. The flag
+  is `-C` (or `--repo-dir`); the tool refuses a prefix such as `--repo`. It runs in the
+  foreground (Bash timeout up to 600000), never with `run_in_background`. Measured 2026-11-03
+  16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule and ran. The
+  same call in the background went to the auto-mode classifier, which refused it. In a cloud
+  session the guard reads the checkout from the flag, else the `cd`, else the working directory
+  (read `hooks/guard_merge.py` `_merge_target_repo`). It allows `--confirm` only when a `cs-repo`
+  tag of the session's own newest `get_session` record names that checkout's repo, and no
+  `set_session_tags` call follows that record (read `hooks/guard_merge.py` `repo_proof_hit`; its
+  tag reader is `hooks/shared_names.py` `repo_tag_names`). Guard rule `merge-confirm-repo` (read
+  `hooks/guard.py` `judge_shell`) refuses a merge that fails the check. Decision
+  `merge-confirm-repo`: a cloud merge confirm acts only in a repo its own record names. A `-C`
+  value that names no folder stops the merge tool before any read. A `-C` value that is no git
+  checkout stops it before its lock and any pull request read (read `merge/merge.py` `main`: the
+  stops say `-C names no folder` and `not in a git checkout`).
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
   SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
@@ -262,10 +334,12 @@ in all three is refused, and the refusal names both files and the variable. The 
 The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
 `tools/ios-ship.json`.
 
-* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only [--method debugging|release-testing]]` archives each app as Release and uploads it to TestFlight.
   It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
   stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
+  `--method` sets the export method: `debugging` for a development `.ipa`, `release-testing` for a release `.ipa` for registered devices. The default is
+  `app-store-connect`. It is refused without `--export-only`.
 * `ios-ship install [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.
@@ -285,14 +359,15 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
 Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
 It runs on the Duo by default, or on the iPhone 18 Pro with `--device pro`. It reuses the first booted device of that role. With none booted, it boots the role's device, runs the tests, and shuts that simulator down, also on failure, INT and TERM. With the other phone kind booted, it boots nothing and exits 1. `--hold [--for S] [-- CMD]` keeps the device for S seconds (default 300, max 900) under the same lock, with no xcodebuild.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
-It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
+It never shuts down a simulator it did not boot. Before its own boot it deletes that device's PosterBoard store (`PRBPosterExtensionDataStore`), which iOS 27.1 never frees. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
 On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro [--udid]`, `give` and `status`. After the grant it checks the booted list again before it boots. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
+After its own boot it tries to disable the Siri, intelligence, Mail and Spotlight daemons that crash on every iOS 27.1 boot; the list lives in `bin/sim-noise-services`.
 
 ## Session tiers and a roadmap record for a repo
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
-session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
-rotation of the standing sessions, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
+session roles (a coordinator that starts triage and the batch runner, then lanes), one roster,
+rotation of a standing session that goes stale or breaks, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.

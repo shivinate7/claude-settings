@@ -22,7 +22,7 @@ from git_reads import (  # noqa: F401
     PROCESS_START_UNREADABLE, SESSION_LIVE_TOLERANCE_MS, _common_dir, _git, _inside_work_tree,
     _path_identity, _process_start_ms, _process_start_ms_windows, _under_by_identity,
     branch_cherry_empty, branch_is_ancestor, branch_is_empty, branch_on_remote, branch_proof,
-    clone_checkouts, dirty_paths_are_pushed_copies, git_common_dir, is_worktree, porcelain,
+    clone_checkouts, clone_worktrees, dirty_paths_are_pushed_copies, git_common_dir, is_worktree, porcelain,
     primary_checkout, read_default_base,
     resolve_default_base, session_is_live, session_records, stash_stack, worktree_live_session,
     worktree_locked,
@@ -112,6 +112,14 @@ class PowerShellScript(str):
 class PosixScript(str):
     """Text that `sh -c` or `bash -c` runs (`inline_script`): read with bash's rules, even in a
     PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
+
+
+# PowerShell reads each of these as the ASCII quote beside it: the double family
+# opens and ends a `"` string, the single family a `'` string. Bash reads them as ordinary characters.
+PS_DOUBLE_QUOTES = "\u201c\u201d\u201e"
+PS_SINGLE_QUOTES = "\u2018\u2019\u201a\u201b"
+PS_STRAIGHT_QUOTES = str.maketrans({**dict.fromkeys(map(ord, PS_DOUBLE_QUOTES), '"'),
+                                    **dict.fromkeys(map(ord, PS_SINGLE_QUOTES), "'")})
 
 
 def is_powershell(text) -> bool:
@@ -374,10 +382,15 @@ WRAPPER_VALUE_FLAGS = {
 # them. Their value flags sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
 })
+# The flags of `docker|podman [compose] exec` that take no value. With WRAPPER_VALUE_FLAGS, they are every
+# flag `wrapped_commands(strict=True)` knows before the container.
+EXEC_BARE_FLAGS = {"-d", "-i", "-t", "-T", "--detach", "--interactive", "--tty", "--privileged"}
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
@@ -432,6 +445,55 @@ def _powershell_values(segment: str) -> str:
     return "".join(out)
 
 
+ANSI_C_SIMPLE = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r",
+                 "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+ANSI_C_ESCAPE = re.compile(r"\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})"
+                           r"|c(.)|(.))", re.DOTALL)
+
+
+def _ansi_c_value(match) -> str:
+    octal, hexa, short, wide, control, plain = match.groups()
+    if octal or hexa or short or wide:
+        try:
+            return chr(int(octal or hexa or short or wide, 8 if octal else 16) & (0xFF if octal else 0x10FFFF))
+        except (ValueError, OverflowError):
+            return match.group(0)
+    if control:
+        return chr(ord(control) & 0x1F)
+    return ANSI_C_SIMPLE.get(plain, match.group(0))
+
+
+def decode_ansi_c(text: str) -> str:
+    """`text` with each bash ANSI-C string (`$'...'`) read as the shell reads it: the escapes
+    (`\\NNN` octal, `\\xHH`, `\\n` and the rest) decode, a `\\0` ends the string, and the result
+    stands as one single-quoted word. shlex has no such quoting and reads `$'g'it` as `$git`, so
+    a command word spelled in pieces got past every rule that reads the word. A `$'` inside
+    quotes or after a backslash is text and stays."""
+    out, quote, index, last = [], "", 0, 0
+    while index < len(text):
+        if not quote and text[index] == "'" and is_contraction(text, index):
+            width, after = 1, ""
+        else:
+            width, after = quote_advance(text, index, quote)
+        if after == "$'" and not quote:
+            end, scan = None, index + 2
+            while scan < len(text):
+                if text[scan] == "\\":
+                    scan += 2
+                elif text[scan] == "'":
+                    end = scan
+                    break
+                else:
+                    scan += 1
+            if end is not None:
+                body = ANSI_C_ESCAPE.sub(_ansi_c_value, text[index + 2:end]).split("\x00", 1)[0]
+                out.append(text[last:index] + "'" + body.replace("'", "'\\''") + "'")
+                last = index = end + 1
+                continue
+        quote, index = after, index + width
+    return "".join(out) + text[last:] if out else text
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 
@@ -443,11 +505,21 @@ def segment_tokens(segment: str):
     source = ""
     if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
-        if "''" in segment or '""' in segment or "`" in segment:
-            segment = _powershell_values(segment)
-    elif "`" in segment:
-        source = segment   # bash text: shlex keeps its backtick substitutions as they stand
-    found = _segment_tokens(segment)
+        # A smart quote is a quote, so read the text with each as its ASCII twin. A text that then
+        # fails shlex (a lone `\u2019` in `don\u2019t` that PowerShell would read as a quote too) is read as it stands.
+        found = None
+        for text in dict.fromkeys((segment.translate(PS_STRAIGHT_QUOTES), segment)):
+            if "''" in text or '""' in text or "`" in text:
+                text = _powershell_values(text)
+            found = _segment_tokens(text)
+            if found is not None:
+                break
+    else:
+        if "`" in segment:
+            source = segment   # bash text: shlex keeps its backtick substitutions as they stand
+        if "$'" in segment:
+            segment = decode_ansi_c(segment)
+        found = _segment_tokens(segment)
     if found is None:
         return None
     tokens, quoted = found
@@ -670,6 +742,81 @@ def _interpreter_header(words: str):
     return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
+# A launcher starts another command, and that CHILD is what runs the heredoc body: `docker exec -i c python3 -`,
+# `ssh host python3 -`, `uv run python -`. The child is read, never a later word of the launcher's line: a
+# container, pod, host, `-w` path, file or `tee` argument named `node` is no interpreter. docker, podman,
+# kubectl and ssh reuse `wrapped_commands` and `ssh_remote_script`. A launcher is read only when every flag
+# before its child is known: a package runner takes no flag there, and docker and podman take only the flags
+# of EXEC_BARE_FLAGS and WRAPPER_VALUE_FLAGS (`wrapped_commands(strict=True)`). An unknown flag may take a
+# value, and a value read as the container would make a `tee` body read as that interpreter. An unread launcher
+# costs a false alarm on prose and never lets a read through.
+_RUN_LAUNCHERS = {
+    "uv": "run", "poetry": "run", "pipenv": "run", "pdm": "run", "rye": "run", "hatch": "run",
+    "conda": "run", "mamba": "run", "pipx": "run", "volta": "run", "pyenv": "exec", "fnm": "exec",
+    "pnpm": "exec", "uvx": "", "npx": "", "bunx": ""}
+_LAUNCHERS = frozenset(_RUN_LAUNCHERS) | {"ssh", "docker", "podman", "kubectl"}
+
+
+def _launched_commands(tokens, at: int):
+    """The command texts the launcher at `tokens[at]` starts, else []."""
+    word = basename(tokens[at])
+    if word == "ssh":
+        return [text for text in [ssh_remote_script(tokens)] if text]
+    if word not in _RUN_LAUNCHERS:
+        return wrapped_commands(list(tokens), at, strict=True)   # it compares list slices
+    index, sub = at + 1, _RUN_LAUNCHERS[word]
+    if sub:
+        if tokens[index:index + 1] != (sub,):
+            return []
+        index += 1
+    if tokens[index:index + 1] == ("--",):
+        index += 1
+    elif tokens[index:index + 1] and tokens[index].startswith("-"):
+        return []
+    return [shlex.join(tokens[index:])] if index < len(tokens) else []
+
+
+def _interpreter_command(words: str):
+    """Like `_interpreter_header`, but the interpreter must be the COMMAND of the heredoc's segment (after
+    assignments and wrappers such as `timeout 5` or `env X=1`), or the command a launcher starts
+    (`_launched_commands`). The word as a redirect target (`cat > node <<EOF`, `cat >& node <<EOF`), a path
+    part (`cat > node/go <<EOF`, `cd ~/node && cat > go <<EOF`) or an argument of another command is the
+    name of a file, and the body is not that interpreter's.
+    A segment the tokenizer cannot read is no match, so the caller keeps the body whole."""
+    word = re.compile(r"(?:" + words + r")(?:\.exe|\.cmd)?").fullmatch
+
+    def runs_interpreter(tokens) -> bool:
+        index = _walk_wrappers(tokens)[0]
+        if index is None:
+            return False
+        if word(basename(tokens[index])):
+            return True
+        if basename(tokens[index]) not in _LAUNCHERS:
+            return False
+        for child in _launched_commands(tokens, index):
+            read = _segment_tokens(child)
+            if read is not None and runs_interpreter(read[0]):
+                return True
+        return False
+
+    def command_is_interpreter(header: str) -> bool:
+        for segment in split_segments(header):
+            if "<<" not in segment:
+                continue
+            read = _segment_tokens(segment)
+            if read is None:
+                continue
+            tokens = []
+            for token in read[0]:
+                if "<<" in token:
+                    break
+                tokens.append(token)
+            if runs_interpreter(tuple(tokens)):
+                return True
+        return False
+    return command_is_interpreter
+
+
 _SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
 # A header whose heredoc pipes into a shell (`cat <<EOF | sh`, `... | ssh host bash -s`) or into xargs or source
 # (`cat <<EOF | xargs sh -c`, `| source /dev/stdin`): the shell runs the body.
@@ -684,9 +831,10 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+PYTHON_WORDS = "python[\\d.]*"
+NODE_WORDS = "node"
+_INTERPRETERS = _SHELLS + "|" + PYTHON_WORDS + "|perl|ruby|" + NODE_WORDS + "|deno"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
-
 
 def SHELL_HEREDOC(text: str) -> bool:
     return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
@@ -754,8 +902,30 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     return kept, bodies
 
 
+def _own_headers(line: str, count: int):
+    """For each of the `count` heredoc headers of one line, the text of the command that owns it: its
+    segment, and the commands it pipes into when they hold no header (`cat <<A | sh`). Two commands on one
+    line (`cat > go <<'A' && node - <<'B'`) so each body is classified by its own command. When the
+    segments do not account for every header (an odd contraction quote doubles the segments), the line is
+    read no further: every owner is '', and a caller that blanks prose keeps the body whole."""
+    ends = []
+    segments = split_segments(line, ends)
+    owners = []
+    for at, segment in enumerate(segments):
+        found = len(heredoc_heads(segment)[0])
+        if not found:
+            continue
+        text, last = segment, at
+        while last + 1 < len(segments) and ends[last] == "|" and not heredoc_heads(segments[last + 1])[0]:
+            last += 1
+            text += "|" + segments[last]
+        owners += [text] * found
+    return owners if len(owners) == count else [""] * count
+
+
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, spans: "list | None" = None,
+                   own_heads: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +934,9 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it, and one that
+    passes `spans` gets the (first, end) line indexes of each body, and one that passes `own_heads` gets, for
+    each body, the text of the command that owns its header (_own_headers)."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -780,11 +952,15 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         header_line = lines[index]
         heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
         index += 1
+        if own_heads is not None and heads:
+            own_heads.extend(_own_headers(header_line, len(heads)))
         for quote, delimiter in heads:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
+            if spans is not None:
+                spans.append((start, index))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
             else:
@@ -792,18 +968,24 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     return kept, bodies, unclosed
 
 
-def _drop_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, keeping every header line. The one loop
-    `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
+def _heredoc_walks(cmd: str):
+    """((line indexes the lane's walk keeps, line indexes main's walk keeps, the line span of each body),
+    the bodies of the lane's walk, whether its last body is unclosed)."""
+    lane_at, main_at, spans = [], [], []
+    _, bodies, unclosed = _walk_heredocs(cmd, kept_at=lane_at, spans=spans)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
+    return (lane_at, main_at, spans), bodies, unclosed
+
+
+def _drop_heredoc_bodies(cmd: str, keep=(), walks=None) -> str:
+    """Drop the body of every heredoc, keeping every header line, and the bodies numbered in `keep`. The one
+    loop `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
-    lane_at, main_at = [], []
-    _walk_heredocs(cmd, kept_at=lane_at)
-    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
-    if lane_at != main_at:
-        keep = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
-        return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in keep)
-    return "\n".join(_split_heredocs(cmd)[0])
+    lane_at, main_at, spans = walks or _heredoc_walks(cmd)[0]
+    # a line stays in view when either walk keeps it, or when its body is one in `keep`
+    show = set(lane_at) | set(main_at) | {at for number in keep for at in range(*spans[number])}
+    return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in show)
 
 
 # A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
@@ -811,53 +993,140 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+# The commands that print their heredoc body or write it to a file, and run nothing in it.
+_DATA_SINKS = {"cat", "tee"}
+_WRAPPERS = r"source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command|time|ssh"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+# The runners that read a file as shell lines: a shell or a wrapper, never a python, perl, ruby or node.
+_SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+# The runners that read a file as a script of their own.
+_SCRIPT_RUNNER = re.compile(r"(?:python[\d.]*|perl|ruby|node|nodejs|bun|deno)(?:\.exe|\.cmd)?").fullmatch
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
-    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
-    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
+    """The word that runs a file a heredoc writes, else '': the first `runner` word of its pipeline (by default a
+    shell, an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or the file itself when it is
+    the command (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
+    matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
-        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
-            return True
-    return False
+        runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words
+                     if runner(word.rsplit("/", 1)[-1])), "")
+        for words in stages:
+            for at, word in enumerate(words):
+                if word in written and (runs or at == 0):
+                    return runs or word
+    return ""
 
 
-def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
+def _feeds_data(header: str, scripts: bool) -> bool:
+    """True when each heredoc on the header line feeds a command that only holds its body as data: a data
+    sink (`_DATA_SINKS`: `cat > n.md <<EOF`, `sudo tee n.md <<EOF`), or with `scripts` a python, node, perl or
+    ruby whose script `interpreter_bodies` reads. The command word is read at command position, as
+    `resolve_command` reads it. A heredoc piped onward, fed through xargs, or on a segment that cannot be
+    read feeds no data sink."""
+    ends = []
+    fed = False
+    for segment, end in zip(split_segments(header, ends), ends):
+        if not heredoc_heads(segment)[0]:
+            continue
+        tokens = segment_tokens(segment)
+        if end == "|" or not tokens:
+            return False
+        at, chain = _walk_wrappers(tuple(tokens))
+        word = basename(tokens[at]) if at is not None else ""
+        if any(wrapper == "xargs" for wrapper, _ in chain) or not (
+                word in _DATA_SINKS or (scripts and script_language(word))):
+            return False
+        fed = True
+    return fed
+
+
+def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
-    only when a shell reads it, for a rule that judges shell lines."""
+    only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
+    view. With `per_body` that reading drops a body whose own header only feeds it to a data sink
+    (`_feeds_data`), unless the header names a shell or an interpreter, pipes it to a shell, or writes a file
+    that a later segment runs. Under `shells_only` a python, node, perl or ruby body drops too: it holds a
+    script, which `interpreter_bodies` gives to a rule that reads its shell spots. A caller that maps the
+    returned lines back to the command (`heredoc_offsets`) takes the default."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    _, bodies, unclosed = _walk_heredocs(cmd)
+    walks, bodies, unclosed = _heredoc_walks(cmd)
     if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
+    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
+    # is text, and no body line may make another body look run.
+    text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
+    headers = [_without_message_values(header) for _, _, header in bodies]
+    keep = []
+    # The per-body reading starts from main's whole-command test, which both its callers read before.
+    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, headers):
+        # The body may be executed, so keep it under inspection. With the two walks reading these headers
+        # differently, no body can be told apart from another; a heredoc that eval or source runs may open
+        # on a line before its header.
+        if not per_body or walks[0] != walks[1] or _FED_SHELL(text):
+            return cmd
+        first = _SHELL_FIRST if shells_only else _INTERPRETER_FIRST
+        runner = _SHELL_RUNNER if shells_only else _RUNNER
+        keep = [number for number, header in enumerate(headers)
+                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)
+                or not _feeds_data(header, shells_only)]
     # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
-    # lines of their own; the prose around them is data. A script body's header test below keeps it whole.
+    # lines of their own; the prose around them is data. A script body is the interpreter's own text, one
+    # command (`interpreter_bodies` gives it to a rule that reads its shell spots).
     runs = []
-    for quote, body, header in bodies:
-        if not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header)):
+    for number, (quote, body, _header) in enumerate(bodies):
+        if (not quote and number not in keep and ("$(" in body or "`" in body)
+                and not _INTERPRETER_FIRST(headers[number])):
             from guard_env import _substitutions   # imported late: guard_env imports this file
             texts, too_deep = _substitutions(body, heredoc=True)
             if too_deep:
                 return cmd
-            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
-    dropped = _drop_heredoc_bodies(cmd)
-    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
-    # is text, and no body line may make another body look run.
-    text = _without_message_values(dropped)
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
-        return cmd  # the body may be executed, so keep it under inspection
-    return "\n".join([dropped] + runs)
+            runs += [t for t, _ in texts[:-1]]   # the last text is the body around them
+    if len(keep) == len(bodies):
+        return cmd
+    return "\n".join([_drop_heredoc_bodies(cmd, keep, walks)] + runs)
+
+
+# The language a header names, by the header's own word.
+SCRIPT_HEADERS = {
+    "py": re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])"),
+    "js": re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])"),
+    "perl": re.compile(r"(?<![\w.-])perl(?:\.exe)?(?![\w.-])"),
+    "ruby": re.compile(r"(?<![\w.-])ruby(?:\.exe)?(?![\w.-])"),
+}
+
+
+def script_language(header: str) -> str:
+    """"py", "js", "perl" or "ruby" for a header line that names that interpreter, else ''."""
+    return next((lang for lang, found in SCRIPT_HEADERS.items() if found.search(header)), "")
+
+
+def interpreter_bodies(cmd: str):
+    """[(language, body, quote)] for each heredoc body that python, node, perl or ruby reads as a script: the body
+    of a header that names one, and the body written to a file that a later segment runs with one, in the
+    language of the word that runs it (language '' for a file run as the command itself, `./f`).
+    `quote` is "'" for a quoted delimiter. A rule that judges shell lines reads these only at their shell spots
+    (guard_env.script_spots), and an unquoted body also at the substitutions bash runs in it."""
+    if "<<" not in cmd:
+        return []
+    walks, bodies, _ = _heredoc_walks(cmd)
+    text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
+    out = []
+    for quote, body, header in bodies:
+        header = _without_message_values(header)
+        runs = _runs_written_file(text, [header], _SCRIPT_RUNNER)
+        lang = script_language(header) or script_language(runs)
+        if lang or runs:
+            out.append((lang, body, quote))
+    return out
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
@@ -915,6 +1184,51 @@ REDIRECTION = re.compile(
     r"|<\s*\S+"         # <file
     r"|\d?>>?\s*\S+"    # >file, >>file, 2>file, 2>>file, 2>&1, >&2, 1>&2
 )
+
+
+# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `2>`, with the space before its target.
+_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?>>?\s*")
+
+
+def strip_redirections(segment: str) -> str:
+    """`segment` with each UNQUOTED redirection (REDIRECTION's shapes) cut to one space; a `>` or `<` inside quotes is text and stays.
+    The target is one shell word: a quoted target (`> "run log"`) goes whole, an unquoted one up to the next space, as REDIRECTION
+    reads it. Quote state comes from walk_quotes, the one quote walk. A quote left open stays open, so segment_tokens returns None
+    for the result and its caller can refuse.
+
+    One walk step can span several characters (an escape `\\x`, a `$'` opener), so each character takes the quote state of the step
+    it falls in, and only a step's first character can start a redirection or end a target word: an escaped `>` or space is text."""
+    size = len(segment)
+    quotes, step_starts = [""] * size, [False] * size
+    steps = [(at, quote) for at, _char, quote in walk_quotes(segment)]
+    for (at, quote), (after, _next) in zip(steps, steps[1:] + [(size, "")]):
+        step_starts[at] = True
+        for inside in range(at, min(after, size)):
+            quotes[inside] = quote
+
+    def unquoted_space(at: int) -> bool:
+        return step_starts[at] and not quotes[at] and segment[at].isspace()
+
+    out, index = [], 0
+    while index < size:
+        char, quote = segment[index], quotes[index]
+        word_start = index == 0 or unquoted_space(index - 1)
+        starts = not quote and step_starts[index] and (char in "<>&" or (char.isdigit() and word_start))
+        operator = REDIRECTION.match(segment, index) and _REDIRECT_OPERATOR.match(segment, index) if starts else None
+        if not operator:
+            out.append(char)
+            index += 1
+            continue
+        end = operator.end()
+        fd = re.compile(r"&(?:\d+|-)").match(segment, end)
+        if fd:
+            end = fd.end()
+        else:
+            while end < size and not unquoted_space(end):
+                end += 1
+        out.append(" ")
+        index = max(end, index + 1)
+    return "".join(out)
 
 
 def _git_subcommand_index(tokens, index: int) -> int:
@@ -1054,14 +1368,120 @@ def shell_abs(path: str, base):
     return path
 
 
+# Commands that cannot set a variable of the shell they run in. A segment whose command is not here
+# (unset, read, printf -v, export, a loop, eval, a function, `R+=x`) may, so the walk forgets every
+# variable after it.
+_VARIABLE_SAFE_WORDS = frozenset(CD_WORDS + POP_WORDS + (
+    "echo", "true", "false", "git", "gh", "ls", "cat", "pwd", "mkdir", "rm", "grep", "test", "[", "sleep",
+    "python", "python3"))
+_VARIABLE_SET_IN_ARGS = re.compile(r"\$\(\(|\$\{[^}]*=")   # `$((R=1))` and `${R:=x}` set R from an argument
+
+
+def _variable_text(known, text: str) -> str:
+    """`text` with each `$VAR` read as the value in `known`. The values go through `_resolve_vars`, the
+    one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
+    this file). A variable not in `known` stays as written."""
+    from guard_frozen import _resolve_vars
+    mark = " ;\x00; "
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    return _resolve_vars(given + text).split(mark)[-1]
+
+
+def _track_variables(known, segment: str, tokens, ran: bool) -> bool:
+    """Update `known`, the variables the shell holds, for one segment the walk passes. Only a segment of
+    plain `NAME=value` words that surely ran here (`ran`: not in a pipe, not after `||`, not after an `&&`
+    whose left side may fail) sets a variable. A value holding a substitution, a quote, a backslash or an
+    unread variable, an empty value, and a quoted `~` (bash does not expand it) leave the variable unknown.
+    Only a `~` that starts the value or follows a `:` is a tilde: one inside a name (the Windows
+    `RUNNER~1` temp folder) is a plain character.
+    A segment that is not an assignment keeps `known` only when its command cannot set a variable.
+    True when the segment is plain assignments with no substitution: its exit status is 0, so an `&&`
+    after it runs."""
+    if tokens and all(ASSIGNMENT.match(token) for token in tokens):
+        for token in tokens:
+            name, value = token.split("=", 1)
+            read = None
+            if (ran and value and not set(value) & set("`'\"(\\")
+                    and not ((value.startswith("~") or ":~" in value) and "%s=~" % name not in segment)):
+                read = _variable_text(known, value)
+                if not read or "$" in read:
+                    read = None
+            if read is None:
+                known.pop(name, None)
+            else:
+                known[name] = read
+        return not any("$(" in token or "`" in token for token in tokens)
+    index = resolve_command(tokens) if tokens else None
+    if (index is None or basename(tokens[index]) not in _VARIABLE_SAFE_WORDS
+            or _VARIABLE_SET_IN_ARGS.search(segment)):
+        known.clear()
+    return False
+
+
+def _command_text(segment: str, tokens) -> str:
+    """`segment` from its command word on, or None when that word cannot be found unquoted. Bash expands
+    a command's words before its prefix assignments (`R=A cd "$R"`) take effect, so the resolver must not
+    see them."""
+    index = resolve_command(tokens)
+    if index is None or not any(ASSIGNMENT.match(token) for token in tokens[:index]):
+        return segment
+    word = tokens[index]
+    for at, _, quote in walk_quotes(segment):
+        if (not quote and segment.startswith(word, at) and (at == 0 or segment[at - 1].isspace())
+                and (at + len(word) == len(segment) or segment[at + len(word)].isspace())):
+            return segment[at:]
+    return None
+
+
+def _subshell_opens(segment: str, marks):
+    """The indexes of the `(` in `marks` that open a subshell group: the first word of the segment, or
+    inside another such group. A `$(`, `<(`, `((` or a group after a keyword is not read as one, so its
+    `)` keeps what the segment itself did to a variable (`R=$(cmd)` leaves R unknown)."""
+    opens = set()
+    for at, char in marks:
+        if char != "(" or segment[at + 1:at + 2] == "(":
+            continue
+        before = segment[:at].rstrip()
+        if not before or (before[-1] == "(" and len(before) - 1 in opens):
+            opens.add(at)
+    return opens
+
+
+def _close_paren(stack, known):
+    """Pop one `( ... )` level: the folder state comes back, and so does `known` after a subshell group.
+    After any other paren (a substitution, arithmetic), only the variables the segment left unchanged
+    stay known: the snapshot is from before the segment, so restoring it would undo the segment's own
+    clear."""
+    where, prev, saved, group = stack.pop()
+    if group:
+        return where, prev, dict(saved)
+    return where, prev, {name: value for name, value in known.items() if saved.get(name) == value}
+
+
+def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
+    """The folder a `cd` names with each variable read from `known`, or `move` unchanged when it cannot be
+    read: a `cd` that may not run (`ran` False), a command word not found in the text, or a result that is
+    empty, which would be taken for home. A prefix assignment on the cd is not read (`_command_text`)."""
+    text = _command_text(segment, segment_tokens(segment)) if ran else None
+    if text is None:
+        return move
+    tokens = segment_tokens(_variable_text(known, text))
+    read = _segment_cd_move(tokens) if tokens else None
+    return read if isinstance(read, str) and read else move
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    back, a `cd` inside `( ... )` ends with the parenthesis, and `popd` is not tracked. A `cd` to
+    `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value a plain `NAME=value` segment set in this shell
+    (`_track_variables`); a prefix assignment, one in a pipe, a subshell, after `||` or after an `&&` whose
+    left side may fail, and any step that may set a variable (`unset`, `read`, a loop, `$(...)`) leave it
+    unknown. A path that still holds `$` after that
+    (unassigned, a substitution), or holds `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
+    shell stays where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
@@ -1070,29 +1490,47 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
+    doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
+    unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        groups = _subshell_opens(segment, marks)
+        stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
+        closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
             return None if skipping else where
+        if not segment.strip():
+            continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
+            last_end = end
             skipping = end in ("&&", "|")
-            for _ in range(marks.count(")")):
+            unsure = True
+            for _ in range(closes):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, known = _close_paren(stack, known)
                     skipping = False
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (
-                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+        before = last_end
+        last_end = end
+        piped = "|" in (end, before)
+        if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        ran = not (doubt or piped or before == "||")   # this segment runs in the shell, as itself
+        sure = ran and not (unsure and before == "&&")
+        assigned = _track_variables(known, segment, tokens, sure)
+        doubt = doubt and end == "&&"
         if tokens is None:
             where = None
         elif move is not None:
             old = where
+            if move is not CD_UNKNOWN and "$" in move:
+                move = _read_cd_variable(known, segment, move, sure)
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
@@ -1108,27 +1546,58 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
+            doubt = doubt or (where is None and end == "&&")
             prev = old
-        for _ in range(marks.count(")")):
+        # Only a plain assignment or a cd into a folder the walk trusts surely succeeds.
+        unsure = not (sure and (assigned or (move is not None and move is not CD_UNKNOWN and where is not None
+                                                  and not skipping)))
+        for _ in range(closes):
             if stack:
-                where, prev = stack.pop()
+                where, prev, known = _close_paren(stack, known)
     return where
 
 
-def _segment_git_c_target(tokens):
-    """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
-    when the segment's command word is not `git`.
+# The value flags of a wrapper that move the program it runs into another folder first, so `env
+# -C <dir> git ...` runs git in <dir>. `_wrapper_flags` already reads each flag's value with
+# `WRAPPER_VALUE_FLAGS`; this names which of them are a folder.
+WRAPPER_CHDIR_FLAGS = {"env": ("-C", "--chdir")}
+
+
+def _chain_chdir(base, value):
+    """One folder step: a relative VALUE joins onto BASE, as `env -C a env -C b` and `git -C a -C b` do,
+    and an empty one leaves BASE alone."""
+    return os.path.join(base, value) if base and value else (value or base)
+
+
+def _wrapper_chdir(tokens):
+    """Return the folder the command wrappers in front of a segment's command word move it into, or
+    None when none does. Each `env -C` or `env --chdir` is read through `_walk_wrappers`, the walk
+    that finds the command word, so the folder and the program come from one reading. A relative
+    folder joins onto the one before it, as `env -C a env -C b` does."""
+    found = None
+    for word, flags in _walk_wrappers(tuple(tokens))[1]:
+        for flag, value in flags:
+            if flag in WRAPPER_CHDIR_FLAGS.get(word, ()) and value:
+                found = _chain_chdir(found, value)
+    return found
+
+
+def _segment_git_c_parts(tokens):
+    """Return `(env folder, git -C folder)` of a tokenized segment, each None when the segment names none,
+    or None when the segment's command word is not `git` or a `-C` has no value. The env folder is the one
+    an `env -C <dir>` or `env --chdir <dir>` in front of the `git` moves it into (`_wrapper_chdir`). The
+    git -C folder is every `-C` after the `git`, chained. The two stay apart because `_run_dir` reads them
+    differently: an env folder moves only the segment's own program, and a git -C folder reads first-wins.
+    `_segment_git_c_target` joins them for every other caller.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
-    -C/some/path` (or `-C=...`) and never run. An earlier version of this function also
-    accepted an attached `-C<path>` as if it named a tree, which let a command text attach any
-    path it liked to `-C` and have `_run_dir` read that path as though it were real, even
-    though git itself refused the call and the command ran wherever the shell's own cwd (or an
-    earlier, real `cd`) put it. Found in review of PR #75, reproduced against real git and
-    against the live guard: the attached form ALLOWED a `git reset --hard HEAD` that ran in a
-    real dirty checkout, because the fake `-C<path>` pointed the subject read at an unrelated
-    clean one.
+    -C/some/path` (or `-C=...`) and never run. Reading an attached `-C<path>` as a tree would
+    let a command text attach any path it liked to `-C` and have `_run_dir` read that path as
+    though it were real, even though git itself refuses the call and the command runs wherever
+    the shell's own cwd (or a real `cd`) puts it. A `git reset --hard HEAD` that runs in a real
+    dirty checkout would then be allowed, because the fake `-C<path>` points the subject read at
+    an unrelated clean one.
     """
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -1140,9 +1609,8 @@ def _segment_git_c_target(tokens):
         if token == "-C":
             if cursor + 1 >= len(tokens):
                 return None
-            value = tokens[cursor + 1]
             # git chains every `-C`: a relative one joins onto the one before it
-            found = os.path.join(found, value) if found and value else (value or found)
+            found = _chain_chdir(found, tokens[cursor + 1])
             cursor += 2
             continue
         if token in GIT_OPT_WITH_VALUE:
@@ -1152,7 +1620,19 @@ def _segment_git_c_target(tokens):
             cursor += 1
             continue
         break
-    return found
+    return _wrapper_chdir(tokens), found
+
+
+def _segment_git_c_target(tokens):
+    """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
+    when the segment's command word is not `git`. An `env -C <dir>` or `env --chdir <dir>` in
+    front of the `git` moves it first, so a `git -C` after it joins onto that folder, and with
+    no `git -C` the `env` folder alone is the target. `_segment_git_c_parts` holds the reading
+    and its measured limits; this is its joined form, the one every caller but `_run_dir` shares."""
+    parts = _segment_git_c_parts(tokens)
+    if parts is None:
+        return None
+    return _chain_chdir(*parts)
 
 
 def _absolute(where: str, shell_cwd: str) -> str:
@@ -1186,7 +1666,8 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
+    """Return the directory the command RUNS in: a `git -C`, else the env folder when every git segment
+    has one, else the last `cd`, else the cwd.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
     because each answers a different question and each belongs to one caller.
@@ -1196,8 +1677,18 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
     quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    `git -C` found, across all segments in order, still wins over every `cd`, matching this
-    function's behaviour before this fix; failing that, the LAST `cd` found wins.
+    segment with a `git -C` wins over every `cd` and over an env folder (only an env folder in its
+    own segment is kept, as its base), and its relative folder reads against the shell cwd, not
+    against the folder an earlier `cd` left. Without a `git -C`, an env folder is used only when
+    every git segment carries one (below); otherwise the last `cd`, else the cwd. That first-wins
+    reading of `git -C` is kept as the owner ruled.
+
+    AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
+    still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
+    one; the last of them wins, and a relative one joins onto the folder the last `cd` before it left.
+    Any bare git segment makes the shell's folder (the last `cd`, else the cwd) the answer, and so
+    does a command with no git segment. With a `git -C` in the same segment, the `git -C` joins onto
+    that env folder.
 
     HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
@@ -1205,20 +1696,30 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     where = None
-    last_cd = None
+    moved = None   # the folder the last `cd` left
+    env_moved = None   # the env folder of the last git segment that carries one
+    bare_git = False   # a git segment without an env folder runs in the shell's folder
     for segment in split_segments(cmd):
         tokens = segment_tokens(segment)
         if tokens is None:
             continue
-        if where is None:
-            git_c = _segment_git_c_target(tokens)
+        parts = _segment_git_c_parts(tokens)
+        if parts is not None:
+            env_dir, git_c = parts
+            if env_dir and moved:
+                env_dir = shell_abs(env_dir, moved) or env_dir
             if git_c is not None:
-                where = git_c
+                if where is None:
+                    where = _chain_chdir(env_dir, git_c)
+            elif env_dir:
+                env_moved = env_dir
+            else:
+                bare_git = True
         cd = _segment_cd_target(tokens)
         if cd is not None:
-            last_cd = cd
+            moved = cd
     if where is None:
-        where = last_cd
+        where = env_moved if env_moved and not bare_git else moved
     if where:
         where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""
@@ -1560,11 +2061,12 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
-    spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift."""
+    spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -1577,6 +2079,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                if on_lift:
+                    on_lift()
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
@@ -1633,6 +2137,9 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
+# The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
+# brief hook and the tests import it, and none types it.
+REFUTER_ROLE = "refuter"
 
 
 def agent_role(payload) -> str:
@@ -1812,17 +2319,28 @@ def ssh_remote_script(tokens) -> str:
     return " ".join(tokens[index + 1:])   # tokens[index] is the host
 
 
-def wrapped_commands(tokens, at: int):
+# The `find` actions that run a command on a match. `guard_env` builds its own find list on this.
+FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
+
+
+def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
-    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
+    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
+    line.
+    With `strict`, a `docker|podman exec` that has a flag before the container the tables do not list reads
+    as no child: the flag may take a value, and the container is then misplaced."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "watch":
+        index, _ = _wrapper_flags(word, rest, 0)
+        return [" ".join(rest[index:])] if rest[index:] else []
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
     if word == "find":
         found = []
         for i, token in enumerate(rest):
-            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+            if token in FIND_EXEC_ACTIONS:
                 end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
                 found.append(shlex.join(rest[i + 1:end]))
         return found
@@ -1837,9 +2355,13 @@ def wrapped_commands(tokens, at: int):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):
         return []
-    index, _ = _wrapper_flags(word, rest, 0)
+    index, flags = _wrapper_flags(word, rest, 0)
+    if strict and word in ("docker", "podman"):
+        known = WRAPPER_VALUE_FLAGS[word] | EXEC_BARE_FLAGS
+        if any(flag not in known for flag, _ in flags):
+            return []
     inner = rest[index + skip:]
     return [shlex.join(inner)] if inner else []
 
@@ -1847,7 +2369,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`, `uv run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""

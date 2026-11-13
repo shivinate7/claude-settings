@@ -55,7 +55,7 @@ SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
 SLOT_UDID = {
     "1": "3553660D-315C-4B9C-8614-039D7A5B637E",    # Duo 1
     "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",    # Duo 2
-    "pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3",  # iPhone 18 Pro
+    "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",  # iPhone 18 Pro
 }
 
 

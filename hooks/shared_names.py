@@ -6,10 +6,23 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
+
+# The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
+# lint/check_agent_models.py reads it from the guard.
+REMOTE_SERVER = "mcp__claude-code-remote"
+# The claude-code-remote tools that start, message, tag or archive sessions, set scheduled tasks or attach repos
+# and computers. An agent never calls one; the session that spawned it does. settings.json's guard matcher
+# must name each (lint/test_settings_matcher.py reads this tuple).
+REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
+    "create_session", "send_message", "archive_session", "unarchive_session", "interrupt_session",
+    "set_session_tags", "set_session_title", "create_trigger", "update_trigger", "delete_trigger",
+    "fire_trigger", "send_later", "watch_url", "unwatch_url", "subscribe_pr_activity",
+    "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
+    "request_computer_folder"))
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
@@ -33,11 +46,19 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
 
+# A reviewer's brief for a guard or check diff has a line that starts with this text (rule agent-role-model); the guard then
+# reads the `1 guard` round row of the model record for it. It is the review record's field line for such a change, which
+# merge/merge.py review_body writes, so the record and the brief carry one text.
+REVIEW_GUARD_MARKER = "Guard or check: yes"
+# A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
+FIX_CHECK_MARKER = "Fix check"
+
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:
 #   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
-#   "first-line": the brief's first non-blank line only, case-sensitive, with any text ahead of the marker.
+#   "first-line": the brief's first non-blank line only, case-sensitive; a row says whether text may stand ahead of the marker
+#     (the round and audit rows allow it, the fix check row does not).
 # The two positions differ because the owner ruled them apart: a role word or markup ahead of `Round N of 3` on the
 # first line still counts, but lowercase prose must not. A group 1 in a row is the marker's number n; a row with none
 # has no n.
@@ -54,12 +75,18 @@ BRIEF_MARKERS = (
     ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+    # The fix check marker must open the first line (blanks allowed): text ahead of it, as in "New lane after Fix check FAIL", does not count.
+    ("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),
 )
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
+# The repo that holds the shared waiting-page template, and the folder of it (rule page-form-to-template: a page
+# comment is rewritten into the template, never answered by a thread reply). The one home of both strings.
+SETTINGS_REPO = GH_DEFAULT_LOGIN + "/claude-settings"
+TEMPLATE_DIR = "skills/waiting-page"
 
 # The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
 # the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
@@ -70,6 +97,33 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
+# lane-effort-pin and lane-one-topic).
+LANE_GRANT_MARKER = "Grant:"
+CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+
+
+def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
+    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
+    tags = tool_input.get("tags")
+    if isinstance(tags, str):
+        return [tags]
+    return tags if isinstance(tags, list) else []
+
+
+def is_lane_create_session(tool: str, tool_input: dict[str, Any]) -> bool:
+    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
+    return tool == CREATE_SESSION_TOOL and any(
+        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
+
+
+def grant_line_holds_words(line: str) -> bool:
+    """True when a `Grant:` line carries the owner's words: some letter or digit after the marker, and no `<`, which
+    marks a template placeholder such as `<owner words>`. The one reading, shared by rules lane-effort-pin and
+    lane-one-topic."""
+    words = line[len(LANE_GRANT_MARKER):].strip() if line.startswith(LANE_GRANT_MARKER) else ""
+    return "<" not in words and any(c.isalnum() for c in words)
 
 
 def lane_head_refs(slug: str) -> tuple[str, str]:
@@ -87,6 +141,8 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that reads, watches, replies to and resolves comment threads on an artifact (hooks/guard.py rule page-thread-reply).
+COMMENTS_TOOL = "ArtifactComments"
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
@@ -104,6 +160,15 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+def raised_refusals_path(session_id: object) -> Optional[str]:
+    """The file of (tool_name, reason) pairs a session's replies have already raised with the owner, so the same
+    tool refused again for the same reason does not block again, or None for an id that is not a plain name.
+    Written and read by lint/report_guard.py, beside the refusals file."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "refusals-raised", session_id + ".json")
 
 
 def route_flags_path(session_id: object) -> Optional[str]:

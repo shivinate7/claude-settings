@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# ste-changed <base>: lint what the CI ste-lint step lints for the diff <base>...HEAD.
+# ste-changed <base>: lint what the CI ste-lint step lints, from the merge base of <base> and HEAD through the working
+# tree: the commits, the uncommitted edits and removals, and each untracked file .gitignore does not match.
 # It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
@@ -11,6 +12,9 @@
 # (PINNED below). A pin this clone does not hold is reported as unknown and changes no exit code. A pin the
 # clone holds but whose history a shallow clone cut is unknown too, in its own line with the remedy
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
+# Pin note: with STE_CHANGED_PIN_NOTE=1 (bin/ci-job sets it for its ste-lint step) every pin line still prints, but the
+# exit code is the lint's own, never 3, so a lane keeps its place. A drift line then starts `ste-changed: pin note: `
+# (NOTE below), which ci-job reads back into its PASS line. A failing lint keeps its exit code either way.
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
@@ -21,6 +25,7 @@ import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_rea
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint"))
 from workflow_steps import COMMIT_SHA, settings_pins  # noqa: E402  the one home of the pin reader (lint/workflow_steps.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as NOTE  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 
@@ -42,11 +47,20 @@ def find_root():
 
 
 ROOT = find_root()
+# bin/ci-job runs this file twice for a pinned ste-lint step and sets these three (it strips the caller's): STE_CHANGED_ONLY=lint in
+# the pinned tree, which is an archive with no .git and judges no pin; STE_CHANGED_ONLY=pins in its own checkout, which only judges
+# the pins, with STE_CHANGED_CLONE the clone the reads are made in and STE_CHANGED_COMPARE_TO the commit (the stable branch's head)
+# a pin is judged against, in place of this copy's HEAD. With none set, this file lints and judges as a session runs it.
+ONLY = os.environ.get("STE_CHANGED_ONLY")
+CLONE = os.environ.get("STE_CHANGED_CLONE") or ROOT
+TARGET = os.environ.get("STE_CHANGED_COMPARE_TO") or "HEAD"
+COPY = "the stable head" if os.environ.get("STE_CHANGED_COMPARE_TO") else "this copy"  # what a pin is judged against, as a line names it
 ACTION = os.path.join(ROOT, "actions", "ste-lint")
 # Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
 LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",
               "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py", "lint/stale_cites.py",
-              "lint/rule_audit.py", "hooks/_nowindow.py", "hooks/precompact_handoff.py", "hooks/route_match.py",
+              "lint/rule_audit.py", "hooks/_nowindow.py", "hooks/git_reads.py", "hooks/precompact_handoff.py",
+              "hooks/route_match.py", "hooks/shared_names.py",
               "skills/plain-english-map/scripts/lib/py-facts.py")
 # The one table of pinned actions: {action: (files CI runs for it, what the verdict lines call them, the
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
@@ -59,7 +73,7 @@ def out(*a):
 
 
 def here(*a):
-    p = _nowindow.run(["git", "-C", ROOT, *a], capture_output=True, text=True)
+    p = _nowindow.run(["git", "-C", CLONE, *a], capture_output=True, text=True)
     return p.stdout.strip() if p.returncode == 0 else None
 
 
@@ -76,38 +90,40 @@ def pins():
     return found
 
 
-def pin_report():
-    """One stderr line per pinned action and commit. True when a pin's files for its action differ from this copy's."""
-    head, drift = here("rev-parse", "HEAD"), False
+def pin_report(note=False):
+    """One stderr line per pinned action and commit. True when a pin's files for its action differ from this copy's.
+    `note`: a drift line starts with NOTE instead of `ste-changed: `."""
+    head, drift = here("rev-parse", TARGET), False
     for (action, sha), where in pins().items():
         files, what, grant = PINNED[action]
         pin = "ste-changed: CI pins %s at %s" % (action, sha[:7])
+        drifted = NOTE + pin.split(": ", 1)[1] if note else pin  # the lead of a line whose files differ
         if head is None:
             print("%s (%s). Unknown whether it matches: this copy is not a git clone." % (pin, where), file=sys.stderr)
         elif here("cat-file", "-e", sha + "^{commit}") is None:
             print("%s (%s). Unknown whether it matches: this clone does not hold "
                   "that commit. Fetch claude-settings and run again." % (pin, where), file=sys.stderr)
-        elif _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", sha, "HEAD", "--", *files]).returncode == 0:
-            print("%s (%s), the same %s as this copy." % (pin, where, what), file=sys.stderr)
+        elif _nowindow.run(["git", "-C", CLONE, "diff", "--quiet", sha, TARGET, "--", *files]).returncode == 0:
+            print("%s (%s), the same %s as %s." % (pin, where, what, COPY), file=sys.stderr)
         else:
             drift = True
             day = here("log", "-1", "--format=%cs", sha)
-            older = git_reads.branch_is_ancestor(ROOT, "HEAD", sha)  # None in a shallow clone: the cut reads exit 1
+            older = git_reads.branch_is_ancestor(CLONE, TARGET, sha)  # None in a shallow clone: the cut reads exit 1
             if older is None:
-                print("%s (%s, %s), whose %s differs from this copy's. How the pin "
-                      "relates to this copy is unknown (shallow clone): the history between them is cut. Run "
-                      "`git fetch --unshallow` and run again." % (pin, day, where, what), file=sys.stderr)
+                print("%s (%s, %s), whose %s differs from %s's. How the pin "
+                      "relates to %s is unknown (shallow clone): the history between them is cut. Run "
+                      "`git fetch --unshallow` and run again." % (drifted, day, where, what, COPY, COPY), file=sys.stderr)
             elif older:
                 main = here("rev-parse", "origin/main")
-                same = main and _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", main, "HEAD", "--",
+                same = main and _nowindow.run(["git", "-C", CLONE, "diff", "--quiet", main, TARGET, "--",
                                                *files]).returncode == 0
                 fix = ("Move the pin to %s, claude-settings main, in a lane of its own%s." % (main, grant) if same else
-                       "This copy's %s is not on claude-settings main yet: pin main's newest commit." % what)
-                print("%s (%s, %s), older than this copy's %s. A line can pass "
-                      "here and fail CI. %s" % (pin, day, where, what, fix), file=sys.stderr)
+                       "%s's %s is not on claude-settings main yet: pin main's newest commit." % (COPY[0].upper() + COPY[1:], what))
+                print("%s (%s, %s), older than %s's %s. A line can pass "
+                      "here and fail CI. %s" % (drifted, day, where, COPY, what, fix), file=sys.stderr)
             else:
-                print("%s (%s, %s), which this copy does not hold. This copy's %s "
-                      "is older or off main: pull claude-settings and run again." % (pin, day, where, what),
+                print("%s (%s, %s), which %s does not hold. %s's %s "
+                      "is older or off main: pull claude-settings and run again." % (drifted, day, where, COPY, COPY[0].upper() + COPY[1:], what),
                       file=sys.stderr)
     return drift
 
@@ -126,6 +142,9 @@ def main(argv):
     if len(argv) != 1:
         sys.exit("usage: ste-changed <base>")
     base = re.sub(r"^origin/", "", argv[0])
+    note = os.environ.get(PIN_NOTE_ENV) == "1"
+    if ONLY == "pins":
+        sys.exit(3 if pin_report(note) and not note else 0)
     text = open(os.path.join(ACTION, "action.yml")).read()
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
@@ -133,10 +152,10 @@ def main(argv):
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
                DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
-    # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: the lint step prints its findings on the caller's terminal; the wrapper's no-window flag could hide that output
     rc = subprocess.run([find_bash(), run], env=env).returncode
-    drift = pin_report()
-    sys.exit(rc or (3 if drift else 0))
+    drift = ONLY != "lint" and pin_report(note)
+    sys.exit(rc or (3 if drift and not note else 0))
 
 
 main(sys.argv[1:])

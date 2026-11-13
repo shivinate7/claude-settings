@@ -1,0 +1,6 @@
+# The push chain counts main's incoming test lines in a merge commit
+
+- **What.** After a conflicted merge of main, the index holds main's incoming test lines. The chain read counts them, so `git commit --no-edit && git push` and `git merge --continue && git push` are refused as red-chain. The reason (`RED_RUN_CHAIN_REASON`) says the commit in the call adds test lines, but the test lines are main's, not the lane's. A push in a call of its own passes, as the round-3 review saw. No case in `hooks/test_guard.py` pins main's incoming test lines. Frequency unmeasured. Claude merges main into lanes often, so it is likely to hit this. The code lands with #1582 (red-run push check).
+- **Where.** `hooks/guard_merge.py`: `_commit_stages_tests`, its `--cached` read through `_numstat_adds_test` (the plain-commit path).
+- **Decision.** `red-run-trailer-on-test-commits` (red-run trailer on test commits), item 9 (push time), and item 4 (a merge is not judged; the commits it brings in are). Item 9 lands with #1582 (red-run push check).
+- **Retire.** A new case in `hooks/test_guard.py`, red before the fix and green after. After a conflicted merge of main whose incoming side adds test lines, `git commit --no-edit && git push` passes. The existing stopped-merge case that stages the lane's own test file (`RR_MCONT`) stays refused.

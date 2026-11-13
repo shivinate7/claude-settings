@@ -44,12 +44,6 @@
         "reason": "No hook reads the owner's request and judges which shape (solo, one lane or coordinator) fits it, or checks that the session said its pick in one line first."
       }
     },
-    "roles-solo-builds-short-edit-list": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from a one-lane or coordinator job."
-      }
-    },
     "roles-solo-reviews-logic-diffs-only": {
       "mechanism": {
         "kind": "unmechanized",
@@ -87,6 +81,12 @@
         "reason": "The guard (agent-model-cap, hooks/guard.py opus_without_grant) refuses an explicit Opus spawn that has no grant. It does not see a model name with no `opus` in it, such as `fable`, on a role with no table row. It does not see a spawn with no model whose model comes from CLAUDE_CODE_SUBAGENT_MODEL or an agent-file pin (lint/check_agent_models.py checks the pin against the role's row)."
       },
       "test": "hooks/test_guard.py::ceiling: Agent with model opus and no role is denied"
+    },
+    "roles-plan-gets-refuter": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees a Plan agent return without a refuter spawn after it, and none reads the refuter's brief to see that it holds only the task brief and the plan (decision plan-refuter, Known gaps). The pending plan-record check would see a plan record with no Refuter: line. The refuter's Opus spawn sits in roles-sonnet-is-the-ceiling, whose guard row covers it."
+      }
     },
     "roles-opus-shaped-say-so": {
       "mechanism": {
@@ -214,6 +214,13 @@
         "ref": "merge/merge.py",
         "test": "merge/test_merge.py::GhHalf.test_red_required_check_reverts_the_claim_and_merges_nothing"
       }
+    },
+    "gh-write-cloud": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "gh-write-cloud"
+      },
+      "test": "hooks/test_guard.py::gh-write-cloud: a pull request opened without --draft is refused in a cloud session"
     },
     "git-ci-wait-checks-in": {
       "mechanism": {
@@ -351,9 +358,11 @@
     },
     "tokens-run-through-verdict": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check sees which command an agent ran a verification through. CI tests only that bin/verdict itself works."
-      }
+        "kind": "guard",
+        "ref": "check-tail",
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint`, `merge --review-record` or `merge --release-check` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+      },
+      "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
     "tokens-point-brief-at-files": {
       "mechanism": {
@@ -476,10 +485,16 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
+        "kind": "judgment",
+        "reason": "One line on a turn that lands nothing is a content judgment. No check can tell a tracking turn from a turn with something to report."
+      }
+    },
+    "output-landing-turn-ends-with-report": {
+      "mechanism": {
         "kind": "check",
         "ref": "lint/report_guard.py",
         "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
-        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py."
       }
     },
     "output-never-echo-agent-report": {
@@ -600,7 +615,7 @@
     "questions-go-to-owner": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a question names what the session does meanwhile, and whether the session kept working on what does not depend on the answer, are content judgments. Whether the question reached the page writer is a check, not a judgment: the Stop report guard (lint/report_guard.py) blocks an Input Needed pick or question that the same turn did not send to the page writer, write as a page item or open as the box, with no clock (decision questions-go-to-owner, same turn to the page). The session-board mod refuses a question box while this session's agents or background commands run, and once it has started another session (record session-board-mod-limits). The Stop reply judge (hooks/reply_judge.py, a model, never blocks) notes an Input Needed item whose pick rule parallelism-keep-going lets the session take with no question, and a reply that marks work blocked on, or an item as blocking, a question about a port or redesign of an existing app, or that asks such a question with no Departs from line. Code sends every Stop with the words blocked on to the judge off-sample. The page writer refuses a port item with no Departs from line or with holds (guard rule port-question, rule building-port-keeps-behaviour). It refuses a decision with no Problem line naming its stake (goal, money, risk, rule or cannot undo) unless the session's own pick stands (guard rule owner-judge, decision owner-judge-test), and one with no Goal or Based on line or an option with no gain or lose (guard rule question-form, decision question-form). It refuses an option key that is not the lowercase letter of its position, and item text that names an option by a letter-and-digit key (guard rule option-letter-keys, decision option-keys-are-letters). It refuses an open item whose text says it is being reworked (guard rule rework-off-page, decision rework-leaves-page). It refuses a decision, a chat question with options and an Input Needed pick with no valid Departs from line, or one whose change side restates main (guard rule question-departs, decision port-keeps-behaviour). The feedback guard (hooks/feedback_guard.py, cases in hooks/test_feedback_inbox.py) blocks a `[page] -> page:<n>` inbox item with no send to the page writer, and a `[repo] -> repo:<owner>/<name>` item with no send naming that repo. A tool the auto-mode classifier refused is noted by hooks/refusal_note.py, and the Stop report guard (lint/report_guard.py) blocks until the reply raises it under Input Needed (decision refusals-reach-the-owner)."
+        "reason": "Whether a question names what the session does meanwhile, and whether the session kept working on what does not depend on the answer, are content judgments. Whether the question reached the page writer is a check, not a judgment: the Stop report guard (lint/report_guard.py) blocks an Input Needed pick or question that the same turn did not send to the page writer, write as a page item or open as the box, with no clock (decision questions-go-to-owner, same turn to the page). The session-board mod refuses a question box while this session's agents or background commands run, and once it has started another session (record session-board-mod-limits). The Stop reply judge (hooks/reply_judge.py, a model, never blocks) notes an Input Needed item whose pick rule parallelism-keep-going lets the session take with no question, and a reply that marks work blocked on, or an item as blocking, a question about a port or redesign of an existing app, or that asks such a question with no Departs from line. Code sends every Stop with the words blocked on to the judge off-sample. The page writer refuses a port item with no Departs from line or with holds (guard rule port-question, rule building-port-keeps-behaviour). It refuses a decision with no Problem line naming its stake (goal, money, risk, rule or cannot undo) unless the session's own pick stands (guard rule owner-judge, decision owner-judge-test), and one with no Goal or Based on line or an option with no gain or lose (guard rule question-form, decision question-form). It refuses an option key that is not the lowercase letter of its position, and item text that names an option by a letter-and-digit key (guard rule option-letter-keys, decision option-keys-are-letters). It refuses a write of an open decision's options that reorders, relabels or drops an option shown before, one with no `shown` list, and an option with no unique id (guard rule option-letters-frozen, decision option-keys-are-letters, owner ruling R60); it cannot see a str_replace on options or a write that rewrites `shown` itself. It refuses an open item whose text says it is being reworked (guard rule rework-off-page, decision rework-leaves-page). It refuses a decision, a chat question with options and an Input Needed pick with no valid Departs from line, or one whose change side restates main (guard rule question-departs, decision port-keeps-behaviour). It refuses an open decision or task with no `repo`, and one on a repo other than the page's whose `checked_with` is missing, not a session id, or the session in its `owner` (guard rule question-checked-with-repo, decision cross-repo-question-checked); it reads fields, so it cannot see whether the named session really checked. The feedback guard (hooks/feedback_guard.py, cases in hooks/test_feedback_inbox.py) blocks a `[page] -> page:<n>` inbox item with no send to the page writer, and a `[repo] -> repo:<owner>/<name>` item with no send naming that repo. A tool the auto-mode classifier refused is noted by hooks/refusal_note.py, and the Stop report guard (lint/report_guard.py) blocks until the reply raises it under Input Needed (decision refusals-reach-the-owner)."
       }
     },
     "style-cut-narration": {
@@ -649,14 +664,51 @@
       "mechanism": {
         "kind": "guard",
         "ref": "question-form",
-        "reason": "The one form check, hooks/question_form.py (decision question-form), refuses a chat question box (through hooks/call_judge.py, before any model call) and a waiting-page decision that lacks the Goal, Problem or Based on lines, a valid Departs from line (guard rule question-departs), an option's gain or loss, or marks a widening option as the pick or the recommendation. It reads words, so an unmarked widening option and a false stake pass; the question judge model reads what code cannot (a plain gain and lose, unexplained ids, a pointer outside the box)."
+        "reason": "The one form check, hooks/question_form.py (decision question-form), refuses a chat question box (through hooks/call_judge.py, before any model call) and a waiting-page decision that lacks the Goal, Problem or Based on lines, a valid Departs from line (guard rule question-departs), an option's gain or loss, or marks a widening option as the pick or the recommendation. It reads words, so an unmarked widening option and a false stake pass; the question judge model reads what code cannot (a plain gain and lose, unexplained ids, a pointer outside the box); the reply judge (hooks/reply_judge.py, a model, never blocks) notes a reply whose recommended option widens what a shared tool accepts, and a finding writes one guard.log line."
       },
       "test": "hooks/test_question_form.py::guard.data_tool_hit gives item 92 the verdict question_form.item_hit gives (one home)"
     },
     "output-never-hand-off-doable-step": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place)."
+        "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule task-why-cited refuses a waiting-page task whose Why yours line gives a capability reason with no cite that holds: a route row that says refused or asks, or a dated measured cite (decision claims-carry-backing, part (v)). The page reads no refusals file. The Stop guard (lint/report_guard.py cannot_problem) refuses a reply line that says an act cannot be done when the turn holds no failed try of that act, or the line names no check (decision claims-carry-backing)."
+      }
+    },
+    "style-hand-off-cleanup": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A hook would have to see each thing the session made, such as a test ID, a branch or data, and whether the session removed it before it ended; no hook sees that for branches, test IDs or data. hooks/sim_boot_record.py records each simulator a session boots."
+      }
+    },
+    "style-hand-off-irreversible": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether an act can be undone, and whether the ask is one yes or no on the exact act with its cleanup named, are content judgments on the act and the reply."
+      }
+    },
+    "style-hand-off-runs-as-is": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a block is runnable as is, with its `cd`, no blank lines and no admin step, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a command left to the owner without its own fenced code block, ready to run as is, outside the report blockquote, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."
+      }
+    },
+    "style-hand-off-gh-login": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "gh-login-switch",
+        "reason": "Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place). In a chat reply the Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a block that hands the owner a gh command with no such switch, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id."
+      }
+    },
+    "style-hand-off-one-shell": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A block that mixes shells has no code check. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) is asked for one shell in the block and files its finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."
+      }
+    },
+    "style-offer-screen-takeover": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A hook would have to see which screen tools the session holds and whether one can do the act the reply hands to the owner; neither is in a hook's input."
       }
     },
     "style-table-gold-column": {
@@ -705,10 +757,10 @@
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
-    "style-wrong-tier-one-line": {
+    "style-wrong-session-one-line": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether the owner named the wrong tier, or brought work that belongs to another tier, is a content judgment. No check reads that."
+        "reason": "Whether the owner named the wrong session, or brought work that belongs to another session, is a content judgment. No check reads that."
       }
     },
     "style-offer-override-line": {

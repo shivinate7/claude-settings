@@ -66,7 +66,7 @@ designer. A text-only change gets none (decision `design-agents`).
    the designer. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
-6. **Gather.** Each designer pushes its own branch. The orchestrator copies every designer's pair onto the
+6. **Gather.** Each designer pushes to the branch its brief names, so each brief names one branch per designer. The orchestrator copies every designer's pair onto the
    step's design branch, so the owner sees the whole set in one place.
 7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
    and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the

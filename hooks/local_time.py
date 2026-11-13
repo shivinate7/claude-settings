@@ -5,12 +5,14 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
   session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
-  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
+  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
+  A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
-Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
+Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: YYYY-MM-DD 21:40 CDT (UTC-05:00) Later times: run ~/.claude/bin/now-central, never from memory."
+The pointer follows the time line on the same line. The inbox stamp and `line()` carry no pointer. The helper bin/now-central prints later times from this module's clock.
 Plain stdout is context for UserPromptSubmit. SubagentStart takes context only as JSON, so
 `--agent` prints `hookSpecificOutput` with `additionalContext` (Claude Code hooks reference).
 The US rule is coded here, not read from zoneinfo: Windows Python often has no tz database.
@@ -78,21 +80,47 @@ def clock():
         return datetime.now(timezone.utc)
 
 
-def line(clock=clock):
-    now = clock().astimezone(timezone.utc)
+def central_parts(at):
+    """(local time, zone name) in US Central for an instant: the one home of the DST rule below."""
+    now = at.astimezone(timezone.utc)
     # US rule since 2007: DST runs from 02:00 CST on the 2nd Sunday of March (08:00 UTC)
     # to 02:00 CDT on the 1st Sunday of November (07:00 UTC).
     start = nth_sunday(now.year, 3, 2).replace(hour=8)
     end = nth_sunday(now.year, 11, 1).replace(hour=7)
     dst = start <= now < end
     local = now + CST + (timedelta(hours=1) if dst else timedelta())
-    name = "CDT" if dst else "CST"
+    return local, "CDT" if dst else "CST"
+
+
+def line(clock=clock):
+    local, name = central_parts(clock())
     return "Local time: %s %s (%s)" % (local.strftime(STAMP_FORMAT), name, STAMP_ZONES[name])
 
 
 def central_hhmm(at):
-    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of an override."""
-    return " ".join(line(lambda: at).split()[3:5])
+    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of an override.
+    A display helper that never raises: anything that is not a datetime (or one out of range) gives "", not a guessed time."""
+    try:
+        return " ".join(line(lambda: at).split()[3:5])
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return ""
+
+
+def central_full(at):
+    """`YYYY-MM-DD HH:MM CDT` (or CST) for an instant: the stamp without the offset text."""
+    local, name = central_parts(at)
+    return "%s %s" % (local.strftime(STAMP_FORMAT), name)
+
+
+def central_iso(at, seconds=True):
+    """`YYYY-MM-DDTHH:MM:SS-05:00` (or -06:00) for an instant: ISO-8601 with the Central offset.
+    `seconds=False` drops the seconds, as a refusal's reason prints the time.
+    A display helper that never raises: anything that is not a datetime (or one out of range) gives "", not a guessed time."""
+    try:
+        local, name = central_parts(at)
+        return local.strftime("%Y-%m-%dT%H:%M:%S" if seconds else "%Y-%m-%dT%H:%M") + STAMP_ZONES[name][len("UTC"):]
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return ""
 
 
 def override_line(result):
@@ -105,7 +133,7 @@ def override_line(result):
     if kind == "opus":
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
         who = "%s spawns" % roles if roles else "spawns"
-        return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
+        return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
     return "Override: every refused act goes through until %s." % central_hhmm(until)
@@ -316,8 +344,12 @@ def grant_override(raw, at):
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
     that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
     prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
-    role named means every role (decision owner-override). Those calls are why the
-    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
+    role named means every role (decision owner-override). A prompt neither grants goes last to
+    override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
+    prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
+    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most one
+    judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any failure is one stderr
+    line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
@@ -326,6 +358,10 @@ def grant_override(raw, at):
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),
                                              source=hook.get("source"))
+        if result is None:
+            result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                                 transcript=hook.get("transcript_path"),
+                                                 source=hook.get("source"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):
@@ -334,7 +370,24 @@ def grant_override(raw, at):
         print("local_time: override: %s" % e, file=sys.stderr)
 
 
+def mail_lines(raw):
+    """Prints the mailbox's open messages after the time line (hooks/mail.py). It starts no process of its own."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return
+    try:
+        import mail
+        lines = mail.turn_start_lines(hook if isinstance(hook, dict) else {}, os.environ)
+    except Exception as e:  # an unread mailbox shows as unknown, never as empty
+        lines = ["mail unknown: %s" % (" ".join(str(e).split())[:120] or type(e).__name__)]
+    for text in lines:
+        print(text)
+
+
 OLD_FLAG_ENDS = "2026-11-09"
+# Printed after the time line only, never in the capture stamp. The helper is bin/now-central.
+NOW_CENTRAL_POINTER = " Later times: run ~/.claude/bin/now-central, never from memory."
 
 
 def main(argv):
@@ -344,6 +397,7 @@ def main(argv):
             return 0
         now = clock()
         stamp = text = line(lambda: now)
+        text += NOW_CENTRAL_POINTER
         # `--subagent` is the flag's old name, kept until OLD_FLAG_ENDS for a session that read its
         # hook list before the rename. Delete it on that day.
         agent = "--agent" in argv or "--subagent" in argv
@@ -353,8 +407,12 @@ def main(argv):
         print(text)
         if not agent:
             raw = sys.stdin.buffer.read()
+            try:
+                capture(raw, stamp[len("Local time: "):])
+            except Exception as e:  # a capture error never stops the grant
+                print("local_time: capture: %s" % e, file=sys.stderr)
             grant_override(raw, now)
-            capture(raw, stamp[len("Local time: "):])
+            mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0

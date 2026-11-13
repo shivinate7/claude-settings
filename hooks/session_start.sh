@@ -1,6 +1,7 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
-# Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
+# Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
@@ -17,7 +18,7 @@ source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\(
 # with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
 
@@ -33,7 +34,14 @@ bounded_git() {
   shift 2
   ( cd "$git_dir_arg" 2>/dev/null && git "$@" >"$git_out_arg" 2>/dev/null ) &
   fetch_pid=$!
-  ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+  # The watchdog's TERM handler kills its own sleep, so a git call that returns first leaves no sleep behind for
+  # the full bound. (jobs -p is empty inside a dash subshell, so the pid is kept in a variable.)
+  ( wd_sleep=""
+    trap 'kill "$wd_sleep" >/dev/null 2>&1; exit 0' TERM
+    sleep "$fetch_timeout" &
+    wd_sleep=$!
+    wait "$wd_sleep"
+    kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
   wait "$fetch_pid" 2>/dev/null
   fetch_rc=$?
@@ -42,10 +50,93 @@ bounded_git() {
   return "$fetch_rc"
 }
 
-# bounded_fetch <dir> <branch>: quiet `git fetch origin <branch>` in <dir>, bounded. Returns the
-# fetch's status: 0 ran, else not. The one home for both freshness checks below.
+# bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
+# origin, so its cost does not grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish
+# in 20 s; one ref takes well under a second). Returns 0 when the refresh ran, else not. The one home for every
+# freshness check below. The first call per checkout runs it; a later call for the same checkout (resolved with pwd -P)
+# returns that status again, so a session start refreshes each checkout once, however many checks ask. The caller must
+# not run it in $( ), or the memo and fetch_target are lost with the subshell.
+# The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main` names
+# the remote HEAD's target and says whether main exists. Git fails a whole fetch on a refspec the remote lacks, and a
+# local origin/HEAD goes stale when the remote's default is renamed, so a refspec read locally can fail every start.
+# The one fetch then names main when the remote lists it, and the target when that is another branch. A remote that
+# lists neither is not fetched, since a fetch with no refspec reads the configured wildcard. Only after a good
+# ls-remote and a good (or skipped) fetch, a remote with no main has its stale origin/main deleted, a remote-tracking
+# ref only. An ls-remote or fetch that fails or is killed counts as not run, deletes nothing and is never retried.
+# Bound: each git call has its own CLAUDE_SETTINGS_FETCH_TIMEOUT watchdog, and a failed ls-remote returns before any
+# fetch starts, so the worst case is two bounds per checkout (four when the pointer clone is another checkout).
+# fetch_target is the remote HEAD's target from this call's ls-remote, and fetch_remote_read is 1 when that read ran;
+# a memo hit leaves both as the last run set them.
+fetch_memo=""
+fetch_reported=""
+fetch_target=""
+fetch_remote_read=""
 bounded_fetch() {
-  bounded_git "$1" /dev/null fetch --quiet origin "$2"
+  bf_dir="$1"
+  bf_key=$(cd "$bf_dir" 2>/dev/null && pwd -P)
+  bf_key="${bf_key:-$bf_dir}"
+  bf_hit=""
+  while read -r bf_r bf_k; do
+    [ "$bf_k" = "$bf_key" ] && bf_hit="$bf_r"
+  done <<EOF
+$fetch_memo
+EOF
+  [ -n "$bf_hit" ] && return "$bf_hit"
+  fetch_target=""
+  fetch_remote_read=""
+  bf_rc=1
+  bf_ls=$(mktemp 2>/dev/null)
+  if [ -n "$bf_ls" ] && bounded_git "$bf_dir" "$bf_ls" ls-remote --symref origin HEAD refs/heads/main; then
+    fetch_remote_read=1
+    # Lines read: "ref: refs/heads/<t> HEAD" for the target, "<sha> refs/heads/main" when main exists. The pattern HEAD
+    # also matches refs that end in /HEAD, so only the exact HEAD field counts.
+    bf_has_main=""
+    while read -r bf_f1 bf_f2 bf_f3; do
+      if [ "$bf_f1" = "ref:" ] && [ "$bf_f3" = HEAD ]; then
+        case "$bf_f2" in
+          refs/heads/?*) fetch_target="${bf_f2#refs/heads/}" ;;
+        esac
+      elif [ "$bf_f1" != "ref:" ] && [ "$bf_f2" = refs/heads/main ] && [ -z "$bf_f3" ]; then
+        bf_has_main=1
+      fi
+    done <"$bf_ls"
+    set --
+    [ -n "$bf_has_main" ] && set -- "+refs/heads/main:refs/remotes/origin/main"
+    if [ -n "$fetch_target" ] && [ "$fetch_target" != main ]; then
+      set -- "$@" "+refs/heads/$fetch_target:refs/remotes/origin/$fetch_target"
+    fi
+    bf_rc=0
+    if [ "$#" -gt 0 ]; then
+      bounded_git "$bf_dir" /dev/null fetch --quiet --no-tags origin "$@"
+      bf_rc=$?
+    fi
+    if [ "$bf_rc" -eq 0 ] && [ -z "$bf_has_main" ]; then
+      (cd "$bf_dir" 2>/dev/null && git update-ref -d refs/remotes/origin/main >/dev/null 2>&1)
+    fi
+  fi
+  [ -n "$bf_ls" ] && rm -f "$bf_ls" 2>/dev/null
+  fetch_memo="$fetch_memo
+$bf_rc $bf_key"
+  return "$bf_rc"
+}
+
+# fetch_mark_reported <dir>, fetch_was_reported <dir>: a check that prints its own "the fetch did not run" line
+# marks the checkout, so the session start prints one such line per checkout, not two.
+fetch_mark_reported() {
+  fr_key=$(cd "$1" 2>/dev/null && pwd -P)
+  fetch_reported="$fetch_reported
+${fr_key:-$1}"
+}
+fetch_was_reported() {
+  fr_key=$(cd "$1" 2>/dev/null && pwd -P)
+  case "
+$fetch_reported
+" in
+    *"
+${fr_key:-$1}
+"*) return 0 ;;
+  esac
+  return 1
 }
 
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
@@ -58,6 +149,99 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
+
+# Local origin/HEAD's target, empty when unset. The default-branch check below tests the checkout against it. The
+# grants compare reads gm_default instead: the remote HEAD's target when the refresh read the remote, since that is
+# the branch the fetch refreshed and a local origin/HEAD goes stale when the remote's default is renamed; else this.
+default_branch=$(cd "$toplevel" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+default_branch="${default_branch#origin/}"
+
+# Step grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
+# because a stale checkout once led a coordinator to cite acts the owner never gave. A checkout with an origin
+# remote is refreshed first with bounded_fetch (one fetch of main and the remote HEAD's target, no prune, on any
+# branch or a detached HEAD), so the compare reads a current origin/main, not a stale one. The block runs right after
+# the tier line, before every slow step (the worktree listing, the caution call): a hook the platform kills at its
+# timeout loses all later output, and these lines are the ones a session must not lose. A refresh that fails or times out prints one
+# "did not run" line (the later freshness checks then print none of their own for this checkout) and marks each grant
+# line as read from an unrefreshed ref. No origin remote: no fetch and no refresh line; the compare below still
+# runs, so a remote-less repo with a grant file at HEAD prints the unknown-grant line. The compare is the HEAD blob of each
+# grant file (CLAUDE.md, .claude/CLAUDE.md) in the session's toplevel against the blob at origin/main, or at
+# the default branch ($gm_default) when origin/main is absent. A file that differs, or sits on one
+# side only, prints one line with the ref tip's short sha and the git show command that reads the ref's copy. When
+# neither ref reads and a grant file exists at HEAD, one unknown line prints. Only committed blobs are compared,
+# so an uncommitted edit prints nothing. Local main is counted against origin/main with one rev-list and never
+# moved; the line prints only when they differ, and not when the default-branch check above already said behind.
+# Cost: once per SessionStart event (start, resume or compaction), never per prompt (the hook is wired to SessionStart only): one git ls-remote and
+# at most one git fetch of this checkout (shared with the later freshness checks, so at most one each per checkout),
+# whose own writes are refs, objects and FETCH_HEAD, plus one git update-ref when the remote has no main; one temp
+# file for the ls-remote answer, removed in the same call; one git remote read, one git cat-file --batch-check and one git rev-list, plus, only
+# when local main differs, one git config read and, when the pointer clone printed behind, two git rev-parse
+# reads, all local. The ls-remote and the fetch are each bounded by a watchdog (bounded_git): a short-lived subshell and
+# a sleep of at most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds; the sleep is killed when git returns first. When the bound
+# hits, the kill reaches only the subshell that runs git, so on bash the git child may finish after the hook
+# exits. It is bounded by git's own run (an ls-remote, or a fetch of one or two refs) and is never a daemon. No other
+# timer. The hook itself keeps no file; that late git writes only its own refs, objects and FETCH_HEAD.
+gm_unref=""
+gm_remote_read=""
+gm_default="$default_branch"
+if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
+  bounded_fetch "$toplevel"
+  gm_fetch_rc=$?
+  if [ -n "$fetch_remote_read" ]; then
+    gm_remote_read=1
+    gm_default="$fetch_target"
+  fi
+  if [ "$gm_fetch_rc" -ne 0 ]; then
+    gm_unref=1
+    if ! fetch_was_reported "$toplevel"; then
+      printf 'checkout %s: the origin fetch did not run, so origin refs may be stale; freshness unknown\n' "$toplevel"
+      fetch_mark_reported "$toplevel"
+    fi
+  fi
+fi
+gm_out=$( {
+  printf '%s\n' 'HEAD:CLAUDE.md' 'HEAD:.claude/CLAUDE.md' 'origin/main' 'origin/main:CLAUDE.md' 'origin/main:.claude/CLAUDE.md'
+  if [ -n "$gm_default" ] && [ "$gm_default" != "main" ]; then
+    printf '%s\n' "origin/$gm_default" "origin/$gm_default:CLAUDE.md" "origin/$gm_default:.claude/CLAUDE.md"
+  fi
+} | { cd "$toplevel" 2>/dev/null && git cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null; } )
+# gm_pick <n> <type>: the object name on line n of the answer when that line names an object of <type>, else nothing.
+gm_pick() {
+  printf '%s\n' "$gm_out" | sed -n "${1}p" | awk -v t="$2" 'NF == 2 && $2 == t { print $1 }'
+}
+if [ -n "$gm_out" ]; then
+  gm_head1=$(gm_pick 1 blob)
+  gm_head2=$(gm_pick 2 blob)
+  gm_ref=""
+  gm_tip=$(gm_pick 3 commit)
+  if [ -n "$gm_tip" ]; then
+    gm_ref="origin/main"
+    gm_ref1=$(gm_pick 4 blob)
+    gm_ref2=$(gm_pick 5 blob)
+  elif [ -n "$gm_default" ] && [ "$gm_default" != "main" ]; then
+    gm_tip=$(gm_pick 6 commit)
+    if [ -n "$gm_tip" ]; then
+      gm_ref="origin/$gm_default"
+      gm_ref1=$(gm_pick 7 blob)
+      gm_ref2=$(gm_pick 8 blob)
+    fi
+  fi
+  if [ -n "$gm_ref" ]; then
+    gm_note=""
+    [ -n "$gm_unref" ] && gm_note="; $gm_ref is unrefreshed"
+    if [ "$gm_head1" != "$gm_ref1" ]; then
+      printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md%s\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
+    fi
+    if [ "$gm_head2" != "$gm_ref2" ]; then
+      printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md%s\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
+    fi
+  elif [ -n "$gm_head1" ] || [ -n "$gm_head2" ]; then
+    printf 'checkout %s: standing grant check unknown, neither origin/main nor origin/HEAD could be read\n' "$toplevel"
+  fi
+fi
+
 
 # Decision merge-reinstalls-from-main, ruling 1: no work runs in the live pin. A cwd whose toplevel is the
 # pin says so, and names the clone to cd to. Same test as live_pin_clone in install.sh, repeated here
@@ -215,15 +399,19 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   # session start, so a behind count on it is a false alarm. The check skips it.
   cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
-    if bounded_fetch "$d" main; then
+    if bounded_fetch "$d"; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
           "$d" "$behind"
+        ptr_behind_printed=1
       fi
     else
-      printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
-        "$d"
+      if ! fetch_was_reported "$d"; then
+        printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
+          "$d"
+        fetch_mark_reported "$d"
+      fi
     fi
   fi
 fi
@@ -246,20 +434,25 @@ fi
 
 # The session's own repo: when its default branch is checked out and behind origin, say so.
 # Skipped for the claude-settings clone, whose line above already covers it. Never pulls;
-# the fetch never moves a local branch (it may write FETCH_HEAD and remote-tracking refs). Unset origin/HEAD means no line.
-default_branch=$(cd "$toplevel" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
-default_branch="${default_branch#origin/}"
+# the fetch never moves a local branch (it may write FETCH_HEAD and remote-tracking refs). An unknown default branch means no line.
+# When the refresh read the remote and its HEAD names another branch, the local default is stale and was not fetched,
+# so a count against it could read 0 behind on a stale ref: no line then.
 if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
+   && { [ -z "$gm_remote_read" ] || [ "$gm_default" = "$default_branch" ]; } \
    && { [ -z "$d" ] || [ "$(cd "$toplevel" 2>/dev/null && pwd -P)" != "$(cd "$d" 2>/dev/null && pwd -P)" ]; }; then
-  if bounded_fetch "$toplevel" "$default_branch"; then
+  if bounded_fetch "$toplevel"; then
     behind=$(cd "$toplevel" 2>/dev/null && git rev-list --count "$default_branch..origin/$default_branch" 2>/dev/null)
     if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
       printf 'checkout %s: %s is %s commits behind origin/%s; pull before you read it\n' \
         "$toplevel" "$default_branch" "$behind" "$default_branch"
+      dflt_behind_printed=1
     fi
   else
-    printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
-      "$toplevel" "$default_branch"
+    if ! fetch_was_reported "$toplevel"; then
+      printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
+        "$toplevel" "$default_branch"
+      fetch_mark_reported "$toplevel"
+    fi
   fi
 fi
 
@@ -302,6 +495,57 @@ if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && c
   fi
 fi
 
+# The owner's rulings that main has not yet taken in (the ruled store, decision ruled-store-one-home): lint/ruled_store.py
+# --session-line prints one header, up to five entry lines and a command line, or nothing. It reads origin/roadmap and
+# origin/main of the claude-settings clone ($d), else of this checkout, as the fetches above left them: no fetch of its
+# own. Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python start and two
+# read-only git processes (ls-tree, cat-file --batch), plus a third cat-file when an open entry names the text it lands
+# in; no file written, no timer, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  rs_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/ruled_store.py"
+  [ -f "$rs_script" ] || rs_script="$config_dir/lint/ruled_store.py"
+  if [ -f "$rs_script" ]; then
+    rs_repo="$toplevel"
+    [ -n "$d" ] && [ -e "$d/.git" ] && rs_repo="$d"
+    rs_lines=$(python3 "$rs_script" --session-line "$rs_repo" 2>/dev/null)
+    [ -n "$rs_lines" ] && printf '%s\n' "$rs_lines"
+  fi
+fi
+
+# Local main against origin/main: `main...origin/main` counts local-only commits (ahead) on the left and
+# origin-only commits (behind) on the right. Silent when either ref is absent or the two are equal. Also silent
+# when a behind line for this repo's main already printed (the default-branch check, or the pointer check when
+# the pointer clone and this checkout share a git common dir, which a live pin does), and on a clone install.sh
+# made (claude-settings.cloudMirror), which the cloud resume refreshes.
+lm_skip=""
+[ -n "$dflt_behind_printed" ] && lm_skip=1
+if [ -z "$lm_skip" ] && [ -n "$ptr_behind_printed" ]; then
+  lm_ptr_common=$(cd "$d" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)
+  lm_top_common=$(cd "$toplevel" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)
+  [ -n "$lm_ptr_common" ] && [ "$lm_ptr_common" = "$lm_top_common" ] && lm_skip=1
+fi
+if [ -z "$lm_skip" ]; then
+  lm_counts=$(cd "$toplevel" 2>/dev/null && git rev-list --left-right --count refs/heads/main...refs/remotes/origin/main 2>/dev/null)
+  lm_ahead=${lm_counts%%[[:space:]]*}
+  lm_behind=${lm_counts##*[[:space:]]}
+  lm_mirror=""
+  if [ -n "$lm_counts" ] && { [ "${lm_ahead:-0}" -gt 0 ] || [ "${lm_behind:-0}" -gt 0 ]; } 2>/dev/null; then
+    lm_mirror=$(cd "$toplevel" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
+  fi
+  if [ -n "$lm_counts" ] && [ "$lm_mirror" != "true" ] \
+     && { [ "${lm_ahead:-0}" -gt 0 ] || [ "${lm_behind:-0}" -gt 0 ]; } 2>/dev/null; then
+    lm_line="checkout $toplevel: local main is $lm_behind commit"
+    [ "$lm_behind" = 1 ] || lm_line="${lm_line}s"
+    lm_line="$lm_line behind origin/main"
+    if [ "$lm_ahead" -gt 0 ]; then
+      lm_line="$lm_line and $lm_ahead commit"
+      [ "$lm_ahead" = 1 ] || lm_line="${lm_line}s"
+      lm_line="$lm_line ahead"
+    fi
+    printf '%s\n' "$lm_line"
+  fi
+fi
+
 # The SessionEnd sweep is armed. The record is
 # docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md. If the hook goes
 # missing from the config, this notice says so. It reads the installed config, never a date
@@ -323,6 +567,43 @@ if [ -r "$settings_json" ]; then
   fi
 else
   printf 'claude-settings: cannot read %s. SessionEnd sweep state unknown\n' "$settings_json"
+fi
+
+# Patch the platform's Stop-hook script ($config_dir/stop-hook-git-check.sh, written by the platform before this
+# hook runs) so its unpushed-commits nudge skips a branch whose head origin/main already holds. Granted by the
+# owner, page item 464 b, for this one patch (decision lanes-start-in-tool-worktrees).
+# The nudge recreated a deleted branch as a copy of main. A squash-merged branch is not an ancestor of origin/main,
+# so it is not skipped; this repo merges with merge commits.
+# Cost: one file read per session start, one write only when patching (a temp file in the same folder, then mv),
+# no process kept, no timer. A missing file is silent. A file whose anchor line is missing or doubled stays
+# byte-identical, and one line says so.
+stop_hook="$config_dir/stop-hook-git-check.sh"
+if [ -f "$stop_hook" ] && [ -w "$stop_hook" ] && [ -w "$config_dir" ] \
+  && ! grep -qF '# claude-settings: skip-merged' "$stop_hook" 2>/dev/null; then
+  # SC2016: the anchor holds literal dollar signs from the platform's text.
+  # shellcheck disable=SC2016
+  stop_anchor='  unpushed=$(git rev-list "$upstream..HEAD" --count 2>/dev/null) || unpushed=0'
+  stop_anchor_count=$(grep -cxF -- "$stop_anchor" "$stop_hook" 2>/dev/null)
+  if [ "$stop_anchor_count" = 1 ]; then
+    stop_block='  # claude-settings: skip-merged
+  # Skip a branch whose head origin/main already holds (owner, page item 464 b, 2026-11-09 13:09 CST):
+  # the nudge recreated a deleted branch as a copy of main.
+  git merge-base --is-ancestor HEAD origin/main 2>/dev/null && unpushed=0'
+    stop_tmp=$(mktemp "$config_dir/.stop-hook-git-check.XXXXXX" 2>/dev/null)
+    if [ -n "$stop_tmp" ]; then
+      # cp -p carries the mode; the redirect keeps it while the contents are replaced.
+      if cp -p "$stop_hook" "$stop_tmp" 2>/dev/null \
+        && STOP_ANCHOR="$stop_anchor" STOP_BLOCK="$stop_block" \
+          awk '$0 == ENVIRON["STOP_ANCHOR"] { print; print ENVIRON["STOP_BLOCK"]; next } { print }' "$stop_hook" >"$stop_tmp" 2>/dev/null \
+        && mv -f "$stop_tmp" "$stop_hook" 2>/dev/null; then
+        :
+      else
+        rm -f "$stop_tmp" 2>/dev/null
+      fi
+    fi
+  else
+    printf 'claude-settings: Stop-hook patch not applied, the platform script text changed (%s)\n' "$stop_hook"
+  fi
 fi
 
 exit 0

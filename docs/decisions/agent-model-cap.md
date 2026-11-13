@@ -4,12 +4,12 @@
 
 Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
 Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
-and the owner watches that cost. An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
+and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter`). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model, a reviewer's round 3 on Opus too, is refused. It runs only when the owner's typed override or grant names it
-(owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
-claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows: an Agent
-or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
+(owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs the model of its row below. A review round runs the model of its round row (see the round rows). Haiku runs only in Explore,
+claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows. An Agent
+or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
 The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
@@ -27,13 +27,14 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Explore that audits or judges meaning, not a plain search | sonnet or opus, when its brief's first non-blank line carries the `Audit:` marker (owner, 2026-11-01 18:38 CST, item 137, pick a); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
-| reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku`. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a) | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus, by override: high, set per spawn |
+| reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
+| builder, try 3 after a FAIL at review round 2 | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
+| refuter (`agents/refuter.md`) | opus, the owner's ruling of 2026-11-06 12:43 CST, waiting-page item 279, pick d (decision `plan-refuter`) | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
 | `fallbackModel` | sonnet | n/a |
@@ -56,7 +57,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
+| lane (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -71,6 +72,20 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and guard | no model; plain code | n/a |
+| local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
+
+**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix verifier's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to `ROLE_ROUND_FALLBACK` in `hooks/guard.py`. That table gives sonnet for a reviewer's `1 guard`, round 2, round 3 and `fix verifier`, and opus for the builder's round 3. It has no row for a reviewer's `1 other`, so the role row (haiku) applies. `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
+
+| Role | Round | Model | Effort |
+|---|---|---|---|
+| reviewer | 1 guard | sonnet | xhigh |
+| reviewer | 1 other | haiku | xhigh |
+| reviewer | 2 | sonnet | high |
+| reviewer | 3 | sonnet | xhigh |
+| reviewer | fix verifier | sonnet | xhigh |
+| builder | 3 | opus | high |
+
+Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -90,22 +105,30 @@ Reason the ceiling is a refusal and no ask (owner, 2026-11-01 17:25 CST, item 12
 unless the file is a Haiku role. It also fails an `agents/*.md` body that states the agent's own model in fixed text, or whose report header has a `<model>` slot and no `powered by the model named` line. The spawn's model reaches the agent through its system prompt, so a body names that line as the source. `agents/plan.md` pins Plan.
 
 **The role row.** Guard rule `agent-role-model` reads this table at each `Agent` or `Task` spawn, from the pointer checkout (the one `~/.claude/CLAUDE.md` names; `role_model_table` in `hooks/guard.py` is the one reader). A row names a role in its first cell and a model in the first word of its second cell. A first cell that holds more than role words (a qualifier such as `reviewer, rounds 2 and 3`, a skill, a hook) names no role, and the first row for a role wins.
-- A spawn that names a model above its role's row is refused, with the remedy "drop the model field, or name the role's model". A reviewer's refusal also says that a brief for a later review round (the rounds in `ROLE_REVIEWER_FREE_ROUNDS`) opens its first line with a `Round N of 3` marker; it offers no way past round 1. The general override lifts this refusal (owner, 2026-11-01 17:25 CST, item 127, pick a). Ranks run haiku, sonnet, opus. A model with no rank counts as above every row below opus, so it is refused there; its own rank is unruled. A role with no row passes. A role matches its row without case and without surrounding space.
-- Exempt: an `Agent` or `Task` Explore spawn whose brief's first non-blank line carries the audit marker `Audit:` (`EXPLORE_AUDIT_MARKER` in `hooks/shared_names.py`, which the guard and the spawn judge both import; case-sensitive, the first `Audit:` on the brief's first non-blank line, with any text ahead of it, so `**Audit:**` counts; the same first-line pick as the step-up marker scan). Any other such Explore that names a model runs on its haiku row. The guard passes an Explore that names no model whenever `CLAUDE_CODE_SUBAGENT_MODEL` is set (`agents/explore.md` pins haiku, so it also passes without the variable; see the no-model bullet). A Workflow `agent()` call that names a model is judged the same way, by its `agentType` and the brief it passes. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no marker, so the call is judged with an empty brief, and its refusal adds "write the brief as a literal string so the marker is readable" (item 127 pick a; coordinator ruling, 2026-11-01 22:54 CST). A call whose `model` or `agentType` the scan cannot read (a variable, a shorthand, or a spread with no literal `agentType`) is skipped. Owner ruling: shiv, 2026-11-01 11:43 CST, waiting-page item 107, pick a. The refusal names the marker. Also exempt: a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ceiling above judges (an Explore on Opus needs the marker there too, item 137 pick a). One point is unruled: the refusal of a reviewer's round 1 on sonnet. `ROLE_REVIEWER_FREE_ROUNDS` in `hooks/guard.py` flips it.
+- A spawn that names a model above its role's row is refused, with the remedy "drop the model field, or name the role's model". A reviewer's refusal also names the brief forms that lift a reviewer above its row, as the round rows set them (the `Round N of 3` marker for the rounds whose row is above the reviewer's row, the guard marker, the fix check marker). The general override lifts this refusal (owner, 2026-11-01 17:25 CST, item 127, pick a). Ranks run haiku, sonnet, opus. A model with no rank counts as above every row below opus, so it is refused there; its own rank is unruled. The merge tool's `--review-record` refuses a reviewer round 2 or 3 (`--round N:..`) whose model is not its round row's. It allows round 3 on opus, or a granted round 4 (`--grant`). The record takes no override. A role with no row passes. A role matches its row without case and without surrounding space.
+- Exempt: an `Agent` or `Task` Explore spawn whose brief's first non-blank line carries the audit marker `Audit:` (`EXPLORE_AUDIT_MARKER` in `hooks/shared_names.py`, which the guard and the spawn judge both import; case-sensitive, the first `Audit:` on the brief's first non-blank line, with any text ahead of it, so `**Audit:**` counts; the same first-line pick as the step-up marker scan). Any other such Explore that names a model runs on its haiku row. The guard passes an Explore that names no model whenever `CLAUDE_CODE_SUBAGENT_MODEL` is set (`agents/explore.md` pins haiku, so it also passes without the variable; see the no-model bullet). A Workflow `agent()` call that names a model is judged the same way, by its `agentType` and the brief it passes. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no marker, so the call is judged with an empty brief, and its refusal adds "write the brief as a literal string so the marker is readable" (item 127 pick a; coordinator ruling, 2026-11-01 22:54 CST). A call whose `model` or `agentType` the scan cannot read (a variable, a shorthand, or a spread with no literal `agentType`) is skipped. Owner ruling: shiv, 2026-11-01 11:43 CST, waiting-page item 107, pick a. The refusal names the marker. Also exempt: a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ceiling above judges (an Explore on Opus needs the marker there too, item 137 pick a). A reviewer whose brief's first non-blank line starts with the fix check marker `Fix check` is exempt too, to Sonnet only, on every PR (owner item 444 a, 2026-11-08 15:04 CST; `FIX_CHECK_MARKER` in `hooks/shared_names.py`; case-sensitive; blanks may stand ahead of it, text may not; the refusal names it). A reviewer whose brief carries the guard marker is exempt to its `1 guard` row's model on any round (owner, item 359 pick a, 2026-11-07 14:41 CST). A reviewer's round 1 with no guard marker runs its `1 other` row.
 - A spawn that names no model is refused under two conditions. `CLAUDE_CODE_SUBAGENT_MODEL` is unset or empty in the guard's environment. No `agents/*.md` file in the pointer checkout names the role with a `model:` pin in its frontmatter. A spawn with no role counts as general-purpose. The remedy is "name the role's model", with the row's model beside it unless the row is haiku.
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
 - The override lifts an above-row refusal (owner, 2026-11-01 17:25 CST, item 127, pick a; `never_lifted` in `hooks/guard.py` no longer reads it). No override lifts the no-model refusal (`owner-override`, the model guards).
 
-Cost: one read of this record per spawn. A spawn with no model adds one read of the agent files. No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
+Cost: one read of this record per spawn (unmeasured). A spawn with no model adds one read of the agent files (unmeasured). No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
 
 Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
-**The lane effort pin.** A lane session runs at medium effort (owner, 2026-10-30 15:11 CDT). The
-coordinator starts a lane with a `create_session` prompt that is exactly `/effort medium`, then sends
-the brief with `send_message`. A slash command runs only when it is the whole prompt (coordinator
-probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text after it
-set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
-call tagged `cs-build:lane` with any other prompt. A lane started with no such tag is unseen; the
+**The lane effort pin.** A lane runs at medium effort (owner, 2026-11-10 13:19 CST, "B is good").
+The coordinator starts a lane with `create_session` set to effort `medium`, with `model` (the lane row's)
+and `source_url` (the repo), and with its whole brief as the first prompt. The brief opens with a Grant
+line, `Grant: <owner words>, <time>`. The lane treats it as the owner's grant. It checks the grant against
+the coordinator's chat only when the act cannot be undone (coordinator, 2026-11-10 13:18 CST). The effort
+comes from the field, because a slash command runs only as the whole prompt (measured by the
+coordinator's probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text
+after it set none). Guard rule `lane-effort-pin` (likely risk, first landed 2026-10-30) refuses a `create_session`
+call tagged `cs-build:lane` unless its `effort` is `medium` and its prompt's first non-blank line is a Grant line
+with owner words after it. Owner words hold a letter or digit and no `<`, so a placeholder Grant such as
+`<owner words>` is refused. Rule `lane-one-topic` also reads a lane `create_session` prompt. When the prompt's
+`Lane brief:` line follows the Grant line, its Topic must match the call's `cs-topic` tag. A `send_message`
+brief follows the same rule (owner chat, 2026-11-10 13:19 CST, "B is good", page item 495 a). A lane
+started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
 that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH), pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
 value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.
@@ -126,13 +149,22 @@ tag beside its target's. The rule runs after `lane-effort-pin`, so a call that b
 first. An owner override lifts it.
 The roadmap build shares this read (`github_slug` and `blob_url` in `skills/roadmap/build.py`). For an ssh origin with a port, a non-GitHub https origin or a POSIX local path, the build links its last two path segments on github.com.
 Cost, per lane `create_session` only: one extras file read, and one `git remote get-url origin` process start
-when the extras name no repo. A deny writes one guard.log line. No other file, and no timer.
+when the extras name no repo (unmeasured). A deny writes one guard.log line (unmeasured). No other file, and no timer.
 Known gaps: a Windows drive path with backslashes reads as no origin. A `cwd` below the repo root reads no
 extras file. Tags set by `set_session_tags` after the start are not judged.
 Kind of risk: incident. Landed 2026-11-01.
 
 Incident: 2026-11-01 18:08 CST, lanes tagged with the short repo name made 18 false in-progress flags on
 the roadmap page, because the live check matches the full tag.
+
+**The lane start settings.** Guard rule `lane-start-settings` refuses a `create_session` call tagged `cs-build:lane`
+whose input has no `model` or no `source_url`; an empty or whitespace-only value counts as missing. A lane with no
+repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
+passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
+Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
+judged (both inherited from the lane effort pin and the lane repo tag). The rule checks that a model is
+present, not which model.
+Kind of risk: likely. Landed 2026-11-08.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
@@ -171,7 +203,8 @@ the run's `modelUsage` and the agent's own report of its model id. Background ca
 | builder, no pin | unset | haiku | haiku |
 
 So a pin in `agents/*.md` beats the variable in both directions. A reviewer spawn that names no model
-runs Haiku even where the variable is `sonnet`; rounds 2 and 3 must set the model per spawn.
+runs Haiku even where the variable is `sonnet`; rounds 2 and 3 and a fix check must set the model per spawn
+(owner, item 444 a, 2026-11-08 15:04 CST).
 A running cloud thread does not load `~/.claude/agents` files written mid-session: its Agent tool
 refused `reviewer`, `designer` and `builder` as unknown types. A process started after the write
 loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in

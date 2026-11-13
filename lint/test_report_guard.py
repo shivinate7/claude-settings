@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -26,16 +27,21 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPORT_GUARD = os.path.join(HERE, "report_guard.py")
 HOOKS = os.path.join(HERE, "..", "hooks")
+GUARD_PY = os.path.join(HOOKS, "guard.py")
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import report_guard as RG  # noqa: E402  session_wording, the one detector for an order to the session (lint/report_guard.py)
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
+# record holds both. Lower case, to match a lowered reason or record.
+CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -105,19 +111,58 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
-def tool_use_msg(name, input_=None):
+def tool_use_msg(name, input_=None, id_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
+    if id_ is not None:  # a result pairs to its call by this id
+        block["id"] = id_
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
 
 
-def tool_result_msg(tool_use_id="tu_1"):
-    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}
+def tool_result_msg(tool_use_id="tu_1", content="ok", is_error=False):
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    if is_error:
+        block["is_error"] = True
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
 def assistant_text(text):
     return {"type": "assistant", "isSidechain": False,
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def background_agent_launch(spawn, n=0):
+    """A background spawn's launch: its Agent tool_use with run_in_background, then the async-launch result
+    that names the agent. Its completion, when it has one, arrives later as a notice (background_agent_done).
+    A launch with no notice after it is still running. The shape is the one hooks/stall_watch.py reads:
+    isAsync, status async_launched, agentId."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    use = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "Agent", "input": dict(spawn, run_in_background=True)}]}}
+    result = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid,
+         "content": "Async agent launched successfully. agentId: %s." % aid}]},
+        "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid}}
+    return [use, result]
+
+
+def background_agent_done(n, status="completed"):
+    """The completion notice of background spawn n: a queued_command attachment whose prompt is a task
+    notification. Its tool-use-id is the spawn's own id, and its status is terminal."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    prompt = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+              "<status>%s</status>\n<summary>Agent \"review\" %s</summary>\n</task-notification>"
+              % (aid, cid, status, status))
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
+def keyed_spawn(spawn, n=0):
+    """A finished foreground spawn that carries its tool_use id, answered by a real result."""
+    use = tool_use_msg("Agent", spawn)
+    use["message"]["content"][0]["id"] = "toolu_fg%d" % n
+    return [use, tool_result_msg("toolu_fg%d" % n)]
 
 
 def compact_boundary():
@@ -681,11 +726,11 @@ class ReportGuardTests(unittest.TestCase):
 
     def test_73_peer_reply_does_not_move_the_turn_start_in_either_direction(self):
         rows = [
-            # Pin (green before the fix): a peer record before the commit never hides the commit.
+            # Pin: a peer record before the commit never hides the commit.
             ("peer before commit", [human("go"), peer_msg("Answer: ok."),
                                     tool_use_msg("Bash", {"command": "git commit -m x"}),
                                     tool_result_msg(), assistant_text("done")], "block"),
-            # Pin (green before the fix): a commit from an earlier turn never counts because a peer
+            # Pin: a commit from an earlier turn never counts because a peer
             # reply came after the new human message.
             ("earlier turn commit", [human("land it"), tool_use_msg("Bash", {"command": "git commit -m a"}),
                                      tool_result_msg(), human("what is the log"),
@@ -727,10 +772,10 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     # reports-done-format
     def test_df_red_done_without_kind_blocks(self):
-        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_done_without_ref_blocks(self):
-        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_one_bullet_lacks_ref_blocks(self):
         rows = [
@@ -833,7 +878,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     def test_cite_and_done_block_once_with_both_reasons(self):
         out = self.verdict("Per D12.\n\n> **Done** BUILT guard\n> **Next** none")
-        self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
+        self.assertIn("BUILT, RECORDED or OTHER", out["reason"])
         self.assertIn("'D12'", out["reason"])
 
     def test_df_cite_quiet_on_rewrite(self):
@@ -848,27 +893,36 @@ class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
+    def stop(self, records, reply, agent_model="sonnet"):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+        records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                             assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        if agent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        run = run_guard(REPORT_GUARD, hook, env=env)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for n, spawn in enumerate(running):  # a background spawn with no completion notice: still running
+            records += background_agent_launch(spawn, n)
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
             result = tool_result_msg("tu_denied")
             result["message"]["content"][0]["is_error"] = True
             records += [use, result]
-        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                    assistant_text(reply)]
-        path = write_transcript(records, self.tmp.name)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        run = run_guard(REPORT_GUARD, hook, env=env)
-        self.assertEqual(run.returncode, 0)
-        return json.loads(run.stdout) if run.stdout.strip() else None
+        return self.stop(records, reply, agent_model)
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
@@ -929,6 +983,208 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+    REVIEWER = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+    TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
+
+    @staticmethod
+    def file_pin(role):
+        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1].splitlines()
+        for line in front:
+            key, _, value = line.partition(":")
+            if key.strip() == "model":
+                return value.strip()
+        return ""
+
+    def check_unset_spawn_takes_file_pin(self, role):
+        import report_guard  # noqa: E402  MODEL_FAMILIES, the names a Done item may give (one home)
+        pin = self.file_pin(role)
+        self.assertEqual(pin, "haiku", "agents/%s.md pins %r, not the haiku this case expects" % (role, pin))
+        wrong = next(f for f in report_guard.MODEL_FAMILIES if f != pin)
+        spawn = {"subagent_type": role, "prompt": "Round 1 of 3"}
+
+        def reply(model):
+            return "> **Done** BUILT the cases, PR #5 (%s %s)\n> **Next** Unstarted: none" % (role, model)
+
+        out = self.verdict(reply(pin), [spawn], agent_model=None)
+        self.assertIsNone(out, out and out["reason"])
+        out = self.verdict(reply(wrong), [spawn], agent_model=None)
+        self.assertIsNotNone(out, "a %s spawn with no model field ran %s, yet Done naming %s passed"
+                             % (role, pin, wrong))
+        self.assertIn("'%s %s' matches no %s spawn, which ran %s" % (role, wrong, role, pin), out["reason"])
+
+    def test_dm_green_unset_reviewer_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("reviewer")
+
+    def test_dm_green_unset_test_author_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("test-author")
+
+    def test_dm_false_alarm_running_reviewer_absent_from_done_passes(self):
+        # A reviewer still running is not a finished claim: Done names the test-author and the builder only.
+        reply = "> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet)\n" + self.RUNNING_NEXT
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_green_running_reviewer_named_at_pin_passes(self):
+        # Control for the case above: the same running fixture, with Done naming the reviewer at its pin.
+        reply = ("> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet, reviewer haiku)\n"
+                 + self.RUNNING_NEXT)
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_unnamed_reviewer_in_done_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n> **Next** Unstarted: none",
+                           [self.BUILDER, self.REVIEWER])
+        self.assertIsNotNone(out, "a reviewer that Done names with no model passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_green_both_roles_named_match_passes(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku)\n> **Next** Unstarted: none",
+            [self.BUILDER, {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}]))
+
+    TEST_AUTHOR_HAIKU = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    TEST_AUTHOR_DONE = "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none"
+
+    def background_builder_turn(self, status):
+        """A finished test-author, then a background builder whose completion notice has `status`.
+        `status` None leaves the builder with no notice: still running."""
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0)
+        records += background_agent_launch(self.BUILDER, 0)
+        if status:
+            records.append(background_agent_done(0, status))
+        return records
+
+    def test_dm_red_completed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("completed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a completed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_failed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("failed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a failed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_false_alarm_running_background_builder_omitted_passes(self):
+        out = self.stop(self.background_builder_turn(None), self.TEST_AUTHOR_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_finished_keyed_spawn_omitted_blocks(self):
+        # A finished spawn that carries its tool_use id and a real result is required in Done like any other.
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0) + keyed_spawn(self.BUILDER, 1)
+        out = self.stop(records, self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a finished keyed builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_running_reviewer_named_bare_blocks(self):
+        # A Done item that names a role with no model blocks, whether or not that role is still running.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named bare in Done passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_running_reviewer_named_wrong_model_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named with a wrong model passed")
+        self.assertIn("'reviewer sonnet' matches no reviewer spawn, which ran haiku", out["reason"])
+
+    REVIEWER_R3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
+    ROUND1_NO_MODEL = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # runs its file pin, haiku
+
+    def turn_records(self, earlier=(), window=()):
+        """The turn's records: `earlier` spawns from before the owner's second message, then `window` spawns
+        after it. Each spawn carries its tool_use id and a real result, as a finished spawn does. With no
+        earlier spawn there is no second message: the window is the whole transcript."""
+        records = [human("do the task")]
+        n = 0
+        for spawn in earlier:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        if earlier:
+            records.append(human("the owner's next message"))
+        for spawn in window:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        return records
+
+    ROUNDS_DONE = ("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku round 1, "
+                   "reviewer sonnet rounds 2 and 3)\n> **Next** Unstarted: none")
+
+    def test_dm_false_alarm_earlier_round_pin_named_passes(self):
+        # The earlier reviewer runs before the owner's second message, on its file pin, haiku. The later
+        # reviewers run after it, on sonnet, and each is named at its own model.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, self.ROUNDS_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_earlier_round_named_with_unspawned_model_blocks(self):
+        # Control: no spawn of any turn ran opus, so naming reviewer opus blocks.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer opus)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer opus, which no spawn ran, and passed")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
+    def test_dm_false_alarm_earlier_unnamed_builder_passes(self):
+        # Control: the missing-role check stays window-only. An earlier builder Done does not name is no refusal.
+        records = self.turn_records(earlier=[self.BUILDER], window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_same_window_mismatch_blocks(self):
+        # Control: a mismatch inside the window still blocks, with no earlier spawn.
+        records = self.turn_records(window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer haiku against a window reviewer that ran sonnet, and passed")
+        self.assertIn("'reviewer haiku' matches no reviewer spawn, which ran sonnet", out["reason"])
+
+    BUILDER_NO_MODEL = {"subagent_type": "builder", "prompt": "build it"}  # no model field, no file pin
+    BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
+    BUILDER_OPUS = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
+    REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 2 of 3"}
+    REVIEWER_SONNET_EARLY = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 1 of 3"}
+
+    def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
+        # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
+        # the builder check for the window's builder, which ran opus.
+        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+                        agent_model=None)
+        self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
+        self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
+
+    def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
+        # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
+        # not let that wrong name pass.
+        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
+                        agent_model=None)
+        self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_limit_earlier_spawn_model_passes(self):
+        # Accepted limit: a Done model name is judged against every spawn in the transcript, not the turn's
+        # window alone. The earlier sonnet reviewer lets "reviewer sonnet" pass, though the window's reviewer ran haiku.
+        records = self.turn_records(earlier=[self.REVIEWER_SONNET_EARLY], window=[self.REVIEWER_HAIKU])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_limit_earlier_builder_spawn_model_passes(self):
+        # Accepted limit, as above: the earlier sonnet builder lets "builder sonnet" pass, though the
+        # window's builder ran opus.
+        records = self.turn_records(earlier=[self.BUILDER_SONNET], window=[self.BUILDER_OPUS])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1017,42 +1273,43 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_report_block_asks_for_the_corrected_lines_only(self):
+    def test_nr_red_each_refusal_holds_no_correction_tail(self):
         rows = [
-            # Catches: the label-word block asks for the report again.
+            # Catches: the label-word refusal carries the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name block asks for the report again.
+            # Catches: the model-name refusal carries the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted block asks for the report again.
+            # Catches: the Unstarted refusal carries the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss block asks for the report again.
+            # Catches: the cite-gloss refusal carries the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: two joined reasons each carry the tail.
+            # Catches: a joined refusal carries the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
         for name, reply, spawns in rows:
-            with self.subTest(block=name):
+            with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
                 self.assertEqual(out["decision"], "block")
                 reason = out["reason"].lower()
-                self.assertIn("post only the corrected lines", reason)
-                self.assertIn("never send the report again", reason)
+                self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                self.assertEqual(reason.count("post only the corrected lines"), 1)
+                for phrase in CORRECTION_STEP:
+                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
+                self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
-        self.assertIn("Do not write it again.", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("post only the corrected lines", out["reason"].lower())
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
         # Catches: the block asks for the report and also says never send it.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("never send the report again", out["reason"].lower())
 
     def test_nr_correction_only_follow_up_passes(self):
@@ -1090,14 +1347,14 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     def missing_report_block(self):
         out = self.stop("All done.", False)
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
         self.missing_report_block()
         out = self.stop("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge", True)
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
-        self.assertIn("post only the corrected lines", out["reason"].lower())
+        self.assertIn("decision guard-remedy-not-to-owner", out["reason"])
         self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
@@ -1119,6 +1376,26 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def earlier_round_records(self, reply):
+        """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
+        second reviewer ran after it, on sonnet. `reply` is the turn's last text."""
+        round1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # no model field: its file pin, haiku
+        round2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+        records = [human("do the task")] + keyed_spawn(round1, 0) + [human("the owner's next message")]
+        records += keyed_spawn(round2, 1)
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), assistant_text(reply)]
+        return records
+
+    def test_rw_earlier_round_pin_named_passes(self):
+        # The rewrite is judged against every spawn in the transcript, as the stop path is: Done names the earlier
+        # reviewer at its pin, haiku, which ran before the window, and the later one at sonnet, which ran in it.
+        block = self.run_hook(self.earlier_round_records("All done."), False)
+        self.assertIn("does not end with the report", block["reason"])
+        reply = ("> **Done** BUILT the guard, PR #5 (reviewer haiku round 1, reviewer sonnet round 2)\n"
+                 "> **Next** Unstarted: none")
+        out = self.run_hook(self.earlier_round_records(reply), True)
+        self.assertIsNone(out, out and out["reason"])
 
     def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
         # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
@@ -1284,7 +1561,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block demands the line on a reply that is no report.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertIsNone(self.stop(self.compacted_turn("Correction: the Done line needs a PR ref."), active=True))
 
     def test_cc_green_correction_line_satisfies_a_later_report(self):
@@ -1363,7 +1640,7 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_rewrite_after_missing_report_block_names_the_line(self):
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         # The rewrite reads the marker the missing-report block left, and checks the Recovered line once.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
 
@@ -1449,7 +1726,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
                                 "Handoff gave")
 
@@ -1592,7 +1869,7 @@ class CompactionCarryCostTests(unittest.TestCase):
                    assistant_text("All done.")]
         out, new = self.run_hook(records)
         self.assertIsNotNone(out, "no missing-report block")
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertEqual([os.path.basename(path) for path in new], [self.sid + ".report-block"])
 
     def test_cc_cost_both_lines_pass_starts_no_process_and_writes_no_file(self):
@@ -1966,21 +2243,34 @@ class SameTurnWriter:
 
     WRITER = "session_writer1"
 
-    def call(self, name, input_, result=None, side=False):
-        """The records one tool call leaves: the call, and its result when one is given."""
+    DELIVERED = '{"status":"delivered"}'  # a cloud send_message result whose send reached its session
+    NOT_DELIVERED = '{"status":"queued"}'  # a result that reads as not delivered
+
+    def call(self, name, input_, result=None, side=False, is_error=False, tool_use_result=None):
+        """The records one tool call leaves: the call, and its result when one is given. is_error sets the
+        result's is_error flag (a failed cloud send); tool_use_result is the record's toolUseResult (a failed
+        local SendMessage says success false there, with no is_error)."""
         use_id = "toolu_%d" % next(_CALL_IDS)
         recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
         if result is not None:
-            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
+            block = {"type": "tool_result", "tool_use_id": use_id, "content": result}
+            if is_error:
+                block["is_error"] = True
+            rec = {"type": "user", "isSidechain": side, "message": {"role": "user", "content": [block]}}
+            if tool_use_result is not None:
+                rec["toolUseResult"] = tool_use_result
+            recs.append(rec)
         return recs
 
-    def send(self, session_id=None, to=None):
-        """A send: send_message names its target by session_id, SendMessage by to."""
+    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None):
+        """A send: send_message names its target by session_id, SendMessage by to. `result` is the send's tool
+        result text, None when the transcript holds none. is_error and tool_use_result go to call as given."""
+        out = {"result": result, "is_error": is_error, "tool_use_result": tool_use_result}
         if to is None:
-            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
-        return self.call("SendMessage", {"to": to, "message": "pick"})
+            return self.call("mcp__claude-code-remote__send_message",
+                             {"session_id": session_id, "message": "pick"}, **out)
+        return self.call("SendMessage", {"to": to, "message": "pick"}, **out)
 
     def writer_read(self, writer, collection="meta", doc_id="page"):
         """An ArtifactData get whose result carries the writer id."""
@@ -2008,6 +2298,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
     LINKED = PICK + [PAGE]
     QUESTION = ["Close q_max #969 as replaced by #1010?"]
+    NO_KEY = object()  # make_repo's writer default: the extras file holds no "page-writer" key
 
     def setUp(self):
         self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
@@ -2018,14 +2309,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True):
+    def make_repo(self, name, page=True, writer=NO_KEY):
+        """A repo whose extras file names the waiting page (when page is true). `writer` sets its
+        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
+            keys = {"kinds": {}, "waiting-page": self.PAGE}
+            if writer is not self.NO_KEY:
+                keys["page-writer"] = writer
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
-                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+                json.dump(keys, f)
         return repo
+
+    def extras_key(self, repo):
+        """The "page-writer" value on disk in `repo`, or NO_KEY when the file holds no such key."""
+        with open(os.path.join(repo, ".claude", "layout-extras.json")) as f:
+            keys = json.load(f)
+        return keys["page-writer"] if "page-writer" in keys else self.NO_KEY
 
     def reply(self, body):
         """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
@@ -2136,13 +2438,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     def test_qm_red_unknown_writer_blocks_and_names_the_page_read(self):
         # Catches: a send to an id that no meta/page read named passing; the block says how to find the writer.
         out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page", self.PAGE, "ArtifactData get")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session", self.PAGE)
 
     def test_qm_red_writer_from_another_item_does_not_count(self):
         # Catches: a writer id read from a get of another item taken as the page writer.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER, collection="items", doc_id="q1"),
                          *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
 
     def test_qm_green_newest_writer_read_names_the_writer(self):
         # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
@@ -2294,6 +2596,178 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
 
+    # Owner-facing turn with no meta/page read: the layout's "page-writer" key is the writer.
+
+    def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
+        # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
+        # cloud session that never reads meta/page is blocked for a question it sent to the real writer. The send
+        # carries a delivered result, so only the key's writer id decides.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "a send to the layout key's writer id was refused")
+
+    def test_qm_layout_writer_green_ack_from_the_key_writer_keeps_the_turn(self):
+        # Catches: the layout writer's ack after a send starting a new turn, which hides the send and blocks the question.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "the layout writer's ack after a send started a new turn")
+
+    def test_qm_layout_writer_red_send_to_another_id_blocks(self):
+        # Catches: a send to a session that is not the layout key's writer passing because the key is set.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        sends = (("session_id", self.send(session_id="session_other9")), ("to", self.send(to="session_other9")),
+                 ("no id", self.call("mcp__claude-code-remote__send_message", {"message": "pick"})))
+        for label, send in sends:
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_send_this_turn_blocks(self):
+        # Catches: the layout key alone passing a question, or an earlier turn's send to the key id counting as this turn's.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        earlier = (("no send", []),
+                   ("send in an earlier turn", [human("first"), *self.send(session_id=self.WRITER),
+                                                assistant_text("Sent earlier.")]))
+        for label, before in earlier:
+            with self.subTest(case=label):
+                out = self.stop([*before, human("decide"), assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_usable_key_still_says_not_known(self):
+        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes.
+        for label, value in (("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
+                             ("list", [self.WRITER])):
+            with self.subTest(key=label):
+                repo = self.make_repo("key_" + label.replace(" ", "_"), writer=value)
+                self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
+                out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))],
+                                repo=repo)
+                self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_transcript_read_wins_over_the_key(self):
+        # Catches: the layout key taking the place of a meta/page read that names another writer.
+        keyed = self.make_repo("keyed_key", writer=self.OLDER_WRITER)
+        self.assertEqual(self.extras_key(keyed), self.OLDER_WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        reads = self.writer_read(self.WRITER)
+        out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
+                         assistant_text(self.reply(self.PICK))], repo=keyed)
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                     assistant_text(self.reply(self.PICK))], repo=keyed),
+                          "a send to the transcript's writer was refused when the layout key names another id")
+
+    def test_qm_layout_writer_red_meta_read_naming_no_writer_blocks(self):
+        # Catches: a meta/page read that names no writer read as no read, so the layout key stands in for it and a
+        # same-turn send to the key id passes. Any meta/page get in the transcript keeps the layout key out.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        page_json = json.dumps({"url": self.PAGE, "title": "Waiting page"})
+        reads = (("collection", self.call("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page",
+                                                           "url": self.PAGE}, result=page_json)),
+                 ("path", self.call("ArtifactData", {"action": "get", "path": "meta/page", "url": self.PAGE},
+                                    result=page_json)))
+        for label, read in reads:
+            for field, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+                with self.subTest(read=label, field=field):
+                    out = self.stop([human("decide"), *read, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                    self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_lane_send_to_the_key_id_is_refused(self):
+        # Catches: a lane reading the layout key, so a send to the key's writer passes where a lane's own chat never reaches the owner.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        out = self.lane(peer_msg("pick?"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK)),
+                        repo=keyed)
+        self.assert_blocked(out, "Lane pick guard")
+
+    def test_qm_layout_writer_red_key_send_errored_by_is_error_blocks(self):
+        # Catches: a send to the layout key's writer whose result has is_error counted as the send, so the question
+        # reached no one and the guard passed. The result text reads delivered, so only the error flag decides.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED, is_error=True)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED, is_error=True))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_errored_by_success_false_blocks(self):
+        # Catches: a send to the layout key's writer whose record says toolUseResult success false (a failed local
+        # SendMessage, with no is_error flag) counted as the send. The result text reads delivered, so only the
+        # success flag decides.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        failed = {"success": False, "message": "fixture: the send did not reach its session"}
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED,
+                                                     tool_use_result=failed)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED, tool_use_result=failed))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_without_a_result_blocks(self):
+        # Catches: a send to the layout key's writer with no result record in the transcript counted as delivered.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_not_delivered_blocks(self):
+        # Catches: a send to the layout key's writer whose result reads as not delivered counted as the send when no
+        # error flag is set. Only the result text decides here.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.NOT_DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.NOT_DELIVERED))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_green_succeeded_send_counts_past_a_later_errored_resend(self):
+        # Catches: a failed resend to the layout key's writer later in the turn hiding a delivered send to it. The
+        # sends pair by tool_use id, so the delivered one counts, and the writer's ack after them keeps the turn.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, target in (("session_id", {"session_id": self.WRITER}), ("to", {"to": self.WRITER})):
+            with self.subTest(field=label):
+                records = [human("decide"), *self.send(result=self.DELIVERED, **target),
+                           *self.send(result=self.DELIVERED, is_error=True, **target), ack,
+                           assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assertIsNone(self.stop(records, repo=keyed),
+                                  "a delivered send to the layout key's writer was not counted past a later failed resend")
+
+    def test_qm_layout_writer_green_transcript_path_failed_send_keeps_main_verdict(self):
+        # Catches: the failed-send rule leaking into the transcript path. A meta/page read names the writer, so a send
+        # to it passes whatever its result, as on main. That verdict must not change.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        reads = self.writer_read(self.WRITER)
+        failed = (("is_error", self.send(session_id=self.WRITER, result=self.DELIVERED, is_error=True)),
+                  ("success false", self.send(to=self.WRITER, result=self.DELIVERED,
+                                              tool_use_result={"success": False})))
+        for label, send in failed:
+            with self.subTest(failure=label):
+                out = self.stop([human("decide"), *reads, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assertIsNone(out, "a failed send on the transcript path was refused; that path keeps main's verdict")
+
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
         "print(json.dumps(list(report_guard.question_problem(data['records'], data['records'], data['text'], "
@@ -2318,7 +2792,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     def test_ln_green_send_to_parent_in_the_turn_passes(self):
         # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
-        # The human-first shape is red on main: main checks it and blocks, where a peers-only lane is skipped.
+        # The human-first shape pins the send after a human message. A peers-only lane is skipped before it.
         shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
         forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
                  ("to parent", self.send(to="parent")))
@@ -2332,7 +2806,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         for body in (self.PROMISE, self.LINKED):
             with self.subTest(body=body[0]):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
-                self.assert_blocked(out, "Lane pick guard", "@parent")
+                self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
@@ -2356,7 +2830,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         # Catches: a lane's send to a session that is neither its parent nor the writer.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="session_other9"),
                         assistant_text(self.reply(self.PICK)))
-        self.assert_blocked(out, "Lane pick guard", "@parent")
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_send_in_an_earlier_turn_blocks(self):
         # Catches: a send before the lane's last incoming message passing as this turn's send.
@@ -2677,6 +3151,84 @@ class SentenceSplitBoldTests(unittest.TestCase):
         findings = self.lint(text)
         codes = [f.code for f in findings]
         self.assertIn("STE001", codes)
+
+
+class DoubleBacktickMaskTests(unittest.TestCase):
+    """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
+
+    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
+    backtick inside it does not hide the prose after it. They also guard that an unclosed
+    double-backtick run is literal text: it opens no span, so the prose before a later code span
+    is still linted, and that code span is still masked.
+    """
+
+    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
+                 "then checks each new case against the old commit and records the failing run in the trailer")
+
+    def codes(self, text):
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return [f.code for f in linter.check_text("t.md", text)]
+
+    def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
+        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
+        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(double),
+                      "a backtick inside a double-backtick span hides the sentence after it")
+
+    def test_double_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+                         "text inside a double-backtick span is linted as prose")
+
+    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
+        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside adds a finding")
+
+    def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
+        # The `` run has no closing run of two, so it is literal text and opens no span.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
+                      "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+                      "an unclosed double-backtick run hides the words before a later code span")
+
+    def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
+        # The run is literal, so the single-backtick span after it is valid and its words stay masked.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
+                      "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+                         "an unclosed double-backtick run makes a later code span read as prose")
+
+    def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
+        # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
+        # it is masked, and the 31 words before it stay prose.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+                      "a lone backtick before a double-backtick span hides the words before it")
+
+    def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
+        # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
+        # the words stay inside it.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+                         "a two-backtick run inside a three-backtick run closes the span early")
+
+    def test_single_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+                         "text inside a single-backtick span is linted as prose")
+
+    def test_single_backtick_span_budget_is_thirty_words(self):
+        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
+                "before the branch is pushed to the shared remote today for the crew now")
+        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
+        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
 
 
 class DecisionGlossCollapseTests(unittest.TestCase):
@@ -4077,7 +4629,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
         # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
         out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
@@ -4101,17 +4653,18 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
         bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
 
-    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+    # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
+    def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
-    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+    def test_a_prose_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
@@ -4126,7 +4679,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
             run = run_guard(REPORT_GUARD, hook)
         out = json.loads(run.stdout) if run.stdout.strip() else {}
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertIn("past-ruling", run.stderr)
 
     def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
@@ -4462,7 +5015,8 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Catches: the check blocks a rewrite, which this guard leaves quiet today.
         self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
 
-    # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
+    # Cost: regex only, plus one read of hooks/guard.py. report_guard reads its stamp id there once per run, at
+    # load (hooks_dirs), so no other file opens. The probe is builtins.open, the pattern
     # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
 
     def guard_opens(self, reply):
@@ -4482,29 +5036,34 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             runpy.run_path(REPORT_GUARD, run_name="__main__")
         return out.getvalue().strip(), opened, hook["transcript_path"]
 
-    def test_an_cost_no_word_opens_only_the_transcript(self):
+    def test_an_cost_no_word_opens_only_transcript_and_guard_py(self):
         # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
         for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
             with self.subTest(reply=reply):
                 out, opened, transcript = self.guard_opens(reply)
                 self.assertEqual(out, "")
-                self.assertEqual(set(opened), {transcript})
+                self.assertEqual(set(opened), {transcript, GUARD_PY})
 
-    def test_an_cost_offending_line_still_opens_only_the_transcript(self):
+    def test_an_cost_offending_line_still_opens_only_transcript_and_guard_py(self):
         # The block is the red part. The read is the cost: the verdict reads the reply, and nothing else opens.
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
-        self.assertEqual(set(opened), {transcript})
+        self.assertEqual(set(opened), {transcript, GUARD_PY})
 
 
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
-    Input Needed. The refusals file is written here by hand, so these cases do not depend on
-    hooks/refusal_note.py. Each case works in its own folder under this run's folder (test-temp-standard)."""
+    Input Needed or says the refusal was right. A reply that raises a refusal also records it as raised,
+    so the same tool refused again for the same reason passes silently. The refusals file is written here
+    by hand, so these cases do not depend on hooks/refusal_note.py. Each case works in its own folder under
+    this run's folder (test-temp-standard)."""
 
     SID = "pd-sid-1"
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     ADD_REPO = "mcp__claude-code-remote__add_repo"
+    BASH = "Bash"
+    REASON = "auto mode refused the call: it archives a session the owner did not name"
+    OTHER_REASON = "auto mode refused the call: it adds a repo outside the allowed list"
     PAGE = "https://claude.ai/artifact/waitpage3"
     PROSE = "Nothing landed. The state is unchanged."
     LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
@@ -4527,12 +5086,19 @@ class PendingRefusalTests(unittest.TestCase):
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
 
-    def write_refusals(self, tools, sid=SID):
+    def write_rows(self, rows, sid=SID, agent_id=None):
+        """The refusals file with one row per (tool_name, reason) pair, in the shape hooks/refusal_note.py writes.
+        With `agent_id`, each row is an agent's refused call, as the hook writes it."""
         os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
         with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
-            for tool in tools:
-                handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool,
-                                         "reason": "refused"}) + "\n")
+            for tool, reason in rows:
+                row = {"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool, "reason": reason}
+                if agent_id:
+                    row["agent_id"] = agent_id
+                handle.write(json.dumps(row) + "\n")
+
+    def write_refusals(self, tools, sid=SID):
+        self.write_rows([(tool, "refused") for tool in tools], sid)
 
     def pending_tools(self, sid=SID):
         """The tool_name of each line still in the refusals file, [] when the file is gone."""
@@ -4559,6 +5125,41 @@ class PendingRefusalTests(unittest.TestCase):
         """The block decision the guard printed, or None when the Stop passed."""
         return json.loads(run.stdout) if run.stdout.strip() else None
 
+    def use_fresh_config(self):
+        """A config folder of its own, so one subtest's raised refusals never settle the next subtest's."""
+        self.cfg = tempfile.mkdtemp(dir=self.scratch)
+
+    @staticmethod
+    def raising_reply(rows):
+        """A reply that raises each (tool, reason) row: its tool's name, then "refusal was right"."""
+        return "\n".join("`%s` refusal was right." % tool for tool, _ in rows) + "\nNothing landed."
+
+    @staticmethod
+    def input_needed_reply(rows):
+        """A reply that raises each row by naming its tool under Input Needed, with no question for the owner."""
+        names = ", ".join("`%s`" % tool for tool, _ in rows)
+        return ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                "> **Input Needed** %s was refused; nothing for the owner to decide.\n> **Next** wait" % names)
+
+    def raise_refusal(self, rows, reply, active=False, sid=SID):
+        """Raise `rows` with `reply`. Scope first: the rows are in the file. Then the reply passes and clears them."""
+        self.write_rows(rows, sid)
+        self.assertEqual(self.pending_tools(sid), [tool for tool, _ in rows],
+                         "scope: the fixture file does not hold the rows")
+        run = self.stop(reply, active=active, sid=sid)
+        self.assertEqual(run.stdout.strip(), "", "the reply that raises the refusal blocked: %s" % run.stdout)
+        self.assertEqual(self.pending_tools(sid), [], "the reply that raises the refusal left its row in the file")
+
+    def config_files(self):
+        """Every file under this test's config folder, as {relative path: bytes}."""
+        found = {}
+        for root, _, names in os.walk(self.cfg):
+            for name in names:
+                path = os.path.join(root, name)
+                with open(path, "rb") as handle:
+                    found[os.path.relpath(path, self.cfg)] = handle.read()
+        return found
+
     def test_d_pending_refusal_not_named_under_input_needed_blocks(self):
         rows = (("unlanded prose reply", False, self.PROSE),
                 ("landed report that asks about another tool", True, self.LANDED_OTHER_ASK))
@@ -4570,8 +5171,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
                 self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
-                self.assertIn("Input Needed", out["reason"])
-                self.assertIn("notes.md", out["reason"])
+                self.assertIn("does not raise it with the owner", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_e_allow_line_with_no_send_blocks_as_a_question(self):
@@ -4698,6 +5298,183 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
+
+    def test_l_a_raised_refusal_does_not_block_again_for_the_same_tool_and_reason(self):
+        # Catches: a refusal the owner was already told of blocks again, when the classifier refuses the same tool
+        # for the same reason and a later reply does not name it.
+        one = [(self.ARCHIVE, self.REASON)]
+        two = [(self.ARCHIVE, self.REASON), (self.ADD_REPO, self.REASON)]
+        raises = (("refusal was right, one row", self.raising_reply, one),
+                  ("Input Needed, one row", self.input_needed_reply, one),
+                  ("refusal was right, two rows", self.raising_reply, two))
+        followers = (("unlanded prose", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for raise_label, make_reply, rows in raises:
+            for next_label, landed, reply in followers:
+                with self.subTest(raised=raise_label, next_reply=next_label):
+                    self.use_fresh_config()
+                    self.raise_refusal(rows, make_reply(rows))
+                    self.write_rows(rows)
+                    out = self.blocked(self.stop(reply, landed=landed))
+                    self.assertIsNone(out, "a refusal already raised with the owner blocked again: %s" % out)
+                    self.assertEqual(self.pending_tools(), [], "the Stop left the repeated refusal in the file")
+
+    def test_m_a_new_refusal_still_blocks_after_a_raise(self):
+        # Catches: a raise settles a different refusal of the same tool, or of another tool with the same reason.
+        cases = (("same tool, new reason", [(self.BASH, self.REASON)], [(self.BASH, self.OTHER_REASON)], self.BASH),
+                 ("new tool, same reason", [(self.ARCHIVE, self.REASON)], [(self.ADD_REPO, self.REASON)], self.ADD_REPO))
+        for label, raised, new, tool in cases:
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.raise_refusal(raised, self.raising_reply(raised))
+                self.write_rows(new)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a new refusal passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % tool, out["reason"], "the block does not name the new refusal")
+                self.assertEqual(self.pending_tools(), [tool], "the new refusal left the file")
+
+    def test_n_an_empty_reason_is_never_matched(self):
+        # Catches: refusals with no reason read as one refusal, so a second one with no reason passes unraised.
+        cases = (("empty, then empty", [(self.BASH, "")], [(self.BASH, "")]),
+                 ("a reason, then empty", [(self.BASH, self.REASON)], [(self.BASH, "")]))
+        for label, raised, new in cases:
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.raise_refusal(raised, self.raising_reply(raised))
+                self.write_rows(new)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a refusal with no reason passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % self.BASH, out["reason"])
+                self.assertEqual(self.pending_tools(), [self.BASH], "the empty-reason refusal left the file")
+
+    def test_o_a_stop_hook_active_raise_is_recorded_and_never_blocks(self):
+        # Catches: a rewrite Stop clears a refusal without recording it, so the next reply blocks on it again.
+        rows = [(self.ARCHIVE, self.REASON)]
+        raises = (("refusal was right", self.raising_reply), ("Input Needed", self.input_needed_reply))
+        for raise_label, make_reply in raises:
+            with self.subTest(raised=raise_label):
+                self.use_fresh_config()
+                self.raise_refusal(rows, make_reply(rows), active=True)  # the rewrite never blocks, and clears the row
+                self.write_rows(rows)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNone(out, "a refusal raised by a stop_hook_active rewrite blocked again: %s" % out)
+                self.assertEqual(self.pending_tools(), [], "the Stop left the repeated refusal in the file")
+
+    def test_p_a_raise_in_one_session_does_not_settle_another(self):
+        # Catches: the raised record is shared across sessions, so one session's raise settles another's refusal.
+        other = "pd-other-sid-raised"
+        rows = [(self.ARCHIVE, self.REASON)]
+        self.raise_refusal(rows, self.raising_reply(rows))
+        self.write_rows(rows, sid=other)
+        self.assertEqual(self.pending_tools(other), [self.ARCHIVE],
+                         "scope: the other session's file does not hold the row")
+        out = self.blocked(self.stop(self.PROSE, sid=other))
+        self.assertIsNotNone(out, "another session's raise settled this session's refusal")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertEqual(self.pending_tools(other), [self.ARCHIVE], "a blocked Stop cleared the other session's row")
+
+    def test_q_a_stop_with_no_refusals_file_writes_nothing(self):
+        # Catches: a Stop writes state under the config folder when no refusal is pending. The cost is one stat.
+        for label, landed, reply in (("unlanded", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN)):
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.assertFalse(os.path.exists(self.refusals_file()), "scope: a refusals file exists")
+                before = self.config_files()
+                run = self.stop(reply, landed=landed)
+                self.assertEqual(run.stdout.strip(), "", run.stdout)
+                self.assertEqual(self.config_files(), before, "the Stop wrote a file with no refusal pending")
+
+    def test_s_a_blank_reason_is_never_matched(self):
+        # Catches: a reason of spaces only counts as a reason, so a second refusal with that blank reason passes
+        # on the strength of an earlier raise. A blank reason identifies nothing, as an empty one does.
+        raises = (("refusal was right", self.raising_reply), ("Input Needed", self.input_needed_reply))
+        for raise_label, make_reply in raises:
+            with self.subTest(raised=raise_label):
+                self.use_fresh_config()
+                rows = [(self.BASH, "   ")]
+                self.raise_refusal(rows, make_reply(rows))
+                self.write_rows(rows)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a refusal with a blank reason passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % self.BASH, out["reason"], "the block does not name the blank-reason refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "the blank-reason refusal left the file")
+
+    def test_r_an_agent_row_is_never_recorded_as_raised(self):
+        # Catches: an agent's refused call is recorded as raised, so the same tool and reason refused to the
+        # orchestrator later passes unseen. The agent row clears by the agent rule; the orchestrator row must block.
+        agent = [(self.BASH, self.REASON)]
+        followers = (("unlanded prose", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for label, landed, reply in followers:
+            with self.subTest(next_reply=label):
+                self.use_fresh_config()
+                self.write_rows(agent, agent_id="agent-r1")
+                self.assertEqual(self.pending_tools(), [self.BASH], "scope: the fixture file does not hold the agent row")
+                run = self.stop(self.input_needed_reply(agent))
+                self.assertEqual(run.stdout.strip(), "", "the reply that names the agent row blocked: %s" % run.stdout)
+                self.assertEqual(self.pending_tools(), [], "the reply left the agent row in the file")
+                self.write_rows(agent)
+                out = self.blocked(self.stop(reply, landed=landed))
+                self.assertIsNotNone(out, "an orchestrator row passed on the strength of an agent row that was named")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn(self.BASH, out["reason"], "the block does not name the orchestrator refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "a blocked Stop cleared the orchestrator row")
+
+    def test_t_block_reason_names_both_clearing_forms_as_facts(self):
+        # Catches: the block reason says a refused tool is unanswered but not how it clears, so the session cannot
+        # tell that naming the tool under Input Needed, or writing the phrase after its name, clears it. The phrase
+        # is quoted with the placeholder <tool_name>, as the decision says (refusals-reach-the-owner): quoting it
+        # with the real tool name would clear the row. The reason is facts only: no order to the session. It says
+        # "clears when", never "clears only when": an MCP tool also clears by its full name, and "refusal is right"
+        # also clears, so "only" would be false.
+        for label, tools in (("one tool", [self.BASH]), ("two tools", [self.BASH, self.ARCHIVE])):
+            with self.subTest(refused=label):
+                self.use_fresh_config()
+                self.write_refusals(tools)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "the Stop passed with a pending refusal")
+                reason = out["reason"]
+                for tool in tools:  # scope first: the reason names each refused tool in backticks
+                    self.assertIn("`%s`" % tool, reason, "scope: the block does not name refused tool %s" % tool)
+                order = RG.session_wording(reason)
+                checks = (
+                    ("the block does not say when a refused tool clears", "clears when" in reason),
+                    ("the block says 'only' about clearing, which is false: other forms clear a tool too",
+                     not re.search(r"\bonly\b", reason, re.I)),
+                    ("the block does not give the Input Needed clearing form", "under Input Needed" in reason),
+                    ("the block does not give the phrase clearing form `<tool_name>`: refusal was right",
+                     "`<tool_name>`: refusal was right" in reason),
+                    ("the block quotes the phrase with a real tool name, so quoting it would clear the row",
+                     not any("`%s`: refusal was right" % tool in reason for tool in tools)),
+                    ("the block holds an order to the session: %r" % order, not order),
+                )
+                for cause, passed in checks:
+                    with self.subTest(cause=cause):
+                        self.assertTrue(passed, cause)
+
+    def test_t_block_reason_says_an_mcp_tool_counts_by_full_name(self):
+        # Catches: the block reason gives the clearing forms but not that an MCP tool counts by its full name, so a
+        # session that refused an MCP call cannot tell that naming its full name, in backticks or not, clears the row.
+        # The reason is facts only: no order to the session.
+        self.write_refusals([self.ARCHIVE])
+        out = self.blocked(self.stop(self.PROSE))
+        self.assertIsNotNone(out, "the Stop passed with a pending refusal")
+        reason = out["reason"]
+        self.assertIn("`%s`" % self.ARCHIVE, reason, "scope: the block does not name the refused MCP tool")
+        flat = " ".join(reason.split()).lower()  # a line break in the reason does not hide the wording
+        order = RG.session_wording(reason)
+        checks = (
+            ("the block does not say an MCP tool counts by its full name",
+             "mcp tool counts by its full name" in flat),
+            ("the block does not say the full name counts with or without backticks",
+             "with or without backticks" in flat),
+            ("the block holds an order to the session: %r" % order, not order),
+        )
+        for cause, passed in checks:
+            with self.subTest(cause=cause):
+                self.assertTrue(passed, cause)
 
 
 # building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a

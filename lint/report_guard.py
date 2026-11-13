@@ -23,13 +23,17 @@ the writer made ("I broke ...", a first-person clause with a fault word and no n
 guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
 (`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
 
+Every refusal reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
+owner line from owner_line(): the check, what is wrong, and a cite of that decision. The steps to fix it live in
+that record, never in the reason.
+
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
-When the report is there, each of these blocks asks for only the corrected lines, never the report again.
+When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
@@ -37,14 +41,14 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
+parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id. A lane
-reads no layout; an owner-facing turn with no counted send reads it once (`decisions-reach-a-clickable-pick`).
+reads no layout; an owner-facing turn with no counted send reads the extras file for the writer key first, when the transcript has no meta/page read, then for the page; a send to the key writer returns after the first read (`decisions-reach-a-clickable-pick`).
 A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
@@ -95,7 +99,7 @@ transcript (the result of a Bash run of build.py) has an entry line, `stalled st
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
 number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
-it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+it lifts spends a one-act override. A build run through
 verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
 transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
@@ -117,24 +121,42 @@ must cite `(route <id>)` for a route row whose outcome on this surface is refuse
 tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
 dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
-with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
+with an owner line that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
 the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
 the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
+
+Cannot-claim check (rule output-never-hand-off-doable-step): a prose sentence of the reply that says this session cannot do a
+table act (pr-open, pr-merge, push, pr-edit, github-reach), named by the verb the phrase governs, passes only when the
+turn after the last human message holds a failed try of that act, or the sentence carries a hand-off cite (a route row
+that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused), and the sentence names its check
+(a backtick span, an MCP tool name, a word such as returned or refused, an HTTP 4xx, a non-zero exit). A try is a call
+whose result has an error flag or an exit code above zero (an HTTP 4xx or 5xx counts only in an error result, or in an
+agent's relayed text); a later success of the same act, program, verb and target cancels it, and a --dry-run call is no
+try. A local merge is no try of pr-merge. A notice is no try. Not read: an act outside the table, a
+subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
+with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
+block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
+Cost: a regex over the reply; on a claim, one pass over the transcript this hook already holds and one refusals file read;
+on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
 
 Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
 that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
-PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
+the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
+PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
+record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
-process kept or timer. A stop_hook_active rewrite is not checked.
+process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 """
+import bisect
 import datetime
 import json
 import os
@@ -144,9 +166,73 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+import _clause  # noqa: E402
+
+HOOKS_DIR = os.path.join(HERE, "..", "hooks")
+_STAMP = re.compile(rb'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
+# The stamp sits near byte 30000 of the 320 KB hooks/guard.py; the cap leaves room for the file to grow.
+_STAMP_HEAD_BYTES = 64 * 1024
+_hooks_dirs_answer = None  # hooks_dirs() sets it on its first call
+
+
+def hooks_dirs():
+    """The hooks folders to import helpers from, first to last. The installer stamps hooks/guard.py with
+    `INSTALL_ID = "<id>"` and lands guard.py, the guard_*.py files, shared_names, git_reads, question_form, own_session
+    and precompact_handoff in hooks/guard.d/<id>/ (install.sh land_guard_set). A stamp with that folder present puts it
+    before the flat one. A module the folder lacks falls through to the flat one. No stamp (the repo copy), an
+    unreadable file or no folder gives the flat folder alone.
+
+    The stamp is matched in the first 64 KB of bytes, never an import and never a strict decode, so a stray non-UTF-8
+    byte in guard.py cannot stop this module importing. The answer is kept in a module global, so a run reads guard.py
+    once however many lazy helper imports ask. A run as the script starts from a fresh module, so each hook run reads
+    it once. question_form imports this module a second time, as a fresh module whose global starts empty; an install
+    lands between processes, not inside one. So an import (not a run as the script) that finds shared_names already
+    loaded from the flat folder or a guard.d folder takes that folder as the answer and skips the read."""
+    global _hooks_dirs_answer
+    if _hooks_dirs_answer is None:
+        loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
+        _hooks_dirs_answer = loaded if loaded is not None else _find_hooks_dirs()
+    return list(_hooks_dirs_answer)
+
+
+def _loaded_hooks_dir():
+    """The answer a shared_names already in sys.modules gives: its own folder, or None when it came from elsewhere."""
+    origin = getattr(sys.modules.get("shared_names"), "__file__", None)
+    if not origin:
+        return None
+    folder = os.path.dirname(os.path.realpath(origin))
+    flat = os.path.realpath(HOOKS_DIR)
+    if folder == flat:
+        return [flat]
+    if os.path.dirname(os.path.dirname(folder)) == flat and os.path.basename(os.path.dirname(folder)) == "guard.d":
+        return [folder, flat]
+    return None
+
+
+def _find_hooks_dirs():
+    try:
+        with open(os.path.join(HOOKS_DIR, "guard.py"), "rb") as handle:
+            stamp = _STAMP.search(handle.read(_STAMP_HEAD_BYTES))
+    except OSError:
+        stamp = None
+    if stamp:
+        folder = os.path.join(HOOKS_DIR, "guard.d", stamp.group(1).decode("ascii", "replace"))
+        if os.path.isdir(folder):
+            return [folder, HOOKS_DIR]
+    return [HOOKS_DIR]
+
+
+def _hooks_on_path():
+    """Put hooks_dirs() at the front of sys.path, in order: the one call every lazy helper import makes."""
+    for folder in reversed(hooks_dirs()):
+        sys.path.insert(0, folder)
+
+
+_hooks_on_path()
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -163,7 +249,7 @@ guard = None
 
 def _load_guard():
     global guard
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     try:
         import guard as loaded
     except ImportError:
@@ -209,32 +295,80 @@ LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
-BLOCK_REASON_HEAD = (
-    "Report-shape guard: this turn landed a commit, push, or merge, so the reply must end "
-    "with the report. One blockquote, bold labels Done, Deviations, Input Needed, Next in "
-    "that order, drop a label that does not apply, no code fence, nothing after it."
-)
-BLOCK_REASON_TAIL = (
-    " Prose may sit above the report. Send the report now, as the next thing you write. Keep "
-    "the reply above it as it stands. Do not write it again."
-)
-# The owner has read the report before a block lands, so a resent report doubles it. The
-# missing-report block asks for the report itself, so its reply carries every other fix. Once the
-# report is there, every other block asks for a short correction.
-# A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report block is the one
-# exception: rewrite_problems() checks it once, and its own block leaves no marker.
-CORRECTION_TAIL = (
-    " Post only the corrected lines, as a short correction. Never send the report again."
-)
+REMEDY_CITE = "decision guard-remedy-not-to-owner"
 
-MODELS_REASON = (
-    "Model-name guard: a Done item that agents built or reviewed names each one's role "
-    "and model, like \"(builder sonnet, reviewer sonnet)\". Here: ")
-UNSTARTED_REASON = (
-    "Unstarted guard: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
-    "Name each queued item with every question answered that you left unstarted, with "
-    "its reason, or write \"Unstarted: none\".")
+
+def owner_line(check, wrong):
+    """The one owner line that opens every refusal: the check's name, what is wrong, and the record that
+    holds the steps (the one home; no site writes its own). The owner reads each refusal in chat, so a refusal holds
+    facts only, never an instruction to the session. `wrong` may hold a %s slot for the caller to fill."""
+    return check + ": " + wrong + " (" + REMEDY_CITE + ")."
+
+
+# Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
+# `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
+SESSION_PHRASES = (
+    "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
+    "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
+    "send it now", "send the questions again",
+)
+# A unit that opens with one of these words (after a connector such as "so") is an order to the session. "Pick" is
+# left out on purpose: "Pick guard" is the check name of an owner line.
+SESSION_IMPERATIVES = frozenset((
+    "add", "send", "post", "keep", "write", "drop", "give", "name", "move", "run", "never", "do", "don't", "resend",
+    "rewrite", "mark", "resume", "pause", "fix", "ship", "wait", "reply", "put", "cite", "check", "answer", "close",
+    "open", "update", "remove", "include", "set", "make", "stop", "let", "tell", "ask", "see", "read", "dispose",
+))
+# A unit ends at a sentence mark, a clause mark (; : ,) or a line break, so an order after a clause is seen too.
+_UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
+_CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
+_WORD = re.compile(r"[a-z][a-z'-]*")
+# A list of backtick spans ("refused `Agent`, `Write` this session") ends each unit but the last in span + comma. The
+# unit after it that opens directly with a span names the next item and holds no order. A connector before the span
+# ("`Next`, so `add` it") makes it an order, so the unit must open with the backtick itself. A span never crosses a
+# comma, a sentence mark or a line, so a lone backtick cannot pair with a later one and hide an order.
+_SPAN_COMMA_END = re.compile(r"`[^`\n.!?;:,]+`,$")
+# A modal that binds the reader: "you should send it", "the reply must end with the report".
+_MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
+
+
+def session_wording(text):
+    """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
+    a clause that opens with an order word, or a modal ("must", "should")."""
+    low = text.lower()
+    for phrase in SESSION_PHRASES:
+        if phrase in low:
+            return phrase
+    previous = ""
+    for unit in _UNIT_END.split(text):
+        is_list_item = unit.lstrip().startswith("`") and bool(_SPAN_COMMA_END.search(previous))
+        previous = unit.strip()
+        if is_list_item:
+            continue
+        words = _WORD.findall(unit.lower())
+        while words and words[0] in _CONNECTORS:
+            words.pop(0)
+        if words and words[0] in SESSION_IMPERATIVES:
+            return unit.strip()
+    found = _MODAL.search(text)
+    return found.group(0) if found else ""
+
+
+BLOCK_REASON = owner_line(
+    "Report-shape guard",
+    "this turn landed a commit, push, or merge, and the reply does not end with the report in one blockquote "
+    "with the bold labels Done, Deviations, Input Needed, Next")
+# The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
+# asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
+# A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
+# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
+
+MODELS_REASON = owner_line(
+    "Model-name guard",
+    "a Done item that agents built or reviewed does not name each one's role and model (%s)")
+UNSTARTED_REASON = owner_line(
+    "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -261,11 +395,59 @@ def _stops_before_a_commit(args):
     return False
 
 
+GH_API_VALUE_FLAGS = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "-H", "--header",
+                      "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache", "-p",
+                      "--preview", "-R", "--repo"}
+GH_API_FIELD_FLAGS = {"-f", "-F", "--field", "--raw-field", "--input"}
+# A pull's merge route, and the repo's merges route (a merge commit on a branch).
+GH_API_MERGE_ROUTE_RE = re.compile(r"(^|/)pulls/[^/]+/merge/?$")
+GH_API_MERGES_ROUTE_RE = re.compile(r"(^|/)repos/[^/]+/[^/]+/merges/?$")
+
+
+def _gh_api_lands(args):
+    """True when a `gh api` call (the tokens after `api`) merges. The route is the first word that
+    is no flag and no flag's value. The method is `-X`/`--method` when given, else POST once any
+    field or `--input` is given (gh's own default), else GET. A PUT to a pull's merge route and a POST
+    to the repo's merges route land; GET, a POST to a pull's merge route, `--help` and every other
+    route do not."""
+    method, has_fields, route, i = None, False, None, 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg in ("-X", "--method"):
+            method = args[i].upper() if i < len(args) else method
+            i += 1
+        elif arg.startswith("--method=") or arg.startswith("-X"):
+            method = arg.split("=", 1)[1].upper() if "=" in arg else arg[2:].upper()
+        elif arg in ("--help", "-h"):
+            return False   # prints help and makes no request
+        elif arg in GH_API_FIELD_FLAGS:
+            has_fields = True
+            i += 1
+        elif arg in GH_API_VALUE_FLAGS:
+            i += 1
+        elif arg.startswith("--"):
+            has_fields = has_fields or arg.split("=", 1)[0] in GH_API_FIELD_FLAGS
+        elif arg.startswith("-") and len(arg) > 1:
+            has_fields = has_fields or arg[:2] in ("-f", "-F")
+        elif route is None:
+            route = arg.split("?", 1)[0]
+    if route is None:
+        return False
+    method = method or ("POST" if has_fields else "GET")
+    if GH_API_MERGE_ROUTE_RE.search(route):
+        return method == "PUT"
+    return method == "POST" and bool(GH_API_MERGES_ROUTE_RE.search(route))
+
+
 def _segment_lands_a_gh_write(segment):
     """True when the segment's command word is `gh` and the call is `pr merge`, `pr create` or
-    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`). `guard.gh_call_of` reads the
+    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`), or
+    a `gh api` merge call (`_gh_api_lands`). `guard.gh_call_of` reads the
     command word past wrappers and a subshell, the same read the merge guard takes."""
     rest = guard.gh_call_of(segment)
+    if rest is not None and rest[:1] == ["api"]:
+        return _gh_api_lands(rest[1:])
     if rest is None or rest[:1] != ["pr"] or rest[1:2] == [] or rest[1] not in GH_LANDING_PR_VERBS:
         return False
     no_write = GH_NO_WRITE_FLAGS.get(rest[1], set()) | {"--help", "-h"}
@@ -496,11 +678,9 @@ ANSWERED_FILE_RE = re.compile(
     r"\b[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log|cfg|ini)\b")
 ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
-ANSWERED_REASON = (
-    "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
-    "the source on the same line (link, #<n>, commit, file path, item <n>, session or inbox id, or time), or "
-    "say what is meant in other words. A mention of the word, not a claim, can go in an inline code span. "
-    "Lines: ")
+ANSWERED_REASON = owner_line(
+    "Answered guard (rule answered-needs-source)",
+    "each line below says \"answered\" and cites no source; a mention of the word in an inline code span is no claim") + " Lines: "
 
 
 def _has_path(line):
@@ -519,19 +699,28 @@ def _claims_answered(plain):
     return False
 
 
-def answered_problem(text):
-    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
-    if not ANSWERED_RE.search(text):
-        return ""
-    bad, fence = [], ""
+def _prose_lines(text, questions=False):
+    """Each line of `text` that is the reply's own prose, as its body: no blockquote marker, outside fenced code, and not
+    a line that ends in `?` (a question claims nothing), unless `questions` keeps those for a reader that judges a
+    sentence at a time. The one line reader of the answered and cannot-claim checks."""
+    fence = ""
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
         marker = body[:3] if body[:3] in ("```", "~~~") else ""
         if marker and (not fence or marker == fence):
             fence = "" if fence else marker
             continue
-        if fence or body.rstrip("*_)\"' ").endswith("?"):
+        if fence or (not questions and body.rstrip("*_)\"' ").endswith("?")):
             continue
+        yield body
+
+
+def answered_problem(text):
+    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
+    if not ANSWERED_RE.search(text):
+        return ""
+    bad = []
+    for body in _prose_lines(text):
         plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
         if not _claims_answered(plain):
             continue
@@ -577,20 +766,49 @@ def agent_pin(role):
     return ""
 
 
+def _closed_by_notice(text):
+    """The agent ids a completion notice in `text` closes: stall_watch's parser, the one home.
+    It loads on first use, and a missing module closes nothing, so a spawn stays running."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    try:
+        from stall_watch import closed_by_notice
+    except ImportError:
+        return []
+    return closed_by_notice(text)
+
+
+class Spawned(dict):
+    """spawn_models' map of role to model families, with `finished`: the roles that have a finished spawn."""
+    finished = frozenset()
+
+
 def spawn_models(records):
     """Map each named role spawned in `records` to the set of model families it ran on.
 
     A spawn's model is its call's `model` field, else its agent file's pin, else
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
+
+    A running spawn has no result yet, or only a background-launch result. It joins the map
+    but not `finished`.
     """
-    failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    failed, answered, agent_of, closed = set(), set(), {}, set()  # a denied or errored spawn counts for nothing
     for rec in records:
-        content = (rec.get("message") or {}).get("content")
-        for b in content if isinstance(content, list) else []:
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+        launch = rec.get("toolUseResult")
+        launched = isinstance(launch, dict) and launch.get("isAsync") is True and launch.get("status") == "async_launched"
+        for b in tool_results(rec):
+            if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
-    found = {}
+            elif launched:
+                agent_of[b.get("tool_use_id")] = launch.get("agentId")
+            else:
+                answered.add(b.get("tool_use_id"))
+        att = rec.get("attachment")  # a completion notice that arrives as a queued command
+        notice = att.get("prompt") if rec.get("type") == "attachment" and isinstance(att, dict) else None
+        if isinstance(notice, str):
+            closed.update(_closed_by_notice(notice))
+    answered.update(t for t, agent in agent_of.items() if agent in closed)
+    found, finished = Spawned(), set()
     for rec in records:
         for b in tool_uses(rec):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
@@ -602,22 +820,32 @@ def spawn_models(records):
             model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
                 model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
             found.setdefault(role, set()).add(model)
+            if not b.get("id") or b.get("id") in answered:  # no id: no result to wait for
+                finished.add(role)
+    found.finished = frozenset(finished)
     return found
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, every=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+
+    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
+    transcript's spawns: Done also reports a spawn that ran before the turn's window.
+    Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
+    """
     if not spawned:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
-    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    # A running role Done leaves out is not yet claimed; one Done names must carry a model.
+    required = spawned.finished | {r for r in spawned if re.search(r"\b" + r + r"\b", done, re.I)}
+    missing = sorted(r for r in required if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
-        if ran is not None and "" not in ran and model not in ran:
+        ran = set(spawned.get(role, ())) | {m for m in (every or {}).get(role, ()) if m}
+        if ran and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
@@ -650,17 +878,16 @@ OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 
-OWNER_REFUSAL = (
-    "Pick guard: every question goes to the page writer in the same turn it is asked (owner, 2026-11-01 "
-    "23:31 CST). Send it now: %s."
-)
-LANE_REFUSAL = (
-    "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent "
-    "(send_message session_id @parent) now."
-)
+OWNER_REFUSAL = owner_line(
+    "Pick guard",
+    "a question to the owner was not sent to the page writer in the same turn it was asked (owner ruling, "
+    "2026-11-01 23:31 CST); %s")
+LANE_REFUSAL = owner_line(
+    "Lane pick guard",
+    "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
+    "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-LANE_TAG = "cs-build:lane"
-PARENT_TARGETS = {"@parent", "parent"}
+PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
@@ -734,11 +961,6 @@ CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
 )
-CARRY_FORMS = {
-    "Recovered": "`Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`",
-    "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
-                    "or `Handoff gave: none`",
-}
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
@@ -852,14 +1074,12 @@ def recovered_problem(records, text):
     missing = [name for name in pending if not carry_present(name, block)]
     reasons = []
     if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since. "
-                       "Under Deviations, add %s, inside the report blockquote." %
-                       (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
+        reasons.append("a compaction came before this report and no %s line has landed since" %
+                       " or ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
-        reasons.append("the Recovered item %r names no source. End each item with git, page or "
-                       "digest; items split on \";\" outside parentheses." % bad)
-    return "Recovered guard: " + " ".join(reasons) if reasons else ""
+        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
+    return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
 
 
 def repo_root(cwd):
@@ -882,12 +1102,14 @@ def departs_problem(text):
     # hooks/question_form.py is the one home of the predicate: the chat box, the waiting page and this
     # report all call it. lint/ and hooks/ sit side by side, in the repo and under ~/.claude. It loads only
     # for a turn that offers a pick, and an import error fails this one check open (the callers catch it).
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     miss = question_form.departs_hit(input_needed_section(text))
     if not miss:
         return ""
-    return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+    # DEPARTS_REASON (the steps) stays for the waiting page and the question box; a Stop refusal shows the miss.
+    miss = miss.removesuffix(question_form.PLACEHOLDER_HINT)
+    return owner_line("Departs-from guard (rule question-departs)", "the Input Needed pick has a problem (%s)" % miss)
 
 
 # building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
@@ -916,10 +1138,9 @@ MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
-MISTAKE_REASON = (
-    "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
-    "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
-    "(rule building-mistake-names-its-guard).")
+MISTAKE_REASON = owner_line(
+    "Mistake guard (rule building-mistake-names-its-guard)",
+    "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
 
 
 def _admitted_clause(deviations):
@@ -962,6 +1183,17 @@ def _own_lane_read(path, own_id):
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
+
+
+def _is_page_writer(path):
+    """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
+    repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
+    _hooks_on_path()
+    from guard_merge import _own_tier_proved as session_role_proved  # glossary-ok: the name guard_merge exports
+    return session_role_proved(path, PAGE_WRITER_ROLE)
+
+
 def _turn_acts(records, turn, acks):
     """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
@@ -977,12 +1209,19 @@ def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
-    Owner-facing: a send to the page writer, or an items write to this repo's page. The question box counts
+    Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
+    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
+    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
+    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
+    parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads it once."""
+    turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
+    has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
@@ -990,7 +1229,7 @@ def question_problem(records, turn, text, hook):
     uses, sends = _turn_acts(records, turn, acks)
     if writer and any(writer in t for t in sends):
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
@@ -999,8 +1238,21 @@ def question_problem(records, turn, text, hook):
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+        if any(t & wanted for t in sends):
+            return "", ""
+        if not _is_page_writer(hook.get("transcript_path")):
+            return LANE_REFUSAL, ""
+        # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
+    if not writer and root and not page_read_ran(records):
+        writer = layout.page_writer_key(root)
+        if writer:
+            acks[writer] = {writer}
+            uses, sends = _turn_acts(records, turn, acks)
+            # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
+            delivered = delivered_tool_use_ids(records)
+            if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
+                return "", ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
@@ -1011,9 +1263,8 @@ def question_problem(records, turn, text, hook):
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
-    route = ("send_message to the writer " + writer if writer else
-             "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
-    return OWNER_REFUSAL % route, ""
+    return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
+                            "the page writer is not known to this session; the waiting page is " + page), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
@@ -1130,7 +1381,7 @@ def rewrite_stamp_problem(text, human_ts, cwd):
                  if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
     if not sentences:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from datetime import datetime, timezone
     root = repo_root(cwd)
     if not root:
@@ -1153,10 +1404,10 @@ def rewrite_stamp_problem(text, human_ts, cwd):
             d_epoch = epochs[d]
             if d_epoch is None or d_epoch >= ruling.timestamp():
                 continue
-            reason = (
-                "Rewrite-stamp guard: decision `%s` was last committed %s, on every branch and HEAD, before the "
-                "ruling %s that it is said to be rewritten for. Rewrite the record, fetch the branch that holds "
-                "the rewrite, or say it is not rewritten yet."
+            reason = owner_line(
+                "Rewrite-stamp guard (rule rewrite-cite-predates-ruling)",
+                "decision `%s` was last committed %s, on every branch and HEAD, before the ruling %s that it is "
+                "said to be rewritten for"
                 % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)),
                    ruling.strftime("%Y-%m-%d %H:%M ") + stamp[2]))
             if reason not in reasons:
@@ -1181,7 +1432,7 @@ def says_refusal_right(text, tool):
     """True when the reply says "refusal was right" or "refusal is right" directly after `tool`'s name
     (as names_tool counts a name; an optional colon may sit between), on any line. A hedge in the same
     clause, before the name or after the phrase ("not sure", "or wrong", "?"), does not clear. The
-    guard's own block reason never clears: it puts the phrase after the placeholder `<tool_name>`. A
+    guard's own refusal never clears: it puts the phrase after the placeholder `<tool_name>`. A
     plural ("refusals were right") does not clear."""
     if "__" in tool:
         pattern = re.compile(r"(?<!\w)" + re.escape(tool) + r"(?!\w)" + PHRASE + r"(?!\w)", re.I)
@@ -1214,7 +1465,8 @@ def tool_use_sources(transcript_path):
         return None
     agent = _tool_use_ids(r for r in records if r.get("isSidechain"))
     orchestrator = _tool_use_ids(r for r in records if not r.get("isSidechain"))
-    folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
+    import own_session  # the one home of the agent transcript folder
+    folder = own_session.agent_transcript_dir(transcript_path)
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
     except OSError:
@@ -1244,6 +1496,20 @@ def refusal_rows(path, skipped=None):
     return rows
 
 
+def _read_raised(path):
+    """The (tool_name, reason) pairs recorded in the raised-refusals file at `path`; [] when it is missing or bad."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    pairs = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, list) and len(item) == 2 and all(isinstance(x, str) for x in item):
+            pairs.append((item[0], item[1]))
+    return pairs
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
@@ -1252,28 +1518,53 @@ def pending_refusals(hook, text):
     agent's: the row has agent_id, or its tool_use_id is a tool_use in an agent record. A row whose
     tool_use_id is in an orchestrator record stays, even with agent_id. A row with no tool_use_id, a
     tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays, unless it has agent_id.
-    The file goes when none is left. One stat per Stop when the session had no refusal. Fails open: [] on
-    any error. Spec: docs/decisions/refusals-reach-the-owner.md."""
+    A row cleared by name is also recorded as (tool_name, reason) in the session's raised-refusals file, and a
+    later row with the same tool_name and the same reason, not blank after strip, is dropped without blocking: the owner
+    already heard of it. A different reason or tool, or a blank reason, still blocks. The refusals file goes
+    when none is left. One stat per Stop when the session had no refusal; the raised file is read only when
+    the refusals file has rows, and written only when a row is cleared by name. Fails open: [] on any error;
+    a raised file that cannot be written only means the repeat blocks once more.
+    Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
             return []
         rows = refusal_rows(path)
+        if not rows:
+            return []
         section = input_needed_section(text)
         agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
         if transcript and any(r.get("tool_use_id") for _, r in rows):
             agent_ids, orchestrator_ids = tool_use_sources(transcript) or (set(), set())
+        raised_path = shared_names.raised_refusals_path(hook.get("session_id"))
+        raised = _read_raised(raised_path) if raised_path else []
+        newly_raised = []
         kept = []
         for line, row in rows:
             tool = row["tool_name"]
             use_id = row.get("tool_use_id")
+            reason = row.get("reason")
+            has_reason = isinstance(reason, str) and bool(reason.strip())
             from_agent = (row.get("agent_id") or use_id in agent_ids) and use_id not in orchestrator_ids
-            if from_agent or names_tool(section, tool) or says_refusal_right(text, tool):
+            if from_agent:
+                continue
+            if names_tool(section, tool) or says_refusal_right(text, tool):
+                if has_reason and (tool, reason) not in raised + newly_raised:
+                    newly_raised.append((tool, reason))
+                continue
+            if has_reason and (tool, reason) in raised:
                 continue
             kept.append((line, tool))
+        if newly_raised and raised_path:
+            try:
+                os.makedirs(os.path.dirname(raised_path), exist_ok=True)
+                with open(raised_path, "w", encoding="utf-8") as f:
+                    json.dump([list(pair) for pair in raised + newly_raised], f)
+            except OSError:
+                pass
         if len(kept) != len(rows):
             if kept:
                 with open(path, "w", encoding="utf-8") as f:
@@ -1286,7 +1577,7 @@ def pending_refusals(hook, text):
 
 
 def hold_reason(entries):
-    """The block reason for the triage hold, naming its `entries` (joined)."""
+    """The refusal for the triage hold, naming its `entries` (joined)."""
     return HOLD_REASON % entries
 
 
@@ -1297,7 +1588,7 @@ def _shown_flags(hook, flags):
     if not flags:
         return []
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.route_flags_path(hook.get("session_id"))
         if path is None:
@@ -1327,7 +1618,7 @@ def refusal_route_flags(hook):
     route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
     named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
@@ -1355,7 +1646,7 @@ def success_route_flags(hook, after):
         answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
         calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
                  if u.get("id") in answered and u.get("id") not in failed]
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         if not calls:  # a turn with no successful call reads no rows file
             return []
         import route_match
@@ -1378,11 +1669,25 @@ def success_route_flags(hook, after):
 ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
+def _forms_re(forms):
+    return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
+
+
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
+# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-CAPABILITY_RE = re.compile(
-    r"\bcan['’]t\b|\bcannot\b|\brefuse[sd]?\b|\bunable to\b|\bdenied\b|\bforbidden\b|\bno access\b"
-    r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
-    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+    r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
+    r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
+# The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
+_CAPABILITY_CITE_ONLY = _forms_re(_clause.COULD_NOT_FORMS) + r"|\breject(?:s|ed|ing)?\b|\b401\b"
+# The hand-off cite reads both pieces: the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, the 401 or 403
+# token, and the other core words.
+CAPABILITY_RE = re.compile(_CAPABILITY_CORE + "|" + _CAPABILITY_CITE_ONLY, re.I)
+# cannot_lines leaves a Why yours line to the hand-off guard when it reads one of the core words. A line whose only
+# capability word is a could-not form, a reject form or 401 stays in the cannot-claim check, which asks for the check that
+# failed.
+CAPABILITY_SKIP_RE = re.compile(_CAPABILITY_CORE, re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
     r"|\bthe safety rules keep\b", re.I)
@@ -1392,16 +1697,10 @@ CHOICE_RE = re.compile(
 WHY_YOURS_FORM_RE = re.compile(
     r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__)?Why yours(?:\*\*|__)?:(?:\*\*|__)?[ \t]*\S", re.I)
 HAND_OFF_TAIL = " (rule output-never-hand-off-doable-step)"
-CITE_FORMS = (
-    "end the line with `(route <id>)`, an id from the route rows file whose outcome on this surface is refused or "
-    "asks, name in backticks a tool the auto-mode classifier refused this session, or give `(measured <date>, <check "
-    "and result>)`")
-HAND_OFF_NO_CITE = (
-    "Hand-off guard: a Why yours line gives a capability reason with no cite. Remedy: " + CITE_FORMS + ". A check name "
-    "is no cite. If no row, refusal or measurement fits, the act may be one a session can do.")
-HAND_OFF_NO_DATE = (
-    "Hand-off guard: a Why yours line carries a measured premise with no date or no check and result. Remedy: write "
-    "`(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
+HAND_OFF_CHECK = "Hand-off guard"
+HAND_OFF_NO_CITE = owner_line(HAND_OFF_CHECK, "a Why yours line gives a capability reason with no cite")
+HAND_OFF_NO_DATE = owner_line(
+    HAND_OFF_CHECK, "a Why yours line carries a measured premise with no date, or with no check and result")
 
 
 def hand_off_lines(text, anywhere=False):
@@ -1422,7 +1721,7 @@ def _cited_refusal(hook, line):
     """True when the Why yours `line` names a tool in this session's refusals file, False when it does not, None when
     the file did not read (it cannot be opened, is not UTF-8, or a line in it is not JSON) and names none. The file is
     read here, before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
     if path is None or not os.path.exists(path):
@@ -1454,7 +1753,7 @@ def _route_verdict(ids):
     """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
     "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
     rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import route_match
     rows = route_match.read_rows()
     if rows is None:
@@ -1470,14 +1769,49 @@ def _route_verdict(ids):
         elif row is None or row.get("outcome") not in ("refused", "asks", "works"):
             kinds.append(("unknown", "route row %s has no readable outcome on %s" % (rid, here)))
         elif row["outcome"] == "works":
-            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do. "
-                          "Remedy: do it through the route %s" % (rid, here, row.get("route") or "that row names")))
+            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do; the route is %s"
+                          % (rid, here, row.get("route") or "the one that row names")))
         else:
             return "ok", ""
     for kind in ("works", "dead", "unknown"):
         for found, text in kinds:
             if found == kind:
                 return kind, text
+
+
+def cite_tokens_verdict(line):
+    """(kind, detail) for the route and measured cite tokens of `line` alone, with no capability verb needed: the page
+    reads a str_replace fragment that swaps only a cite (hooks/question_form.py). Kind is "undated" (a `(measured ...)`
+    token with no date or no check and result), "works", "dead", "unknown" as `_route_verdict` gives them, or "ok"
+    (no token, or a route token whose row says refused or asks). A line with no route token reads no file."""
+    found = MEASURED_RE.search(line)
+    if found and found.group(1).strip() and _measured(line) == "bad":  # a bare "(measured)" is a premise kind, not a cite
+        return "undated", ""
+    ids = ROUTE_CITE_RE.findall(line)
+    return _route_verdict(ids) if ids else ("ok", "")
+
+
+def why_yours_verdict(hook, line):
+    """(kind, detail) for one Why yours `line`. Kind is "ok" (a choice phrase, no capability verb, or a cite that holds),
+    "none" (a capability reason with no cite), "undated" (a `(measured ...)` cite with no date or no check and result),
+    "works" (a cited row says the act is doable), "dead" (a cited id no row holds), "unknown" (the rows file or the
+    row's outcome on this surface did not read) or "unread" (the refusals file did not read). Detail is the text of the
+    last three. A `hook` of None reads no refusals file: the waiting page (hooks/question_form.py) accepts a route cite
+    and a dated measured cite only. The refusals file is read for a capability line, the rows file only for a line
+    with a route cite."""
+    if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
+        return "ok", ""
+    refused = _cited_refusal(hook, line) if hook is not None else False
+    measured = _measured(line)
+    if refused or measured == "ok":
+        return "ok", ""
+    ids = ROUTE_CITE_RE.findall(line)
+    kind, detail = _route_verdict(ids) if ids else ("none", "")
+    if kind != "none":
+        return kind, detail
+    if measured == "bad":
+        return "undated", ""
+    return ("unread", "") if refused is None else ("none", "")
 
 
 def hand_off_problem(hook, text):
@@ -1488,31 +1822,757 @@ def hand_off_problem(hook, text):
     read only for a reply that holds a capability Why yours line, the rows file only for a line with a route cite."""
     refusals, notes = [], []
     for line in hand_off_lines(text):
-        if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
-            continue
-        refused = _cited_refusal(hook, line)
-        measured = _measured(line)
-        if refused or measured == "ok":
-            continue
-        ids = ROUTE_CITE_RE.findall(line)
-        kind, detail = _route_verdict(ids) if ids else ("none", "")
+        kind, detail = why_yours_verdict(hook, line)
         if kind == "ok":
             continue
-        if kind == "none" and measured == "bad":
+        if kind == "undated":
             refusals.append(HAND_OFF_NO_DATE)
-        elif kind == "none" and refused is None:
+        elif kind == "unread":
             notes.append("Hand-off guard: UNKNOWN, this session's refusals file did not read, so the cite went unchecked.")
         elif kind == "none":
             refusals.append(HAND_OFF_NO_CITE)
         elif kind == "unknown":
             notes.append("Hand-off guard: UNKNOWN, " + detail + ".")
         elif kind == "works":
-            refusals.append("Hand-off guard: " + detail + ".")
+            refusals.append(owner_line(HAND_OFF_CHECK, detail))
         else:
-            refusals.append("Hand-off guard: the Why yours line cites a route id the route rows file does not hold (%s). "
-                            "Remedy: cite an id the file holds, or name a tool refused this session in backticks." % detail)
+            refusals.append(owner_line(HAND_OFF_CHECK, "the Why yours line cites a route id the route rows file "
+                                       "does not hold (%s)" % detail))
     unique = list(dict.fromkeys(refusals))
     return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
+
+
+# The cannot-claim check (rule output-never-hand-off-doable-step). A reply sentence that says this session cannot do a table
+# act is a claim, so the turn must show a failed try of that act, or the sentence must carry a hand-off cite, and it must
+# name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
+# Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
+# create-PR tool opens on its first call. Record: decision claims-carry-backing.
+_NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
+# The phrases, the permission forms too, are _clause.CANNOT_FORMS.
+# A hyphen just before or after a phrase makes it part of a name, so the match refuses it.
+CANNOT_RE = re.compile(
+    _NOT_NAME + "(?:%s)(?![\\w-])" % "|".join(_clause.form_pattern(form) for form in _clause.CANNOT_FORMS),
+    re.I)
+# The words just before the phrase must hold the writer's own subject (_clause.own_subject), or the phrase opens its clause.
+# Any other subject (it, the guard, the lane, the session, a builder in this session, a draft PR) is another party, so the
+# sentence is no claim about this session. A conditional or a negator just before the phrase (_clause.conditional,
+# _clause.negated_near) is no claim. A passive act whose clause says where it runs ("can't be merged from here",
+# _clause.FROM_HERE_RE) is a claim whatever its subject.
+# After the phrase: a doubt, a promise or a wait is no claim. "be" skips only before these words: "can't be merged" claims.
+CANNOT_SKIP_NEXT_RE = re.compile(
+    r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
+CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re.I)
+# A blocker is a true reason, not a hand-off: the act waits on a blocker in a state (CI is red, the batch run is in
+# progress, a hold is on). A blocker noun followed by a tool noun (the checks tool, the review tool, a connector on hold)
+# is an outage and stays a claim, and so does the lock in index.lock. A reason word (because, while) opens the blocker in
+# the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
+# clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
+# it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
+# A failing word followed by to and a verb of _clause.OUTAGE_VERBS (start, connect, respond, authenticate, clone ...) names an
+# outage ("failing to start"), not a red check ("because CI is failing to go green" skips). A sentence that ties a red
+# state to its claim by a so comma or by because is no claim: "CI is red, so I can't merge." and "Because CI is red I cannot
+# merge." skip. A no-try "cannot" without that join blocks: "CI is red so I cannot merge." (no comma) and "CI is failing to
+# go green, so I cannot merge." (the state is not right before the comma). A checks noun after a noun of
+# _clause.OUTAGE_NOUNS (connection, network, auth, proxy, health ...) is an outage too.
+_FAIL_END = r"(?!\s+to\s+(?:%s)\b)" % "|".join(_clause.OUTAGE_VERBS)  # the verbs have one home, lint/_clause.py
+_CI_CHECKS = "".join("(?<!%s )" % noun for noun in _clause.OUTAGE_NOUNS) + "checks?"
+_BLOCKER_TAIL = (
+    r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|running|pending|in\s+progress|failing%s)" % _FAIL_END
+    + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
+# Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
+# merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
+_BLOCKER_STATES = (
+    (("pr-merge",), r"(?<![\w.])(?:CI|%s|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % (_CI_CHECKS, _BLOCKER_TAIL)),
+    (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
+    (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
+    (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
+    (None, r"\bno\s+grant\b"),
+)
+_BLOCKER_RES = {}
+
+
+def _blocker_res(act):
+    """The compiled blocker readers for a claim of `act`, cached: (state, reason word then state, a state that ends just
+    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses). All read the
+    states in _BLOCKER_STATES that gate `act`."""
+    if act not in _BLOCKER_RES:
+        state = "|".join(pattern for acts, pattern in _BLOCKER_STATES if acts is None or act in acts)
+        _BLOCKER_RES[act] = (
+            re.compile(r"(?:%s)\b" % state, re.I),
+            re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
+            re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % state, re.I),
+            re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % state, re.I),
+            re.compile(r"\(\s*(?:%s)\b" % state, re.I))
+    return _BLOCKER_RES[act]
+
+
+# A rule id in parentheses after the act names the rule that stops it. It has two hyphens or more, so "(read-only)" is a
+# capability and stays a claim, and it must be a real rule or decision id (_names_rule_id): "(pre-push-hook)" claims.
+CANNOT_RULE_ID_RE = re.compile(r"\(\s*([a-z][a-z0-9]*(?:-[a-z0-9]+){2,})\s*\)", re.I)
+# A sentence that names a rule states the rule, so it is not the session's claim. A semicolon ends that sentence: the
+# clause after it is judged on its own.
+CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
+# The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
+# that form; the guard lets the label follow a question on the same line.
+CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
+# A phrase in the past tense reports a failure (_clause.past): could not, wasn't able, or any phrase right after was or were.
+# Emphasis marks (**cannot**, _push_, a lone ** after a word) are no part of a word; a mark between two word characters
+# (snake_case) stays. cannot_lines reads each line with the marks removed (_strip_emphasis).
+CANNOT_EMPHASIS_RE = re.compile(r"(?<!\w)(?:\*\*|__|\*|_)|(?:\*\*|__|\*|_)(?!\w)")
+# A code span of one act verb (`push`) names the act like the bare word.
+CANNOT_VERB_SPAN_RE = re.compile(r"^`(open|create|make|raise|file|submit|merge|push|close|comment|mark|edit|update)`", re.I)
+_PR = r"(?:PRs?|pull[- ]requests?)"
+# A preposition ends the pr-open object: "open the logs for PR 12" opens the logs, not a PR.
+_PREPOSITION = "(?:%s)" % "|".join(_clause.PREPOSITIONS)  # the prepositions have one home, lint/_clause.py
+CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
+# Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
+# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
+CANNOT_ACTS = (
+    ("pr-open", re.compile(r"^(?:open(?:ing)?|creat(?:e|ing)|mak(?:e|ing)|rais(?:e|ing)|fil(?:e|ing)|submit(?:ting)?)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
+    ("pr-merge", re.compile(r"^(?:be\s+)?merg(?:e|ed|ing)\b", re.I)),
+    ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed|ing)?\b", re.I)),
+    ("pr-edit", re.compile(r"^(?:clos(?:e|ing)|comment(?:ing)?|mark(?:ing)?|edit(?:ing)?|updat(?:e|ing))\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
+    ("github-reach", re.compile(
+        r"^(?:reach(?:ing)?|us(?:e|ing)|access(?:ing)?|connect(?:ing)?\s+to)\s+(?:the\s+)?`?(?:mcp__github__\w*|github\b|gh(?![\w-])|api\.github\.com)",
+        re.I)),
+)
+# A passive form that names the PR elsewhere in its clause: "the PR can't be opened".
+# The nouns that, as the object of open, merge, close, comment or update, name no PR: "merge the config files" and "update
+# the docs for PR 12" merge and update files. A PR named in the object (not as a possessor) keeps the claim: "open the CI
+# logs and PR".
+CANNOT_NON_PR_OBJECTS = ("file", "files", "config", "configs", "doc", "docs", "document", "documents", "log", "logs",
+                         "diff", "diffs", "tag", "tags", "readme")
+_PR_WORDS = ("pr", "prs", "pull-request", "pull-requests", "pull", "request", "requests")
+# The route a run names: "run gh pr create", "run `git push`".
+CANNOT_RUN_ROUTE_RE = re.compile(r"^run\s+`?(?=gh pr |git (?:push|merge)(?![\w-]))", re.I)
+CANNOT_PASSIVE_ACTS = (
+    ("pr-open", re.compile(r"^be\s+(?:opened|created|raised|filed|submitted)\b", re.I)),
+    ("pr-edit", re.compile(r"^be\s+(?:closed|edited|updated|marked)\b", re.I)),
+)
+CANNOT_GITHUB_SPAN_RE = re.compile(r"^`(?:gh\b|mcp__github__)", re.I)
+GITHUB_REACH = "github-reach"
+# The act each tool is a route of. Every mcp__github__ tool is also a route of github-reach. The Bash routes are read from
+# the command by _segment_tries.
+CANNOT_TOOL_ACTS = {
+    "mcp__github__create_pull_request": "pr-open",
+    "mcp__github__merge_pull_request": "pr-merge", "mcp__github__enable_pr_auto_merge": "pr-merge",
+    "mcp__github__push_files": "push", "mcp__github__create_or_update_file": "push",
+    "mcp__github__delete_file": "push",
+    "mcp__github__update_pull_request": "pr-edit", "mcp__github__add_issue_comment": "pr-edit",
+    "mcp__github__update_pull_request_branch": "pr-edit",
+}
+# `gh pr <verb>` -> act; a verb not here is no route of a table act.
+CANNOT_GH_PR_ACTS = {"create": "pr-open", "merge": "pr-merge", "close": "pr-edit", "comment": "pr-edit",
+                     "ready": "pr-edit", "edit": "pr-edit"}
+CANNOT_GIT_REACH = {"fetch", "push", "ls-remote"}  # the git calls that reach the remote
+CANNOT_HTTP_TOOLS = {"curl", "wget", "http", "https"}
+# A command or script whose name holds the act word is a route of that act: the repo's merge tool (`merge`) for pr-merge,
+# open-pr.sh for pr-open, push.sh for push. The word is a whole part of the name (split at - _ .), so pushd is no push.
+CANNOT_SCRIPT_ACTS = (
+    ("pr-open", re.compile(
+        r"(?:^|[-_.])(?:(?:open|create)[-_]?(?:pr|pull[-_]?request)|(?:pr|pull[-_]?request)[-_]?(?:open|create))(?:[-_.]|$)")),
+    ("pr-merge", re.compile(r"(?:^|[-_.])merge(?:[-_.]|$)")),
+    ("push", re.compile(r"(?:^|[-_.])push(?:[-_.]|$)")),
+)
+# A script named for a test (test_merge.py, test-push.sh, push_test.sh) tests the act; its failure is no try of it.
+CANNOT_TEST_SCRIPT_RE = re.compile(r"^test[-_]|[-_.]test\b")
+CANNOT_INTERPRETER_RE = re.compile(r"^(?:bash|sh|zsh|node|python[\d.]*)$")  # a script runs as the word after these
+# The runners that name a script or target as an argument, with the flags that take a value, which are skipped.
+CANNOT_RUNNERS = {
+    "make": {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--include-dir", "--old-file", "--what-if"},
+    "gmake": {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--include-dir", "--old-file", "--what-if"},
+    "npm": {"--prefix", "-w", "--workspace"}, "yarn": {"--cwd"}, "pnpm": {"-C", "--dir", "--filter", "-F"}}
+# The input fields that name a GitHub MCP call's target, read in this order.
+CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
+# A failed try: the result's error flag or an exit code above zero as the shell result reports it. An HTTP 4xx or 5xx
+# in an ok result is output text, not a failure; only a relayed agent result, which has no exit of its own, reads it.
+# A loose word such as refused in a successful call's output is none of these.
+CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]")
+CANNOT_RELAY_FAIL_RE = re.compile(r"\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
+CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
+CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push)\b")
+# Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
+# while "the push failed, so I could not push" does (_clause.check_word_counts).
+_CHECK_WORD = "(?:%s)" % "|".join(_clause.CHECK_WORDS)  # the words have one home, lint/_clause.py
+CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
+_BACK = _clause.BACK_PATTERN  # "sent back 403": a status the call answered with; the words have one home, lint/_clause.py
+_STATUS = _clause.STATUS_PATTERN  # an HTTP status that no hyphen joins and no size unit follows
+CANNOT_CHECK_RE = re.compile(
+    r"`[^`\n]+`|\bmcp__\w+|\b" + _CHECK_WORD + r"\b|\bexit(?: code)? [1-9]"
+    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a|" + _BACK + r")\s+(?:a\s+)?"
+    r"|(?:[(:,;—–]|\s-{1,2})\s*)" + _STATUS,
+    re.I)
+# With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
+# words or more with a verb (is, was, not, rejected ...), read only after the phrase: in parentheses, after a colon, a
+# semicolon, a comma or a dash, after because, or the sentence next to the claim (_clause.reasons, _clause.is_reason). A
+# bare claim has none of these, and neither has a noun phrase such as "the 450-line diff" or a lead-in before the phrase
+# ("Sorry, I could not push."). A clause that a conjunction opens ("..., but I can open a PR") is another clause, not a reason.
+
+
+def _gives_reason(head, tail, following):
+    """True when `tail`, the sentence after the phrase, carries a reason that no conjunction opens, or the sentence that
+    `following` names is one, or a clause of `head`, the sentence up to the end of the phrase, says why before it
+    (_clause.reasons_before)."""
+    tail, head, following = (_strip_emphasis(t)[0] for t in (tail, head, following))
+    return any(_clause.is_reason(g) and not _clause.opens_with_joiner(g) for g in _clause.reasons(tail)) \
+        or _clause.is_reason(following) or bool(_clause.reasons_before(head))
+
+
+CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
+CANNOT_NO_TRY = (
+    CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
+    "fails, name on the line what you ran and what it returned, or end the line with `(route <id>)` for a route row "
+    "that says refused or asks, or with `(measured <date>, <check and result>)`. Lines:")
+CANNOT_NO_CHECK = (
+    CANNOT_HEAD + "names no check. Remedy: name the tool in backticks and its error. Lines:")
+
+
+def _mask(text):
+    """`text` with each code span and quoted span blanked to spaces of the same length, so a position in the mask is a
+    position in the text. A phrase inside either is a mention, never a claim."""
+    blank = lambda found: " " * len(found.group())  # noqa: E731
+    return QUOTED_RE.sub(blank, CODE_SPAN.sub(blank, text))
+
+
+def _non_pr_object(window):
+    """True when the object of the verb that starts `window` is a file, doc, log or the like and names no PR of its own."""
+    found = _clause.head_objects(_clause.words(window), 1)
+    return bool(found) and found[-1][0] in CANNOT_NON_PR_OBJECTS and not any(
+        word in _PR_WORDS and not possessive for word, possessive in found)
+
+
+def _window_act(window, clause):
+    """The table act the verb at the start of `window` names, else None. `clause` is the phrase's whole clause, where a
+    passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open, and so is a
+    run of that route. An object that names a file, doc or log and no PR is no PR act (_non_pr_object)."""
+    window = _clause.strip_adverbs(window)
+    span = CANNOT_VERB_SPAN_RE.match(window)
+    window = span.group(1) + window[span.end():] if span else window
+    if window.startswith("`"):
+        acts = sorted(_text_acts(window[1:].split("`", 1)[0]))
+        return acts[0] if acts else GITHUB_REACH if CANNOT_GITHUB_SPAN_RE.match(window) else None
+    if CANNOT_RUN_ROUTE_RE.match(window):
+        acts = sorted(_text_acts(window[3:].lstrip().lstrip("`")))
+        return acts[0] if acts else None
+    for act, rx in CANNOT_ACTS:
+        if rx.match(window):
+            return None if act in ("pr-open", "pr-merge", "pr-edit") and not window.lower().startswith("be ") \
+                and _non_pr_object(window) else act
+    for act, rx in CANNOT_PASSIVE_ACTS:
+        if rx.match(window) and CANNOT_PR_RE.search(clause):
+            return act
+    return None
+
+
+def _scan(parts):
+    """(parts, starts, conjs) of one sentence's clauses (_clause.clauses): where each starts, and the clauses that a comma
+    and an and, but or or open."""
+    return parts, [c.start for c in parts], [c for c in parts if c.lead == "," and c.join in ("and", "but", "or")]
+
+
+def _claim(body, mask, hit, floor, scan):
+    """(act, window, past) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
+    sentence and `scan` its clauses (_scan); `floor` is where the previous phrase of the sentence ended, so words that
+    condition it do not condition this one. The phrase's clause starts after the last separator (a comma, a dash, but, a
+    stop) before it and ends at the first stop after it (a comma does not end it). Not a claim: a conditional or a negator
+    just before the phrase, a subject that is not the writer's own (_clause.own_subject), a verb of telling or waiting
+    after it, a dependency (until, before, without your) in its clause, a verb that names no table act, a blocker of that
+    act (_blocker_res) in its own clause (a comma and, but or or starts another) or in the part after the next semicolon
+    or joined to the clause (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses
+    in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
+    parts, starts, conjs = scan
+    at = max(bisect.bisect_right(starts, hit.start()) - 1, 0)
+    first = at
+    while first and parts[first].join in _clause.REASON_LINKS and not parts[first].lead:  # because ends no scope
+        first -= 1
+    opener = parts[first]
+    start = max(opener.start + len(opener.join) if opener.join == "but" else opener.lead_end if opener.lead else opener.start,
+                floor)
+    end = parts[at].hard_end
+    before, after = body[start:hit.start()], body[hit.end():end]
+    shown = _clause.veil(before, mask[start:hit.start()])  # a code span or quote negates and conditions nothing
+    if _clause.conditional(shown) or _clause.negated_near(shown):
+        return None
+    words = after.split()
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(
+            _clause.veil(after, mask[hit.end():end])):  # "until" in a code span waits on nothing
+        return None
+    if not _clause.own_subject(before) and not (
+            after.lstrip().lower().startswith("be ") and _clause.FROM_HERE_RE.search(after)):
+        return None
+    left = mask.rfind(";", 0, hit.start()) + 1  # the sentence part between the semicolons around the phrase
+    right = mask.find(";", hit.end())
+    right = len(mask) if right < 0 else right
+    if CANNOT_RULE_RE.search(_clause.veil(body[left:right], mask[left:right])):  # `rules.md` names no rule
+        return None
+    window = _clause.first_words(after)
+    act = _window_act(window, before + " " + after)
+    if not act:
+        return None
+    state_re, reason_re = _blocker_res(act)[:2]
+    clause_left = max((c.start + len(c.join) for c in conjs if c.lead_at >= left and c.start + len(c.join) <= hit.start()),
+                      default=left)
+    conj = next((c.lead_at for c in conjs if c.lead_at >= hit.end() and c.start + len(c.join) <= right), None)
+    if reason_re.search(body[clause_left:right if conj is None else conj]):
+        return None
+    if right < len(mask):
+        reach = mask.find(";", right + 1)
+        if state_re.search(body[right + 1:len(mask) if reach < 0 else reach]):
+            return None
+    so = _clause.opens_with(before, "so")
+    if _joined_blocker(act, body[floor:start], so, after, body[end:]) or _names_rule_id(after):
+        return None
+    return act, window, _clause.past(hit.group(), before)
+
+
+def _joined_blocker(act, lead, so, after, tail):
+    """True when a bare blocker state of `act` is joined to the claim clause. `lead` is the sentence up to the clause start,
+    `so` whether the clause opens with so, `after` the clause after it, and `tail` the sentence from the clause
+    break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
+    colon or dash, then the state, or the state in parentheses in the clause."""
+    _, _, before_re, after_re, paren_re = _blocker_res(act)
+    hit = before_re.search(lead)
+    if hit and (hit.group(1) != "," or so):
+        return True
+    return bool(after_re.match(tail) or paren_re.search(after))
+
+
+_RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug that follows a claim
+
+
+def _names_rule_id(clause):
+    """True when a slug in parentheses in `clause` (CANNOT_RULE_ID_RE) is a real rule or decision id: a `rule:<id>`
+    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or an <id>.md file in the decisions
+    folder (layout.path). Both are read in this file's checkout and in the checkout the global CLAUDE.md points at
+    (guard.pointer_checkout): an installed copy holds only the pointer and no decisions. Cost: on the first such slug of
+    a hook run, the guard import (cannot_problem needs it next anyway), one read of the pointer, of each rule file and
+    of the layout per checkout; per slug, one file stat per checkout. A guard that does not load prints UNKNOWN and
+    reads this checkout alone. A checkout whose layout path does not read uses the layout's default; when that does not
+    read either, the hook prints UNKNOWN and the slug skips. When no checkout's rule files can be read, the slug skips
+    with no note: a guard that cannot read cannot accuse."""
+    slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
+    if not slugs:
+        return False
+    if not _RULE_IDS:
+        import rule_audit
+        if guard is None:  # the Stop run judges claims before cannot_problem loads the guard
+            _load_guard()
+        if guard is None:
+            print("cannot-claim guard: UNKNOWN, the guard did not load, so the pointer checkout's rule ids went unread.",
+                  file=sys.stderr)
+        pointer = guard.pointer_checkout() if guard is not None else ""
+        roots = list(dict.fromkeys(os.path.realpath(r) for r in (os.path.join(HERE, ".."), pointer) if r))
+        ids, read = set(), False
+        for root in roots:
+            try:
+                ids.update(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
+                read = True
+            except (OSError, UnicodeDecodeError):
+                continue
+        folders = []  # each checkout's decisions folder: its layout path, else the layout's default path, else unknown
+        for root in roots:
+            folder = None
+            for read_folder in (lambda: layout.path(root, "decisions"), lambda: layout.kinds()["decisions"]["path"]):
+                try:
+                    folder = os.path.join(root, *read_folder().strip("/").split("/"))
+                    break
+                except (layout.LayoutError, OSError, KeyError):
+                    continue
+            folders.append(folder)
+        if None in folders:
+            print("cannot-claim guard: UNKNOWN, the layout did not read, so a slug in parentheses was not checked "
+                  "against the decisions.", file=sys.stderr)
+        _RULE_IDS.append((folders, ids if read else None))
+    folders, ids = _RULE_IDS[0]
+    return ids is None or None in folders or any(
+        slug in ids or any(os.path.isfile(os.path.join(folder, slug + ".md")) for folder in folders) for slug in slugs)
+
+
+def _report_label_end(body):
+    """Where a bold report label (LABEL_ORDER) that starts `body` ends, else 0. "**Input Needed** Could not ..." opens
+    its clause after the label, so the phrase has no other subject."""
+    m = LABEL_RE.match(body)
+    return m.end() if m and m.group(1).strip().rstrip(":").strip() in LABEL_ORDER else 0
+
+
+def _strip_emphasis(text):
+    """(`text` with each emphasis mark (CANNOT_EMPHASIS_RE) removed, `keep`), where keep[i] is the index in `text` of
+    character i of the stripped text and keep[-1] is len(text). The one home of the emphasis strip."""
+    out, keep, last = [], [], 0
+    for mark in CANNOT_EMPHASIS_RE.finditer(text):
+        out.append(text[last:mark.start()])
+        keep.extend(range(last, mark.start()))
+        last = mark.end()
+    out.append(text[last:])
+    keep.extend(range(last, len(text) + 1))
+    return "".join(out), keep
+
+
+def cannot_lines(text):
+    """(sentence, act, window, past, prior, following, tail) for each phrase of the reply's prose that claims a table act
+    cannot be done; `tail` is the sentence after the phrase. The text is read a sentence at a time, with emphasis marks
+    removed (_strip_emphasis); the sentences returned keep them. A sentence that ends in `?` asks and claims nothing, one
+    that starts with Unvetted: (the past-ruling guard's form) is not read, and neither is a line that starts with it or a
+    Why yours line (the hand-off guard's). Every phrase of a sentence is judged."""
+    if not CANNOT_RE.search(CANNOT_EMPHASIS_RE.sub("", text)):
+        return []
+    found, hand_off = [], None
+    for raw in _prose_lines(text, questions=True):
+        body, keep = _strip_emphasis(raw)
+        if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
+            continue
+        if hand_off is None:
+            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_SKIP_RE.search(line)}
+        if raw in hand_off:
+            continue
+        mask = _mask(body)
+        flags = [char != blank for char, blank in zip(body, mask)]  # True where the mask hides a character
+        spans = _clause.sentences(body, flags)
+        label = _report_label_end(raw)
+        at = lambda i: keep[i - 1] + 1 if i else 0  # noqa: E731  where stripped index i starts in `raw`, marks before it kept
+        for k, (begin, stop) in enumerate(spans):
+            piece, shadow = body[begin:stop], mask[begin:stop]
+            sentence = raw[at(begin):keep[stop]].strip()
+            if sentence.rstrip("*_)\"' ").endswith("?") or CANNOT_UNVETTED_RE.match(sentence):
+                continue
+            # a report label opens the clause after it
+            floor = next((i for i, at in enumerate(keep) if at >= label), 0) if begin == 0 and label else 0
+            scan = _scan(_clause.clauses(piece, flags[begin:stop]))
+            for hit in CANNOT_RE.finditer(shadow):
+                claim = _claim(piece, shadow, hit, floor, scan)
+                floor = hit.end()
+                if claim:
+                    prior = raw[at(spans[k - 1][0]):keep[spans[k - 1][1]]].strip() if k else ""
+                    following = raw[at(spans[k + 1][0]):keep[spans[k + 1][1]]].strip() if k + 1 < len(spans) else ""
+                    tail = raw[keep[begin + hit.end()]:keep[stop]]
+                    found.append((sentence, claim[0], claim[1], claim[2], prior, following, tail))
+    return found
+
+
+def _pulls_act(token):
+    """The act of a GitHub pulls URL or API path: pr-merge for .../pulls/<n>/merge, pr-edit for .../pulls/<n>, pr-open
+    for .../pulls, else ''."""
+    hit = CANNOT_PULLS_RE.search(token.strip("\"'"))
+    return "" if not hit else "pr-merge" if hit.group(2) else "pr-edit" if hit.group(1) else "pr-open"
+
+
+def _script_tries(tokens):
+    """{(act, key)} when the command word of one shell segment (or the script an interpreter runs) names an act, else
+    empty. The key is the command's name and its first plain argument, so a later success of the same call cancels it."""
+    index = guard.resolve_command(tokens)
+    if index is None:
+        return set()
+    if CANNOT_INTERPRETER_RE.match(os.path.basename(tokens[index]).lower()):
+        index = next((i for i in range(index + 1, len(tokens)) if not tokens[i].startswith("-")), None)
+        if index is None:
+            return set()
+    name = os.path.basename(tokens[index]).lower()
+    plain, skip = [], False
+    for token in tokens[index + 1:]:
+        if skip:
+            skip = False
+        elif token.startswith("-"):
+            skip = token in CANNOT_RUNNERS.get(name, ())
+        else:
+            plain.append(token)
+    if name in CANNOT_RUNNERS:
+        scripted = plain[:1] in (["run"], ["run-script"])
+        if name == "npm" and not scripted:  # npm has no push or merge command: only npm run names a script
+            return set()
+        plain = plain[1:] if scripted and name not in ("make", "gmake") else plain
+        if not plain:
+            return set()
+        name, plain = os.path.basename(plain[0]).lower(), plain[1:]
+    if CANNOT_TEST_SCRIPT_RE.search(name):
+        return set()
+    target = plain[0] if plain else ""
+    return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
+
+
+def _gh_target(verb, args, branch=""):
+    """The target of a `gh pr <verb>` call. A create names no PR, so its target is its --head branch, else `branch` (the
+    branch the same command checked out). Any other verb names its PR by number or URL wherever it sits among the flags,
+    else by its first plain argument; a number is qualified by its --repo, so a PR of another repo is another target. A
+    URL names its own repo, so it matches a number only when --repo names the URL's repo. A call that names no
+    target is keyed by its own arguments, tagged so they match no named target: an identical retry is the same call, and
+    a call with other arguments is not. A call with no arguments has the empty target ''."""
+    flags = {"--head": "head", "-H": "head", "--repo": "repo", "-R": "repo"}
+    named, plain = {}, []
+    for k, token in enumerate(args):
+        name, _, value = token.partition("=")
+        if name in flags:
+            named.setdefault(flags[name], value or (args[k + 1] if k + 1 < len(args) else ""))
+        elif token.startswith("-") or k and args[k - 1] in flags:
+            continue
+        else:
+            plain.append(token)
+    own = "args " + " ".join(args) if args else ""
+    if verb == ["create"]:
+        return named.get("head") or branch or own
+    for token in plain:
+        if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
+            url = re.search(r"([^/]+/[^/]+)/pull/(\d+)", token)
+            if url:  # a PR's URL names its repo, as --repo does
+                return url.group(1) + "#" + url.group(2)
+            return (named["repo"] + "#" if named.get("repo") and "/pull/" not in token else "") + token.lstrip("#")
+    return (named["repo"] + "#" if named.get("repo") else "") + plain[0] if plain else own
+
+
+def _checked_out(segment):
+    """The branch a `git checkout` or `git switch` in `segment` moves to, else ''."""
+    for subcommand, args in guard.git_calls(segment):
+        if subcommand in ("checkout", "switch"):
+            for k, arg in enumerate(args):
+                if arg in ("-b", "-B", "-c", "-C"):
+                    return args[k + 1] if k + 1 < len(args) else ""
+            return next((a for a in args if not a.startswith("-")), "")
+    return ""
+
+
+def _segment_tries(segment, branch=""):
+    """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
+    name table acts), git push, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
+    whose name holds an act word (_script_tries). The key is the
+    program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
+    a failure of the same call. A gh pr call that names no target is keyed by its own arguments (_gh_target);
+    `branch` is the branch an earlier segment of the same command checked out, the target of a create with no --head.
+    A segment with --dry-run is no try."""
+    tokens = guard.segment_tokens(segment) or segment.split()
+    if "--dry-run" in tokens:
+        return set()
+    tries = set()
+    rest = guard.gh_call_of(segment)
+    if rest is not None:
+        pr = rest[:1] == ["pr"]
+        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), _gh_target(rest[1:2], rest[2:], branch) if pr else " ".join(rest[1:2]))
+        tries.add((GITHUB_REACH, key))
+        if pr and rest[1:2]:
+            tries.add((CANNOT_GH_PR_ACTS.get(rest[1], ""), key))
+        elif rest[:1] == ["api"]:
+            tries.update((_pulls_act(token), key) for token in rest[1:])
+    for subcommand, args in guard.git_calls(segment):
+        key = ("git " + subcommand, " ".join(a for a in args if not a.startswith("-")))
+        if subcommand in CANNOT_GIT_REACH:
+            tries.add((GITHUB_REACH, key))
+        if subcommand == "push":
+            tries.add(("push", key))
+    tries |= _script_tries(tokens)
+    if any(os.path.basename(t) in CANNOT_HTTP_TOOLS for t in tokens):
+        for token in (t for t in tokens if "github.com" in t):
+            tries.add((GITHUB_REACH, ("http", token)))
+            if "api.github.com" in token:
+                tries.add((_pulls_act(token.split("api.github.com", 1)[1]), ("http", token)))
+    return {(act, key) for act, key in tries if act}
+
+
+def _text_acts(text):
+    """The acts whose routes a text names: a route tool, `gh pr <verb>` or `git push`. A GitHub MCP tool
+    name is also github-reach."""
+    acts = {act for tool, act in CANNOT_TOOL_ACTS.items() if tool in text}
+    if "mcp__github__" in text:
+        acts.add(GITHUB_REACH)
+    for hit in CANNOT_TEXT_ROUTE_RE.finditer(text):
+        acts.add(CANNOT_GH_PR_ACTS[hit.group(1)] if hit.group(1) else "push")
+    return acts
+
+
+def _is_relay(use):
+    return use.get("name") in SPAWN_TOOLS or use.get("name") in SEND_TOOLS
+
+
+def _tool_acts(name):
+    """The acts a tool name is a route of: its table act, and github-reach for every GitHub MCP tool."""
+    acts = {CANNOT_TOOL_ACTS[name]} if name in CANNOT_TOOL_ACTS else set()
+    if isinstance(name, str) and name.startswith("mcp__github__"):
+        acts.add(GITHUB_REACH)
+    return acts
+
+
+def _call_tries(use, text):
+    """{(act, key)} for one tool call. A shell call is read a segment at a time; a relay (an agent spawn or a send) by the
+    route its result text names; any other tool by its name, keyed by the target its input names."""
+    name = use.get("name")
+    given = use.get("input") if isinstance(use.get("input"), dict) else {}
+    if name == "Bash":
+        command = given.get("command")
+        tries = set()
+        if isinstance(command, str):
+            branch = ""
+            for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
+                tries |= _segment_tries(segment, branch)
+                branch = _checked_out(segment) or branch
+        return tries
+    if _is_relay(use):
+        return {(act, ("relay", use.get("id"))) for act in _text_acts(text)}
+    target = next((str(given[f]) for f in CANNOT_TARGET_FIELDS if given.get(f) not in (None, "")), "")
+    return {(act, (name, target)) for act in _tool_acts(name)}
+
+
+def failed_tries(records, refused=(), recovered=None):
+    """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
+    is_error or an exit code above zero as a shell result reports it (CANNOT_FAIL_RE); a relay's text also fails on an HTTP
+    4xx or 5xx (CANNOT_RELAY_FAIL_RE), an ok call's does not. A later call
+    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target). A gh pr
+    act verb (CANNOT_GH_PR_ACTS) with no arguments has the empty target, which is no identity and cancels nothing; a relay's
+    text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
+    failed try. When `recovered` is a set, each act whose failure a later call cancelled is added to it."""
+    uses, tries = {}, {}
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            if use.get("id"):
+                uses[use["id"]] = use
+        for result in tool_results(rec):
+            use = uses.get(result.get("tool_use_id"))
+            if use is None:
+                continue
+            text = _result_text(result.get("content"))
+            found = _call_tries(use, text)
+            if (result.get("is_error") is True or CANNOT_FAIL_RE.search(text)
+                    or (_is_relay(use) and CANNOT_RELAY_FAIL_RE.search(text))):
+                for act, key in found:
+                    tries.setdefault(act, set()).add(key)
+            elif not _is_relay(use):
+                for act, key in found:
+                    if not key[1] and key[0].startswith("gh pr ") and key[0][6:] in CANNOT_GH_PR_ACTS:
+                        # CANNOT_GH_PR_ACTS holds every act verb: each one with no arguments has the empty key
+                        continue  # a bare `gh pr merge` or `gh pr create` names no PR: it cancels nothing
+                    if key in tries.get(act, ()) and recovered is not None:
+                        recovered.add(act)
+                    tries.get(act, set()).discard(key)
+    for tool in refused:
+        for act in _tool_acts(tool):
+            tries.setdefault(act, set()).add(("refused", tool))
+    return tries
+
+
+def refused_tools(hook):
+    """The tool names in this session's refusals file, () when it holds none. Raises on a file that cannot be read.
+    Called before pending_refusals settles the file away."""
+    _hooks_on_path()
+    import shared_names
+    path = shared_names.refusals_path(hook.get("session_id"))
+    if path is None or not os.path.exists(path):
+        return ()
+    return tuple(row["tool_name"] for _, row in refusal_rows(path))
+
+
+def _cited(line, refused, act):
+    """True when the claim `line` of `act` carries a hand-off cite: a dated measurement, a tool the classifier refused that
+    is a route of that act, or a route row that says refused or asks."""
+    if _measured(line) == "ok" or any(act in _tool_acts(tool) and names_tool(line, tool) for tool in refused):
+        return True
+    ids = ROUTE_CITE_RE.findall(line)
+    return bool(ids) and _route_verdict(ids)[0] == "ok"
+
+
+CANNOT_MERGE_TOOL_RE = re.compile(r"\bthe\s+merge\s+tool\b", re.I)  # the repo's merge tool, named in prose
+
+
+def _backed(tries, act, sentence):
+    """True when a failed try of `act` backs `sentence`. A try read from a command's name (a script, a make target; its key
+    starts with "script") backs only a line that names it: the name as a whole token. A name that is only the act word
+    (merge, push) is named only inside a backtick span, since the prose of any such claim holds that word."""
+    for key in tries.get(act, ()):
+        if key[0] != "script" or key[1] == "merge" and CANNOT_MERGE_TOOL_RE.search(sentence):
+            return True
+        token = r"(?<![\w.-])%s(?![\w-])" % re.escape(key[1])
+        if re.search(r"`[^`\n]*%s[^`\n]*`" % token if re.fullmatch(r"\w+", key[1]) else token, sentence, re.I):
+            return True
+    return False
+
+
+def _head(sentence, tail):
+    """`sentence` up to the end of the phrase: what is left once `tail`, the text after the phrase, is cut off."""
+    return sentence[:len(sentence) - len(tail.rstrip())]
+
+
+def _names_a_call(text, writer_counts=False):
+    """True when `text` holds a check (CANNOT_CHECK_RE) that names a call. A bare check word (CANNOT_CHECK_WORD_RE) counts
+    only when it lies outside a claim phrase ("blocked from" is the claim, not its check) and _clause.check_word_counts
+    accepts it: the writer as its subject names no call ("I tried"), unless `writer_counts`, and a speech word needs a
+    tool, hook, check, command or remote as its subject. The one home of that test."""
+    phrases = [hit.span() for hit in CANNOT_RE.finditer(_mask(text))]
+    return any(not CANNOT_CHECK_WORD_RE.fullmatch(m.group()) or (
+        _clause.check_word_counts(text[:m.start()], m.group(), writer_counts)
+        and not any(a <= m.start() < b for a, b in phrases))
+        for m in CANNOT_CHECK_RE.finditer(text))
+
+
+def _names_check(sentence, tail):
+    """True when `sentence` names its check (CANNOT_CHECK_RE), read with its emphasis marks removed (_strip_emphasis). In
+    `tail`, the text after the phrase, any form counts but a bare check word that the phrase holds or that a speech word
+    with no tool, hook, check, command or remote as its subject makes. Before the phrase, a bare check word counts only when the
+    writer is not its subject (_names_a_call)."""
+    head = _strip_emphasis(_head(sentence, tail))[0]
+    return _names_a_call(_strip_emphasis(tail)[0], writer_counts=True) or _names_a_call(head)
+
+
+# The act a sentence's own words are about: the verb of a table act, a PR act's verb only beside the PR word. github-reach
+# has no prose word: a sentence about GitHub is about every act.
+CANNOT_PROSE_ACTS = (
+    ("push", re.compile(r"\bpush(?:ed|es|ing)?\b", re.I)),
+    ("pr-merge", re.compile(r"\bmerg(?:e|es|ed|ing)\b", re.I)),
+    ("pr-open", re.compile(r"\b(?:open(?:ed|ing|s)?|creat(?:e|es|ed|ing)|rais(?:e|es|ed|ing)|fil(?:e|es|ed|ing)|submit\w*)\b", re.I)),
+    ("pr-edit", re.compile(r"\b(?:clos(?:e|es|ed|ing)|comment\w*|edit\w*|updat(?:e|es|ed|ing)|mark(?:s|ed|ing)?)\b", re.I)),
+)
+
+
+def _prose_acts(prose):
+    """The table acts the words of `prose` (a sentence without its code spans) are about; a PR act needs the PR word."""
+    prose = _clause.unopen(prose)  # "PR 12 is open" is a state, so it opens no PR
+    return {act for act, rx in CANNOT_PROSE_ACTS
+            if rx.search(prose) and (act in ("push", "pr-merge") or CANNOT_PR_RE.search(prose))}
+
+
+def _prior_names_check(prior, act):
+    """True when the sentence before a claim of `act` names a check of that act: a check word (CANNOT_CHECK_RE) outside
+    code spans, in a sentence that is not about another act alone ("The push failed." checks no merge), or a code span that
+    names a route of `act`, in a sentence that names no route of another act. A route of another act ("`gh pr create`
+    returned 403") is the check of that act, and a span of another command ("`ls` printed a list") names no check."""
+    prior = _strip_emphasis(prior)[0]
+    acts = _text_acts(prior)
+    if acts and act not in acts:
+        return False
+    prose = CODE_SPAN.sub(" ", prior)
+    about = _prose_acts(prose)
+    return _names_a_call(prose) and (not about or act in about or act == GITHUB_REACH) or any(
+        act in _text_acts(span.group(2)) for span in CODE_SPAN.finditer(prior))
+
+
+def cannot_problem(records, text, refused=()):
+    """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
+    human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
+    (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: _gives_reason). A
+    sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
+    failure and is let pass; a present claim (cannot) after that later success still blocks.
+    A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
+    claims = cannot_lines(text)
+    if not claims:
+        return ""
+    if guard is None:
+        _load_guard()
+    if guard is None:  # a guard that cannot read cannot accuse
+        print("cannot-claim guard: UNKNOWN, the transcript parser did not load, so the claims went unchecked.",
+              file=sys.stderr)
+        return ""
+    recovered = set()
+    tries = failed_tries(records, refused, recovered)
+    no_try, no_check = [], []
+    for sentence, act, _, past, prior, following, tail in claims:
+        backed = _backed(tries, act, sentence)
+        if past and not tries.get(act) and act in recovered:  # every failed try of the act was later cancelled
+            continue
+        if not backed and not _cited(sentence, refused, act):
+            if sentence not in no_try:
+                no_try.append(sentence)
+        elif not (_names_check(sentence, tail) or backed and (_prior_names_check(prior, act)
+                                                                  or _gives_reason(_head(sentence, tail), tail, following))) \
+                and sentence not in no_check:
+            no_check.append(sentence)
+    return " ".join(head + "".join("\n- " + line for line in lines)
+                    for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check)) if lines)
 
 
 # Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
@@ -1527,6 +2587,7 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -1536,6 +2597,19 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+# The record for the live head is posted, but merge's review_state reads it open or held: name that state and its why.
+REVIEW_NOT_DONE = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, but merge reads its review record for the live head "
+    "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands."
+)
+REVIEW_UNPARSED = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
+    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
+    "PR #%d, then report again."
+)
+REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
+                      "line makes the record unreadable.")
 
 
 def review_claims(text):
@@ -1561,32 +2635,55 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd):
-    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+def _time_left(end):
+    """Seconds left of the whole-check budget that ends at `end`, or raises: no time left is a read that could not run."""
+    import time
+    left = end - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("the review check's time budget is spent")
+    return left
+
+
+def _gh_json(args, cwd, end):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. The read ends at REVIEW_READ_TIMEOUT or
+    at `end`, the end of the whole check's budget, whichever is first."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                        timeout=REVIEW_READ_TIMEOUT)
+                        timeout=min(REVIEW_READ_TIMEOUT, _time_left(end)))
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
 
 
 def _newest_record(n, comments, merge_mod):
-    """The parsed newest review record comment of `comments` (oldest first), else None."""
+    """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return merge_mod.parse_review(marked[-1]) if marked else None
+    return (merge_mod.parse_review(marked[-1]), marked[-1]) if marked else (None, None)
+
+
+def _text_after_ci_line(body, merge_mod):
+    """True when non-blank text follows the last CI line before the first `---` line: the one cause named for an unparsed record."""
+    lines = body.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    at = [i for i, line in enumerate(lines) if line == merge_mod.REVIEW_CI_LINE]
+    return bool(at) and any(line.strip() for line in lines[at[-1] + 1:])
 
 
 def review_record_problem(hook, text):
     """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
-    review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
-    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    review log must name the PR, and merge's live_review_state must call it done for the live head (_live_state). A read
+    of the PR or its comments that could not run, or a merge tool that could not load, is a note with UNKNOWN, never a block.
+    A clean-merge read that could not run keeps a stale record stale, so it blocks, with a note that says so."""
     claims = review_claims(text)
     if not claims:
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import time
+    end = time.monotonic() + REVIEW_CHECK_BUDGET  # one budget for every claimed PR and every read, so the hook ends under its timeout
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     if not own_id or not _own_lane_read(hook.get("transcript_path"), own_id)[0]:
@@ -1601,35 +2698,58 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd, end)["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
-                              "--paginate", "--slurp"], cwd)
+                              "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            rec = _newest_record(n, comments, merge_mod)
+            rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+        if rec is None and body is not None:
+            cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
+            reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
+        elif not rec or rec["n"] != n:
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
+        else:
+            state, why = _live_state(merge_mod, rec, live, cwd, end)
+            if state in ("open", "held"):
+                reasons.append(REVIEW_NOT_DONE % (n, state, why))
+            elif state != "done":
+                reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            if getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", None) and merge_mod.REVIEW_SURVIVAL_UNKNOWN in why:
+                notes.append("Review-record guard: PR #%d reads stale: %s." % (n, why))
     return " ".join(reasons), " ".join(notes)
 
 
+def _live_state(merge_mod, rec, live, cwd, end):
+    """(state, why) of `rec` for the live head, from merge/merge.py live_review_state: the one read `merge --reviewed` makes, so the guard and
+    the list agree on a record that survives clean merges of main. Its reads share the time left of the whole check's budget (`end`). Any error reads as stale, so
+    a record this check cannot prove done still blocks, as a stale record did before the clean-merge read."""
+    try:
+        with merge_mod.shared_deadline(_time_left(end)):
+            host = merge_mod.Host(cwd=cwd or None)
+            return merge_mod.live_review_state(host, rec, live, host.base)  # a fresh Host: its base is main, as `merge --reviewed` reads it
+    except Exception as err:  # never a pass: the record is not proven done
+        return "stale", "%s: %s" % (getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", "the clean-merge read is unknown"), type(err).__name__)
+
+
 def refusal_reason(tools, hold=""):
-    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
+    """The refusal for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
     held = hold_reason(hold) if hold else ""
     if not tools:
         return held
     names = ", ".join("`%s`" % tool for tool in tools)
-    return (held + " " if held else "") + (
-        "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
-        "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
-        "right, say \"`<tool_name>`: refusal was right\" on one line "
-        "(decision refusals-reach-the-owner)." % names)
+    return (held + " " if held else "") + owner_line(
+        "Refusal guard (decision refusals-reach-the-owner)",
+        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner. "
+        "A refused tool clears when the reply names it in backticks under Input Needed, "
+        "or writes \"`<tool_name>`: refusal was right\". "
+        "An MCP tool counts by its full name, with or without backticks" % names)
 
 
 def _marker_path(hook):
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import local_time
     return local_time.report_marker_path(hook.get("session_id"))
 
@@ -1663,9 +2783,9 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
-            reasons.append(MODELS_REASON + models + ".")
+            reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
         answered = answered_problem(text)
@@ -1693,17 +2813,14 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
-RELAY_RULE_REASON = (
-    "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
-    "that names that ruling and says why the owner is asked again.")
-UNVETTED_REASON = (
-    "Unvetted guard: the past-ruling check could not run (%s), so this question would reach the owner unchecked. "
-    "Add the line `Unvetted: <why it could not be checked>` to the question and send it again.")
-KEYS_REASON = (
-    "Question-keys guard (rule question-keys): two questions to the owner use the option key(s) %s, so his answer "
-    "could mean either. Give each question its own keys, such as 1a/1b for the first and 2a/2b for the second, and "
-    "send the questions again.")
+# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop.
+RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
+UNVETTED_REASON = owner_line(
+    "Unvetted guard (rule past-ruling)",
+    "a question to the owner went out without the past-ruling check, which could not run (%s)")
+KEYS_REASON = owner_line(
+    "Question-keys guard (rule question-keys)",
+    "two questions to the owner use the option key(s) %s, so his answer could mean either")
 ASK_TEXT_MAX = 6000
 # A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
 # code span is no question.
@@ -1750,7 +2867,7 @@ def has_input_needed(text):
     if "input needed" not in text.casefold():
         return False
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from reply_judge import has_input_needed as home
         return home(text)
     except Exception:
@@ -1766,7 +2883,7 @@ def asked_text(text):
     questions = prose_questions(text)
     if not questions:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form  # the one home of the Unvetted line
     # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
     questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
@@ -1777,14 +2894,14 @@ def asked_text(text):
 def cannot_run(asked, why):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
     `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
 def past_ruling_problem(asked, cwd):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
@@ -1809,6 +2926,10 @@ def past_ruling_problem(asked, cwd):
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
+    if session_wording(reason):
+        # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
+        cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
+        reason = "a past ruling settles this (%s)." % ", ".join(cited[:3]) if cited else "a past ruling settles this."
     return RELAY_RULE_REASON % reason
 
 
@@ -1845,7 +2966,7 @@ def question_keys_problem(after, text):
     """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
     if "input needed" not in text.casefold():
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     clash = question_form.key_overlap(text, earlier_replies(after, text))
     return KEYS_REASON % clash if clash else ""
@@ -1886,10 +3007,10 @@ def rewrite_relay(hook):
 
 
 HOLD_TIER = "triage"
-HOLD_REASON = (
-    "Triage hold: the newest roadmap build prints stalled step lines for %s. Dispose each (resume, pause or done), "
-    "rebuild, then end; or name them under Input Needed to escalate (decision session-tiers, the triage session)."
-)
+HOLD_REASON = owner_line(
+    "Triage hold (decision session-tiers)",
+    "the newest roadmap build prints stalled step lines for %s, and the reply does not name each one under "
+    "Input Needed")
 # A Bash command that runs the roadmap build: python, its flags, then a path that ends in build.py. A quoted or
 # piped mention (cat build.py, grep 'python3 build.py') is no run.
 BUILD_CALL_RE = re.compile(r"(?:^|[\s;&|(])python[\d.]*\s+(?:-\S+\s+)*(?:\S*/)?build\.py(?=[\s;&|)]|$)")
@@ -1973,7 +3094,7 @@ def triage_hold(hook, records, active):
         entries = stalled_entries(records)
         if not entries:
             return ""
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from guard_merge import _own_tier_proved
         if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
             return ""
@@ -2020,8 +3141,7 @@ def main():
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -2045,10 +3165,20 @@ def main():
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
     hand_off, hand_note = "", ""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         hand_off, hand_note = hand_off_problem(hook, reply)
     except Exception as err:  # a read that could not run is UNKNOWN, never clear
         hand_note = "Hand-off guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+
+    # The cannot-claim check reads the refusals file here too, and only when a line claims. A read that fails skips it.
+    cannot_refused = ()
+    try:
+        if cannot_lines(reply):
+            cannot_refused = refused_tools(hook)
+    except Exception as exc:
+        cannot_refused = None
+        print("cannot-claim guard: UNKNOWN, the check did not run (%s), so the claims went unchecked."
+              % type(exc).__name__, file=sys.stderr)
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, reply)
@@ -2095,6 +3225,18 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
+    cannot = ""
+    if last_human_idx is not None and cannot_refused is not None:
+        try:
+            # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
+            # this turn is an ack and starts no turn, as in the question check.
+            acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
+            idx = last_incoming_index(records, acks)
+            ack_turn = records if idx is None else records[idx + 1:]
+            cannot = cannot_problem(ack_turn, text, cannot_refused)
+        except Exception as exc:
+            print("cannot-claim guard: UNKNOWN, the check did not run (%s), so the claims went unchecked."
+                  % type(exc).__name__, file=sys.stderr)
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
@@ -2105,6 +3247,7 @@ def main():
             pass
         pick += relay
         pick.append(hand_off)
+        pick.append(cannot)
         pick.append(review)
         try:
             if report_shape_ok(text):
@@ -2115,7 +3258,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)"
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -2124,16 +3267,17 @@ def main():
         return
 
     shape_ok = report_shape_ok(text)
-    reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]
+    reasons = [] if shape_ok else [BLOCK_REASON]
     item = done_format_problem(text) if shape_ok else ""
     if item:
-        reasons.append(
-            "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
-            "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
+        reasons.append(owner_line(
+            "Report-shape guard",
+            "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
+            + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
-        reasons.append(MODELS_REASON + models + ".")
+        reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
     if pick_reason:
@@ -2154,6 +3298,8 @@ def main():
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
+    if cannot:
+        reasons.append(cannot)
     if review:
         reasons.append(review)
     try:
@@ -2170,13 +3316,12 @@ def main():
         pass
     cite = bare_cite(text)
     if cite:
-        reasons.append(
-            "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
-            "plus a few words, like \"D12, short titles for records\".")
+        reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                  "%r is a record id with no short gloss" % cite))
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})

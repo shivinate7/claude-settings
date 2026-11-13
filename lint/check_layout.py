@@ -4,8 +4,9 @@
 lint/layout.json is the one list of where each kind of file lives (decision one-layout-every-repo).
 Three things can drift from it, and this check reads each:
 
-  1. The guard's literal. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
-     its own literal. That literal must equal LAYOUT_FILE in lint/layout.py.
+  1. The hooks' literals. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
+     its own literal. That literal must equal LAYOUT_FILE in lint/layout.py. hooks/git_reads.py reads the
+     layout's extras file from LAYOUT_EXTRAS, which must equal "extras" in lint/layout.json.
   2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
      mutation tests aside. A string constant there may not name a record
      path: a layout, legacy or legacy-repos path of a record or listed kind, the notes file or the todo file, followed by `/` or holding one, at
@@ -35,6 +36,8 @@ ROOT = os.path.dirname(HERE)
 
 GUARD = "hooks/guard.py"
 GUARD_NAME = "RECORD_LAYOUT_FILE"
+GIT_READS = "hooks/git_reads.py"
+EXTRAS_NAME = "LAYOUT_EXTRAS"
 READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and mutation tests aside
 NOT_READERS = ("test_", "mutate_", "prove_")
 ACTION_INPUTS = (("actions/ruling-kind/action.yml", "records-dir"), ("actions/ste-lint/action.yml", "decisions-dir"))
@@ -87,15 +90,16 @@ def docstrings(tree):
     return found
 
 
-def guard_literal(tree):
-    """The guard's RECORD_LAYOUT_FILE as a `/` path, or None when it is not a literal join or string."""
+def path_constant(tree, name):
+    """The module constant `name` as a `/` path, or None when it is not a string, a literal join or a tuple of strings."""
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == GUARD_NAME for t in node.targets):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
             value = node.value
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
                 return value.value.replace("\\", "/")
-            if isinstance(value, ast.Call) and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in value.args):
-                return "/".join(a.value for a in value.args)
+            parts = value.args if isinstance(value, ast.Call) else value.elts if isinstance(value, ast.Tuple) else None
+            if parts is not None and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in parts):
+                return "/".join(a.value for a in parts)
     return None
 
 
@@ -118,9 +122,12 @@ def problems():
     found = []
 
     guard_tree = ast.parse(read(GUARD))
-    literal = guard_literal(guard_tree)
+    literal = path_constant(guard_tree, GUARD_NAME)
     if literal != layout.LAYOUT_FILE:
         found.append("%s: %s is %r, not lint/layout.py LAYOUT_FILE %r" % (GUARD, GUARD_NAME, literal, layout.LAYOUT_FILE))
+    extras = path_constant(ast.parse(read(GIT_READS)), EXTRAS_NAME)
+    if extras != data.get("extras"):
+        found.append("%s: %s is %r, not lint/layout.json \"extras\" %r" % (GIT_READS, EXTRAS_NAME, extras, data.get("extras")))
 
     readers = sorted("%s/%s" % (folder, name) for folder in READER_DIRS
                      if os.path.isdir(os.path.join(ROOT, folder))

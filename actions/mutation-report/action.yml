@@ -4,7 +4,10 @@ description: >
   caller's repository. Runs hooks/mutate_guard.py from this repo against the caller's checkout.
   `--changed` mutates the lines the checkout adds past its merge base with the pull request base, runs the suites
   the profile selects for each file, and writes the catch share and the untested lines to the job summary. A low
-  share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD, installs the
+  share never fails the action. A run in which no mutant ran exits 1 with a `no mutant ran: <cause>` line: mutants made and none
+  ran, or an unreadable diff, an unparsable change, a refused install or checkout, or a raised replay. A change with no
+  target lines exits 0. The summary shows that line only when the exit is 1 and the line is in the output. Any other
+  non-zero exit reads UNKNOWN. The step always exits 0. `--known-defects` plants each defect of the list in a checkout of HEAD, installs the
   profile's packages into it (a second install, because the `--changed` step removes its own) and runs its catcher suite, and fails when the list drops an id the base list holds, unless a commit of the change carries the
   trailer `Known-defect-removed: <id>`, or changes an entry the base list holds, unless a commit carries
   `Known-defect-changed: <id>`. A defect that is MISS or UNKNOWN, or an id that is MISSING or CHANGED, fails the action
@@ -70,6 +73,8 @@ runs:
           echo '```'
           if [ "$status" = 0 ]; then
             grep -E '^(catch share|untested):' "$OUT/changed.txt"
+          elif [ "$status" = 1 ] && grep -qE '^no mutant ran:' "$OUT/changed.txt"; then
+            grep -E '^(no mutant ran|catch share|untested):' "$OUT/changed.txt"
           else
             echo "UNKNOWN: the report did not run (exit $status)"
           fi

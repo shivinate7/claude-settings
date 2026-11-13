@@ -13,8 +13,9 @@ clean. With no argument it also compares the guard's role lists with the role ta
 Exits 1 and names each file that sets a Haiku model, each agent file whose `model:` pin names a different
 family than its role's row in the role table (pin_row_problem), each agent body that states the agent's own
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
-and the model record
-docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
+each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
+`disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
+docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
 import glob
@@ -26,14 +27,17 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 # One home for the role list: the guard's HAIKU_ROLES. Read it, never copy it.
 _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hooks", "guard.py"))
 _guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
+REMOTE_SERVER = _guard.REMOTE_SERVER
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
-LANE_ROW = re.compile(r"^\|\s*lane session\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
+LANE_ROW = re.compile(r"^\|\s*lane\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # The self-model rules. An agent runs the model its spawn names, so its body must not state a model as its own. A
 # sentence is a run of text up to `.`, `!` or `?` before a space, wrapped lines included. A chunk of sentences ends at
@@ -93,6 +97,24 @@ def pin_row_problem(text: str, table) -> str:
         pin, row, name)
 
 
+def session_tools_problem(text: str) -> str:
+    """Why the agent can reach the claude-code-remote server, or "" when it cannot. It cannot when frontmatter
+    `disallowedTools` names the whole server (`<server>__*` or the bare name), or `tools` is an allow-list with no entry
+    for the server. A deny of one remote tool leaves the rest reachable, so it does not count."""
+    keys = _guard.frontmatter_keys(frontmatter(text) or [])
+    field = unread_list(keys)
+    if field:
+        return "the %s list sits below its key, which this check does not read. Write it on the key's line" % field
+    denied = tokens(scalar(keys.get("disallowedTools", "")))
+    if REMOTE_SERVER in denied or REMOTE_SERVER + "__*" in denied:
+        return ""
+    if "tools" in keys:
+        if any(item == REMOTE_SERVER or item.startswith(REMOTE_SERVER + "__") for item in tokens(scalar(keys["tools"]))):
+            return "the tools allow-list names the %s server. No agent role needs it" % REMOTE_SERVER
+        return ""
+    return "frontmatter `disallowedTools` must name %s__* (or the agent needs a `tools` allow-list with no entry for it)" % REMOTE_SERVER
+
+
 def body_chunks(text: str):
     """The agent file's body as (first line number, text) chunks. The body starts after the closed frontmatter."""
     lines = text.splitlines()
@@ -147,12 +169,12 @@ def is_lane_record(path: str) -> bool:
 
 
 def lane_effort_problem(text: str) -> str:
-    """Why the lane session row's effort cell is not the lane effort, or "" when it is."""
+    """Why the lane row's effort cell is not the lane effort, or "" when it is."""
     rows = LANE_ROW.findall(text)
     if len(rows) != 1:
-        return "needs one `lane session` row with a model and an effort cell, found %d" % len(rows)
+        return "needs one `lane` row with a model and an effort cell, found %d" % len(rows)
     if not rows[0].startswith(LANE_EFFORT):
-        return "the `lane session` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
+        return "the `lane` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
             LANE_EFFORT, rows[0])
     return ""
 
@@ -168,6 +190,17 @@ def role_list_problems() -> list:
     if unread:
         return ["role lists: the role table or the agents folder could not be read, so drift is unknown."]
     return list(_guard.role_list_drift(ROOT))
+
+
+def round_row_problems() -> list:
+    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift), named by the record's
+    path, and one line when the record holds its role table and no round row (a missing table, or a header with no row): the guard then reads
+    no round row and runs on its fallback. [] when the record cannot be read: role_list_problems reports that as unknown."""
+    record = os.path.join(ROOT, LANE_RECORD)
+    lines = ["%s: %s." % (record, line) for line in _guard.role_round_drift(ROOT)]
+    if _guard.role_model_table(ROOT) is not None and _guard.role_round_table(ROOT) is None:
+        lines.append("%s: the record holds no round row, so the guard runs on its built-in fallback." % record)
+    return lines
 
 
 def main(argv) -> int:
@@ -193,15 +226,15 @@ def main(argv) -> int:
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
             bad = 1
         elif os.path.basename(os.path.dirname(path)) == "agents":
-            problem = pin_row_problem(text, table)
-            if problem:
-                print("%s: %s." % (path, problem))
-                bad = 1
+            for problem in (pin_row_problem(text, table), session_tools_problem(text)):
+                if problem:
+                    print("%s: %s." % (path, problem))
+                    bad = 1
             for line, problem in body_problems(text):
                 print("%s:%d: %s" % (path, line, problem))
                 bad = 1
     if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
-        for line in role_list_problems():
+        for line in role_list_problems() + round_row_problems():
             print(line)
             bad = 1
     return bad

@@ -80,6 +80,7 @@ sys.path.insert(0, HERE)
 from _transcript import read_transcript, tool_results, tool_uses  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import own_session  # noqa: E402  the one home of the agent transcript folder (hooks/own_session.py)
 
 GIT_TIMEOUT_SECONDS = 10
 REACH_WORD_MIN = 8
@@ -394,7 +395,7 @@ def scan_transcript(path, project_dir, timeouts):
 
 def agent_transcript_paths(project_dir, session_stem):
     """`*.jsonl` files directly under a session's own subagents/ folder."""
-    subdir = os.path.join(project_dir, session_stem, "subagents")
+    subdir = own_session.agent_transcript_dir(os.path.join(project_dir, session_stem))
     if not os.path.isdir(subdir):
         return []
     paths = []

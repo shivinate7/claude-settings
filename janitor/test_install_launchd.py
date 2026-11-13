@@ -138,7 +138,8 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
             data = plistlib.load(handle)
         self.assertEqual(data["StartCalendarInterval"], {"Hour": 5, "Minute": 42})
         # Exactly sweep.py (not session_end_sweep.py), then the one flag. The daily job never
-        # carries --session-end: that flag scopes the SessionEnd run to its own repository only.
+        # carries --session-end, which judges branches and worktrees in its own repository only,
+        # stops proven orphans machine-wide like the scheduled job, and skips the loose-process report.
         self.assertEqual(data["ProgramArguments"][1:],
                          [os.path.join(self.repo, "janitor", "sweep.py"), "--confirm"])
         self.assertNotIn("--session-end", data["ProgramArguments"])

@@ -34,6 +34,20 @@ Interface the module must match (the lane's form contract):
   is the text of question_form.PAGE_REASONS, the one table guard.py prints from.
 - A closed item passes. An update is judged only for the fields it carries. A str_replace on `context`
   that removes a Goal, Problem or Based on line is refused.
+- A waiting-page task's Why yours line (rule task-why-cited, decision claims-carry-backing part (v)): a
+  capability reason needs a cite that holds on this surface, a `(route <id>)` whose row says refused or asks, or a
+  dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens.
+- question_form.cross_repo_hit(op, data, page_repo, session_id=None) -> reason or None (rule
+  question-checked-with-repo). An open decision or task set (a missing kind is a decision, and any status but closed
+  is open), or an update carrying `repo`, that names a repo other than the page's needs a session-shaped
+  `checked_with`. A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused.
+  A `repo` that is not owner/name is refused with the format reason. `repo` is required on the set: a direct call
+  with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown, since no
+  compare can run. A str_replace on `repo` or `checked_with` is refused as this rule. An update that
+  carries `checked_with` without `repo` is refused, naming `repo`. item_hit and page_item_hit take the writer's
+  session_id. guard.py passes the cloud session's record id (env CLAUDE_CODE_REMOTE_SESSION_ID read as session_<x>),
+  never the payload's local UUID. The page repo is read from the checkout at cwd,
+  and None (no cwd, or no origin) skips only the compare.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
 
@@ -43,13 +57,17 @@ the chat surface from one table (FORM_VARIANTS). The call_judge cases reuse test
 one home of the model stub). Temp files: the run folder of lint/_test_temp.py, whose sweep
 lint/test_find_copies.py proves once (decision test-temp-standard).
 """
+import atexit
 import contextlib
 import copy
 import io
 import json
 import os
 import re
+import inspect
+import shutil
 import sys
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -61,7 +79,14 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+# The pointer is patched by name, not imported: an import line here lists this suite for hooks/guard_pointer.py.
+POINTER_CHECKOUT = "guard_pointer.pointer_checkout"  # the ruled-store cases' patch target
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
+import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
+import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
+atexit.register(shutil.rmtree, hook_base.RUN, ignore_errors=True)  # that folder is not this module's, so it goes here
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 
 try:
@@ -129,7 +154,7 @@ def page_item(tail="", options=None, lines=None, **over):
     if options is not None:
         item["options"] = options
     item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
-    return item
+    return tcj.with_frozen_fields(item)  # ids and `shown` for the options as they stand now
 
 
 TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
@@ -364,9 +389,9 @@ def case_closed_stood_and_updates():
     lacking = copy.deepcopy(ITEM92["options"])
     lacking[1].pop("lose")
     page("an update that carries options with an option that has no loss is refused", "update",
-         entry_of({"kind": "decision", "options": lacking}), (FORM_RULE, "lose"))
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": lacking})), (FORM_RULE, "lose"))
     page("an update that carries options with a gain and a loss each passes, its context not carried", "update",
-         entry_of({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])}), None)
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"])})), None)
 
 
 def case_str_replace():
@@ -392,15 +417,242 @@ def case_str_replace():
     replace("on why is not judged", PROBLEM, "A keeps the allow list to one form.", None, field="why")
 
 
-def case_batch():
-    def batch(writes):
-        return guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO)
+def page_batch(writes):
+    """guard.data_tool_hit on one ArtifactData batch of waiting-page writes."""
+    return guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO)
 
+
+def case_batch():
     good = {"op": "set", "collection": "items", "doc_id": DOC, "data": page_item()}
     bad = {"op": "set", "collection": "items", "doc_id": "second", "data": ITEM92}
-    verdict("page guard: a batch of items that meet the form passes", batch([good, dict(good, doc_id="second")]), None)
-    verdict("page guard: a batch whose second write has no Problem line is refused", batch([good, bad]),
+    verdict("page guard: a batch of items that meet the form passes", page_batch([good, dict(good, doc_id="second")]),
+            None)
+    verdict("page guard: a batch whose second write has no Problem line is refused", page_batch([good, bad]),
             (FORM_RULE, "Problem"))
+
+
+# ------------------------------------------------------------------ a task's Why yours line cites what it claims
+#
+# Rule task-why-cited (decision claims-carry-backing, part (v)). The Why yours line of a waiting-page task
+# is judged on its cite: a capability reason needs one, and the cite must hold on this surface. The page accepts a
+# route cite and a dated measured cite, and no refusals-file cite. Each case judges one write through
+# guard.data_tool_hit alone, with its rows in a file of this run's folder and the surface pinned to local.
+
+WHY_RULE = "task-why-cited"
+CAP = "Why yours: the cloud proxy refused the delete (403)"  # a capability reason: "refused" and "403"
+# Capability reasons with the widened words, one word each, so a red names its word alone. The rule reads each word as a
+# capability word, as it reads "refused" and "403" above.
+CAP_COULD_NOT = "Why yours: I could not push the delete from here"
+CAP_COULDNT = "Why yours: I couldn't push the delete from here"
+CAP_COULDNT_CURLY = "Why yours: I couldn’t push the delete from here"
+CAP_REJECTED = "Why yours: the remote rejected the delete"
+CAP_401 = "Why yours: the remote returned 401 to the delete"
+# The reject forms: "reject", "rejects" and "rejecting" are red on the old commit; "being rejected" holds "rejected", which
+# the old commit already reads.
+CAP_REJECT = "Why yours: the remote may reject the delete"
+CAP_REJECTS = "Why yours: the remote rejects the delete"
+CAP_REJECTING = "Why yours: the remote is rejecting the delete"
+CAP_REJECTED_BEING = "Why yours: the delete is being rejected"
+STEPS = ["Open Terminal"]
+BACKTICK_TOOL = "mcp__claude-code-remote__archive_session"
+# The rows the cases cite. The first three are on the local surface the cases pin; r-cloud-only is on the cloud one.
+WHY_ROWS = [hook_base.route_row("r-refused", "delete_branch", "refused", surface="local"),
+            hook_base.route_row("r-asks", "ask_first", "asks", surface="local", route="ask-first"),
+            hook_base.route_row("r-works", "gh_api", "works", surface="local", route="gh-api"),
+            hook_base.route_row("r-cloud-only", "archive_session", "refused", surface="cloud")]
+
+
+def rows_at(name, rows):
+    """A route rows file named `name` in this run's folder, holding `rows`. Its path."""
+    path = os.path.join(RUN_FOLDER, name)
+    hook_base.write_route_rows(path, rows)
+    return path
+
+
+@contextlib.contextmanager
+def local_rows(path):
+    """The rows seam at `path`, on the local surface. The cloud markers are removed for the block, and os.environ is
+    restored after it, so no case judges a cite on the cloud surface."""
+    with mock.patch.dict(os.environ):
+        for name in (hook_base.CLOUD_ENV, hook_base.REMOTE_SESSION_ENV):
+            os.environ.pop(name, None)
+        os.environ[hook_base.ROUTE_ROWS_ENV] = path
+        yield
+
+
+@contextlib.contextmanager
+def counted_rows_reads():
+    """The reads of the rows file, counted. Every reader calls route_match.rows_path(), the one home of the path, so
+    the count sees each read. The real path is still returned, so a verdict is judged as it is."""
+    reads = []
+    real = route_match.rows_path
+
+    def counting():
+        reads.append(real())
+        return reads[-1]
+
+    with mock.patch.object(route_match, "rows_path", counting):
+        yield reads
+
+
+def on_local_surface(name):
+    """The scope before the subject (P7): the surface reads local. Off it, the case fails by name and judges nothing."""
+    if route_match.surface() == "local":
+        return True
+    check("task why cited: " + name, False, "the surface is not local, so the cite is judged on the wrong rows")
+    return False
+
+
+def why_guard(name, op, entry, want):
+    """One page write judged by guard.data_tool_hit alone, on the local surface."""
+    if on_local_surface(name):
+        verdict("task why cited: " + name, guard_hit(op, entry), want)
+
+
+def why_batch(name, writes, want):
+    if on_local_surface(name):
+        verdict("task why cited: " + name, page_batch(writes), want)
+
+
+def case_task_why_cited_reds():
+    """Each case here must be refused as task-why-cited. The code before the rule passes each one, so each is red on it."""
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    with local_rows(rows):
+        why_guard("a capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + ".")), (WHY_RULE, None))
+        why_guard("a works-row cite is refused, since the row says the act is doable here", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-works).")), (WHY_RULE, None))
+        why_guard("a cite of an id no row holds is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-missing).")), (WHY_RULE, None))
+        why_guard("an undated measured cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (measured, the proxy answered 403 to the delete).")),
+                  (WHY_RULE, None))
+        why_guard("a backtick tool name in place of a cite is refused, since the page reads no refusals file", "set",
+                  entry_of(task_item(STEPS, context="Why yours: I can't delete it, since `%s` was refused this session."
+                                     % BACKTICK_TOOL)), (WHY_RULE, None))
+        why_guard("an update that carries kind task and an uncited context is refused", "update",
+                  entry_of({"kind": "task", "context": CAP + "."}), (WHY_RULE, None))
+        why_guard("a str_replace whose new_str holds an uncited capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY, "new_str": CAP + "."},
+                  (WHY_RULE, None))
+        why_batch("a batch whose second write is uncited is refused",
+                  [{"op": "set", "collection": "items", "doc_id": DOC, "data": task_item(STEPS)},
+                   {"op": "set", "collection": "items", "doc_id": "second",
+                    "data": task_item(STEPS, context=CAP + ".")}], (WHY_RULE, None))
+        # A str_replace whose new_str holds only a cite, with no Why yours line: the cite must back on its own.
+        why_guard("a str_replace that swaps a works-row cite in for a refused one is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-works)"}, (WHY_RULE, None))
+        why_guard("a str_replace that swaps an id no row holds in for a refused cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-missing)"}, (WHY_RULE, None))
+        why_guard("a str_replace that drops the date from a measured cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context",
+                   "old_str": "(measured 2026-11-06, the proxy answered 403)",
+                   "new_str": "(measured, the proxy answered 403)"}, (WHY_RULE, None))
+        why_guard("a plain edit that adds a works-row cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Run the proxy check (route r-works)."}, (WHY_RULE, None))
+        # The widened words: a capability line with no cite is refused, as "refused" and "403" are.
+        why_guard("a could-not capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + ".")), (WHY_RULE, None))
+        why_guard("a couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT + ".")), (WHY_RULE, None))
+        why_guard("a curly-apostrophe couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT_CURLY + ".")), (WHY_RULE, None))
+        why_guard("a rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + ".")), (WHY_RULE, None))
+        why_guard("a 401 capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited 401 capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_401 + "."}, (WHY_RULE, None))
+        why_guard("a reject capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECT + ".")), (WHY_RULE, None))
+        why_guard("a rejects capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTS + ".")), (WHY_RULE, None))
+        why_guard("a rejecting capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTING + ".")), (WHY_RULE, None))
+        why_guard("a being-rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED_BEING + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited rejects capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_REJECTS + "."}, (WHY_RULE, None))
+    with local_rows(rows_at("why-rows-empty.json", [])):
+        why_guard("a cite of an id in an empty rows file is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
+    # The scope control: a route-cited line reaches the rows file. Without a read, no cite is judged at all.
+    with local_rows(rows), counted_rows_reads() as reads:
+        if on_local_surface("a route-cited line reads the rows file"):
+            guard_hit("set", entry_of(task_item(STEPS, context=CAP + " (route r-refused).")))
+    check("task why cited: a route-cited line reads the rows file", len(reads) >= 1,
+          "the rows file was read %d times for a route-cited line" % len(reads))
+
+
+def case_task_why_cited_greens():
+    """Each case here passes on the code before the rule, and must still pass once it lands: a cite the page accepts,
+    a line the rule does not judge, and a rows file that does not judge."""
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    with local_rows(rows):
+        why_guard("a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+        why_guard("an asks-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-asks).")), None)
+        why_guard("a dated measured cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (measured 2026-11-06, the proxy answered 403 to the delete).")),
+                  None)
+        why_guard("a refused-row cite in a str_replace passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP + " (route r-refused)."}, None)
+        why_guard("a str_replace that swaps an asks-row cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-asks)",
+                   "new_str": "(route r-refused)"}, None)
+        why_guard("a str_replace that swaps a dated measured cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(measured 2026-11-06, the proxy answered 403)"}, None)
+        why_guard("a Based on (measured) premise line in a str_replace passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Based on (measured): the proxy refused the delete (403)."}, None)
+        why_guard("a bare premise-kind label in a str_replace passes, since it is no cite", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(read)",
+                   "new_str": "(measured)"}, None)
+        why_guard("a capability word outside the Why yours line passes", "set",
+                  entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
+        why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
+                  entry_of(page_item(tail="\n" + CAP + ".")), None)
+        # Controls for the widened words: a dated measured cite or a refused-row cite backs the line, a choice phrase
+        # keeps the act, and 401 inside a longer number is no status.
+        why_guard("a rejected capability line with a dated measured cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + " (measured 2026-11-06, check_red_run exited 1).")),
+                  None)
+        why_guard("a 401 capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + " (route r-refused).")), None)
+        why_guard("a could-not capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + " (route r-refused).")), None)
+        why_guard("a choice line with a widened word passes, since the owner keeps the act", "set",
+                  entry_of(task_item(STEPS, context="Why yours: it is your call, and I couldn't decide for you.")),
+                  None)
+        why_guard("a 4012 near miss passes, since 401 inside a longer number is no status", "set",
+                  entry_of(task_item(STEPS, context="Why yours: the lane on build 4012 needs the owner.")), None)
+    with local_rows(rows_at("why-rows-cloud.json", [WHY_ROWS[3]])):
+        why_guard("a row only on another surface passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-cloud-only).")), None)
+    with local_rows(os.path.join(RUN_FOLDER, "missing-route-rows.json")):
+        why_guard("a cite against a rows file that does not exist passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+    bad_path = os.path.join(RUN_FOLDER, "garbled-route-rows.json")
+    with open(bad_path, "w", encoding="utf-8") as handle:
+        handle.write("{not json")
+    with local_rows(bad_path):
+        why_guard("a cite against a rows file that is not JSON passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+    # The cost control: a Why yours line with no route cite never reads the rows file, whatever its verb.
+    with local_rows(rows), counted_rows_reads() as reads:
+        why_guard("a Why yours line with no route cite passes", "set", entry_of(task_item(STEPS)), None)
+        why_guard("a login line with no route cite passes", "set",
+                  entry_of(task_item(STEPS, context="Why yours: this needs your login.")), None)
+    check("task why cited: a Why yours line with no route cite never reads the rows file", not reads,
+          "the rows file was read %d times" % len(reads))
 
 
 # ------------------------------------------------------------------ chat only
@@ -1235,7 +1487,7 @@ def case_departs_line_forms_pass():
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
     page("a decision with CRLF line endings and a valid Departs from line passes", "set",
-         entry_of(dict(ITEM92, context=crlf)), None)
+         entry_of(tcj.with_frozen_fields(dict(ITEM92, context=crlf))), None)
 
 
 def case_departs_str_replace_forms():
@@ -1480,6 +1732,171 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+# The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
+# ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
+# pass whichever checkout past_rulings reads the store from.
+RULED_ID, RULED_CLOSED_ID = "ruled-apps-keep", "ruled-old-shut"
+RULED_AT = "2026-11-12T14:15:00-06:00"
+RULED_TEXT = "Owner, 2026-11-12, page item 12: keep the apps' access to claude-settings as it is."
+RULED_SUPERSEDES = [{"kind": "main-sentence", "ref": "apps-keep-sentence"},
+                    {"kind": "test", "ref": "hooks/test_question_form.py::case_ruled_store_first_and_carries_supersedes"}]
+
+
+def case_ruled_store_first_and_carries_supersedes():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-first", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_CLOSED_ID: fixture.entry(RULED_CLOSED_ID, status="closed"),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    first = candidates[0] if candidates else ""
+    check("ruled store: the open entry is the first candidate, ahead of the decision records",
+          first.startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store: the first candidate carries the entry's ruling text", RULED_TEXT in first, first[:200])
+    check("ruled store: the first candidate names the owner time and says open, not on main",
+          ("(owner %s; open, not on main; supersedes " % RULED_AT) in first and first.endswith(")"), first[:200])
+    check("ruled store: the first candidate carries each supersedes ref",
+          all(item["ref"] in first for item in RULED_SUPERSEDES), first[:200])
+    check("ruled store: a closed entry is no candidate",
+          not any(c.startswith("ruled:%s:" % RULED_CLOSED_ID) for c in candidates), str(candidates)[:200])
+
+
+RULED_UNREAD_ID = "ruled-unread"
+
+
+def case_ruled_store_marks_an_unread_entry_unchecked():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store unread: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-unread", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_UNREAD_ID: fixture.entry(RULED_UNREAD_ID, at="2026-11-13T09:00:00-06:00", ruling=RULED_TEXT,
+                                       supersedes=None, supersedes_none="unread: triage has not read the supersedes"),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    unread_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_UNREAD_ID)), "")
+    read_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_ID)), "")
+    check("ruled store unread: the unread entry is listed", bool(unread_line), str(candidates)[:200])
+    check("ruled store unread: its candidate line is marked (unchecked, not law)",
+          "(unchecked, not law)" in unread_line, unread_line[:200])
+    check("ruled store unread: a read entry's candidate line carries no unchecked mark",
+          bool(read_line) and "(unchecked, not law)" not in read_line, read_line[:200])
+
+
+def case_ruled_store_absent_is_only_unknown():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store absent: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-absent", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, unknown = fn(tcj.APPS_GOAL, repo)
+    check("ruled store absent: the unknown list names the store as absent",
+          "ruled store (absent)" in unknown, str(unknown)[:300])
+    check("ruled store absent: no candidate is a ruled entry",
+          not any(c.startswith("ruled:") for c in candidates), str(candidates)[:200])
+    check("ruled store absent: the absent store never refuses",
+          "ruled store (absent)" not in question_form.unreadable_sources(unknown), str(unknown)[:300])
+
+
+# Store entries join the candidates only when they share a word with the question (the step rulings' word test), and at
+# most RULED_CAP_MAX of them, the newest first. An entry that shares no word stays out.
+RULED_UNRELATED = "ruled-lunch-menu"
+RULED_UNRELATED_TEXT = "Owner: the cafeteria menu changes on Fridays."
+RULED_CAP_MAX = 8
+
+
+def ruled_ids(candidates):
+    """The ids of the ruled candidates, in the order past_rulings gave them (`ruled:<id>: ...` lines)."""
+    return [c[len("ruled:"):].split(":", 1)[0] for c in candidates if c.startswith("ruled:")]
+
+
+def case_ruled_store_words_filter_leaves_out_an_unrelated_entry():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store words: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-words", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT),
+        # Newer than the matching entry, so newest-first alone would list it first if it were kept.
+        RULED_UNRELATED: fixture.entry(RULED_UNRELATED, at="2026-11-13T09:00:00-06:00", ruling=RULED_UNRELATED_TEXT,
+                                       quote="lunch options", source="page item 40",
+                                       supersedes=[{"kind": "test", "ref": "lunch-menu-check"}]),
+    }), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store words: the entry that shares words with the question is listed",
+          RULED_ID in listed, str(candidates)[:200])
+    check("ruled store words: the entry that shares words with the question is the first candidate",
+          bool(candidates) and candidates[0].startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store words: the entry that shares no word with the question is left out",
+          RULED_UNRELATED not in listed and RULED_UNRELATED_TEXT not in str(candidates), str(candidates)[:200])
+
+
+def case_ruled_store_caps_matching_entries_at_eight_newest_first():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    entries = {}
+    for day in range(1, 13):
+        rid = "ruled-cap-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: keep the apps' access to claude-settings, round %02d." % day)
+    repo = tcj.make_repo("ruled-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    expected = ["ruled-cap-%02d" % day for day in range(12, 12 - RULED_CAP_MAX, -1)]
+    check("ruled store cap: at most %d matching entries are listed" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+    check("ruled store cap: the %d newest matching entries are listed, newest first" % RULED_CAP_MAX,
+          listed == expected, "listed %r, want %r" % (listed, expected))
+
+
+def case_ruled_store_ranks_by_shared_words_before_recency():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store rank: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    many = "ruled-many-words"
+    entries = {many: fixture.entry(many, at="2026-10-20T09:00:00-06:00",
+                                   ruling="Owner: keep the GitHub apps' access to claude-settings as it is.")}
+    # Nine newer entries, each sharing only the word "apps" with the question: recency alone would list them first.
+    for day in range(4, 13):
+        rid = "ruled-one-word-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: the apps menu changes on Fridays, item %02d." % day)
+    repo = tcj.make_repo("ruled-rank", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store rank: the entry that shares the most words with the question is listed",
+          many in listed, str(listed))
+    check("ruled store rank: the entry that shares the most words is the first candidate, ahead of newer ones",
+          bool(listed) and listed[0] == many, str(listed))
+    check("ruled store rank: still at most %d ruled entries" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -1555,6 +1972,88 @@ def case_item_51_stray_field():
     refused as item-field-rendered and names the field, on both surfaces."""
     page("a top-level focus the page does not list is refused, naming it", "set",
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
+
+
+# ------------------------------------------------------------------ dismissed: the page's own Mark read
+
+def case_session_update_naming_dismissed_is_refused():
+    """`dismissed` is written by the page's Mark read only (step ask-phase-out). The page draws it, so its itemFields
+    block lists it, yet a session update that names it is refused on both surfaces. The control is a session update
+    that names only a field, which must pass: a refusal of every update would fail it too."""
+    for value in ("2026-11-10T18:00:00Z", None):
+        data = {"dismissed": value}
+        for surface, got in (("page item_hit", call("item_hit", "update", entry_of(data))),
+                             ("page guard", guard_hit("update", entry_of(data)))):
+            check("%s: a session update naming dismissed=%r is refused" % (surface, value),
+                  got[0] != "" and "dismissed" in str(got[1]).lower(),
+                  "want a refusal naming dismissed, got %r" % (got,))
+    verdict("control: a session update naming only the title passes",
+            call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+# ------------------------------------------------------------------ dismissed: every route refuses it, and the reason names only Mark read
+#
+# Step ask-phase-out (owner pick 480 a): the page's Mark read writes `dismissed`, and no session write does. Each route is
+# refused at the guard, and the reason the guard prints says that only the page's Mark read writes dismissed. The generic
+# item-field reason tells a writer to draw the field on the page, which is wrong here: the page draws dismissed already.
+
+DISMISSED_AT = "2026-11-10T18:00:00Z"
+ONLY_MARK_READ = re.compile(r"\bonly\b[^.]*\bMark read\b[^.]*\bdismissed\b", re.IGNORECASE)
+
+
+def dismissed_routes():
+    """One write per route that names `dismissed`, each as ArtifactData sends it: a str_replace, a set, an update, an
+    update that deletes it, and a batch entry."""
+    base = {"url": PAGE_URL, "collection": "items", "doc_id": DOC}
+    return (
+        ("str_replace on dismissed", dict(base, action="str_replace", field="dismissed", old_str="null", new_str=DISMISSED_AT)),
+        ("set with dismissed", dict(base, action="set", data=page_item(dismissed=DISMISSED_AT))),
+        ("update with dismissed", dict(base, action="update", data={"dismissed": DISMISSED_AT})),
+        ("update deleting dismissed", dict(base, action="update", data={"dismissed": {"__delete__": True}})),
+        ("a batch entry with dismissed", {"url": PAGE_URL, "action": "batch", "writes": [
+            {"op": "update", "collection": "items", "doc_id": DOC, "data": {"dismissed": DISMISSED_AT}}]}),
+    )
+
+
+def dismissed_refused(name, tool_input):
+    """One write that names dismissed, at the guard. It is refused, and the reason it prints says only the page's Mark
+    read writes dismissed, with no generic item-field remedy."""
+    got = guard.data_tool_hit(tool_input, PAGE_REPO)
+    check("%s: refused, naming dismissed" % name, got[0] != "" and "dismissed" in str(got[1]).lower(),
+          "got %r" % (got,))
+    reason = printed_reason(tool_input)
+    check("%s: the reason says only the page's Mark read writes dismissed" % name,
+          bool(ONLY_MARK_READ.search(reason)), reason[:200])
+    check("%s: the reason gives no generic itemFields remedy" % name,
+          "add it to that block" not in reason, reason[:200])
+
+
+def case_dismissed_refused_on_every_route():
+    """A session's write that names `dismissed` is refused on each route, and each refusal's reason names only Mark read."""
+    for name, tool_input in dismissed_routes():
+        dismissed_refused(name, tool_input)
+
+
+def case_dismissed_refused_without_a_readable_field_list():
+    """The same routes with the page's itemFields block unreadable (fields is None). The refusal and its reason still hold."""
+    blank = os.path.join(RUN_FOLDER, "page-without-itemfields.html")
+    os.makedirs(RUN_FOLDER, exist_ok=True)
+    with open(blank, "w", encoding="utf-8") as f:
+        f.write("<!doctype html>\n<html><body><p>A page with no field list.</p></body></html>\n")
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: blank}):
+        check("control: the blank page reads as no field list (fields is None)",
+              question_form._item_fields(blank) is None, "the block read as a list")
+        for name, tool_input in dismissed_routes():
+            dismissed_refused(name + ", with no readable field list", tool_input)
+        verdict("control: an update naming only a title passes with no readable field list",
+                call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
+    """Control: a stray top-level field that the page does not list still prints the generic item-field reason."""
+    stray = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(focus="#fill")}
+    check("control: a stray top-level field keeps the generic itemFields reason",
+          question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
 
 
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
@@ -1652,8 +2151,523 @@ def test_task_str_replace_prose_label_mention_passes():
     _judged(case_task_str_replace_prose_label_passes)
 
 
+def case_item_stray_field_refused_from_a_record_branch_checkout():
+    """The page checks run from a checkout on the record branch. Its extras file is on origin/main
+    only, and the page reads it from there (lint/layout.py waiting_page), so an item set with a stray top-level field is
+    refused as item-field-rendered, as at the page's own checkout. Scope first: when the page url reads as unknown, no
+    page check runs and the case stops at that one cause."""
+    repo = tcj.record_branch_checkout()
+    check("scope: the record-branch checkout holds no extras file",
+          not os.path.isfile(os.path.join(repo, ".claude", "layout-extras.json")), "the checkout holds the extras file")
+    tool_input = {"action": "set", "url": PAGE_URL, "collection": tcj.PAGE_ITEMS, "doc_id": DOC, "data": page_item(focus="#fill")}
+    named = call("is_waiting_page", tool_input, repo) is True
+    check("scope: the page url names the page at the record-branch checkout", named,
+          "the page url reads as unknown at a checkout with no extras file, so no page check runs")
+    if not named:
+        return
+    got = call("page_item_hit", tool_input, repo)
+    verdict("page_item_hit at the record-branch checkout: a stray top-level field is refused", got[0], ("item-field-rendered", "focus"))
+    control = call("page_item_hit", dict(tool_input), tcj.PAGE_REPO)
+    verdict("control: the same stray field at the page's own checkout is refused", control[0], ("item-field-rendered", "focus"))
+
+
+# ------------------------------------------------------------------ a decision on another repo is checked with that repo
+#
+# Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
+# page's repo needs a session-shaped `checked_with`, and a `checked_with` equal to the session id in `owner` is refused.
+# `repo` is required on an open decision or task set: a set with no repo is refused. The page's repo is the origin of
+# the checkout the write is judged at (cwd). With no cwd, or no origin, it is None: there is nothing to compare, so a
+# foreign repo passes, but a set with no repo is still refused.
+# The fixture is the incident item ma144-tab-bar (mailaudit #144) as it was written, opened, with the repo field.
+
+CROSS_REPO_RULE = "question-checked-with-repo"
+PAGE_REPO_NAME = "shivinate7/claude-settings"  # the page's repo: the origin of tcj.origin_page_repo()
+OTHER_REPO = "shivinate7/mailaudit"
+CHECKED = "session_013ABCdefGHI"
+MA144_ID = "ma144-tab-bar"
+MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
+VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
+
+MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
+
+
+def ma144(repo=OTHER_REPO, checked=None, **over):
+    """The incident item, judged on `repo` (None leaves the field out). `checked` sets checked_with (None leaves it
+    out, "" sets it empty). `over` sets or replaces any other field."""
+    item = copy.deepcopy(MA144)
+    if repo is not None:
+        item["repo"] = repo
+    if checked is not None:
+        item["checked_with"] = checked
+    item.update(over)
+    return tcj.with_frozen_fields(item)  # MA144 is the record as written; its options get the ids and shown a write carries
+
+
+def ma144_write(**over):
+    """The `set` entry for the incident item, as the page's ArtifactData call carries it."""
+    return entry_of(ma144(**over), doc_id=MA144_ID)
+
+
+def cross(name, op, data, page_repo, fragments=None):
+    """cross_repo_hit's result: None for a pass, else a reason that matches every regex in `fragments`. A missing
+    function returns the MISSING sentinel, which fails the check by name."""
+    got = call("cross_repo_hit", op, data, page_repo)
+    if fragments is None:
+        check("cross_repo_hit: " + name, got is None, "want a pass (None), got %r" % (got,))
+    else:
+        ok = isinstance(got, str) and all(re.search(f, got, re.I) for f in fragments)
+        check("cross_repo_hit: " + name, ok, "want a reason naming %s, got %r" % (list(fragments), got))
+
+
+def at_page(name, op, entry, cwd, fragments=None):
+    """One page write judged at `cwd` by question_form.item_hit and by guard.data_tool_hit. A pass is ("", ""). A
+    refusal is the cross-repo rule, with a reason that matches every regex in `fragments`. The page's repo is the
+    origin of `cwd`'s checkout, so only a cwd with an origin reaches the rule."""
+    tool_input = dict(entry, url=PAGE_URL, action=op)
+    surfaces = (("item_hit", call("item_hit", op, entry, cwd)), ("guard", guard.data_tool_hit(tool_input, cwd)))
+    for surface, got in surfaces:
+        label = "%s at cwd: %s" % (surface, name)
+        if fragments is None:
+            check(label, got == ("", ""), "want a pass, got %r" % (got,))
+        else:
+            ok = got[0] == CROSS_REPO_RULE and all(re.search(f, str(got[1]), re.I) for f in fragments)
+            check(label, ok, "want %s naming %s, got %r" % (CROSS_REPO_RULE, list(fragments), got))
+
+
+def case_cross_repo_missing_checked_with():
+    """(i) An open decision on another repo with no checked_with is refused, and the reason names checked_with. On
+    main the write is refused as an unknown field, so only the new rule's reason passes this case."""
+    cross("(i) no checked_with", "set", ma144(), PAGE_REPO_NAME, ("checked_with",))
+    cross("(i) empty checked_with", "set", ma144(checked=""), PAGE_REPO_NAME, ("checked_with",))
+    at_page("(i) no checked_with", "set", ma144_write(), tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_checked_with_passes():
+    """(ii) A session-shaped checked_with on another repo's decision passes."""
+    cross("(ii) session-shaped checked_with", "set", ma144(checked=CHECKED), PAGE_REPO_NAME)
+    at_page("(ii) session-shaped checked_with", "set", ma144_write(checked=CHECKED), tcj.origin_page_repo())
+
+
+def case_cross_repo_same_repo_passes():
+    """(iii) A decision on the page's own repo passes with no checked_with."""
+    cross("(iii) repo is the page repo", "set", ma144(repo=PAGE_REPO_NAME), PAGE_REPO_NAME)
+    at_page("(iii) repo is the page repo", "set", ma144_write(repo=PAGE_REPO_NAME), tcj.origin_page_repo())
+
+
+def case_cross_repo_compares_lowercase():
+    """(iv) The page's repo in other case passes. Only the case differs, so the compare folds case."""
+    cross("(iv) Shivinate7/Claude-Settings is the page repo", "set", ma144(repo="Shivinate7/Claude-Settings"),
+          PAGE_REPO_NAME)
+    at_page("(iv) Shivinate7/Claude-Settings is the page repo", "set",
+            ma144_write(repo="Shivinate7/Claude-Settings"), tcj.origin_page_repo())
+
+
+def case_cross_repo_no_page_repo_passes():
+    """(v) With no page repo the compare is skipped, so a foreign repo with no checked_with passes: a direct call with
+    page_repo None, and a write judged at a checkout with no origin (tcj.PAGE_REPO), which reads as no page repo. A set
+    with no repo is still refused (case_cross_repo_required_when_page_repo_unknown)."""
+    cross("(v) page_repo None", "set", ma144(), None)
+    at_page("(v) checkout with no origin", "set", ma144_write(), tcj.PAGE_REPO)
+
+
+def case_cross_repo_required():
+    """(vi) repo is required on an open decision or task set. A set with no repo is refused, and the reason names
+    `repo` and the page's own repo, so the writer fixes it in one try."""
+    cross("(vi) no repo", "set", ma144(repo=None), PAGE_REPO_NAME, VI_FRAGMENTS)
+    at_page("(vi) no repo", "set", ma144_write(repo=None), tcj.origin_page_repo(), VI_FRAGMENTS)
+
+
+def case_cross_repo_checked_with_not_the_owner():
+    """(vii) A checked_with equal to the session id in owner is refused: the owner's own session did not check."""
+    cross("(vii) checked_with is the owner's session", "set", ma144(checked=MA144_OWNER_SESSION), PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(vii) checked_with is the owner's session", "set", ma144_write(checked=MA144_OWNER_SESSION),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_str_replace_not_judged():
+    """(viii) A str_replace on context is not judged by this rule, whatever repo it carries. A str_replace on repo or
+    checked_with is judged (case_cross_repo_str_replace_on_repo_and_checked_with)."""
+    cross("(viii) str_replace with a foreign repo", "str_replace",
+          {"repo": OTHER_REPO, "kind": "decision", "status": "open"}, PAGE_REPO_NAME)
+    at_page("(viii) str_replace on context", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="context", old_str="README, choice 3.",
+                     new_str="README, choice 3, and the Duo sizes."), tcj.origin_page_repo())
+
+
+def case_cross_repo_update_carrying_repo():
+    """(ix) An update that carries repo is judged as a set is. It names only its own fields, so the stored kind is
+    unseen and the repo alone decides. An update that carries no repo passes."""
+    cross("(ix) update with a foreign repo, no checked_with", "update", {"repo": OTHER_REPO}, PAGE_REPO_NAME,
+          ("checked_with",))
+    cross("(ix) update with no repo", "update", {"title": MA144["title"]}, PAGE_REPO_NAME)
+    at_page("(ix) update with a foreign repo, no checked_with", "update", entry_of({"repo": OTHER_REPO},
+            doc_id=MA144_ID), tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_closed_item_passes():
+    """(x) A closed item asks the owner nothing, so it passes whatever its repo."""
+    cross("(x) closed decision on another repo", "set", ma144(status="closed"), PAGE_REPO_NAME)
+    at_page("(x) closed decision on another repo", "set", ma144_write(status="closed"), tcj.origin_page_repo())
+
+
+def case_cross_repo_task_names_checked_with():
+    """(xi) An open task set on another repo is refused without checked_with, as a decision is. The task carries its
+    Why yours line, so only this rule judges it."""
+    task = task_item(["Open the page and answer item ma144-tab-bar."], repo=OTHER_REPO)
+    cross("(xi) open task on another repo, no checked_with", "set", task, PAGE_REPO_NAME, ("checked_with",))
+    at_page("(xi) open task on another repo, no checked_with", "set", entry_of(task, doc_id="ma144-task"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_malformed_checked_with():
+    """(xii) A checked_with that is not session-shaped is refused, and the reason names checked_with."""
+    cross("(xii) checked_with is not a session id", "set", ma144(checked="batch runner 9"), PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(xii) checked_with is not a session id", "set", ma144_write(checked="batch runner 9"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+# ------------------------------------------------------------------ question-checked-with-repo: the gaps of the rule
+#
+# One case per gap in the rule above, each with a concrete input. A red case is judged by the verdict it names, never by
+# a crash. The writer's session is judged through cross_judged: a build with no session_id parameter is called with the
+# signature it has, so its verdict shows instead of a TypeError. The case that needs the parameter asserts it first.
+
+WRITER_SESSION = "session_01WRITERxyz"  # the record id of the session that files the item: the env's cse_<x> read as session_<x>, never the payload's UUID (case_cross_repo_writer_guard_path)
+NO_REPO_FRAGMENTS = (r"\brepo\b",)  # the reason names `repo`; with no page repo it cannot name the page's own
+
+
+def takes_session_id():
+    """True when cross_repo_hit takes the writer's session_id."""
+    fn = getattr(question_form, "cross_repo_hit", None)
+    return fn is not None and "session_id" in inspect.signature(fn).parameters
+
+
+def cross_judged(op, data, page_repo, session_id=None):
+    """cross_repo_hit with the writer's session_id when the build takes one, else with the signature it has."""
+    if takes_session_id():
+        return call("cross_repo_hit", op, data, page_repo, session_id)
+    return call("cross_repo_hit", op, data, page_repo)
+
+
+def cross_as_writer(name, data, session_id, fragments=None):
+    """cross_repo_hit on the page repo with the writer's session_id: a pass is None, a refusal a reason that matches
+    every regex in `fragments`."""
+    got = cross_judged("set", data, PAGE_REPO_NAME, session_id)
+    if fragments is None:
+        check("cross_repo_hit: " + name, got is None, "want a pass (None), got %r" % (got,))
+    else:
+        ok = isinstance(got, str) and all(re.search(f, got, re.I) for f in fragments)
+        check("cross_repo_hit: " + name, ok, "want a reason naming %s, got %r" % (list(fragments), got))
+
+
+def cross_format(name, data, page_repo=PAGE_REPO_NAME):
+    """A repo that is not owner/name: the reason is the format reason, which names owner/name and not checked_with."""
+    got = call("cross_repo_hit", "set", data, page_repo)
+    ok = isinstance(got, str) and re.search(r"owner/name", got) is not None and re.search(r"checked_with", got) is None
+    check("cross_repo_hit: " + name, ok, "want a format reason naming owner/name and not checked_with, got %r" % (got,))
+
+
+def case_cross_repo_open_filter_is_the_one_home():
+    """(xiii) The open filter is the one home _open_decision: a set with no kind is a decision, and a status other than
+    closed is still open. Each of these sets, on another repo with no checked_with, is refused."""
+    no_kind = ma144()
+    no_kind.pop("kind")
+    cross("(xiii) a set with no kind, on another repo, no checked_with", "set", no_kind, PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(xiii) a set with no kind, at the page's checkout", "set", entry_of(no_kind, doc_id=MA144_ID),
+            tcj.origin_page_repo(), ("checked_with",))
+    cross("(xiii) status Open", "set", ma144(status="Open"), PAGE_REPO_NAME, ("checked_with",))
+    cross("(xiii) status pending", "set", ma144(status="pending"), PAGE_REPO_NAME, ("checked_with",))
+    at_page("(xiii) status pending, at the page's checkout", "set", ma144_write(status="pending"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_open_filter_controls():
+    """(xiii controls) A set with no status is open, so it is judged. A closed set with no kind is not open, so it
+    passes. Both hold with or without the fix."""
+    no_status = ma144()
+    no_status.pop("status")
+    cross("(xiii control) a set with no status is open, no checked_with", "set", no_status, PAGE_REPO_NAME,
+          ("checked_with",))
+    closed_no_kind = ma144(status="closed")
+    closed_no_kind.pop("kind")
+    cross("(xiii control) a closed set with no kind passes", "set", closed_no_kind, PAGE_REPO_NAME)
+
+
+def case_cross_repo_str_replace_on_repo_and_checked_with():
+    """(xiv) A str_replace on `repo` or `checked_with` changes the cross-repo verdict, which the page cannot see, so it
+    is refused as this rule, whatever the page's repo is. The first two writes are judged with no cwd, which pins the
+    unknown-page-repo verdict."""
+    page("(xiv) a str_replace on repo that swaps in the page's own repo", "str_replace",
+         entry_of(None, doc_id=MA144_ID, field="repo", old_str=OTHER_REPO, new_str=PAGE_REPO_NAME),
+         (CROSS_REPO_RULE, "repo"))
+    page("(xiv) a str_replace on checked_with", "str_replace",
+         entry_of(None, doc_id=MA144_ID, field="checked_with", old_str=CHECKED, new_str=WRITER_SESSION),
+         (CROSS_REPO_RULE, "checked_with"))
+    # The same writes at the page's checkout, where the stored repo is judged by the rule's compare: the bypass is a
+    # set that names the page's own repo, then a str_replace that makes it foreign with no checked_with.
+    at_page("(xiv) a str_replace on repo, the page's own repo to a foreign one", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="repo", old_str=PAGE_REPO_NAME, new_str=OTHER_REPO),
+            tcj.origin_page_repo(), ("repo",))
+    at_page("(xiv) a str_replace on repo, a foreign repo to the page's own", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="repo", old_str=OTHER_REPO, new_str=PAGE_REPO_NAME),
+            tcj.origin_page_repo(), ("repo",))
+    at_page("(xiv) a str_replace on checked_with", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="checked_with", old_str=CHECKED, new_str=WRITER_SESSION),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_required_when_page_repo_unknown():
+    """(xv) `repo` is required on a set: cross_repo_hit called with page_repo None refuses a set with no repo, or an
+    empty one, and the reason names `repo`. A write judged at a checkout with no origin is not refused for a missing
+    repo (see the ruling below). The origin checkout pins the requirement end to end."""
+    cross("(xv) no repo, page repo unknown", "set", ma144(repo=None), None, NO_REPO_FRAGMENTS)
+    cross("(xv) empty repo, page repo unknown", "set", ma144(repo=""), None, NO_REPO_FRAGMENTS)
+    # With the page repo unknown, item_hit does not judge a missing repo: no compare can run.
+    at_page("(xv) no repo, a checkout with no origin passes", "set", ma144_write(repo=None), tcj.PAGE_REPO)
+    at_page("(xv) no repo, at the page's checkout with an origin", "set", ma144_write(repo=None),
+            tcj.origin_page_repo(), NO_REPO_FRAGMENTS)
+
+
+def case_cross_repo_malformed_repo_is_a_format_refusal():
+    """(xvi) A repo that is not owner/name is refused with the format reason. shivinate7/claude-settings.git passes the
+    repo-name pattern, so it is judged as a repo off the page's own and asks for checked_with."""
+    cross_format("(xvi) repo shivinate7/claude-settings.git, no checked_with",
+                 ma144(repo="shivinate7/claude-settings.git"))
+    cross_format("(xvi) repo shivinate7/claude-settings.git, a session-shaped checked_with",
+                 ma144(repo="shivinate7/claude-settings.git", checked=CHECKED))
+    at_page("(xvi) repo shivinate7/claude-settings.git, at the page's checkout", "set",
+            ma144_write(repo="shivinate7/claude-settings.git"), tcj.origin_page_repo(), (r"owner/name",))
+
+
+def case_cross_repo_malformed_repo_controls():
+    """(xvi controls) q_max and a URL fail the repo-name pattern, so they already get the format reason. They hold with
+    or without the fix."""
+    cross_format("(xvi control) repo q_max", ma144(repo="q_max"))
+    cross_format("(xvi control) repo https://github.com/a/b", ma144(repo="https://github.com/a/b"))
+
+
+def case_cross_repo_writer_session_is_not_the_checker():
+    """(xvii) A checked_with equal to the writer's own session is refused: the session that files the item did not
+    check with the other repo. The owner here is the coordinator, so only the writer's session can refuse it."""
+    check("cross_repo_hit takes session_id (xvii)", takes_session_id(),
+          "cross_repo_hit has no session_id parameter, so a checked_with equal to the writer's session is not refused")
+    cross_as_writer("(xvii) checked_with is the writer's session, owner coordinator",
+                    ma144(checked=WRITER_SESSION, owner="coordinator"), WRITER_SESSION, ("checked_with",))
+
+
+def case_cross_repo_writer_session_controls():
+    """(xvii controls) A checked_with that differs from the writer's session passes. With no session id, a checked_with
+    equal to a session id passes, since the writer's refusal does not apply. Both hold with or without the fix."""
+    cross_as_writer("(xvii control) checked_with is another session, the writer is WRITER_SESSION",
+                    ma144(checked=CHECKED, owner="coordinator"), WRITER_SESSION)
+    cross_as_writer("(xvii control) no session id, checked_with equal to WRITER_SESSION passes",
+                    ma144(checked=WRITER_SESSION, owner="coordinator"), None)
+
+
+# ------------------------------------------------------------------ the writer's session, through the guard's dispatch
+#
+# Rule question-checked-with-repo, the writer's own session. The hook payload's session_id is the local session's UUID.
+# A cloud session's record id is the env CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x> by
+# override.remote_session_id). The writer's refusal compares checked_with with that record id. The cases below run
+# guard.judge(payload) in process, as the hook runs it, so the session id has to travel from the payload and the env
+# through the guard's dispatch into page_item_hit. The cases above that call cross_repo_hit with a session id directly
+# cannot show that.
+
+LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+CLOUD_LANE = "cse_013TESTabc"  # this cloud session's env value
+CLOUD_RECORD = "session_013TESTabc"  # the same session's record id: the writer's session id in checked_with
+OTHER_SESSION = "session_013OTHERxyz"  # another session's record id
+LOCAL_UUID = "60f6df14-79ff-4a1e-9c2b-5d7e8f901a2b"  # the hook payload's session_id: a UUID, not a record id
+
+
+def writer_input(checked=None, **over):
+    """The tool_input of one `set` on the incident item, as ArtifactData sends it, with checked_with set to `checked`
+    (None leaves it out). `over` sets or replaces any other field of the item."""
+    return dict(ma144_write(checked=checked, **over), url=PAGE_URL, action="set")
+
+
+def guard_refusal(tool_input, lane_env):
+    """The reason guard.judge prints for one ArtifactData call at the page's checkout, with the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to lane_env (None unsets it: a local session). None when the
+    call passes. guard.judge exits through refuse(), which prints the deny JSON, so the print is what is read."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": tool_input}
+    printed = io.StringIO()
+    with mock.patch.dict(os.environ):  # the env is put back as it was on exit
+        if lane_env is None:
+            os.environ.pop(LANE_ENV, None)
+        else:
+            os.environ[LANE_ENV] = lane_env
+        try:
+            with contextlib.redirect_stdout(printed):
+                guard.judge(payload)
+        except SystemExit:
+            pass
+        except Exception as exc:  # a crash is a wrong verdict, shown by name
+            return "RAISED %s: %s" % (type(exc).__name__, exc)
+    text = printed.getvalue().strip()
+    return json.loads(text)["hookSpecificOutput"]["permissionDecisionReason"] if text else None
+
+
+def writer_verdict(name, reason, refused):
+    """refused: the reason names the rule and `checked_with`. Else the call passes, with no refusal printed."""
+    if refused:
+        ok = isinstance(reason, str) and CROSS_REPO_RULE in reason and "checked_with" in reason
+        check(name, ok, "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, reason))
+    else:
+        check(name, reason is None, "want a pass (no refusal), got %r" % (reason,))
+
+
+def case_cross_repo_writer_guard_path():
+    """(xviii) guard.judge refuses a checked_with equal to the writer's own session. The cloud session's record id comes
+    from CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x> read as session_<x>), not from the payload's UUID. The red: on the
+    build that reads the payload's UUID, the writer's session is never the record id, so the refusal does not fire.
+    The controls: another session passes; a local session (env unset) has no writer's session to refuse; a missing
+    checked_with is refused end to end (green on the build that has this rule: it shows the guard dispatches it)."""
+    writer_verdict("(xviii) guard: checked_with is this cloud session's record id, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), CLOUD_LANE), refused=True)
+    writer_verdict("(xviii control) guard: checked_with is another session, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=OTHER_SESSION, owner="coordinator"), CLOUD_LANE), refused=False)
+    writer_verdict("(xviii control) guard: local session, env unset, checked_with is the record id",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), None), refused=False)
+    writer_verdict("(xviii control) guard: no checked_with is refused, env cse_013TESTabc",
+                   guard_refusal(writer_input(owner="coordinator"), CLOUD_LANE), refused=True)
+
+
+def case_cross_repo_writer_page_item_hit():
+    """(xix) page_item_hit takes the writer's session id and refuses a checked_with equal to it. It is called direct, so a
+    build that drops the id on the way (question_form.py, item_hit's cross-repo call) fails here too, not only in the
+    guard case above. Green on the build that threads the id: this case holds the threading in place."""
+    got = call("page_item_hit", writer_input(checked=CLOUD_RECORD, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    ok = isinstance(hit, tuple) and len(hit) == 2 and hit[0] == CROSS_REPO_RULE and "checked_with" in str(hit[1])
+    check("page_item_hit: checked_with equal to the writer's session is refused, naming checked_with", ok,
+          "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, hit))
+    got = call("page_item_hit", writer_input(checked=OTHER_SESSION, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    check("control: page_item_hit, checked_with another session passes", hit == ("", ""),
+          "want a pass, got %r" % (hit,))
+
+
+def model_calls_of_call_judge(checked):
+    """How many model calls hooks/call_judge.py makes for one ArtifactData write of the page, the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to CLOUD_LANE. A write that a rule refuses makes none."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": writer_input(checked=checked, owner="coordinator")}
+    with mock.patch.dict(os.environ, {LANE_ENV: CLOUD_LANE}):
+        run = tcj.run_hook(json.dumps(payload))
+    return len(run.calls)
+
+
+def case_cross_repo_writer_call_judge():
+    """(xxi) call_judge.py reads the writer's session the way guard.py does. A checked_with equal to the cloud session's
+    record id is a hit, so call_judge asks no model about the write. The red: on a build that passes the payload's UUID,
+    the write is no hit there and the model is asked. The control, another session's checked_with, is asked, so the
+    model call is seen."""
+    refused = model_calls_of_call_judge(CLOUD_RECORD)
+    check("(xxi) call_judge: checked_with is this cloud session's record id, no model call", refused == 0,
+          "want no model call for a write the rule refuses, got %d call(s)" % refused)
+    asked = model_calls_of_call_judge(OTHER_SESSION)
+    check("(xxi control) call_judge: checked_with is another session, the model is asked", asked > 0,
+          "want a model call for a write no rule refuses, got %d" % asked)
+
+
+def case_cross_repo_update_checked_with_needs_repo():
+    """(xviii) An update that carries checked_with but no repo is refused, and the reason names `repo`. The stored repo
+    is unseen, so a checked_with alone cannot be judged against it. The controls carry repo, so they hold with or
+    without this refusal."""
+    cross("(xx) update with checked_with, no repo", "update", {"checked_with": CHECKED}, PAGE_REPO_NAME, ("`repo`",))
+    at_page("(xx) update with checked_with, no repo", "update", entry_of({"checked_with": CHECKED}, doc_id=MA144_ID),
+            tcj.origin_page_repo(), ("`repo`",))
+    cross("(xx control) update with a foreign repo and checked_with", "update",
+          {"repo": OTHER_REPO, "checked_with": CHECKED}, PAGE_REPO_NAME)
+    cross("(xx control) update with the page's own repo and checked_with", "update",
+          {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
+
+
+# ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
+#
+# An items write whose data is a file (`file_path`, no `data`) is read by _write_data against the cwd it is given. The
+# model review reads its writes through judged_item_writes, which must take the payload cwd as item_hit does. Each file
+# name is unique and absent from the process cwd, so a read that finds the file can only come from the cwd join.
+def judged_items(writes, cwd):
+    """judged_item_writes(writes, cwd). A build whose function takes no cwd is called with the writes alone, so its
+    relative write fails an assert, never a TypeError."""
+    if "cwd" in inspect.signature(question_form.judged_item_writes).parameters:
+        return question_form.judged_item_writes(writes, cwd)
+    return question_form.judged_item_writes(writes)
+
+
+def write_json_file(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def judged_folder():
+    """The payload cwd of these cases: a folder in this run's temp root, swept with the run."""
+    folder = os.path.join(tcj.ROOT, "judged-cwd")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def case_judged_relative_file_path_read_at_cwd():
+    """(judged cwd) A set whose data is a file named by a relative file_path is returned when the payload cwd holds the
+    file. On main the path is read against the process cwd, finds nothing, and the write is dropped, so no model review
+    sees it."""
+    folder, item, name = judged_folder(), tcj.good_page_item(), "judged-relative-item.json"
+    write_json_file(os.path.join(folder, name), item)
+    check("judged cwd: the file is at the payload cwd", os.path.isfile(os.path.join(folder, name)), folder)
+    check("judged cwd: no file of that name at the process cwd, so only a join to the payload cwd finds it",
+          not os.path.exists(name), os.getcwd())
+    got = judged_items([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p1", "file_path": name})], folder)
+    check("judged cwd: the relative write is returned, its data read from the payload cwd",
+          len(got) == 1 and got[0].get("doc_id") == "p1" and got[0].get("data") == item,
+          "got %r: the path was read against the process cwd, so the write was dropped" % (got,))
+
+
+def case_judged_absolute_and_empty_are_unchanged():
+    """(judged cwd, control) An absolute file_path is read and returned with no cwd, as on main, and no writes
+    judge to an empty list. Green before and after the fix."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    path = os.path.join(folder, "judged-absolute-item.json")
+    write_json_file(path, item)
+    check("judged absolute: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    got = question_form.judged_item_writes([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p2", "file_path": path})])
+    check("judged absolute: the write is returned, its data read from the absolute path",
+          len(got) == 1 and got[0].get("doc_id") == "p2" and got[0].get("data") == item, got)
+    empty = judged_items([], folder)
+    check("judged empty: no writes judge to an empty list", empty == [], empty)
+
+
+def case_judged_mixed_writes_all_returned():
+    """(judged cwd, full list) An inline write, a relative file_path and an absolute file_path come back together, in
+    order, from one call. On main the relative write, p4, is the one dropped."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    name, abs_path = "judged-mixed-relative.json", os.path.join(folder, "judged-mixed-absolute.json")
+    write_json_file(os.path.join(folder, name), item)
+    write_json_file(abs_path, item)
+    check("judged mixed: no file of the relative name at the process cwd", not os.path.exists(name), os.getcwd())
+    c = tcj.PAGE_ITEMS
+    writes = [("set", {"collection": c, "doc_id": "p3", "data": item}),
+              ("set", {"collection": c, "doc_id": "p4", "file_path": name}),
+              ("set", {"collection": c, "doc_id": "p5", "file_path": abs_path})]
+    ids = [w.get("doc_id") for w in judged_items(writes, folder)]
+    check("judged mixed: the inline, relative and absolute writes all come back, in order",
+          ids == ["p3", "p4", "p5"],
+          "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
+                 case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
+                 case_item_stray_field_refused_from_a_record_branch_checkout,
+                 case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
@@ -1671,11 +2685,31 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
+                 case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
+                 case_ruled_store_caps_matching_entries_at_eight_newest_first,
+                 case_ruled_store_marks_an_unread_entry_unchecked,
+                 case_ruled_store_ranks_by_shared_words_before_recency,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes):
+                 case_task_str_replace_prose_label_passes,
+                 case_cross_repo_missing_checked_with, case_cross_repo_checked_with_passes,
+                 case_cross_repo_same_repo_passes, case_cross_repo_compares_lowercase,
+                 case_cross_repo_no_page_repo_passes, case_cross_repo_required,
+                 case_cross_repo_checked_with_not_the_owner, case_cross_repo_str_replace_not_judged,
+                 case_cross_repo_update_carrying_repo, case_cross_repo_closed_item_passes,
+                 case_cross_repo_task_names_checked_with, case_cross_repo_malformed_checked_with,
+                 case_cross_repo_open_filter_is_the_one_home, case_cross_repo_open_filter_controls,
+                 case_cross_repo_str_replace_on_repo_and_checked_with, case_cross_repo_required_when_page_repo_unknown,
+                 case_cross_repo_malformed_repo_is_a_format_refusal, case_cross_repo_malformed_repo_controls,
+                 case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
+                 case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
+                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
+                 case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
+                 case_judged_mixed_writes_all_returned):
         try:
             case()
         except Exception as exc:

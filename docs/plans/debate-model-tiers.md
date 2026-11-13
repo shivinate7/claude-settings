@@ -23,10 +23,10 @@ and there are probably more places to use them". The word is "refuter" (item 282
 | Lane | Model call | Who else sees the verdict | Calls per day | Pick | Gold |
 |---|---|---|---|---|---|
 | blind-plan-refuter | one per plan | nobody before the build | plan records added: 2 to 17 a day, 10-30 to 11-04 (proxy; most Plan output is no record) | Opus, ruled (item 279, pick d). Not in the question. | Opus |
-| reviewer-brief-blind | none: a guard check on the brief | n/a | 0 | n/a, no model call. The reviewer keeps its row: haiku round 1, sonnet rounds 2 and 3. Item 279 option c (guard fix check on sonnet) was not picked. | 0 calls |
+| reviewer-brief-blind | none: a guard check on the brief | n/a | 0 | n/a, no model call. The reviewer keeps its row: haiku round 1, sonnet rounds 2 and 3. Every fix check runs on sonnet (item 279 option c, picked as item 351 a, 2026-11-07 14:44 CST; widened from guard and check changes to every change by item 444 a, 2026-11-08 15:04 CST). | 0 calls |
 | judge-replay-corpus | CI only, per judge change | CI | only on a PR that changes a judge | n/a. Each judge replays on its own production row, or the replay proves nothing. | each judge's own row |
 | step-done-needs-check | none: a lint | n/a | 0 | n/a, no model call. Its `Critic:` line names the refuter role, which is Opus. | 0 calls |
-| challenger-page-against | one per decision item | the owner reads the case; the Opus question reviewer reads the question | decision items added: 6 to 51 a day, 10-31 to 11-06, median 22 (measured) | Sonnet | a strong case against, read by the owner |
+| refuter-page-against | one per decision item | the owner reads the case; the Opus question reviewer reads the question | decision items added: 6 to 51 a day, 10-31 to 11-06, median 22 (measured) | Sonnet | a strong case against, read by the owner |
 | ruling-skip-check | one per skip | nobody: the owner never sees a skip | unmeasured. Stood picks (13, all 10-27 and 10-28) do not match the meaning. Assumed: under 10 a day | Opus | each skip confirmed against the ruling's own words |
 | check-line-reader, brief read | one per lane brief | the builder and reviewer, later | lane sessions started: 25 to 104 a day, 10-28 to 11-05, median 58 (measured, session list) | Sonnet | a weak done-check flagged before the build |
 | check-line-reader, close read | one per step close | nobody: it decides "done" | steps closed: 4 to 33 a day, 10-29 to 11-05 (proxy: the commit that first set done; 11-06 is a bulk rewrite and is left out) | Opus | done only on a check that proves the ask |
@@ -36,15 +36,14 @@ and its count is the highest. The close read is the last reader before "done", a
 
 ## 2. More places a refuter catches a normal-work mistake
 
-Item 279 options c and e (guard fix check on sonnet; a second blind reviewer on guard PRs) were offered and
-not picked. This list does not repeat them.
+Item 279 options c and e (guard fix check on sonnet; a second blind reviewer on guard PRs) were offered. Option c was picked as item 351 a, 2026-11-07 14:44 CST, and widened by item 444 a, 2026-11-08 15:04 CST; option e was not. This list does not repeat them.
 
 | Place | Mistake Claude makes | Harm | Calls per day | Model | Gold |
 |---|---|---|---|---|---|
 | Coordinator rulings | A coordinator rules on a question that stakes a rule, and files it ("Ruling: coordinator ... The owner may rule otherwise", decision `plan-needs-critic`). | A rule changes with no owner word, and every repo copies it. | 14 such rulings in 9 decision files on main (measured), so under 2 a day | Opus: nobody reads it | each coordinator ruling checked: owner's call or not |
 | Test re-point | A builder re-points a failing test to the new behaviour, but the test had found a defect (`outcomes-tests-are-statements`). | The defect ships under a green check. | commits that say "re-point": 2 to 43 a day, 11-01 to 11-06 (proxy) | Sonnet: the reviewer also reads the diff | each re-point shown to hide no defect |
 | False-alarm claim | A session reads a refusal as a false alarm and routes around it (`verification-cry-wolf-guard-is-spent`). | The guarded act happens. | commits that say "false alarm": 1 to 14 a day, 11-01 to 11-05 (proxy) | Opus: the act is past the guard | each route-around argued against the guard's record |
-| Stale-decision claim | A session calls a decision stale to get past it (`outcomes-stale-decision-protocol`). | The owner grants the removal of a live protection on a one-sided case. | covered by challenger-page-against when the proposal goes on the page | none new | the case for the decision on the page |
+| Stale-decision claim | A session calls a decision stale to get past it (`outcomes-stale-decision-protocol`). | The owner grants the removal of a live protection on a one-sided case. | covered by refuter-page-against when the proposal goes on the page | none new | the case for the decision on the page |
 
 Each new place needs its own owner pick. This record proposes them. It adopts none.
 
@@ -78,9 +77,6 @@ Departs from: main agent-model-cap has no row for the three item-284 refuters â€
 
 ## Risks
 
-- Name drift: `plan-needs-critic` on lane step-done-needs-check cites `CHALLENGER_ROLE`. Lane
-  blind-plan-refuter renamed it `REFUTER_ROLE`. Lane reviewer-brief-blind still says `challenger`. Merged out
-  of order, the check reads a name that is gone.
 - The `Critic:` line here names no refuter. It fails `lint/check_plan_critic.py` once that check requires
   the refuter role (coordinator, 2026-11-06 12:56 CST), unless a refuter reads this plan first.
 

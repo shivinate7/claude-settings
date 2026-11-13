@@ -29,7 +29,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - The export has an `--all` mode. It exports each registered artifact with the same scan and mirror rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
 - Briefs and handoffs are working files. The cite check does not read them.
 
-Cost: each run of the page writer makes one list call per page of each collection and starts one python process. It makes one commit when a file changed. No timer and no watcher.
+Cost: each run of the page writer makes one list call per page of each collection and starts one python process (unmeasured). It makes one commit when a file changed (unmeasured). No timer and no watcher.
 
 Known limits:
 
@@ -43,4 +43,4 @@ Incidents:
 - Date not recorded. The waiting page moved to another org, and Claude Code lost read access to it. 80 items were rebuilt from old transcripts. No repo held a copy of the page's database.
 
 Kind: process
-Home: skills/waiting-page/SKILL.md
+Home: skills/waiting-page/reference/copies-and-accounts.md

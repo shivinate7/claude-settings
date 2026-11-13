@@ -13,7 +13,22 @@ actions/zizmor/run.sh, one line per action, and that a workflow pinning both act
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
-Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
+Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
+Also asserts an uncommitted or untracked markdown file is linted or fails bin/ste-changed, never a plain PASS, a file .gitignore
+matches is not linted, and a clean tree still passes. A non-ASCII untracked name is linted by its own name, a run with no merge
+base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step.
+Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-cites line, a Markdown file that is untracked and cites
+an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
+a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
+Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
+markdown file that .ste-lint-exclude matches is not named unknown. A dirty tree whose snapshot fails is named unknown, never
+PASS, and a clean tree with a held index lock lints as main does, touched or not.
+Also asserts a root push's missing HEAD~1 is named by an ste-lint unknown line, not "no markdown changed"; a .ste-lint-exclude
+line git rejects as a pathspec is unknown, never "no markdown changed"; and a .git/index that is gone or a directory is one
+ste-lint unknown line, exit 0, and no PASS.
+Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on a step that runs the local copy): a drifted pin with a
+passing lint exits 0 with the drift on stderr, a failing lint still exits 1. R67: ci-job runs the pinned ste-lint under
+--lint and --step from a tree with no .git, so the log reads the pin as unknown (not drift), the step reads PASS with no pin note, and no exit 3."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +38,8 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 CMD = os.path.join(ROOT, "bin", "ste-changed")
 EXCLUDE_FILE = os.path.join(ROOT, ".ste-lint-exclude")
 EXCLUDE_TEXT = open(EXCLUDE_FILE, encoding="utf-8").read()  # run_pair writes this as the target's file
+sys.path.append(os.path.join(ROOT, "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 # Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
 text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
@@ -35,7 +52,7 @@ BASH = "/bin/bash" if os.path.exists("/bin/bash") else (
 LONG = " ".join(["word"] * 40) + " end."
 BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
-            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES")
+            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES", PIN_NOTE_ENV)
 FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
 
 # Test temp files (decision test-temp-standard): one run folder for this run, from the repo's one helper.
@@ -45,6 +62,7 @@ sys.path.append(os.path.join(ROOT, "testing"))
 import _test_temp  # noqa: E402
 import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser (lint/workflow_steps.py)
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
@@ -110,11 +128,14 @@ def run_step(d, work, env):
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, **over):
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, after=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
-    on_main), apply `change(work)`, then run the step script. `over` overrides env vars."""
+    on_main), apply `change(work)`, then run the step script. `after(work)`, when given, runs last: after the fetch,
+    just before the step. `over` overrides env vars."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
+        if after:
+            after(work)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
@@ -483,6 +504,478 @@ for label, change, base, want in [
           s_out + "\n--- command ---\n" + c_out)
 
 
+# An uncommitted or untracked markdown file is outside origin/main...HEAD, so the diff finds no markdown. The command
+# then printed "no markdown changed" and passed: a false green for a file that fails lint at hand-off. It must lint the
+# file (listed in its scope) or exit non-zero and name it. A file .gitignore matches is not linted. Each case checks
+# git's own state first (P7), read before the command runs.
+UNCOMMITTED_BASE = {"draft-note.md": "# Draft\n\nShort line.\n", "data.txt": "x\n", ".gitignore": "ignored-*.md\n"}
+
+
+def edit_draft(work):
+    write(work, "draft-note.md", "# Draft\n\n" + LONG + "\n", "w")  # a markdown edit, not committed
+
+
+def edit_data(work):
+    write(work, "data.txt", "y\n", "w")  # a non-markdown edit, not committed
+
+
+def edit_new(work):
+    write(work, "new-note.md", "# New\n\n" + LONG + "\n", "w")  # a new markdown file, never git-added
+
+
+def edit_ignored(work):
+    write(work, "ignored-note.md", "# Ignored\n\n" + LONG + "\n", "w")  # a new markdown file .gitignore matches
+
+
+def git_read(cwd, *a):
+    return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True).stdout
+
+
+def uncommitted_run(change, base=UNCOMMITTED_BASE):
+    """A topic fixture with `base` committed on main and `change` applied and not committed, then bin/ste-changed main
+    there. Returns whether HEAD is origin/main's commit, git status (ignored files too), and the command's exit code and output."""
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+        work = make_repo(d, base, change)
+        at_base = git_read(work, "rev-parse", "HEAD") == git_read(work, "rev-parse", "origin/main")
+        status = git_read(work, "status", "--porcelain", "--ignored")
+        rc, out = run_command(work)
+    return at_base, status, rc, out
+
+
+at_base, status, rc, out = uncommitted_run(edit_draft)
+check("uncommitted scope: HEAD is origin/main and draft-note.md is modified, not committed",
+      at_base and " M draft-note.md" in status, status)
+check("uncommitted: exits non-zero on the 41-word sentence in draft-note.md", rc != 0, out)
+check("uncommitted: the verdict is FAIL and names draft-note.md",
+      "ste-lint: FAIL" in out and "draft-note.md" in out, out)
+at_base, status, rc, out = uncommitted_run(edit_data)
+check("uncommitted control scope: HEAD is origin/main, data.txt is modified, no markdown is",
+      at_base and " M data.txt" in status and ".md" not in status, status)
+check("uncommitted control: no markdown changed still passes with exit 0",
+      rc == 0 and "ste-lint: no markdown changed" in out and "Traceback" not in out, out)
+at_base, status, rc, out = uncommitted_run(edit_new)
+check("untracked scope: HEAD is origin/main and new-note.md is untracked, not ignored",
+      at_base and "?? new-note.md" in status, status)
+check("untracked: exits non-zero on the 41-word sentence in new-note.md", rc != 0, out)
+check("untracked: the verdict is FAIL and names new-note.md",
+      "ste-lint: FAIL" in out and "new-note.md" in out, out)
+at_base, status, rc, out = uncommitted_run(edit_ignored)
+check("ignored control scope: HEAD is origin/main and .gitignore matches ignored-note.md",
+      at_base and "!! ignored-note.md" in status, status)
+check("ignored control: a markdown file .gitignore matches is not linted, plain PASS with exit 0",
+      rc == 0 and "ste-lint: no markdown changed" in out and "ignored-note.md" not in out and "Traceback" not in out, out)
+
+
+# Another git process holds .git/index.lock (an agent's `git add`) while the tree is dirty. The step must not go silent:
+# one ste-lint line says unknown and names the lock, and the exit is 0, as in the no-merge-base case (decision
+# stale-cites-at-merge, rule verification-report-unknown-reads). Empty output is the bug. The lock is set in the change, so
+# the scope fact is read there (P7).
+lock = {}
+
+
+def hold_index_lock(work):
+    """Another git process holds .git/index.lock: an empty file there, as an agent's `git add` leaves it. True if it exists."""
+    path = os.path.join(work, ".git", "index.lock")
+    open(path, "w").close()
+    return os.path.exists(path)
+
+
+def touch_same_bytes(work, name):
+    """A tracked file's mtime moves 60 seconds, its bytes stay: the index's stat data goes stale, its content does not."""
+    path = os.path.join(work, name)
+    before = os.stat(path)
+    os.utime(path, (before.st_atime, before.st_mtime + 60))
+    return before
+
+
+def content_clean(work):
+    """git's content check on the tracked files, with no optional index write: a read that refreshes the index would
+    hide the stale stat data the case needs, so the scope fact must leave the index as it found it."""
+    return subprocess.run(["git", "--no-optional-locks", "-C", work, "diff", "--quiet", "HEAD", "--"]).returncode == 0
+
+
+def edit_data_locked(work):
+    edit_data(work)  # a non-markdown edit, not committed: the tree is dirty
+    lock["held"] = hold_index_lock(work)
+
+
+at_base, status, rc, out = uncommitted_run(edit_data_locked)
+check("index lock scope: the lock is held, data.txt is modified and HEAD is origin/main",
+      lock.get("held") is True and at_base and " M data.txt" in status, status)
+check("index lock: exits 0, as the no-merge-base case does", rc == 0, out)
+check("index lock: one ste-lint line says unknown and names index.lock",
+      any(l.startswith("ste-lint:") and "unknown" in l and "index.lock" in l for l in out.splitlines()), out)
+
+
+# An uncommitted removal. A tracked doc cites hooks/keep.py, and the working tree deletes it, uncommitted. Once
+# committed, the range removes the path and the cite is STALE001 (CI fails on it). The command read only the committed
+# range, so the uncommitted removal passed. It must fail the same way. The committed removal is the control: CI's check.
+STALE_LOCAL_BASE = {"a.md": "# T\n\nShort line.\n", "docs/guide.md": "# Guide\n\n- see `hooks/keep.py`\n",
+                    "hooks/keep.py": "X = 1\n"}
+
+
+def remove_keep(work):
+    os.remove(os.path.join(work, "hooks", "keep.py"))  # a deletion, not committed
+
+
+def remove_keep_committed(work):
+    remove_keep(work)
+    git(work, "commit", "-qam", "remove hooks/keep.py")
+
+
+at_base, status, rc, out = uncommitted_run(remove_keep, base=STALE_LOCAL_BASE)
+check("uncommitted removal scope: HEAD is origin/main and hooks/keep.py is deleted, not committed",
+      at_base and " D hooks/keep.py" in status, status)
+check("uncommitted removal: exits non-zero", rc != 0, out)
+check("uncommitted removal: names the stale cite docs/guide.md:3 as STALE001",
+      "docs/guide.md:3: STALE001 " in out, out)
+rc, out = run("changed", base=STALE_LOCAL_BASE, change=remove_keep_committed)
+check("committed removal, control: the step fails on the same stale cite, as CI does",
+      rc == 1 and "docs/guide.md:3: STALE001 " in out, out)
+
+
+# An untracked Markdown file cites a path the working tree removed. The stale-cites check reads Markdown as committed at
+# head, never from the working tree (decision stale-cites-at-merge), so it cannot read cite.md. That read cannot run, so
+# the output names cite.md as unknown and never prints `stale-cites: PASS` (rule verification-report-unknown-reads).
+# No tracked Markdown cites hooks/keep.py, so cite.md is the only cite; the scope fact is read inside the change (P7).
+UNTRACKED_CITE_BASE = {"a.md": "# T\n\nShort line.\n", "hooks/keep.py": "X = 1\n"}
+untracked_cite = {}
+
+
+def remove_keep_untracked_cite(work):
+    remove_keep(work)  # a deletion, not committed
+    write(work, "cite.md", "# Cite\n\n- see `hooks/keep.py`\n")  # a new file, never git-added
+    untracked_cite["cites"] = git_read(work, "grep", "hooks/keep.py", "HEAD", "--", "*.md")
+
+
+at_base, status, rc, out = uncommitted_run(remove_keep_untracked_cite, base=UNTRACKED_CITE_BASE)
+check("untracked cite scope: hooks/keep.py is deleted, not committed, and cite.md is untracked",
+      at_base and " D hooks/keep.py" in status and "?? cite.md" in status, status)
+check("untracked cite scope: no tracked Markdown cites hooks/keep.py", untracked_cite.get("cites") == "",
+      str(untracked_cite))
+check("untracked cite: the output does not print `stale-cites: PASS`", "stale-cites: PASS" not in out, out)
+check("untracked cite: an unknown line names cite.md",
+      any(l.startswith("stale-cites: unknown,") and "cite.md" in l for l in out.splitlines()), out)
+
+
+# A non-ASCII untracked name. git quotes such a name in `git ls-files` output unless -z is passed ("caf\303\251.md"),
+# so the step read a name no file has. The name the file has is listed and linted, and a clean sentence passes. The ASCII
+# name beside it is the control: the same shape, with no quoting to get wrong.
+def untracked_run(name, text):
+    """A topic fixture with one new markdown file `name`, untracked and never git-added, then bin/ste-changed main there.
+    Returns the untracked names git lists with -z (no quoting), and the command's exit code and output."""
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+        work = make_repo(d, UNCOMMITTED_BASE, lambda w: write(w, name, text, "w"))
+        names = git_read(work, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+        rc, out = run_command(work)
+    return names, rc, out
+
+
+names, rc, out = untracked_run("café.md", "# Café\n\nShort line.\n")
+check("non-ASCII untracked scope: café.md is untracked, not ignored", "café.md" in names, str(names))
+check("non-ASCII untracked: the scope lists café.md by its own name", "café.md" in parts(out)["files"], out)
+check("non-ASCII untracked: exits 0 with PASS on a clean sentence", rc == 0 and "ste-lint: PASS" in out, out)
+names, rc, out = untracked_run("clean-note.md", "# Clean\n\nShort line.\n")
+check("ASCII untracked control: clean-note.md is listed, exits 0 and PASSes",
+      "clean-note.md" in parts(out)["files"] and rc == 0 and "ste-lint: PASS" in out, out)
+
+
+# A name with a space. git ends the `+++ b/` header of such a name with a tab, so the changed-line map read a name with
+# that tab, no finding landed on a changed line, and the step passed. The name is linted by its own name, and a 42-word
+# sentence in it fails. `space.md` is the control: the same sentence under a name with no space.
+LONG42 = " ".join(["word"] * 41) + " end."  # 42 words, over the STE001 limit of 40
+
+
+def long_sentence(name):
+    def change(work):
+        write(work, name, "# S\n\n" + LONG42 + "\n", "w")
+        git(work, "commit", "-qam", "long")
+    return change
+
+
+rc, out = run("changed", base={"sp ace.md": "# S\n\nShort line.\n"}, change=long_sentence("sp ace.md"))
+check("space in name: sp ace.md is in scope", "sp ace.md" in parts(out)["files"], out)
+check("space in name: exits 1 on the 42-word sentence", rc == 1, out)
+check("space in name: STE001 names sp ace.md:3", "sp ace.md:3: STE001 " in out, out)
+rc, out = run("changed", base={"space.md": "# S\n\nShort line.\n"}, change=long_sentence("space.md"))
+check("space control: space.md with the same sentence exits 1 and names space.md:3",
+      rc == 1 and "space.md:3: STE001 " in out, out)
+
+
+# A stat-only change: a tracked file is touched, so its mtime moves and its content does not. The committed STE001 in the PR
+# range is still a finding. The stat refresh is not an unknown read: the step lints the range and exits 1, as main does.
+# The touch is the change's last act, since a commit refreshes the index first. The scope facts read no index (P7).
+STAT_BASE = {**UNCOMMITTED_BASE, "long-note.md": "# S\n\nShort line.\n"}
+stat = {}
+
+
+def stat_only(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    path = os.path.join(work, "data.txt")
+    before = touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
+    with open(path, encoding="utf-8") as f:
+        stat["same"] = f.read() == git_read(work, "show", "HEAD:data.txt")
+    stat["committed"] = "long-note.md" in git_read(work, "ls-tree", "--name-only", "HEAD").split()
+    stat["moved"] = os.stat(path).st_mtime != before.st_mtime
+
+
+rc, out = run("changed", base=STAT_BASE, change=stat_only)
+check("stat-only scope: long-note.md is committed, data.txt has a new mtime and its committed bytes",
+      stat.get("committed") and stat.get("moved") and stat.get("same"), str(stat))
+check("stat-only: exits 1 on the committed STE001, as main does", rc == 1, out)
+check("stat-only: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("stat-only: no ste-lint unknown line, so the stat refresh did not stop the read",
+      "ste-lint: unknown" not in out, out)
+rc, out = run("changed", base=STAT_BASE, change=long_sentence("long-note.md"))
+check("stat-only control: the same committed STE001 with no touch exits 1 and names long-note.md:3",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+
+
+# A dirty tree whose snapshot fails. The step reads the working tree with `git stash create`, and exit 1 with no output
+# can also be a real failure, not only "no local changes". A tracked FIFO, which git cannot read ("unsupported file type"),
+# makes the snapshot fail on a dirty tree. The step must say unknown and exit 0, and never print PASS or "stale-cites: PASS",
+# since the uncommitted STE001 in a.md is not read. A FIFO is a POSIX file type, so a platform with no os.mkfifo prints SKIP.
+# The scope facts are read in the change, before the step runs (P7).
+UNREADABLE_BASE = {"a.md": "# T\n\nShort line.\n", "data.txt": "x\n"}
+unreadable = {}
+
+
+def unreadable_dirty(work):
+    write(work, "a.md", "# T\n\n" + LONG + "\n", "w")  # a markdown edit, not committed: the tree is dirty
+    path = os.path.join(work, "data.txt")
+    os.remove(path)
+    os.mkfifo(path)  # a tracked file git cannot read: the snapshot fails
+    unreadable["dirty"] = not content_clean(work)
+    snap = subprocess.run(["git", "-c", "user.name=ste-lint", "-c", "user.email=ste-lint@localhost", "-C", work,
+                           "stash", "create"], capture_output=True, text=True)
+    unreadable["snapshot_empty"] = snap.returncode != 0 and snap.stdout == ""
+    unreadable["snapshot_cause"] = "unsupported file type" in snap.stderr
+
+
+if not hasattr(os, "mkfifo"):
+    print("SKIP ste-lint unreadable dirty tree: a FIFO is a POSIX file type, and this platform has no os.mkfifo")
+else:
+    rc, out = run("changed", base=UNREADABLE_BASE, change=unreadable_dirty)
+    check("unreadable dirty scope: git's content check reads the tree as dirty", unreadable.get("dirty") is True,
+          str(unreadable))
+    check("unreadable dirty scope: the snapshot exits non-zero with no output", unreadable.get("snapshot_empty") is True,
+          str(unreadable))
+    check("unreadable dirty scope: the snapshot names data.txt as unsupported", unreadable.get("snapshot_cause") is True,
+          str(unreadable))
+    check("unreadable dirty: exits 0, as the other unknown reads do", rc == 0, out)
+    check("unreadable dirty: one ste-lint line says unknown",
+          any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+    check("unreadable dirty: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
+    check("unreadable dirty: no stale-cites PASS line", "stale-cites: PASS" not in out, out)
+
+
+# A clean tree with .git/index.lock held. Touching a tracked file moves its mtime and keeps its bytes: git's content check
+# reads the tree as clean, but the index's stat data is stale, and the snapshot needs the lock to refresh it. With the lock
+# held, the step must still lint the committed range as main does: FAIL on the committed error, exit 1, no unknown line.
+# The untouched clean tree with the lock is the control.
+clean_lock = {}
+
+
+def touched_clean_locked(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
+    clean_lock["held"] = hold_index_lock(work)  # the lock first, so no scope read below can refresh the index
+    clean_lock["clean"] = content_clean(work)
+    clean_lock["in_range"] = "long-note.md" in git_read(work, "diff", "--name-only", "HEAD~1", "HEAD").split()
+
+
+rc, out = run("changed", base=STAT_BASE, change=touched_clean_locked)
+check("clean lock scope: git's content check reads the touched tree as clean", clean_lock.get("clean") is True,
+      str(clean_lock))
+check("clean lock scope: long-note.md is committed in the range", clean_lock.get("in_range") is True, str(clean_lock))
+check("clean lock scope: the index lock is held", clean_lock.get("held") is True, str(clean_lock))
+check("clean lock: exits 1 on the committed STE001, as main does", rc == 1, out)
+check("clean lock: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("clean lock: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
+
+
+def clean_locked(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range, and no tracked file is touched
+    clean_lock["control_held"] = hold_index_lock(work)
+    clean_lock["control_clean"] = content_clean(work)
+
+
+rc, out = run("changed", base=STAT_BASE, change=clean_locked)
+check("clean lock control scope: git's content check reads the tree as clean", clean_lock.get("control_clean") is True,
+      str(clean_lock))
+check("clean lock control scope: the index lock is held", clean_lock.get("control_held") is True, str(clean_lock))
+check("clean lock control: exits 1 on the committed STE001, as main does",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+check("clean lock control: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
+
+
+# An untracked Markdown file that .ste-lint-exclude matches is not read, so it is no unknown read. The step printed
+# "untracked Markdown is not read" for any untracked .md, excluded or not. The control has no exclude entry: there the same
+# file is named unknown. The exclude file is committed, so the scope facts come from ls-files (P7).
+EXCL_BASE = {"a.md": "# T\n\nShort line.\n", ".ste-lint-exclude": "gen/**\n"}
+excl = {}
+
+
+def untracked_gen(work):
+    write(work, "gen/x.md", "# G\n\n" + LONG42 + "\n", "w")  # untracked, never git-added, matched by gen/**
+    excl["untracked"] = git_read(work, "ls-files", "--others", "--exclude-standard").split()
+    excl["tracked"] = git_read(work, "ls-files").split()
+
+
+rc, out = run("changed", base=EXCL_BASE, change=untracked_gen)
+check("untracked excluded scope: gen/x.md is untracked and .ste-lint-exclude is committed",
+      "gen/x.md" in excl.get("untracked", []) and ".ste-lint-exclude" in excl.get("tracked", []), str(excl))
+check("untracked excluded: exits 0, as an excluded file is not read", rc == 0, out)
+check("untracked excluded: no line says untracked Markdown is not read",
+      "untracked Markdown is not read" not in out, out)
+check("untracked excluded: the stale-cites line says PASS", "stale-cites: PASS" in out, out)
+rc, out = run("changed", base={"a.md": "# T\n\nShort line.\n"}, change=untracked_gen)
+check("untracked excluded control: with no exclude entry, gen/x.md is named unknown",
+      any(l.startswith("stale-cites: unknown,") and "gen/x.md" in l for l in out.splitlines()), out)
+
+
+# No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The
+# unknown-base rule (decision stale-cites-at-merge, docs/decisions/stale-cites-at-merge.md: a base that does not resolve
+# is unknown, not a finding, and the check exits 0; rule verification-report-unknown-reads) holds here too: the command
+# exits 0 and names the missing merge base as unknown. It must not print nothing and exit 1, as it does today.
+def unrelated_change(work):
+    git(work, "checkout", "-q", "--orphan", "unrelated")
+    git(work, "rm", "-q", "-r", "--cached", ".")  # the index only: the files stay on disk, untracked
+    write(work, "u.md", "# U\n\nShort line.\n")
+    git(work, "add", "u.md")
+    git(work, "commit", "-qm", "unrelated")
+
+
+with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+    work = make_repo(d, BASE_FILES, unrelated_change)
+    has_base = subprocess.run(["git", "merge-base", "origin/main", "HEAD"], cwd=work, capture_output=True).returncode == 0
+    rc, out = run_command(work)
+check("no merge base scope: origin/main and HEAD share no commit", not has_base, str(has_base))
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the command exits 0", rc == 0, out)
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output names the missing merge base",
+      re.search(r"merge[ -]base", out, re.I) is not None, out)
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output says the result is unknown",
+      "unknown" in out, out)
+
+
+# A push to the default branch whose HEAD is a root commit has no HEAD~1. The step diffs HEAD~1..HEAD, and the stale-cites
+# check reads that base as unknown: decision stale-cites-at-merge exits 0 for `<head>~1` of a root commit, as main does. The
+# output must say `stale-cites: unknown,` in lower case; `stale-cites: UNKNOWN,` with exit 2 is the bug. The tree is
+# clean and HEAD has no parent, both read inside the change (P7). The control has a second commit, so HEAD~1 exists.
+root = {}
+
+
+def root_commit(work):
+    root["parents"] = git_read(work, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    root["status"] = git_read(work, "status", "--porcelain")
+
+
+def second_commit(work):
+    write(work, "b.md", "# B\n\nShort line.\n")
+    git(work, "add", "b.md")
+    git(work, "commit", "-qm", "second")
+
+
+rc, out = run("changed", on_main=True, change=root_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+check("root push scope: HEAD has no parent and the tree is clean",
+      len(root.get("parents", [])) == 1 and root.get("status") == "", str(root))
+check("root push: exits 0, as main does (an unknown base, decision stale-cites-at-merge)", rc == 0, out)
+check("root push: the output says `stale-cites: unknown,` in lower case", "stale-cites: unknown," in out, out)
+check("root push: no `no markdown changed` line, since HEAD~1 was never read", "no markdown changed" not in out, out)
+check("root push: an ste-lint unknown line names the missing HEAD~1",
+      any(l.startswith("ste-lint: unknown") and "HEAD~1" in l for l in out.splitlines()), out)
+rc, out = run("changed", on_main=True, change=second_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+check("root push control: with HEAD~1 present, exits 0 and says `stale-cites: PASS`",
+      rc == 0 and "stale-cites: PASS" in out, out)
+check("root push control: with HEAD~1 present, no ste-lint unknown line",
+      not any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+
+
+# A changed-file read that git refuses. A .ste-lint-exclude line git rejects as a pathspec, such as ../gen/*.md (a path outside
+# the repo), fails the diff that lists the changed files. That read printed "no markdown changed" with exit 0: a false green for
+# files nobody read. The step must print one ste-lint unknown line, exit 0, and never "no markdown changed" or PASS. The valid
+# exclude line is the control: the same committed STE001 fails as main does. git's rejection is read in the change (P7).
+BAD_PATHSPEC_BASE = {"a.md": "# T\n\nShort line.\n", "long-note.md": "# S\n\nShort line.\n",
+                     ".ste-lint-exclude": "../gen/*.md\n"}
+bad_pathspec = {}
+
+
+def bad_pathspec_change(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    p = subprocess.run(["git", "-C", work, "diff", "--name-only", "origin/main...HEAD", "--", "*.md",
+                        ":(exclude,glob)../gen/*.md"], capture_output=True, text=True)
+    bad_pathspec.update(rc=p.returncode, err=p.stderr)
+
+
+rc, out = run("changed", base=BAD_PATHSPEC_BASE, change=bad_pathspec_change)
+check("bad pathspec scope: git rejects the exclude line, exit non-zero, naming the path outside the repository",
+      bad_pathspec.get("rc", 0) != 0 and "outside repository" in bad_pathspec.get("err", ""), str(bad_pathspec))
+check("bad pathspec: exits 0, as an unknown read does", rc == 0, out)
+check("bad pathspec: one ste-lint line says unknown",
+      any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+check("bad pathspec: no `no markdown changed` line, since the changed files were not read",
+      "no markdown changed" not in out, out)
+check("bad pathspec: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
+rc, out = run("changed", base={**BAD_PATHSPEC_BASE, ".ste-lint-exclude": "gen/**\n"}, change=long_sentence("long-note.md"))
+check("bad pathspec control: a valid exclude line lints long-note.md and exits 1 on its STE001",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+
+
+# The content check of the tracked files cannot run (run.sh, the DIFF_RC branch). The copy of .git/index fails when the index
+# is gone or is a directory, so the working tree was not read. The step must print one ste-lint unknown line, exit 0, and print
+# no PASS, though a Markdown edit is uncommitted. The index is replaced after the fetch and just before the step (P7).
+index_state = {}
+
+
+def index_replaced(how):
+    def after(work):
+        index = os.path.join(work, git_read(work, "rev-parse", "--git-path", "index").strip())
+        index_state["dirty"] = " M draft-note.md" in git_read(work, "status", "--porcelain")
+        index_state["was_file"] = os.path.isfile(index)
+        os.remove(index)
+        if how == "dir":
+            os.mkdir(index)  # cp -p of a directory fails, as a missing file does
+        index_state["now"] = "dir" if os.path.isdir(index) else "missing" if not os.path.lexists(index) else "other"
+    return after
+
+
+for how in ("missing", "dir"):
+    rc, out = run("changed", base=UNCOMMITTED_BASE, change=edit_draft, after=index_replaced(how))
+    check("index %s scope: .git/index was a file, is now %s, and draft-note.md is modified" % (how, how),
+          index_state.get("was_file") is True and index_state.get("now") == how and index_state.get("dirty") is True,
+          str(index_state))
+    check("index %s: exits 0, as an unknown read does" % how, rc == 0, out)
+    check("index %s: exactly one ste-lint line says unknown" % how,
+          sum(l.startswith("ste-lint: unknown") for l in out.splitlines()) == 1, out)
+    check("index %s: no PASS line, from ste-lint or stale-cites" % how,
+          "ste-lint: PASS" not in out and "stale-cites: PASS" not in out, out)
+    check("index %s: no `no markdown changed` line" % how, "no markdown changed" not in out, out)
+
+
+# The step summary of a run with no merge base. It must say unknown, not "No markdown changed": nothing was read.
+# The summary is read inside the scratch folder, which is removed when the block ends. The control is a committed
+# non-markdown change with a merge base, where "No markdown changed." is the true line.
+def add_notes(work):
+    write(work, "notes.txt", "x\n")
+    git(work, "add", "notes.txt")
+    git(work, "commit", "-qm", "notes")
+
+
+with scratch("summary") as s:
+    summary = os.path.join(s, "sum")
+    rc, out = run("changed", change=unrelated_change, GITHUB_STEP_SUMMARY=summary)
+    text = open(summary, encoding="utf-8").read() if os.path.exists(summary) else ""
+check("no merge base summary: the step summary has its STE lint section", "### STE lint" in text, text)
+check("no merge base summary: it does not say `No markdown changed`", "No markdown changed" not in text, text)
+check("no merge base summary: it says unknown", "unknown" in text.lower(), text)
+with scratch("summary") as s:
+    summary = os.path.join(s, "sum")
+    rc, out = run("changed", change=add_notes, GITHUB_STEP_SUMMARY=summary)
+    text = open(summary, encoding="utf-8").read() if os.path.exists(summary) else ""
+check("summary control: a committed non-markdown change with a merge base says `No markdown changed.`",
+      "No markdown changed." in text, text)
+
+
 # Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
 # ste_emit.py there must not run when the step imports its helpers. A package wins over a module of the
 # same name, so each shape gets its own run. Each planted file writes its own marker when imported.
@@ -516,12 +1009,35 @@ src = open(CMD, encoding="utf-8").read()
 m = re.search(r"^LINT_FILES = (\([^)]*\))", src, re.M)
 check("the command names the files the step runs (LINT_FILES)", bool(m), "")
 LINT_FILES = ast.literal_eval(m.group(1)) if m else ()
-for name in ("lint/ste_lint.py", "lint/layout.py"):
-    tree = ast.parse(open(os.path.join(ROOT, name), encoding="utf-8").read())
-    mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-    local = sorted("lint/%s.py" % m for m in mods if os.path.exists(os.path.join(ROOT, "lint", m + ".py")))
-    check("LINT_FILES holds every lint module %s imports" % name, set(local) <= set(LINT_FILES), str(local))
+# The linter's imports, followed at any depth through lint/ and hooks/ (the folders its sys.path reaches).
+# The pin check hashes only LINT_FILES, so every file these imports reach must be listed there.
+IMPORT_DIRS = ("lint", "hooks")
+
+
+def repo_imports(rel):
+    """The lint/ and hooks/ files that the module at `rel` imports, as repo-relative paths."""
+    tree = ast.parse(open(os.path.join(ROOT, rel), encoding="utf-8").read())
+    mods = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    mods |= {n.module.split(".")[0] for n in ast.walk(tree)
+             if isinstance(n, ast.ImportFrom) and n.module and not n.level}
+    return sorted("%s/%s.py" % (d, m) for m in mods for d in IMPORT_DIRS
+                  if os.path.exists(os.path.join(ROOT, d, m + ".py")))
+
+
+def import_closure(entry):
+    seen, todo = set(), [entry]
+    while todo:
+        rel = todo.pop()
+        if rel not in seen:
+            seen.add(rel)
+            todo.extend(repo_imports(rel))
+    return seen
+
+
+reached = set().union(*(import_closure(e) for e in ("lint/ste_lint.py", "lint/layout.py")))
+for rel in sorted(reached):
+    check("LINT_FILES holds %s, which the linter imports" % rel, rel in LINT_FILES,
+          "%s is imported by the linter (lint/ and hooks/ at any depth), and LINT_FILES in bin/ste-changed omits it" % rel)
 check("LINT_FILES holds the linter run.sh runs",
       "lint/ste_lint.py" in LINT_FILES and "../../lint/ste_lint.py" in open(os.path.join(HERE, "run.sh")).read(), "")
 
@@ -565,28 +1081,33 @@ def scratch_clone(cs, zizmor_step=False):
     return shas
 
 
-def pin_child(d, shas, pin, change=lambda work: None, dead=None, zizmor=None):
+def pin_child(d, shas, pin, change=lambda work: None, dead=None, zizmor=None, step_name=None):
     """A child repo under `d` whose CI pins ste-lint at `pin` and zizmor at `zizmor`: each a label of `shas`, or a sha,
-    or None for no pin of that action. The ste-lint pin is written first, so it is line 5. `dead` is a label that is
-    pinned in a comment only. Returns its working folder."""
-    uses = []
+    or None for no pin of that action. The ste-lint pin is written first, so it is line 5, and `step_name`, when given,
+    names that step on line 6. `dead` is a label that is pinned in a comment only. Returns its working folder."""
+    steps = []
     if pin is not None:
-        uses.append("o/claude-settings/actions/ste-lint@%s # main" % shas.get(pin, pin))
+        steps.append("      - uses: o/claude-settings/actions/ste-lint@%s # main\n" % shas.get(pin, pin)
+                     + ("        name: %s\n" % step_name if step_name else ""))
     if zizmor is not None:
-        uses.append("o/claude-settings/actions/zizmor@%s # main" % shas.get(zizmor, zizmor))
-    wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + "".join("      - uses: %s\n" % u for u in uses)
+        steps.append("      - uses: o/claude-settings/actions/zizmor@%s # main\n" % shas.get(zizmor, zizmor))
+    wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + "".join(steps)
     if dead:
         wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
     return make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
 
 
-def run_ste_changed(cmd, work, home=None):
-    """`cmd main` in `work`, with the step's variables and CLAUDE_CONFIG_DIR stripped. `home` replaces HOME, so a
-    command that reads ~/.claude reads the temp one. Returns (rc, output)."""
+def run_ste_changed(cmd, work, home=None, extra=None, err=None):
+    """`cmd main` in `work`, with the step's variables, the pin note's variable and CLAUDE_CONFIG_DIR stripped. `home`
+    replaces HOME, so a command that reads ~/.claude reads the temp one. `extra` sets variables on the command, and
+    `err`, a list, takes its stderr. Returns (rc, output)."""
     env = {k: v for k, v in os.environ.items() if k not in STEP_ENV + ("CLAUDE_CONFIG_DIR",)}
     if home:
         env["HOME"] = home
+    env.update(extra or {})
     p = subprocess.run([sys.executable, cmd, "main"], cwd=work, env=env, capture_output=True, text=True)
+    if err is not None:
+        err.append(p.stderr)
     return p.returncode, p.stdout + p.stderr
 
 
@@ -601,11 +1122,12 @@ def zizmor_facts(cs, sha):
             "yml_differ": blob(sha, "action.yml") != blob("HEAD", "action.yml")}
 
 
-def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None, zizmor=None, zizmor_step=False):
+def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None, zizmor=None, zizmor_step=False,
+             extra=None, err=None):
     """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin` and zizmor at `zizmor`. A pin
     may name a commit label of the scratch clone, or be None. Returns (rc, output, {label: sha}). `shallow` runs the
     command from a shallow clone that holds the pin's object and cuts the history above it. `zizmor_step` adds the Z
-    commit (see scratch_clone). `proof`, a dict, takes that clone's facts."""
+    commit (see scratch_clone). `proof`, a dict, takes that clone's facts. `extra` and `err` pass to run_ste_changed."""
     with scratch("pin") as d:
         cs = os.path.join(d, "claude-settings")
         if shallow:
@@ -621,7 +1143,7 @@ def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None
             if proof is not None and zizmor is not None:
                 proof.update(zizmor_facts(cs, shas.get(zizmor, zizmor)))
         rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"),
-                                  pin_child(d, shas, pin, change, dead, zizmor))
+                                  pin_child(d, shas, pin, change, dead, zizmor), extra=extra, err=err)
         return rc, out, shas
 
 
@@ -650,6 +1172,99 @@ check("unknown pin: a commit this clone does not hold is unknown and exits 0",
 rc, out, _ = pin_case("A", default_change)
 check("lint red and drift: the lint's exit code wins, and the drift line still prints",
       rc == 1 and "older than this copy's lint" in out, out)
+
+# The pin note (decision action-pins-follow-sessions). With STE_CHANGED_PIN_NOTE=1 a drifted pin never turns a passing
+# lint into exit 3: the drift stays on stderr, and a failing lint keeps its own exit code. Without the variable, exit 3.
+PIN_NOTE = {PIN_NOTE_ENV: "1"}
+
+
+def short_change(work):
+    """A changed Markdown line that passes the lint: the base has a.md, so the commit can stage it."""
+    write(work, "a.md", "# T\n\nA short sentence.\n", "w")
+    git(work, "commit", "-qam", "short")
+
+
+err = []
+rc, out, shas = pin_case("A", short_change, extra=PIN_NOTE, err=err)
+check("pin note scope: the drift line is on stderr, and the lint passed",
+      "CI pins ste-lint at %s" % shas["A"][:7] in "".join(err) and "ste-lint: PASS" in out, out + "".join(err))
+check("pin note: a drifted pin with a passing lint exits 0", rc == 0, out)
+err = []
+rc, out, shas = pin_case("A", default_change, extra=PIN_NOTE, err=err)
+check("pin note, failing lint: the drift line is on stderr, and the lint's FAIL is the verdict",
+      "CI pins ste-lint at %s" % shas["A"][:7] in "".join(err) and "ste-lint: FAIL" in out, out + "".join(err))
+check("pin note, failing lint: exit 1, never masked as a note", rc == 1, out)
+
+
+# ci-job's ste-lint step (bin/ci-job runs bin/ste-changed in place) in a child whose CI pins ste-lint. The job runs from
+# the scratch clone's own bin/ci-job, so the step's ste-changed and its pin check are that clone's too.
+def ci_job_case(change, pin="A", step=False):
+    """`bin/ci-job l --lint --base origin/main` in a child repo whose CI pins ste-lint at `pin`. With `step`, the child's
+    ste-lint step is named in its workflow and run as `--step NAME`, with no --lint, as merge's ready checks run it.
+    Returns (rc, stdout, the job's verdict log, {label: sha}, the step's name, or "" without `step`). The log is read
+    before the run folder is removed."""
+    with scratch("cijob") as d:
+        cs = os.path.join(d, "claude-settings")
+        shas = scratch_clone(cs)
+        work = pin_child(d, shas, pin, change, step_name="ste-lint" if step else None)
+        name = ""
+        if step:  # read back from the workflow the fixture wrote, through the one step parser (lint/workflow_steps.py)
+            with open(os.path.join(work, ".github", "workflows", "ci.yml"), encoding="utf-8") as f:
+                wf = f.read()
+            name = next((step_key(st, "name") for st in step_blocks(job_block(wf, "l"))
+                         if "actions/ste-lint@" in st), None) or ""
+        log, tmp = os.path.join(d, "verdict.log"), os.path.join(d, "tmp")
+        os.makedirs(tmp)
+        env = {k: v for k, v in os.environ.items() if k not in STEP_ENV + ("CLAUDE_CONFIG_DIR",)}
+        env.update(VERDICT_LOG=log, TMPDIR=tmp)  # the job's logs and step scripts stay in this run's folder
+        mode = ["--step", name] if step else ["--lint"]
+        p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ci-job"), "l", "--workflow",
+                            os.path.join(".github", "workflows", "ci.yml"), *mode, "--base", "origin/main"],
+                           cwd=work, env=env, capture_output=True, text=True)
+        text = open(log, encoding="utf-8", errors="replace").read() if os.path.exists(log) else ""
+        return p.returncode, p.stdout, text, shas, name
+
+
+def step_line(stdout):
+    """The first line of a job run that starts with a verdict word, or '' when none."""
+    words = ("PASS ", "FAIL ", "SKIP ", "unknown ", "not run")
+    return next((l for l in stdout.splitlines() if l.startswith(words)), "")
+
+
+rc, stdout, log, shas, _ = ci_job_case(short_change)
+line = step_line(stdout)
+# A stale pin under --lint is a note on the step's PASS line, judged against the stable head, else the local copy, exit 0
+# (decision action-pins-follow-sessions: drift under --lint is a note, not an exit).
+check("ci-job pinned tree, pass: scope, the lint passed and the log holds the pin's drift line",
+      "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
+check("ci-job pinned tree, pass: the ste-lint step reads PASS and its line carries the drift as a pin note",
+      line.startswith("PASS ") and PIN_NOTE_MARKER in line, stdout)
+check("ci-job pinned tree, pass: the job exits 0, the stale pin is a note under --lint", rc == 0, stdout)
+rc, stdout, log, shas, _ = ci_job_case(default_change)
+line = step_line(stdout)
+check("ci-job pin note, failing lint: scope, the drift is in the log and the lint FAILs",
+      "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: FAIL" in log, log)
+check("ci-job pin note, failing lint: the step reads FAIL and its line never says `pin note`",
+      line.startswith("FAIL ") and "pin note" not in line, stdout)
+check("ci-job pin note, failing lint: the job exits 1", rc == 1, stdout)
+rc, stdout, log, shas, _ = ci_job_case(short_change, pin="C")
+line = step_line(stdout)
+check("ci-job, no drift: scope, the pinned lint runs and the log says the pin is the same as this copy",
+      "ste-lint: PASS" in log and "as this copy" in log, log)
+check("ci-job, no drift: the step reads PASS with no `pin note`, and the job exits 0",
+      rc == 0 and line.startswith("PASS ") and "pin note" not in line, stdout)
+
+# merge's ready checks run ci-job with --step and no --lint (merge/merge.py run_ready_checks). A stale pin under --step is a
+# FAIL of the named step, and the job exits 1 (decision action-pins-follow-sessions).
+rc, stdout, log, shas, name = ci_job_case(short_change, step=True)
+line = step_line(stdout)
+check("ci-job --step, drifted pin: scope, the step is named in its workflow, its lint PASSes, and the log holds the pin's drift line",
+      bool(name) and "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
+check("ci-job --step, drifted pin: the named step reads FAIL", line.startswith("FAIL ") and name + ":" in line, stdout)
+check("ci-job --step, drifted pin: the job exits 1", rc == 1, stdout)
+rc, stdout, log, shas, name = ci_job_case(short_change, pin="C", step=True)
+check("ci-job --step, no drift: the named step reads PASS and the job exits 0",
+      rc == 0 and step_line(stdout).startswith("PASS "), stdout)
 
 # The zizmor pin. The check reads `<owner>/claude-settings/actions/zizmor@<sha>` pins in the same workflows and compares
 # actions/zizmor/run.sh at each pinned commit with this copy's, with the same verdict lines, each naming its action.

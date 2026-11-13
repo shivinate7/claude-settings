@@ -32,9 +32,9 @@ text-only change (owner, 2026-11-03: design reviewer only).
     element, class, style, token or layout, and adds no screen.
   - Outcome the designer protected: the new copy fits the screen, seen before the build. The design
     reviewer protects it now. It compares the built screen with main's screenshots of the same screen,
-    at every size and theme, and catches overflow, wrapping and truncation from the new copy. It reads the
-    built diff too: any element, class, style, token or layout change in a text-only change is a finding
-    that sends the lane to a designer.
+    at every size and theme, and catches overflow and truncation. It also catches a label, button or heading
+    that newly wraps (it fit on one line before) from the new copy. It reads the built diff too: any element, class,
+    style, token or layout change in a text-only change is a finding that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
   step, after the blind list is complete (`design-skills`). A second design read reuses the round-1

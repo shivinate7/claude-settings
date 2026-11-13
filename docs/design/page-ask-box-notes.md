@@ -32,7 +32,7 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 ## 3. The record, `asks/<id>`
 
-- Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key, as for `items/`.
+- Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key.
 - The page writes `id`, `text` (the owner's words, line breaks kept, 4000 characters or fewer) and `at` (ISO).
   It writes them once, at Send. A text over 4000 characters is never cut: the box has no `maxlength`, so a paste keeps
   every character. Send ask is off and writes nothing, the words stay in the box, and the hint says the length and the
@@ -106,7 +106,10 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 - An answered ask folds to one row: the check, the ask (one line, two on a phone), "Answered <time>" and "Show answer".
   The whole row is one button, 48px tall.
 - An answer stays open while it is new to this viewer. It shows "New answer".
-  The page keeps a seen mark per viewer in `localStorage` `waiting.askSeen`, an ISO time, set when the page is hidden.
+  The page keeps a seen mark per viewer in `localStorage` `waiting.askSeen`, an ISO time.
+  It is set when the tab hides or the page closes, and only while the answers list is on screen.
+  Each new answer in that list must also have been in view since it was drawn.
+  A new answer is a New answer row, or a fresh reply answer under a folded thread. A pagehide of a hidden tab leaves it at the hide time. A hide after a back-forward cache restore counts, even before its pageshow.
   When storage fails, answers from the last 24 hours stay open and older ones fold.
 - A fold happens only at a page load or at a press. A row never folds while the owner looks at it.
 - Fold and Show answer sit at the same spot, the right end of the first line. Focus goes to the control at that spot after a press.

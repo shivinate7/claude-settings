@@ -2,9 +2,9 @@
 """Fresh-code guard. Usage: launch.py <checkout> [--dev] [merge args...]
 
 Fetches origin main, runs merge/merge.py from a detached temporary worktree at that SHA, and
-fast-forwards the checkout only when it is on main, clean and behind. When fresh code cannot
-be proven, prints a warning block and runs the checkout's own tree. --dev runs the checkout's
-own tree and nothing else. README: "The `merge` command".
+fast-forwards the checkout only when it is on main, clean, behind and not a cloud mirror. When
+fresh code cannot be proven, prints a warning block and runs the checkout's own tree. --dev runs
+the checkout's own tree and nothing else. README: "The `merge` command".
 """
 import os, shutil, stat, subprocess, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
@@ -24,7 +24,7 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
 def run(tree, args):
-    # nowindow: merge.py prints its report on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
     return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
 
 def warn(sha, behind, why):
@@ -56,11 +56,13 @@ def main(co, args):
         branch = git(co, "rev-parse", "--abbrev-ref", "HEAD")[1]
         clean = git(co, "status", "--porcelain")[1] == ""
         if behind:
-            if branch == "main" and clean:
+            # install.sh owns a cloud mirror's refresh and mirrorSha record; a launch fast-forward would leave mirrorSha stale
+            mirror = git(co, "config", "--get", "claude-settings.cloudMirror")[1] == "true"
+            if branch == "main" and clean and not mirror:
                 if git(co, "merge", "-q", "--ff-only", "origin/main")[0]:
                     print("merge: checkout not fast-forwarded: ff-only merge refused", file=sys.stderr)
             else:
-                print(f"merge: checkout left as is in {os.path.realpath(co)}: {'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
+                print(f"merge: checkout left as is in {os.path.realpath(co)}: {'cloud mirror, install.sh refreshes it' if mirror else 'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
         print(f"merge: running claude-settings {want[:12]} (origin/main)", file=sys.stderr)
         return run(wt, args)
     finally:
