@@ -28,6 +28,8 @@ Contract the builder codes against. The names are pinned in this block, and each
   MailError("timeout") on a timeout. Its Windows branch runs when mail.WINDOWS is True, read at call time, and that
   branch never calls communicate() after kill. wait() takes git_bounded as its default run_git. Windows is unmeasured:
   on this Linux runner the cases drive that branch through subprocess._mswindows and a fake child.
+- Wake subject. The subject is the first non-blank line after the header block, whether the message's lines end in LF
+  or CRLF. The wake line holds no CR.
 - Writes. The waiter creates its lock. Its baseline fetch writes the cache once, as the mailbox fetch always does.
   During a poll nothing is written, and no listing-*.json file is ever written.
 """
@@ -929,37 +931,76 @@ class BaselineRetry(WaitCase):
         self.assertTrue(text.startswith("mail: new 0a1b2c3d4e70 "), "the wake line is not the new message: %r" % text)
 
 
+# The blobs the CRLF cases land. The header block and its blank line end in CRLF. The body ends in CRLF, or in LF
+# for the mixed case.
+CRLF_MESSAGE = ("Msg 0a1b2c3d4e21 from %s to %s kind request re - try 1\r\n"
+                "Reply-to: %s\r\n\r\nBody marker: crlf-subject\r\n" % (SENDER, ADDR, SENDER)).encode("utf-8")
+MIXED_MESSAGE = ("Msg 0a1b2c3d4e21 from %s to %s kind request re - try 1\r\n"
+                 "Reply-to: %s\r\n\r\nBody marker: mixed-subject\n" % (SENDER, ADDR, SENDER)).encode("utf-8")
+
+
 class WakeLine(WaitCase):
     """The wake line names the message's address with its read and take commands, and shows the subject as untrusted,
     quoted text, cleaned and cut. A repo-address message wakes with its own --addr."""
 
-    def wake(self, body, addr=ADDR, waiter_addrs=None, msg_id="0a1b2c3d4e21"):
+    def wake(self, body, addr=ADDR, waiter_addrs=None, msg_id="0a1b2c3d4e21", eol="\n", body_eol=None):
         store, machine = self.fixture()
-        probe = {}
+        probe = {"store": store, "addr": addr, "msg_id": msg_id}
 
         def land(fake):
             if len(fake.sleeps) == 2 and "sent" not in probe:
-                store.seed(addr, msg_id, "request", SENDER, body)
+                store.seed(addr, msg_id, "request", SENDER, body, eol=eol, body_eol=body_eol)
                 probe["sent"] = True
 
         code, text = run_wait(machine.env, FakeTime(hook=land), Procs(), addrs=waiter_addrs, max_seconds=600)
         return code, text, probe
 
+    def stored(self, probe):
+        """The blob the fixture landed for the probed message, as bytes. Asserted before the wake line, so a case
+        whose line endings never reached the store cannot pass or fail on the wrong thing (P7)."""
+        return probe["store"].read("mail/%s/%s.md" % (probe["addr"], probe["msg_id"]), raw=True)
+
+    def assert_wake_names(self, text, subject, msg_id="0a1b2c3d4e21", addr=ADDR):
+        """The one wake line for one message: its read and take commands with --addr, and the subject quoted after the
+        word untrusted. Every case that wakes on a message asserts through here."""
+        lines = text.strip().splitlines()
+        self.assertEqual(len(lines), 1, "the wake printed %d lines, expected one: %r" % (len(lines), text))
+        line = lines[0]
+        self.assertNotIn('untrusted subject ""', line,
+                         "the wake line shows an empty subject: the message's first body line was not found: %r" % line)
+        self.assertIn("mail read --addr %s %s" % (addr, msg_id), line,
+                      "the wake line gives no read command with --addr: %r" % line)
+        self.assertIn("mail take --addr %s %s" % (addr, msg_id), line,
+                      "the wake line gives no take command with --addr: %r" % line)
+        self.assertIn("untrusted", line, "the wake line does not mark the subject untrusted: %r" % line)
+        self.assertIn('"%s"' % subject, line, "the wake line does not quote the subject %r: %r" % (subject, line))
+        self.assertLess(line.index("untrusted"), line.index('"%s"' % subject),
+                        "the word untrusted does not come before the quoted subject: %r" % line)
+        return line
+
     def test_wake_line_carries_the_read_and_take_commands_and_an_untrusted_quoted_subject(self):
         code, text, probe = self.wake("Body marker: wake-new")
         self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
         self.assertEqual(code, 0, "new mail made mail wait exit %r, expected 0" % (code,))
-        lines = text.strip().splitlines()
-        self.assertEqual(len(lines), 1, "the wake printed %d lines, expected one: %r" % (len(lines), text))
-        line = lines[0]
-        self.assertIn("mail read --addr %s 0a1b2c3d4e21" % ADDR, line, "the wake line gives no read command with --addr: %r"
-                      % line)
-        self.assertIn("mail take --addr %s 0a1b2c3d4e21" % ADDR, line, "the wake line gives no take command with --addr: %r"
-                      % line)
-        self.assertIn("untrusted", line, "the wake line does not mark the subject untrusted: %r" % line)
-        self.assertIn('"Body marker: wake-new"', line, "the wake line does not quote the subject: %r" % line)
-        self.assertLess(line.index("untrusted"), line.index('"Body marker'),
-                        "the word untrusted does not come before the quoted subject: %r" % line)
+        self.assert_wake_names(text, "Body marker: wake-new")
+
+    def test_crlf_message_wakes_with_its_subject_quoted_and_no_cr_in_the_line(self):
+        code, text, probe = self.wake("Body marker: crlf-subject", eol="\r\n", body_eol="\r\n")
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        stored = self.stored(probe)
+        self.assertEqual(stored, CRLF_MESSAGE, "the store does not hold the CRLF message on every line: %r" % (stored,))
+        self.assertEqual(code, 0, "new CRLF mail made mail wait exit %r, expected 0" % (code,))
+        self.assert_wake_names(text, "Body marker: crlf-subject")
+        self.assertNotIn("\r", text, "the wake line keeps a CR from the CRLF message: %r" % (text,))
+
+    def test_mixed_ending_message_with_crlf_header_and_lf_body_wakes_with_its_subject_quoted(self):
+        code, text, probe = self.wake("Body marker: mixed-subject", eol="\r\n", body_eol="\n")
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        stored = self.stored(probe)
+        self.assertEqual(stored, MIXED_MESSAGE, "the store does not hold the mixed-ending message: %r" % (stored,))
+        self.assertEqual(code, 0, "new mixed-ending mail made mail wait exit %r, expected 0" % (code,))
+        self.assert_wake_names(text, "Body marker: mixed-subject")
+        self.assertNotIn("\r", text, "the wake line keeps a CR from the mixed-ending message: %r" % (text,))
 
     def test_wake_line_strips_control_c1_and_bidi_characters_from_the_subject(self):
         body = "Hello\x1b[31m\x07keepme\x9b‮gnp⁦tail"
