@@ -1262,7 +1262,7 @@ def question_problem(records, turn, text, hook):
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     try:
-        page = layout.waiting_page(root) if root else "unknown"
+        page = layout.waiting_page(root) if root else "unknown"  # glossary-ok: the layout module's own function name
     except layout.LayoutError as err:
         return LAYOUT_UNREADABLE % err, ""
     here = None if page == "unknown" else page.rstrip("/")

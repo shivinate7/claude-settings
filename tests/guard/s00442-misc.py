@@ -920,6 +920,8 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
+    elif re.fullmatch(r"rules/branches/[^/]+", rel):  # the rules that apply to the base: GitHub answers 200 [] when no ruleset applies
+        print("[]")
     elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
         if state.get("compare_delay_s"):  # a repo's compare reads each sleep first: one budget shared across them runs out
             time.sleep(state["compare_delay_s"])
