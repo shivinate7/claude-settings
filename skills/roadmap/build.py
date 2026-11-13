@@ -46,7 +46,8 @@ or a session row or pull row has the wrong shape.
 The upkeep list also holds the row "status drift" (status_drift): a step whose hand status differs from the derived one
 (done on a merged proof, else doing on an open pull on lane_head_refs, else the hand status; hand active counts as doing;
 no session tag is a source). The build prints `status drift: <id> (hand <x>, derived <y>)` per entry and the exit code is
-unchanged. Cost: no GitHub read; it reads the live file's pulls and landedPulls and one more git log of main.
+unchanged. The row reads `unknown (<why>)` when the read is unknown. Cost: no GitHub read; it reads the live file's pulls
+and landedPulls and one more git log of main, and repeats the landed rows' git merge-base per unmerged row head.
 
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
@@ -1677,14 +1678,21 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
 
 
 def status_drift(steps, work, repo, main_branch, ref):
-    """[(id, hand, derived)] in step order for each step whose hand status differs from the derived one.
+    """([(id, hand, derived)] in step order, why or None): each step whose hand status differs from the derived one.
 
     Derived is done when a merged proof names the step (a Step trailer on main, or a landedPulls row), else doing when
     an open pull's branch is in lane_head_refs(step), else the hand status, which then never differs. Merged beats
-    open. Hand `active` equals derived doing (LIVE_STATUS). Session tags are no source. With no usable pulls read
-    (pair_why) open pulls are unknown and derive nothing. A hand status that is not text is left to the unknown-status
-    entry of unlaned."""
-    found, _, _ = landed_marks(repo, ref, main_branch, steps, with_done=True)
+    open. Hand `active` equals derived doing (LIVE_STATUS). Session tags are no source. A hand status that is not text
+    is left to the unknown-status entry of unlaned.
+
+    `why` is the unknown read, as an `unknown (<reason>)` entry, or None. The pulls read (pair_why) comes first, then
+    main (landed_marks' why); main unreadable derives nothing. An unknown pulls read still lists a done that a merged
+    proof shows, but derives no doing. A live file with no landedPulls list reads unknown only when it finds no drift:
+    a drift it finds stays listed, and an empty list would claim a clear read."""
+    found, _, main_why = landed_marks(repo, ref, main_branch, steps, with_done=True)
+    why = pair_why(work) or (main_why and "unknown (%s)" % main_why) or None
+    if main_why:
+        return [], why
     proven = set(found) | set(pull_landed_marks(repo, ref, steps, work, with_done=True))
     branches = set() if pair_why(work) else {p.get("branch") for p in work["pulls"]}
     out = []
@@ -1702,7 +1710,9 @@ def status_drift(steps, work, repo, main_branch, ref):
             continue  # derived doing, and the hand status is a live one
         if hand != derived:
             out.append((sid, hand, derived))
-    return out
+    if not why and not out and (work or {}).get("landedPulls") is None:
+        why = "unknown (the live file has no landedPulls list)"
+    return out, why
 
 
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
@@ -1737,7 +1747,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
     ready = [k for k, d in open_ if d.get("status") in TODO_STATUS and READY_SENTENCE.search(d.get("note") or "")]
-    drift = status_drift(steps, work, repo, main_branch, ref)
+    drift, drift_why = status_drift(steps, work, repo, main_branch, ref)
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
@@ -1753,7 +1763,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
             ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
-            (DRIFT_LINE, ["%s (hand %s, derived %s)" % t for t in drift]),
+            (DRIFT_LINE, [drift_why] if drift_why else ["%s (hand %s, derived %s)" % t for t in drift]),
             ("done without check", done_without_check(steps))]
     # A hold line is shown, never counted as a lane to archive.
     print("upkeep: " + "; ".join(
