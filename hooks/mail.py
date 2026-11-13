@@ -32,6 +32,10 @@ TRANSFER_BOUND = 30  # bin/mail's own git calls, which no prompt waits on
 LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
+# Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. MAILBOX_HOLD_OFF=1
+# lifts it for one command. Empty: no platform is held.
+HELD_PLATFORMS = ()
+HOLD_OFF = "MAILBOX_HOLD_OFF"
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
 WINDOWS = sys.platform == "win32"  # read at call time, so a case can drive the Windows branch on any runner
 WAIT_INTERVAL, WAIT_MAX_SECONDS = 30, 6600  # `mail wait`: poll gap, and a run that ends before the 2 h background cap
@@ -352,10 +356,15 @@ def read_listing(path):
         return {}
 
 
+def held(env):
+    """True on a held platform unless the caller sets MAILBOX_HOLD_OFF=1."""
+    return sys.platform in HELD_PLATFORMS and env.get(HOLD_OFF) != "1"
+
+
 def turn_start_lines(payload, env):
     """The lines a UserPromptSubmit hook prints: one per open message, or one "mail unknown: <reason>". Nothing when
-    MAILBOX_REPO is unset or the session has no address."""
-    if not env.get("MAILBOX_REPO"):
+    MAILBOX_REPO is unset, the session has no address, or the platform is held (`held`)."""
+    if not env.get("MAILBOX_REPO") or held(env):
         return []
     try:
         addrs = own_addrs((payload or {}).get("session_id"), (payload or {}).get("cwd"), env)

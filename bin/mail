@@ -5,7 +5,7 @@
 # mail wait [--interval <s>] [--max-seconds <s>]   block until new mail for the session's address, then print one line
 # --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
-# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use or MAILBOX_REPO not set. Windows: bin/mail.cmd.
+# Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use, MAILBOX_REPO not set, or the platform held. Windows: bin/mail.cmd.
 # wait exits 0 on new mail; 2 not started (MAILBOX_REPO unset, no address, a waiter already runs, the lock cannot be taken,
 # the mailbox unreadable at start for about 5 minutes, or a bad --interval or --max-seconds); 3 ended with no mail.
 import argparse
@@ -117,6 +117,9 @@ def main(argv):
         return mail.wait(env, addrs, clock=time.time, sleep=time.sleep, interval=args.interval, max_seconds=args.max_seconds)
     if not env.get("MAILBOX_REPO"):
         print("MAILBOX_REPO is not set", file=sys.stderr)
+        return 2
+    if mail.held(env):
+        print("mail is held on this platform until its round trip passes (step mail-mac-unhold)", file=sys.stderr)
         return 2
     addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
     if not addrs:
