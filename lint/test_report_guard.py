@@ -4655,10 +4655,11 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
-    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+    def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
+        # The roadmap read plus one origin/main blob read: the intended added cost (step guards-read-origin-main-config).
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
     def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)

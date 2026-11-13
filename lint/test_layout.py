@@ -605,8 +605,8 @@ class DefaultBranchPage(GitTree):
                         "the checkout has no extras file, so its page url reads as unknown and does not name the page")
 
     def test_guard_read_names_the_origin_main_page_over_a_stale_checkouts_own_extras_file(self):
-        """Re-pointed: this case used to expect the checkout's own page. The owner's choice (step record
-        guards-read-origin-main-config, Part (a), degen report pasted 20:51 CST Nov 12) reverses that for guard reads."""
+        """Re-pointed: this case used to expect the checkout's own page. It now follows this lane's task (coordinator grant);
+        Part (a) of ledger row D14, the reversal of grants-read-from-main, is left to the owner."""
         self.stale_checkout(self.old_key(self.URL_LOCAL), self.registry(self.URL_MAIN))
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
                          "the guard read named the checkout's stale page, not the page origin/main holds")
