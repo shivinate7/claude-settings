@@ -12286,7 +12286,7 @@ class RedMainBrake(Env):
         self.assertIn("checks: fail", out)
         self.assertEqual(self.host.reads.count("actions/runs/1701/jobs"), 1, "the empty green run is not read once, to see that it is empty")
 
-    # The owner's order (Nov 12): a red push run, then a newer green push run that ran no suite job and carries no evidence. That run is no
+    # A red push run, then a newer green push run that ran no suite job and carries no evidence. That run is no
     # verdict, so the older red run is the verdict, and main stays red. One method per shape: a merge that goes through empties the fixture.
     def test_an_empty_green_push_run_without_evidence_does_not_hide_an_older_red_push_run(self):
         self.assert_red_stays_over_empty_green(*self.red_then_empty_green("push", self.EMPTY_PUSH))
