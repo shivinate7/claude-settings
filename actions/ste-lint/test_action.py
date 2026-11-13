@@ -26,9 +26,9 @@ PASS, and a clean tree with a held index lock lints as main does, touched or not
 Also asserts a root push's missing HEAD~1 is named by an ste-lint unknown line, not "no markdown changed"; a .ste-lint-exclude
 line git rejects as a pathspec is unknown, never "no markdown changed"; and a .git/index that is gone or a directory is one
 ste-lint unknown line, exit 0, and no PASS.
-Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on its ste-lint step): a drifted pin with a
-passing lint exits 0 with the drift on stderr, a failing lint still exits 1, and ci-job's ste-lint step reads PASS
-with `pin note` on its line, and that line holds the drift line's marker and its whole text. Without --lint (`--step`, as merge's ready checks run it), a drifted pin still FAILs."""
+Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on a step that runs the local copy): a drifted pin with a
+passing lint exits 0 with the drift on stderr, a failing lint still exits 1. R67: ci-job runs the pinned ste-lint under
+--lint and --step from a tree with no .git, so the log reads the pin as unknown (not drift), the step reads PASS with no pin note, and no exit 3."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1233,14 +1233,13 @@ def step_line(stdout):
 
 rc, stdout, log, shas, _ = ci_job_case(short_change)
 line = step_line(stdout)
-check("ci-job pin note scope: the drift is in the step's log, and the lint passed",
-      "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
-check("ci-job pin note: the ste-lint step reads PASS", line.startswith("PASS "), stdout)
-check("ci-job pin note: its line holds `pin note`", "pin note" in line, stdout)
-check("ci-job pin note: its line holds the drift line's marker", PIN_NOTE_MARKER in line, stdout)
-check("ci-job pin note: its line holds the whole drift line, `A line can pass here and fail CI`",
-      "A line can pass here and fail CI" in line, stdout)
-check("ci-job pin note: the job exits 0", rc == 0, stdout)
+# R67: --lint runs the pinned ste-lint from a tree with no .git, so the drift note and its pin note never appear.
+check("ci-job pinned tree, pass: scope, the lint passed and the log reads the pin as unknown, not drift",
+      "CI pins ste-lint at %s" % shas["A"][:7] in log and "Unknown whether it matches" in log and "ste-lint: PASS" in log, log)
+check("ci-job pinned tree, pass: the ste-lint step reads PASS with no `pin note`",
+      line.startswith("PASS ") and "pin note" not in line, stdout)
+check("ci-job pinned tree, pass: the line holds no drift line marker", PIN_NOTE_MARKER not in line, stdout)
+check("ci-job pinned tree, pass: the job exits 0", rc == 0, stdout)
 rc, stdout, log, shas, _ = ci_job_case(default_change)
 line = step_line(stdout)
 check("ci-job pin note, failing lint: scope, the drift is in the log and the lint FAILs",
@@ -1250,18 +1249,20 @@ check("ci-job pin note, failing lint: the step reads FAIL and its line never say
 check("ci-job pin note, failing lint: the job exits 1", rc == 1, stdout)
 rc, stdout, log, shas, _ = ci_job_case(short_change, pin="C")
 line = step_line(stdout)
-check("ci-job, no drift: scope, the pin is the same lint as this copy", "the same lint as this copy" in log, log)
+check("ci-job, no drift: scope, the pinned lint runs and the log reads the pin as unknown (R67)",
+      "ste-lint: PASS" in log and "Unknown whether it matches" in log, log)
 check("ci-job, no drift: the step reads PASS with no `pin note`, and the job exits 0",
       rc == 0 and line.startswith("PASS ") and "pin note" not in line, stdout)
 
-# merge's ready checks run ci-job with --step and no --lint (merge/merge.py run_ready_checks). The pin note is set under
-# --lint only (decision action-pins-follow-sessions), so a drifted pin there keeps its exit 3, and the named step reads FAIL.
+# merge's ready checks run ci-job with --step and no --lint (merge/merge.py run_ready_checks). R67: --step runs the pinned
+# ste-lint too, from a tree with no .git, so a drifted pin there has no drift note and no exit 3.
 rc, stdout, log, shas, name = ci_job_case(short_change, step=True)
 line = step_line(stdout)
-check("ci-job --step, drifted pin: scope, the step is named in its workflow, and its lint PASSes under the drift",
-      bool(name) and "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
-check("ci-job --step, drifted pin: the named step reads FAIL", line.startswith("FAIL ") and name + ":" in line, stdout)
-check("ci-job --step, drifted pin: the job exits 1", rc == 1, stdout)
+check("ci-job --step, drifted pin: scope, the step is named in its workflow, its lint PASSes, and the log reads the pin as unknown",
+      bool(name) and "CI pins ste-lint at %s" % shas["A"][:7] in log and "Unknown whether it matches" in log
+      and "ste-lint: PASS" in log, log)
+check("ci-job --step, drifted pin: the named step reads PASS", line.startswith("PASS ") and name + ":" in line, stdout)
+check("ci-job --step, drifted pin: the job exits 0, not 3", rc == 0, stdout)
 rc, stdout, log, shas, name = ci_job_case(short_change, pin="C", step=True)
 check("ci-job --step, no drift: the named step reads PASS and the job exits 0",
       rc == 0 and step_line(stdout).startswith("PASS "), stdout)
