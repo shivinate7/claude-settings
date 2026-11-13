@@ -5,7 +5,7 @@ FAMILY = "simulator"
 # simulator MCP control tool's `launch` naming a shut-down device. The cap and twin rules judge only
 # those. A raw `xcrun simctl boot` is refused by simulator-boot-bypass before either is read.
 #   simulator-boot-cap   refuses a boot while the machine is busy by the load brake's bar, naming the reading.
-#                        The booted count does not decide it (owner ruling 2026-11-12 21:59 CST); a cloud session is not braked.
+#                        The booted count does not decide it (decision sims-load-brake-only); a cloud session is not braked.
 #   simulator-boot-twin  refuses a boot while an IDLE booted device of the same deviceTypeIdentifier
 #                        and runtime exists, naming its UDID. "Idle" is the shutdown tier's own
 #                        test (owner 2026-10-10): booted 1 hour or more, no outside holder process,
@@ -278,7 +278,7 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", load=SIM_BUSY, env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    # The boot cap follows the machine, not the count (owner ruling 2026-11-12 21:59 CST). Two booted on a quiet machine:
+    # The boot cap follows the machine, not the count (decision sims-load-brake-only). Two booted on a quiet machine:
     # the cap lets the boot through, so the route rule (xcodebuild) and the lease rule (MCP) judge it instead.
     sh("boot a third simulator with two booted, a quiet machine: xcodebuild destination is judged by the route rule",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
@@ -959,7 +959,7 @@ def register_simulator_lease_cases():
     lease_launch("lease: this session's live slot 1 lease, cap full and busy: simulator-boot-cap still refuses first",
                  "deny", lease_fixture("cap_full", cap_rows, live, slot1), device=duo1,
                  rule="simulator-boot-cap", load=SIM_BUSY, carries=(SIM_UA, SIM_UB))
-    # The boot cap follows the machine, not the count (owner ruling 2026-11-12 21:59 CST). This session's live slot 1 lease
+    # The boot cap follows the machine, not the count (decision sims-load-brake-only). This session's live slot 1 lease
     # for the Duo launch: a quiet, unread or cloud machine lets the boot through whatever the count, and a busy one refuses it.
     sim_type_pad = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch"  # no other row has this type
     cap3_rows = cap_rows + [(SIM_UG, "Gamma Pad", "Booted", sim_type_pad, SIM_RT)]
