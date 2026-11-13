@@ -27,7 +27,7 @@
   "owner": "lane page-wakes-and-relays (session_013NEJL2bhraKVrHgFRGTdBk), via coordinator",
   "pick": "b",
   "ref": "coordinator 18:49 CST Nov 12; lane draft PR #3038",
-  "reply": "Closed 18:52 CST: withdrawn, already settled by your ruling of Nov 10 11:06 CST (decision relayed-grant-read-from-page): a relayed act counts only when the receiving session reads your answer on the page itself. Nothing changes.",
+  "reply": "Closed 18:55 CST: withdrawn, already settled by your ruling of Nov 10 16:46-16:57 CST (R18 point 5): a relay counts when it carries your exact words, their time and the one act, in the form Grant: \"<words>\" (owner, <time>) covers <act>, checked by the sending session. The settings edit follows that ruling, after #3038 merges and its guard has refused a paraphrase in a test.",
   "repo": "shivinate7/claude-settings",
   "short": "Grants quoted by a peer session",
   "status": "closed",
