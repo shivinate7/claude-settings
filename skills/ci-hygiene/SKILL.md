@@ -217,6 +217,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
+20. **Skip a push whose tree a PR run already proved.** The `push-skip` job runs the shared action
+    `actions/push-skip`. It says skip only when the push tree equals the head tree of a merged PR
+    (a `batch-*` PR or a lone lane) whose run was full: every suite job passed and scope skipped no step.
+    A direct push, an admin merge, a tree mismatch and any read error run everything. A schedule or
+    dispatch run never skips. The nightly is the check on what a PR run scoped out. Decision
+    `push-skip-on-proven-tree` (a push skips on a proven tree). See `snippets.md`, section 20.
 
 ## Public repos
 

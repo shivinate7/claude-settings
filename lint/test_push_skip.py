@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Tests for .github/scripts/push-skip.py, the decision that lets a push to main skip the checks its tree already passed.
+"""Tests for the push skip decision, which lets a push to main skip the checks its tree already passed.
 
-The script writes skip=true to $GITHUB_OUTPUT only when the push commit's tree equals the tree of a batch-* pull request
-head whose checks run concluded success. Any read failure writes skip=false and says "unknown". Two stand-ins drive it,
-never the network: PUSH_TREE, the push commit's tree sha, and PRS_JSON, a JSON list of the batch pull request heads, each
-{"head_branch", "tree", "status", "conclusion"}. The live read uses GH_TOKEN and REPO.
+The decision's one home is the shared action actions/push-skip (push-skip.py beside its action.yml). Child repos pin that action,
+and this repo's checks.yml calls it. Until the lift moves the script, the copy at .github/scripts/push-skip.py answers.
 
-The wiring cases read checks.yml: the push-skip job decides in a step with id decide, outputs skip, is push-only, and scope
-needs it, so every other job skips through needs as nightly-skip does for scope.
+The contract these cases pin. A change to any of it changes these cases first.
+- Env in: PUSH_TREE (the push commit's tree), HEAD_SHA (the push commit), REPO, GH_TOKEN, GITHUB_OUTPUT. EVENT is the event name,
+  as ci-scope.sh reads it: a schedule or workflow_dispatch run never skips. GITHUB_WORKSPACE is the calling checkout; the suite
+  list is read from its .github/workflows/checks.yml, and unset means this repo, as before.
+- Reads: commits/<sha>/pulls (the pull requests the push commit belongs to); git/commits/<head> (the head's tree);
+  commits/<head>/check-runs (a batch-* head only: its all-jobs-passed run and its suite runs); actions/runs?head_sha&event
+  (the checks.yml runs of a merged pull request head that is not a batch head); actions/runs/<id>/jobs (its jobs, with steps).
+- skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
+  request head whose newest checks.yml run is a full green pull request run. Full means every suite job succeeded and no suite
+  step was skipped. Scope narrows a pull request run by its diff, and the mutation-report steps are skipped by head ref
+  (batch-* only), so those are the one exemption.
+- Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 
-The live cases answer the GitHub reads through FakeGitHub, by URL, as the API does. A ready batch head skips the push only when
-every suite job of checks.yml succeeded on that head's ready run, not only when all-jobs-passed passed.
+The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
+by URL, as the API does. A ready batch head skips only when every suite job of checks.yml succeeded on its ready run, not only
+when all-jobs-passed passed.
 
     python3 lint/test_push_skip.py
 """
@@ -20,6 +29,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,9 +43,12 @@ import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from 
 from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
 from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
+import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PUSH_SKIP = os.path.join(ROOT, ".github", "scripts", "push-skip.py")
+ACTION_SCRIPT = os.path.join(ROOT, "actions", "push-skip", "push-skip.py")
+LEGACY_SCRIPT = os.path.join(ROOT, ".github", "scripts", "push-skip.py")
+PUSH_SKIP = ACTION_SCRIPT if os.path.isfile(ACTION_SCRIPT) else LEGACY_SCRIPT  # the one home; a tree that has not moved it yet answers from the legacy copy
 RUN_FOLDER = _test_temp.run_folder()  # one run folder per test run; teardown removes it
 
 JOB = "push-skip"
@@ -43,7 +56,9 @@ REPO = "owner/repo"
 TREE = "a" * 40  # the push commit's tree
 OTHER_TREE = "b" * 40
 BATCH = "batch-lane-x"
-SCRIPT_MISSING = "push-skip.py is missing at .github/scripts/push-skip.py, so no decision sets the push skip"
+RUN_PATH = ".github/workflows/checks.yml"
+OTHER_PATH = ".github/workflows/other.yml"
+SCRIPT_MISSING = "push-skip.py is missing at actions/push-skip/push-skip.py and at .github/scripts/push-skip.py, so no decision sets the push skip"
 
 # The suite jobs: the jobs a ready pull request run is meant to run, read from checks.yml by the one reader (split_jobs, whose
 # needed list is all-jobs-passed's needs). Bookkeeping is not a suite: scope decides, push-skip and nightly-skip never run on a
@@ -176,33 +191,59 @@ def ready_head_runs(changes=None, extra=()):
 
 
 class FakeGitHub:
-    """The GitHub reads push-skip makes, answered by URL the way the API answers them: the batch head's pull request list, its
-    commit, and its check runs. check_name filters the runs, and per_page (default 30) and page cut them. `fail` is raised by every
-    check-runs read. A URL no case expects goes to `unexpected`, which the case asserts empty."""
+    """The GitHub reads push-skip makes, answered by URL the way the API answers them. The batch head's pull request list, commit and
+    check runs are the defaults. `pulls` is the list the push commit's pull request read returns, `trees` maps a head sha to its tree,
+    `workflow_runs` are the runs of the repo (filtered by head_sha and event when the read names them) and `jobs` maps a run id to its
+    jobs. check_name filters the check runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read,
+    `runs_fail` by the runs read and `jobs_fail` by the jobs read. A URL no case expects goes to `unexpected`, which the case asserts
+    empty; `reads` keeps every path asked, in order."""
 
-    def __init__(self, runs, fail=None):
-        self.runs = runs
+    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None):
+        self.runs = list(runs or [])
         self.fail = fail
-        self.unexpected = []
+        self.pulls = [{"head": {"ref": BATCH, "sha": HEAD}}] if pulls is None else pulls
+        self.trees = {HEAD: TREE} if trees is None else trees
+        self.workflow_runs = [] if workflow_runs is None else workflow_runs
+        self.jobs = {} if jobs is None else jobs
+        self.runs_fail, self.jobs_fail = runs_fail, jobs_fail
+        self.unexpected, self.reads = [], []
+
+    @staticmethod
+    def page(items, query):
+        per_page = int(query.get("per_page", ["30"])[0])
+        page = int(query.get("page", ["1"])[0])
+        return items[(page - 1) * per_page:page * per_page]
 
     def __call__(self, url, token):
         parts = urllib.parse.urlsplit(url)
         prefix = "/repos/%s/" % REPO
         path = parts.path[len(prefix):] if parts.path.startswith(prefix) else parts.path
         query = urllib.parse.parse_qs(parts.query)
+        self.reads.append(path)
         if path == "commits/%s/pulls" % SHA:
-            return [{"head": {"ref": BATCH, "sha": HEAD}}]
-        if path == "git/commits/%s" % HEAD:
-            return {"tree": {"sha": TREE}}
+            return self.pulls
+        if path.startswith("git/commits/") and path[len("git/commits/"):] in self.trees:
+            return {"tree": {"sha": self.trees[path[len("git/commits/"):]]}}
         if path == "commits/%s/check-runs" % HEAD:
             if self.fail is not None:
                 raise self.fail
             runs = self.runs
             if "check_name" in query:
                 runs = [run for run in runs if run["name"] == query["check_name"][0]]
-            per_page = int(query.get("per_page", ["30"])[0])
-            page = int(query.get("page", ["1"])[0])
-            return {"check_runs": runs[(page - 1) * per_page:page * per_page]}
+            return {"check_runs": self.page(runs, query)}
+        if path == "actions/runs":
+            if self.runs_fail is not None:
+                raise self.runs_fail
+            runs = [r for r in self.workflow_runs
+                    if ("head_sha" not in query or r["head_sha"] == query["head_sha"][0])
+                    and ("event" not in query or r["event"] == query["event"][0])]
+            return {"total_count": len(runs), "workflow_runs": self.page(runs, query)}
+        if path.startswith("actions/runs/") and path.endswith("/jobs"):
+            if self.jobs_fail is not None:
+                raise self.jobs_fail
+            run_id = int(path[len("actions/runs/"):-len("/jobs")])
+            jobs = self.jobs.get(run_id, [])
+            return {"total_count": len(jobs), "jobs": self.page(jobs, query)}
         self.unexpected.append(path)
         return {}
 
@@ -211,12 +252,12 @@ class LiveHead(unittest.TestCase):
     """main() on the live reads, each answered by FakeGitHub: no network, no stand-in. Returns the one skip value written and the text
     printed."""
 
-    def skip_on(self, runs=None, fake=None):
+    def skip_on(self, runs=None, fake=None, extra_env=None):
         self.assertTrue(os.path.isfile(PUSH_SKIP), SCRIPT_MISSING)
         module = load_script()
         fake = fake if fake is not None else FakeGitHub(runs)
         out = os.path.join(RUN_FOLDER, "output-%s" % uuid.uuid4().hex)
-        env = {"GH_TOKEN": "t", "REPO": REPO, "HEAD_SHA": SHA, "PUSH_TREE": TREE, "GITHUB_OUTPUT": out}
+        env = {"GH_TOKEN": "t", "REPO": REPO, "HEAD_SHA": SHA, "PUSH_TREE": TREE, "GITHUB_OUTPUT": out, **(extra_env or {})}
         printed = io.StringIO()
         with mock.patch.object(module._nightly_skip(), "api_get", side_effect=fake), contextlib.redirect_stdout(printed):
             code = module.main(env)
@@ -451,6 +492,221 @@ class SuiteRunsOfTheHead(LiveHead):
         value, text = self.skip_on(fake=FakeGitHub(ready_head_runs(), fail=http.client.IncompleteRead(b"partial")))
         self.assertEqual(value, "false", "the check-runs read failed, so the suite evidence is unknown: skip=false")
         self.assertIn("unknown", text.lower(), "the check-runs read failed, so the script must say unknown")
+
+
+OTHER_HEAD = "9" * 40  # a head that is not the pull request head under test
+
+
+def step(name, conclusion="success"):
+    """One step of a job, in the shape the jobs read returns."""
+    return {"name": name, "status": "completed", "conclusion": conclusion}
+
+
+def job_row(name, conclusion="success", steps=None):
+    """One job of a run, in the shape the jobs read returns. Its steps default to one that ran, as a job that passed has."""
+    return {"name": name, "status": "completed", "conclusion": conclusion, "steps": [step("Run")] if steps is None else steps}
+
+
+def full_run_jobs(changes=None):
+    """The jobs of a full, ready pull request run of checks.yml: every job passed with its steps, and the jobs that never run on a pull
+    request are skipped with no steps. `changes` maps a job name to the job_row keyword arguments it gets instead, or to None to leave
+    that job out."""
+    jobs = {name: job_row(name, "skipped", steps=[]) if name in OFF_ON_PR else job_row(name) for name in ALL_RUN_JOBS}
+    for name, change in (changes or {}).items():
+        if change is None:
+            jobs.pop(name, None)
+        else:
+            jobs[name] = job_row(name, **change)
+    return list(jobs.values())
+
+
+def skipped_suite_steps(jobs):
+    """(job, step) for each step of a suite job that was skipped: a scope flag that is off skips steps this way."""
+    return [(job["name"], s["name"]) for job in jobs if job["name"] in SUITE_JOBS for s in job["steps"] if s["conclusion"] == "skipped"]
+
+
+def pull_request_run(id_, conclusion="success", status="completed", head=LANE_HEAD, created_at=EARLY, path=RUN_PATH, event="pull_request"):
+    """One checks.yml run of a pull request head, in the shape the runs read returns."""
+    return {"id": id_, "name": "checks", "path": path, "event": event, "head_sha": head, "status": status,
+            "conclusion": conclusion, "created_at": created_at, "run_attempt": 1}
+
+
+def lane_pull(head=LANE_HEAD, merged_at=EARLY, branch="lane-x"):
+    """The pull request of the push commit, in the shape the pull request read returns: merged unless merged_at is None."""
+    return {"head": {"ref": branch, "sha": head}, "merged_at": merged_at}
+
+
+class MergedPullRequest(LiveHead):
+    """A push whose tree is the tree of one merged pull request that is not a batch head. The push skips only when the newest checks.yml
+    run on that head is a full green pull request run. The reads are answered by FakeGitHub: the runs read asks for 100 per page, as
+    the other reads do, so a full page is unknown."""
+
+    def lane_fake(self, runs, jobs, pulls=None, tree=TREE, **options):
+        return FakeGitHub(pulls=[lane_pull()] if pulls is None else pulls, trees={LANE_HEAD: tree}, workflow_runs=runs, jobs=jobs, **options)
+
+    def test_a_merged_pull_request_with_the_push_tree_and_a_full_green_run_skips(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()})
+        value, text = self.skip_on(fake=fake)
+        self.assertIn("actions/runs", fake.reads, "push-skip never read the merged pull request's runs, so it cannot prove that run full")
+        self.assertEqual(value, "true", "a merged pull request with the push's tree and a full green run must give skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_a_full_run_whose_only_skipped_steps_are_mutation_report_steps_skips(self):
+        # The mutation report is set by head ref (batch-* only), and on a push its action reports nothing, so its skipped steps are no narrowing.
+        jobs = full_run_jobs({"mutation-report": {"steps": [step("Checkout", "skipped"), step("Mutation report and known defects", "skipped")]}})
+        self.assertEqual(skipped_suite_steps(jobs), [("mutation-report", "Checkout"), ("mutation-report", "Mutation report and known defects")],
+                         "the fixture must skip only the mutation-report steps, or it proves nothing about the exemption")
+        fake = self.lane_fake([pull_request_run(1)], {1: jobs})
+        value, text = self.skip_on(fake=fake)
+        self.assertIn("actions/runs", fake.reads, "push-skip never read the merged pull request's runs, so it cannot judge the exemption")
+        self.assertEqual(value, "true", "a full run whose skipped steps are all mutation-report steps must give skip=true (%s)" % text.strip()[-200:])
+
+    def test_a_partial_run_whose_suite_step_was_skipped_by_scope_runs(self):
+        jobs = full_run_jobs({"checks-windows-rest": {"steps": [step("Run"), step("Rest tests", "skipped")]}})
+        self.assertEqual(skipped_suite_steps(jobs), [("checks-windows-rest", "Rest tests")], "the fixture must skip one suite step, or it proves nothing")
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "false", "a suite step skipped by scope makes the run partial, and a partial run proves nothing: skip=false")
+
+    def test_a_draft_run_whose_suite_jobs_were_all_skipped_runs(self):
+        jobs = full_run_jobs({name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS})
+        self.assertTrue(all(job["conclusion"] == "skipped" for job in jobs if job["name"] in SUITE_JOBS), "the fixture must skip every suite job")
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "false", "the draft run skipped every suite job, and a skipped job proves nothing: skip=false")
+
+    def test_a_red_pull_request_run_runs(self):
+        jobs = full_run_jobs({"checks-windows-rest": {"conclusion": "failure"}})
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1, conclusion="failure")], {1: jobs}))
+        self.assertEqual(value, "false", "a red pull request run must give skip=false")
+
+    def test_a_newer_red_run_beats_an_older_full_green_run(self):
+        runs = [pull_request_run(1, created_at=EARLY), pull_request_run(2, conclusion="failure", created_at=LATE)]
+        jobs = {1: full_run_jobs(), 2: full_run_jobs({"checks-windows-rest": {"conclusion": "failure"}})}
+        self.assertEqual(max(runs, key=lambda r: r["created_at"])["conclusion"], "failure", "the fixture's newest run must be the red one")
+        value, _ = self.skip_on(fake=self.lane_fake(runs, jobs))
+        self.assertEqual(value, "false", "the newest run on the head is red, so an older green run stands for nothing: skip=false")
+
+    def test_a_cancelled_newer_run_beats_an_older_full_green_run(self):
+        runs = [pull_request_run(1, created_at=EARLY), pull_request_run(2, conclusion="cancelled", created_at=LATE)]
+        jobs = {1: full_run_jobs(), 2: full_run_jobs({name: {"conclusion": "cancelled", "steps": []} for name in SUITE_JOBS})}
+        value, _ = self.skip_on(fake=self.lane_fake(runs, jobs))
+        self.assertEqual(value, "false", "the newest run on the head was cancelled, so it is no green run: skip=false")
+
+    def test_an_in_progress_newer_run_beats_an_older_full_green_run(self):
+        runs = [pull_request_run(1, created_at=EARLY), pull_request_run(2, conclusion=None, status="in_progress", created_at=LATE)]
+        value, _ = self.skip_on(fake=self.lane_fake(runs, {1: full_run_jobs()}))
+        self.assertEqual(value, "false", "the newest run on the head is still going, so its result is not in: skip=false")
+
+    def test_a_full_green_run_on_another_head_runs(self):
+        fake = self.lane_fake([pull_request_run(1, head=OTHER_HEAD)], {1: full_run_jobs()})
+        self.assertNotEqual(fake.workflow_runs[0]["head_sha"], LANE_HEAD, "the fixture's run must be on another head, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a green run on another head does not prove this pull request head: skip=false")
+
+    def test_a_full_green_run_of_another_workflow_runs(self):
+        fake = self.lane_fake([pull_request_run(1, path=OTHER_PATH)], {1: full_run_jobs()})
+        self.assertNotEqual(fake.workflow_runs[0]["path"].split("@")[0], RUN_PATH, "the fixture's run must be another workflow, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a green run of another workflow is not the checks run: skip=false")
+
+    def test_a_pull_request_that_was_not_merged_runs(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()}, pulls=[lane_pull(merged_at=None)])
+        self.assertIsNone(fake.pulls[0]["merged_at"], "the fixture's pull request must be unmerged, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a pull request that was not merged is no proof for main: skip=false")
+
+    def test_a_merged_pull_request_with_another_tree_runs(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()}, tree=OTHER_TREE)
+        self.assertNotEqual(fake.trees[LANE_HEAD], TREE, "the fixture's tree must differ from the push's, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a pull request whose tree is not the push's tree does not cover the push: skip=false")
+
+    def test_a_direct_push_with_no_pull_request_runs(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()}, pulls=[])
+        self.assertEqual(fake.pulls, [], "the fixture must give the push no pull request, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a direct push has no pull request run to stand for it: skip=false")
+
+    def test_a_failed_runs_read_runs(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()}, runs_fail=http.client.IncompleteRead(b"partial"))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a failed runs read is unknown, so it runs everything: skip=false")
+
+    def test_a_failed_jobs_read_runs(self):
+        fake = self.lane_fake([pull_request_run(1)], {1: full_run_jobs()}, jobs_fail=http.client.IncompleteRead(b"partial"))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "a failed jobs read is unknown, so it runs everything: skip=false")
+
+    def test_a_full_page_of_runs_on_the_head_runs(self):
+        runs = [pull_request_run(i) for i in range(1, 101)]
+        jobs = {i: full_run_jobs() for i in range(1, 101)}  # every run is full and green: only the full page keeps the read from skipping
+        self.assertEqual(len(runs), 100, "the fixture must fill a page of 100, or it proves nothing")
+        value, _ = self.skip_on(fake=self.lane_fake(runs, jobs))
+        self.assertEqual(value, "false", "a full page of runs may hide a newer run, so the read is unknown: skip=false")
+
+    def test_a_batch_head_that_passed_still_skips_beside_a_partial_merged_pull_request(self):
+        jobs = full_run_jobs({"checks-windows-rest": {"steps": [step("Rest tests", "skipped")]}})
+        self.assertTrue(skipped_suite_steps(jobs), "the merged pull request's run must be partial, so only the batch head can skip")
+        fake = FakeGitHub(ready_head_runs(), pulls=[{"head": {"ref": BATCH, "sha": HEAD}}, lane_pull()],
+                          trees={HEAD: TREE, LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "true", "a green batch head with the push's tree still skips, whatever a partial merged pull request says")
+
+
+class EventRefusal(LiveHead):
+    """A scheduled or manual run never skips, even when a green batch head with the push's tree is there. The push job runs on push
+    only, but the decision refuses by event too, so a wiring that drops the push-only if: cannot skip a nightly."""
+
+    def test_a_schedule_run_never_skips_even_when_a_green_batch_head_matches(self):
+        fake = FakeGitHub(ready_head_runs())
+        self.assertEqual(fake.trees[HEAD], TREE, "the fixture's batch head must match the push's tree, or it proves nothing")
+        value, _ = self.skip_on(fake=fake, extra_env={"EVENT": "schedule"})
+        self.assertEqual(value, "false", "a scheduled run must never skip: skip=false")
+
+    def test_a_workflow_dispatch_run_never_skips_even_when_a_green_batch_head_matches(self):
+        fake = FakeGitHub(ready_head_runs())
+        self.assertEqual(fake.trees[HEAD], TREE, "the fixture's batch head must match the push's tree, or it proves nothing")
+        value, _ = self.skip_on(fake=fake, extra_env={"EVENT": "workflow_dispatch"})
+        self.assertEqual(value, "false", "a manual run must never skip: skip=false")
+
+
+class CallerWorkflow(LiveHead):
+    """The suite list comes from the calling checkout, GITHUB_WORKSPACE, as all-jobs-passed reads its own workflow. A child repo that pins
+    the shared action has its own checks.yml, and the action's copy of this repo's is not that repo's."""
+
+    def test_the_suite_list_is_read_from_the_calling_workflow_in_the_workspace(self):
+        caller = os.path.join(RUN_FOLDER, "caller-%s" % uuid.uuid4().hex)
+        os.makedirs(os.path.join(caller, ".github", "workflows"))
+        with open(os.path.join(caller, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as handle:
+            handle.write(all_jobs_home.CHILD_GOOD)
+        child_suites = sorted(name for name in split_jobs(all_jobs_home.CHILD_GOOD)[0] if name not in BOOKKEEPING)
+        self.assertNotEqual(child_suites, SUITE_JOBS, "the caller's suite list must differ from this repo's, or the case proves nothing")
+        fake = FakeGitHub([check_run(name="lint"), check_run(name="test-mac"), check_run(name=ROLLUP_NAME)])
+        value, text = self.skip_on(fake=fake, extra_env={"GITHUB_WORKSPACE": caller})
+        self.assertEqual(value, "true", "every suite job of the caller's checks.yml passed, so the push skips: the suite list must come from the caller (%s)"
+                         % text.strip()[-200:])
+
+
+class SharedAction(unittest.TestCase):
+    """This repo's checks.yml calls the shared action for the decision, so the decision has one home. The uses line is matched the way
+    this repo writes its local actions: its prefix is read from the all-jobs-passed line, never assumed."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_the_push_skip_job_calls_the_shared_action(self):
+        prefix = re.search(r"uses: (\S*?)actions/all-jobs-passed", self.text)
+        self.assertIsNotNone(prefix, "checks.yml has no all-jobs-passed uses line to read the local action prefix from")
+        block = job_block(self.text, JOB) or ""
+        self.assertIn("uses: %sactions/push-skip" % prefix.group(1), block,
+                      "the push-skip job does not call the shared action, so the decision keeps its own copy in a run step")
+
+    def test_the_push_skip_job_passes_the_event_name_to_the_decision(self):
+        block = job_block(self.text, JOB) or ""
+        self.assertIn("EVENT: ${{ github.event_name }}", block, "the push-skip job does not pass the event name, so the decision cannot refuse a schedule or dispatch run")
+
+    def test_no_second_copy_of_the_decision_is_left_under_github_scripts(self):
+        self.assertFalse(os.path.isfile(LEGACY_SCRIPT), "push-skip.py still has a second copy at .github/scripts/push-skip.py, so the decision has two homes")
 
 
 class PushSkipWiring(unittest.TestCase):

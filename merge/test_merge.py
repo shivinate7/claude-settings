@@ -11416,6 +11416,17 @@ class RedMainBrake(Env):
         self.assertIn("checks: fail", out)
         self.assertNotIn("actions/runs/1721/jobs", self.host.reads, "a pull_request run is not judged, so it is not read")
 
+    def test_a_red_nightly_stays_red_under_a_newer_push_run_that_the_proven_skip_skipped(self):
+        # The proven skip (a push whose tree a merged pull request's full green run covered) leaves push-skip success and scope skipped, with
+        # every suite job skipped. That run is the push group's verdict, but a skipped job is no pass, so it clears no red nightly.
+        red_nightly = [main_job("checks", "failure", 20), main_job("scope", "success"), main_job("checks-macos", "success", 30)]
+        rc, out, before = self.go([main_run(1801, "success", event="push"), main_run(1800, "failure", event="schedule")],
+                                  {1800: red_nightly, 1801: self.EVIDENCE_PUSH})
+        self.refused(rc, out, before)
+        self.assertIn("actions/runs/1801/jobs", self.host.reads, "the newer push run was not read, so the verdict did not weigh it")
+        self.assertIn("run 1800", out, "the newer skipped push run hid the red nightly")
+        self.assertIn("checks: fail", out)
+
     def test_a_push_run_whose_suite_ran_and_passed_clears_an_older_red_push_run(self):
         # control: a newer push run that ran its suite and passed is the verdict, whatever its bookkeeping jobs say
         rc, out, _ = self.go([main_run(1731, "success"), main_run(1730, "failure")], {1730: self.RED_PUSH, 1731: self.RAN_PUSH})
