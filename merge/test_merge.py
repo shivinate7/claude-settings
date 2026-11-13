@@ -20663,7 +20663,7 @@ class LeftOutBatch(CloudSession):
             self.assertEqual(out.splitlines()[-len(want):], want, f"{claim}: the left-out lines do not end the output: %s" % out)
 
     def test_a_done_pr_no_batch_holds_is_named_none(self):
-        """The shape of #2990: round 3 is done with guard or check yes and net value zero, and no batch holds it. The build's last line names it."""
+        """A done record, net value zero, in no batch: the build's last line names that pull request none."""
         for n in (101, 102, 103):
             self.lane(n)
         self.done(103, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, PASS"),
@@ -20746,7 +20746,7 @@ class LeftOutBatch(CloudSession):
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
     def test_a_pr_that_is_not_done_is_not_named(self):
-        """#103 is open on a FAIL round and #104's record is for an older head (stale): neither is done, so neither is named. The control, #105, is named."""
+        """#103's latest record is FAIL and #104's record is for an older head (stale): neither is done, so neither is named. The control, #105, is named."""
         for n in (101, 102, 103, 104, 105):
             self.lane(n)
         self.record(103, rounds=("Round 1: reviewer, sonnet, FAIL",))
@@ -20788,7 +20788,7 @@ class LeftOutBatch(CloudSession):
         rc, out = self.build("--batch-build", "nightly", "101", "102")
         self.assertIn("merge: batch nightly built", out, "a failed list read stopped the batch build: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        self.assertLeftOut(out, ["merge: left-out list unknown (reading the pull requests failed: HTTP 500)"],
+        self.assertLeftOut(out, ["merge: left-out list unknown (reading the pull requests failed: HTTP 500) " + merge.UNKNOWN_CITE],
                            "a failed list read is not printed as an unknown left-out list")
 
     def mid_list_read_raises(self, err):
@@ -20830,6 +20830,7 @@ class LeftOutBatch(CloudSession):
         unknown = [l for l in out.splitlines() if l.startswith("merge: left-out list unknown (")]
         self.assertEqual(len(unknown), 1, "%s: want exactly one left-out list unknown line, got %d: %s" % (claim, len(unknown), out))
         self.assertIn(reason_part, unknown[0], "%s: the unknown line does not name the read's failure: %s" % (claim, unknown[0]))
+        self.assertTrue(unknown[0].endswith(") " + merge.UNKNOWN_CITE), "%s: the unknown line does not end with the cite: %s" % (claim, unknown[0]))
         self.assertEqual([l for l in out.splitlines() if " left out of batch " in l], [],
                          "%s: a left out line is printed although the list is unknown: %s" % (claim, out))
 
