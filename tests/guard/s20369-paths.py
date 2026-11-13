@@ -199,6 +199,18 @@ SA = dict(A, cwd=SCRIPTREPO)   # a test-author, run in SCRIPTREPO
 # A script over guard_frozen's read limit (_SCRIPT_READ_LIMIT, 256 KB). The string runs past the limit, so the
 # cut falls inside it and the read is no parseable python. Anything written before the cut is still read.
 OVER_LIMIT_PAD = "PAD = '" + "x" * (300 * 1024) + "'\n"
+# The patches the git apply cases name, in git's own format. The guard reads the paths each header names, so a
+# patch git cannot parse would test nothing. names_only.patch names a test path in an added line only. empty.patch
+# holds nothing, and dir.patch is a folder, not a readable file.
+PATCH_NEW_TEST = ("diff --git a/tests/x.py b/tests/x.py\nnew file mode 100644\n--- /dev/null\n"
+                  "+++ b/tests/x.py\n@@ -0,0 +1 @@\n+x = 1\n")
+PATCH_MODIFY_TEST_APP = ("diff --git a/src/test_app.py b/src/test_app.py\n--- a/src/test_app.py\n"
+                         "+++ b/src/test_app.py\n@@ -1 +1 @@\n-x = 0\n+x = 1\n")
+PATCH_PRODUCT = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+                 "@@ -1 +1 @@\n-x = 0\n+x = 1\n")
+PATCH_MIXED = PATCH_PRODUCT + PATCH_MODIFY_TEST_APP
+PATCH_NAMES_ONLY = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+                    "@@ -1 +1 @@\n-print('old')\n+print('tests/x.py and src/test_app.py are named, not touched')\n")
 
 
 def _build_scriptrepo():
@@ -239,6 +251,13 @@ def _build_scriptrepo():
         # A repo-relative write into tests/: no temp folder, so it stays a test write.
         "tools/gen_rel_tests.js": "const fs = require('fs');\nconst path = require('path');\n"
                                   "fs.writeFileSync(path.join('tests', 'a.test.js'), 'x');\n",
+        "patches/to_tests.patch": PATCH_NEW_TEST,
+        "patches/to_test_app.patch": PATCH_MODIFY_TEST_APP,
+        "patches/mixed.patch": PATCH_MIXED,
+        "patches/product.patch": PATCH_PRODUCT,
+        "patches/names_only.patch": PATCH_NAMES_ONLY,
+        "patches/empty.patch": "",
+        "patches/dir.patch/notes.txt": "a folder named like a patch\n",
     })
     run_vcs(SCRIPTREPO, "worktree", "add", "-q", SCRIPTWT, "-b", "scriptlane")
     os.makedirs(SCRIPTFRESH, exist_ok=True)
@@ -249,7 +268,11 @@ def _build_scriptrepo():
             or not os.path.isfile(os.path.join(SCRIPTWT, "tools", "build.py"))
             # The over-limit cases need a script past the read limit, or they test nothing.
             or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_dist_write.py")) <= 256 * 1024
-            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024):
+            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024
+            # The git apply cases need each patch in place, the folder read as no file, and the missing one absent.
+            or not os.path.isfile(os.path.join(SCRIPTREPO, "patches", "to_tests.patch"))
+            or not os.path.isdir(os.path.join(SCRIPTREPO, "patches", "dir.patch"))
+            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "missing.patch"))):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
 
@@ -854,6 +877,32 @@ for _path in MUTATION_TESTS:
     ):
         sh("builder-test: shell %s onto %s is refused" % (_form, _path), _command, "deny", rule=BT,
            carries=("test-author",), **BR)
+
+# ---- a builder's `git apply` of a patch file. The guard reads the paths the patch's headers name, so a patch that
+# touches a test path is refused when it is applied, as a shell write to that path is. A flag that only checks or
+# prints writes nothing and stays allowed. A patch that is missing or not a readable file is unknown and stays allowed.
+for _patch in ("patches/to_tests.patch", "patches/to_test_app.patch"):
+    sh("builder-test: git apply of %s, a patch touching a test path, is refused" % _patch,
+       "git apply " + _patch, "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply of a patch touching a product file and a test file is refused",
+   "git apply patches/mixed.patch", "deny", rule=BT, carries=("test-author",), **SB)
+for _flag in ("-R", "--index", "--3way", "--cached"):
+    sh("builder-test: git apply %s of a test patch is refused" % _flag,
+       "git apply %s patches/to_tests.patch" % _flag, "deny", rule=BT, carries=("test-author",), **SB)
+for _flag in ("--check", "--stat", "--numstat"):
+    sh("builder-test: git apply %s of a test patch writes nothing and is allowed" % _flag,
+       "git apply %s patches/to_tests.patch" % _flag, "allow", **SB)
+for _patch in ("patches/product.patch", "patches/names_only.patch", "patches/empty.patch",
+               "patches/missing.patch", "patches/dir.patch"):
+    sh("builder-test: git apply of %s is allowed" % _patch, "git apply " + _patch, "allow", **SB)
+sh("builder-test: git apply of a test patch by the test-author is allowed",
+   "git apply patches/to_tests.patch", "allow", **SA)
+sh("builder-test: git apply of a test patch in a main session is allowed",
+   "git apply patches/to_tests.patch", "allow", cwd=SCRIPTREPO)
+sh("builder-test: an echo that names a git apply of a test patch is allowed",
+   'echo "git apply patches/to_tests.patch"', "allow", **SB)
+sh("builder-test: a trailing comment that names a git apply of a test patch is allowed",
+   "ls  # git apply patches/to_tests.patch", "allow", **SB)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
