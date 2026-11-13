@@ -112,6 +112,7 @@ FAMILIES = {
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
+    "readonly-shell-write": "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass",
     "push-delete": "push and delete",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
