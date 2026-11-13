@@ -7,7 +7,8 @@ with `draft` false (the cloud's ready route, since `gh pr ready` gets 403 in clo
 decision ci-wait-reads-run-status, The CI wake-up). The MCP call names its PR by `owner`, `repo` and `pullNumber` in tool_input.
 A call with `draft` absent or true starts none. Each `gh pr ready` in a command gets its own watch, in this one
 process. A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
-ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
+ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one
+verdict line. While the quota is low, it also prints one low line per spell on stderr before the verdict:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
