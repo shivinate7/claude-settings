@@ -23,6 +23,8 @@ UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_i
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
 entry) is never saved.
+A bash-input echo (one shared_names.BASH_INPUT_TAG block, then only whitespace and shared_names.BASH_OUTPUT_TAGS
+blocks) is never saved either. Owner words after the block are saved.
 After a save, capture writes `<session_id>.inbox.repo` once, when the payload cwd is inside a git
 repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
@@ -219,6 +221,32 @@ def not_saved(what, err):
     return "Feedback capture: this %s was not saved (%s). Jot it by hand into the handoff." % (what, err)
 
 
+def _closing(tag):
+    """`<x>` -> `</x>`."""
+    return "</" + tag[1:]
+
+
+def is_bash_echo(prompt, input_tag, output_tags):
+    """True when the prompt is nothing but the echo of a `!` command: one input block, then only whitespace and
+    output blocks. Text after the input block, or an unclosed block, is owner words and is saved."""
+    rest = prompt.strip()
+    if not rest.startswith(input_tag):
+        return False
+    end = rest.find(_closing(input_tag))
+    if end < 0:
+        return False
+    rest = rest[end + len(_closing(input_tag)):].lstrip()
+    while rest:
+        tag = next((t for t in output_tags if rest.startswith(t)), None)
+        if tag is None:
+            return False
+        end = rest.find(_closing(tag))
+        if end < 0:
+            return False
+        rest = rest[end + len(_closing(tag)):].lstrip()
+    return True
+
+
 def capture(raw, stamp):
     """Saves one owner prompt to the inbox. `raw` is the hook's stdin as bytes."""
     hook = json.loads(raw.decode("utf-8"))
@@ -226,12 +254,23 @@ def capture(raw, stamp):
     paths = inbox_paths(hook.get("session_id"))
     if paths is None or not isinstance(prompt, str):
         return
+    # Each name imports apart: a stale helper that lacks one tag only turns off that tag's own skip.
     try:
         from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
-    except ImportError:  # missing or stale helper: only the notice check degrades; capture and the grant run on
+    except ImportError:
         MACHINE_TAGS = ()
+    try:
+        from shared_names import BASH_INPUT_TAG
+    except ImportError:
+        BASH_INPUT_TAG = None
+    try:
+        from shared_names import BASH_OUTPUT_TAGS
+    except ImportError:
+        BASH_OUTPUT_TAGS = ()
     if MACHINE_TAGS and prompt.strip().startswith(MACHINE_TAGS):
         return  # a notice is not an owner message
+    if BASH_INPUT_TAG and is_bash_echo(prompt, BASH_INPUT_TAG, BASH_OUTPUT_TAGS):
+        return  # the echo of a command the owner ran with `!`, not feedback
     err = save_message(paths[0], stamp, prompt)
     if err is not None:
         print(not_saved("message", err))

@@ -30,6 +30,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
   04:29 CST, covering this skip only; debt `inbox-saves-other-notices`, which tracks other notices
   the inbox saves). Other peer messages are skipped only where a tag marks them.
+- **Bash echo.** A message that is only the echo of a shell command the owner ran with `!` is never
+  captured and counts toward no burst (owner ruling 2026-11-12 21:59 CST, question q7, option a). The
+  echo is one `shared_names.BASH_INPUT_TAG` (`<bash-input>`) block, then only whitespace and
+  `shared_names.BASH_OUTPUT_TAGS` blocks (`<bash-stdout>`, `<bash-stderr>`). Any other text after the
+  input block, a quote mid-message, an unclosed block and `<bash-input-log>` are saved. Cost: string
+  checks on text already in memory. Run-of-messages item b is not built.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
   Only a burst's messages need items. A lone message of one or two plain lines never triggers the guard.
