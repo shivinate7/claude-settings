@@ -309,3 +309,10 @@ List: main's build row "draft PRs over 12 h with no live lane", from live file r
 - Held, branch starts with an open step's slug (doing, no live lane): 19 (#2832, #2837, #2844, #2856, #2857, #2858, #2859, #2873, #2883, #2895, #2909, #2914, #2918, #2919, #2923-#2927).
 - Closed: 18, finished 02:29 CST, no closing comment, no branch delete: #2827 #2831 #2841 #2842 #2846 #2853 #2855 #2861 #2862 #2863 #2867 #2884 #2889 #2901 #2908 #2910 #2912 #2928. Reopened 02:31 CST: #2863, the home of ruling 557 a (coordinator 02:31 CST). Net closed: 17.
 The 206 already listed in the second pass keep its verdicts; not re-joined.
+
+## Fourth pass, after batch 125 (#3119, merged 9d360b2e7 06:15 CST Nov 13)
+
+List: main's build row "draft PRs over 12 h with no live lane", from live file readAt 2026-11-13T06:20:36-06:00 (404 open PRs): 338 listed. 62 were not on an earlier pass's list and not on runner 10's 06:18 CST hold list (33 PRs).
+- Held, named by an open step, a non-archived session's tags, or an open page item: 51.
+- Held, held in the second pass by an idle, unarchived lane: 8 (#2941, #2946, #2948, #2953, #2954, #2955, #2991, #3006).
+- Closed at 06:22 CST, with no closing comment and no branch delete: #2998, plus runner 10's own stale batch drafts #2995 (batch 108) and #3016 (batch 110), which runner 10 released at 06:18 CST.
