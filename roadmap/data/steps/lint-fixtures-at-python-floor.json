@@ -1,0 +1,14 @@
+{
+ "id": "lint-fixtures-at-python-floor",
+ "title": "Lane lint fails on a pre-3.11 Mac because the test fixtures need Python 3.11",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "On the owner's Mac, `merge --lane-lint 3048` failed 5 fixture suites on a 3-line .claude/CLAUDE.md diff: Stale prose check, Wait-pid helper, Hook stub suite, Hook stub check, Playwright setup action. The log shows 7 \"ValueError: Invalid isoformat string: '2026-10-25T12:00:00Z'\" errors, because Python before 3.11 cannot parse a trailing Z, plus \"pipx not found\". The product floor is 3.9 (lint/check_python_floor.py), but these tests assume CI's 3.11, so lane lint cannot pass on that Mac. It fails on the fixtures, not on the diff.",
+ "source": "retrospective 20:31 CST Nov 12, from the owner's Mac",
+ "note": "Fix options for the lane: parse fixture times through one helper that accepts a trailing Z on 3.9; and make a missing pipx an unknown, not a FAIL. Debt or note per roles-findings-are-debts-or-notes: a debt if Mac lanes run lane lint in normal work, else a note. Meanwhile the cloud review lane lints #3048.",
+ "updatedAt": "2026-11-12T20:32:43-06:00"
+}
