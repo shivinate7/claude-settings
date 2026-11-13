@@ -1164,7 +1164,7 @@ class Host:
             heads[name] = row
         return heads
 
-    def batch_running(self, n, base, unprotected_counts_all=False, ignore=None, head=None):
+    def batch_running(self, n, base, head=None):
         """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a required check
         reported and not completed (rule git-no-merge-during-batch-ci), unless that head contains n's head (decision no-merge-during-batch-ci):
         the compare `head...other head` reads `ahead` or `identical`, and so does the compare `base...head` (this head holds the base tip). Both are read only for a busy
@@ -1172,18 +1172,15 @@ class Host:
         `head` is n's head sha; None reads it through pr(n). The run counts because a required job can wait on another job
         (checks.yml's `checks` needs `scope`), so it has no row yet. A required name with no entry and no running workflow on that head
         does not count: a ready PR whose CI never reports would block every merge. merge.ignoreChecks runs and checks never count. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
-        The required names are a pinned list, else the branch protection. `unprotected_counts_all` (the guard's mode): a base with no
-        branch protection counts every reported pending check, and an empty protection list counts none. Without it, required_names rules.
-        `ignore` (the guard's, whose Host keeps no ignore list so its own head counts every check) replaces self.ignore for this read."""
-        ignore = self.ignore if ignore is None else ignore
+        The required names are a pinned list, else the branch protection (required_names)."""
         others = [d for d in self.pages("pulls", fields={"state": "open"})
                   if d["base"]["ref"] == base and not d.get("draft") and d["number"] != n]
         if not others:
             return []  # no protection read when no other pull request could block
-        names = self.batch_names(unprotected_counts_all)
+        names = self.required_names()
         blockers = []
         for d in others:
-            parts = self.busy_parts(d, names, ignore)
+            parts = self.busy_parts(d, names, self.ignore)
             if not parts:
                 continue
             if head is None:
@@ -1192,13 +1189,6 @@ class Host:
             if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
-
-    def batch_names(self, unprotected_counts_all=False):
-        """The required names a read of the head's settled state takes: the protection's (None: no branch protection) in the guard's mode with no
-        pinned list, else required_names. A failed read raises Stop, so the caller reads unknown."""
-        if unprotected_counts_all and not isinstance(self.required, list):
-            return self.protection_names()
-        return self.required_names()
 
     def busy_parts(self, d, names, ignore):
         """-> why the head of the open pull request row `d` is busy: one text per pending required check and per workflow run not completed.
@@ -1583,30 +1573,26 @@ class Host:
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(held) if held else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
-    def head_read(self, n, nothing_is_green=False, batch_ignore=None):
+    def head_read(self, n, nothing_is_green=False):
         """One read, no wait, of every check and workflow run on the head, required or not.
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        Another ready PR's running CI holds no merge (per-lane merge), so no other pull request is read and `batch_ignore` is not used. A settled
-        head still reads the required names (batch_names, the guard's mode): a read of them that fails is unknown, and the guard denies a merge
-        it could not read.
+        Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
-        a head whose check runs link more than one run adds one more workflow runs read; a settled head with no pinned list adds the protection read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
         not one per call."""
         try:
             with shared_deadline(SH_TIMEOUT):
-                num = self.pr_number(n)  # the number, so batch_running can leave this PR out; pr() of a number reads nothing more
+                num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
-                if not (red or pending or unseen):
-                    self.batch_names(unprotected_counts_all=True)  # the answer holds no merge; a failed read raises
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
