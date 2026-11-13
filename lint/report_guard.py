@@ -41,7 +41,7 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the one session tagged cs-build:triage and cs-repo:<repo> in the transcript's get_session or list_sessions records), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
@@ -166,7 +166,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_writer, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -1210,18 +1210,20 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
-    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
-    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
-    A read whose result names no writer keeps the refusal's old text. The question box counts
-    only in a repo with no waiting page. A send to @parent reaches no one there.
+    meta/page read's; with none, the one session its triage tag names for this repo (`_transcript.page_writer`), read
+    from the get_session and list_sessions records of this transcript (its ack starts no turn either). A tag
+    writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send with no result,
+    a failed result or a non-delivered one does not. A transcript writer counts on the send alone. With no writer
+    named, or two triage sessions, the refusal says to run list_sessions in its own turn first. The question box
+    counts only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
     newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
     parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
-    has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
+    turn with no counted send reads the repo name (git's config file) and the transcript's session records for the
+    tag writer when it has no meta/page writer, then the waiting page (`layout.waiting_page`); a delivered send to
+    the tag writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
@@ -1244,8 +1246,8 @@ def question_problem(records, turn, text, hook):
             return LANE_REFUSAL, ""
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
-    if not writer and root and not page_read_ran(records):
-        writer = layout.page_writer_key(root)
+    if not writer and root:
+        writer = page_writer(records, layout.repo_name(root))
         if writer:
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
@@ -1264,7 +1266,9 @@ def question_problem(records, turn, text, hook):
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
-                            "the page writer is not known to this session; the waiting page is " + page), ""
+                            "the page writer is not known to this session; the waiting page is " + page + ". Run list_sessions "
+                            "(tag cs-build:triage, the same cs-repo tag as this repo) in its own turn first, so the one triage "
+                            "session is named, then send the question to it"), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.

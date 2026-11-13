@@ -449,6 +449,51 @@ def page_writer_id(records):
     return _page_reads(records)[1]
 
 
-def page_read_ran(records):
-    """True when the main session ran an ArtifactData get of meta/page, whatever its result named."""
-    return _page_reads(records)[0]
+TRIAGE_TAG = "cs-build:triage"  # the tag of the session that writes the waiting page
+SESSION_READS = ("get_session", "list_sessions")  # the tool-name tails whose results carry session tags
+
+
+def _session_tags(node, found):
+    """Fill `found` with id -> lowercase tags for every dict under `node` that has a string `id` and a tags list."""
+    if isinstance(node, dict):
+        if isinstance(node.get("id"), str) and isinstance(node.get("tags"), list):
+            found[node["id"]] = {str(t).lower() for t in node["tags"]}
+        for child in node.values():
+            _session_tags(child, found)
+    elif isinstance(node, list):
+        for child in node:
+            _session_tags(child, found)
+
+
+def tag_writer(records, repo):
+    """The one session whose newest get_session or list_sessions record in the main session carries cs-build:triage and
+    cs-repo:<repo>, else None. A session's newest record decides, so one that is no longer triage drops out. Zero or
+    two such sessions name no writer: a guess between two would refuse the real one. `repo` is compared lowercase; no
+    repo names no writer. A failed result is no record. A listing counts as a record of each session it holds."""
+    if not repo:
+        return None
+    import own_session  # lazy: it lives in hooks/, which every caller of this module has on sys.path
+    wanted = {TRIAGE_TAG, "cs-repo:" + repo.lower()}
+    pending, tags = set(), {}
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            if str(use.get("name", "")).endswith(SESSION_READS):
+                pending.add(use.get("id"))
+        for block in tool_results(rec):
+            if block.get("tool_use_id") not in pending or block.get("is_error") is True:
+                continue
+            try:
+                _session_tags(own_session._record_json(result_text(block)), tags)
+            except (ValueError, KeyError, TypeError):
+                continue
+    match = [sid for sid, have in tags.items() if wanted <= have]
+    return match[0] if len(match) == 1 else None
+
+
+def page_writer(records, repo):
+    """The page writer: the `writer` of the newest meta/page get in the main session, else the one session its triage
+    tag names for `repo` (tag_writer). The one home of "who writes the page"; the pick guard and the owner-feedback
+    check both call it, so they cannot disagree. None when neither names one."""
+    return page_writer_id(records) or tag_writer(records, repo)

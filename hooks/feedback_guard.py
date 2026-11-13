@@ -699,10 +699,12 @@ class Pages:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
-    def is_writer(self, session_id):
-        """True when the transcript's newest meta/page get names `session_id` as the page writer. False when it
-        names another, none, or the transcript cannot be read: the writer is not known, so the session is not it."""
-        return bool(session_id) and self._load() and _transcript.page_writer_id(self.records) == session_id
+    def is_writer(self, session_id, repo=None):
+        """True when `_transcript.page_writer` names `session_id`: the newest meta/page get's writer, else the one session
+        tagged cs-build:triage and cs-repo:<repo> (the pick guard reads the same function). With no `repo`, only a
+        meta/page get can name it. False when it names another, none, or the transcript cannot be read: the writer is
+        not known, so the session is not it."""
+        return bool(session_id) and self._load() and _transcript.page_writer(self.records, repo) == session_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
@@ -939,7 +941,7 @@ def page_form_problem(text, items, homes, pages, session):
     if wake.startswith((SAVED_WAKE, UNDONE_WAKE)) and "(" not in wake.partition("Items:")[2]:
         return None  # a plain save or an undo: no owner words to route
     scope = homes.page_form_scope(banner.group(1))
-    if scope is None or not pages.is_writer(session):
+    if scope is None or not pages.is_writer(session, repo=SETTINGS_REPO.lower()):  # page_form_scope proved the cwd repo is this one
         return None
     try:
         for it in items:
