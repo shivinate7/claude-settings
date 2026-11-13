@@ -11975,7 +11975,7 @@ class RedMainBrake(Env):
         rc, out, before = self.go(runs, self.page_jobs(runs))
         self.refused(rc, out, before)
         self.assertIn("#2650", out, "the refusal does not name breaking run 905's pull request while the revert's run is pending")
-        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+        self.assertIn("Merges resume once the revert merges", out, "the refusal does not say merges resume once the revert merges, while the revert's own run is still going")
 
     def revert_route_refusal(self, above=(), below=(), jobs=None):
         """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route.
@@ -11989,11 +11989,11 @@ class RedMainBrake(Env):
         _, out, _ = self.revert_route_refusal()
         self.assertRegex(out, r"(?i)revert[^.\n]*--base-red-ok|--base-red-ok[^.\n]*revert", "the refusal does not name --base-red-ok as the route for the revert PR")
 
-    def test_the_revert_route_says_merges_resume_once_the_revert_run_on_main_is_green(self):
-        # the revert's own run is pending after the revert merges: merges resume when that run is green, not when the revert merges
+    def test_the_revert_route_says_merges_resume_once_the_revert_merges(self):
+        # merges resume when the revert merges, not when its run on main is green: that run may still be going then
         _, out, _ = self.revert_route_refusal()
-        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
-        self.assertNotIn("merges resume once the revert merges", out, "the refusal says merges resume once the revert merges, which is false while the revert's run is pending")
+        self.assertIn("Merges resume once the revert merges", out, "the refusal does not say merges resume once the revert merges")
+        self.assertNotIn("run on main is green", out, "the refusal still holds merges until the revert's run on main is green")
 
     def test_the_revert_route_does_not_say_drops_lines_is_needed_only_for_deleted_files(self):
         # the silent-undo check flags a revert of a merge for each file it deletes and for each file it restores
