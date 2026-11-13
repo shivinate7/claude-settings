@@ -1,0 +1,14 @@
+{
+ "id": "triage-picks-judged",
+ "title": "The past-ruling check on a pick also covers triage's picks",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": "pick-ack-past-ruling",
+ "why": "PR #2932 (step pick-ack-past-ruling) checks only a coordinator's picks: hooks/call_judge.py is_coordinator is true only for a session tagged cs-build:coordinator. Triage made two picks on mutation-tests-for-cost tonight (08:00 and 09:05 CST) that missed decision ci-job-caps and the GUARD_MODULE_EXEMPT list (sightings 9 and 10).",
+ "source": "lane pick-ack-past-ruling (session_013NEJL1Bx5gQkzUWiKgjPk3) 09:13 CST Nov 13",
+ "note": "Fix after #2932 merges: the check also judges a pick or hold sent by a session tagged cs-build:triage. Red first: a triage pick that a decision on main settles is flagged; a coordinator pick still is.",
+ "updatedAt": "2026-11-13T09:15:41-06:00"
+}
