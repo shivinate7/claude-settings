@@ -1,0 +1,14 @@
+{
+ "id": "worktree-guard-refuses-red-run-checkout",
+ "title": "The hand-made-worktree guard refuses the protocol's own red-run checkout (`git worktree add`)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A test-author following the red-run protocol is refused, so authors used git archive copies instead, which prove the red on a different tree shape.",
+ "source": "Lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi), 17:04 CST Nov 13: its read, unchecked by triage.",
+ "note": "Filed 17:04 CST Nov 13. The guard against a hand-made worktree refuses `git worktree add`, the checkout the red-run protocol itself uses. Test-authors worked around it with git archive copies. A guard that refuses the protocol it serves is a false alarm (rule `verification-cry-wolf-guard-is-spent`). Fix is a lane's read of the guard record first: allow the protocol's exact form, or change the protocol. Do not route around the refusal. A guard change: test-author red case first, builder, reviewer. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T17:04:35-06:00"
+}
