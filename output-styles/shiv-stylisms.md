@@ -45,7 +45,7 @@ Short and plain are one goal. Never trade one for the other.
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. When every option's `Lose:` is large (a rule gone, a known gap left open, an act
   that cannot be undone), add one option that softens that loss. It keeps most of the gain.
-  Never pick it for the owner. `hooks/question_form.py` checks the box and the page, but not this softening
+  `hooks/question_form.py` checks the box and the page, but not this softening
   option: it is a writing rule only (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
