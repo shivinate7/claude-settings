@@ -6,4 +6,4 @@
 
 **Decision.** rule `roles-findings-are-debts-or-notes` (a known gap is a debt only if Claude is likely to hit it in normal work).
 
-**Retire.** Closed when `lint/test_verdict.py` runs `verdict` by name from an agent's PATH.
+**Retire.** Closed when an agent's PATH holds `verdict`, so an agent runs `verdict` by name.
