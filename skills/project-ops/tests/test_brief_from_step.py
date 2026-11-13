@@ -444,9 +444,9 @@ class TemplateTail(unittest.TestCase):
     def test_red_first_line_is_in_the_template(self):
         self.assertTrue(tail_has(r"\bred first\b"), "the template's tail has no sentence that says red first")
 
-    def test_round_one_review_cites_ruling_r9(self):
-        self.assertTrue(tail_has(r"\bround[- ]1\b", r"\bR9\b"),
-                        "the template has no round-1 review sentence that cites ruling R9")
+    def test_round_one_review_follows_the_ruling_in_the_store(self):
+        self.assertTrue(tail_has(r"\bround[- ]1\b", r"\bruling\b", r"\bstore\b"),
+                        "the template's tail has no round-1 review sentence that follows the ruling in the store")
 
     def test_round_one_review_has_no_round_three(self):
         self.assertTrue(tail_has(r"\bround 3\b", NEGATION), "the template does not say there is no round 3")
@@ -471,11 +471,12 @@ class TemplateRules(unittest.TestCase):
         self.assertTrue(any("cs-topic:" in line for line in read_template().splitlines()),
                         "the template has no line naming the cs-topic tag")
 
-    def test_template_points_at_r9_by_id_and_restates_nothing(self):
+    def test_template_names_no_ruling_id_and_restates_no_ruling_words(self):
         text = read_template()
-        self.assertTrue(re.search(r"\br9\b", text, re.I), "the template does not point at ruling r9 by id")
+        found = re.search(r"\br\d+\b", text, re.I)
+        self.assertIsNone(found, "the template names a ruling by id: %s" % (found and found.group(0)))
         for phrase in R9_WORDS:
-            self.assertNotIn(phrase, text, "the template restates ruling r9: %r" % phrase)
+            self.assertNotIn(phrase, text, "the template restates a ruling's words or time: %r" % phrase)
 
     def test_task_part_holds_a_fences_line(self):
         task = section(read_template(), "Task")
