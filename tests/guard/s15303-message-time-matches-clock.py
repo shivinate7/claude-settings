@@ -222,7 +222,7 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
 # its label, so the words after it are prose. A `Mon D` date counts only with a real month name, so `and`, `for` and
 # `Foo` are not dates.
 MTC_LABEL_CLOCK = "2026-11-13T13:40:00-06:00"  # 13:40 CST, the clock of the cases in this block
-# Passes: the bracket closes `PR #3177` before the time, so `ready by` is prose after the bracket.
+# Passes: the bracket closes its label before the time, so `ready by` is prose after the bracket.
 mtc_allow("a bracket closed before the time, [PR #3177] ready by 14:00 CST, is allowed: prose after the bracket",
           "[PR #3177] ready by 14:00 CST", clock=MTC_LABEL_CLOCK)
 mtc_allow("a bracket closed before the time, [Note] Standup moved to 14:00 CST, is allowed: prose after the bracket",
@@ -256,8 +256,9 @@ mtc_refuse("a bare label with a real month and a day after the zone, coordinator
 # ---- the forms with no separator: a bracket, a paren, or a bare label. A bracket or a paren is a header stamp with no
 # mark before the time. A bare label with no mark before the time is a header stamp only when a `Mon D` date and a
 # colon follow the zone, so the bare row is prose and stays allowed. Main reads none of these forms. Each
-# 10-minutes-ahead refusal below is RED on main. Every other case is marked STAYS GREEN: it passes on main and must
-# pass once the header form widens. The group's clock is 12:43 CST on 2026-11-13, so 12:53 is 10 minutes ahead.
+# The 10-minutes-ahead refusals below pin the header form: a stamp 10 minutes ahead is refused. Every other case is
+# prose, and 10 minutes ahead must pass, so widening the header form cannot start refusing prose. The group's clock is
+# 12:43 CST, so 12:53 is 10 minutes ahead.
 MTC_FORM_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the 10-minutes-ahead refusals
 MTC_FORMS = (  # (name, template, quote, header): {t} is the stamp's time, 12:53 in every form below
     ("bracket with a date", "[coordinator {t} CST Nov 13] hi", False, True),
@@ -277,7 +278,7 @@ def mtc_form_cases():
     for form, template, quote, header in MTC_FORMS:
         msg = template.format(t="12:53")
         if header:
-            # RED on main: refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
+            # Refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
             mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
                        clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
         else:
@@ -314,15 +315,15 @@ mtc_allow("a prose line, Meet at 14:00 CST tomorrow, 10 minutes ahead is allowed
 
 # ---- a dated header in a bracket, a paren, or a dash form. The date sits in the label, before the time, so the stamp is
 # a dated instant with no window: 16:36 on the clock's own day is 9 hours 28 minutes ahead at 07:08, and is refused.
-MTC_DATED_CLOCK = "2026-11-13T07:08:00-06:00"  # 07:08 CST on 2026-11-13, the clock of the dated cases below
-MTC_DATED_NOON_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST on 2026-11-13, the clock of the next-day case below
+MTC_DATED_CLOCK = "2026-11-13T07:08:00-06:00"  # 07:08 CST, the clock of the dated cases below
+MTC_DATED_NOON_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the next-day case below
 mtc_refuse("a bracket dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "[coordinator 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
 mtc_refuse("a paren dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "(coordinator 2026-11-13 16:36 CST) x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
 mtc_refuse("a dash dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "[coordinator - 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
-# Refused: the next day's date, 2026-11-14 12:30, is 23 hours 47 minutes ahead at 12:43 on 2026-11-13.
+# Refused: the stamp, 12:30 CST on the next day, is 23 hours 47 minutes ahead at 12:43 CST.
 mtc_refuse("a bracket dated header on the next day, 2026-11-14 12:30 CST at 12:43 on 2026-11-13, is refused",
            "[coordinator 2026-11-14 12:30 CST] x", clock=MTC_DATED_NOON_CLOCK, carries=("12:43 CST",))
 # Refused, a control: the comma form keeps its date, so it is refused 9 hours 28 minutes ahead at 07:08.
