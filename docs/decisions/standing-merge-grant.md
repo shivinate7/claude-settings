@@ -15,7 +15,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - A lane the owner started merges its own lone lane under the same limits (owner, 2026-11-02 15:14 CST; decision `session-tiers`). A cloud confirm still fails without the batch-runner role.
 - A lane that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
-- Main merge into handed-in branches (owner, 2026-11-13 13:12 CST, answer "a" to the coordinator's standing-grant question; until withdrawn). The batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in the last 2 hours. No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh review record.
+- Main merge into handed-in branches (owner, 2026-11-13 13:12 CST, answer "a" to the coordinator's standing-grant question; until withdrawn). The batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in the last 2 hours. No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix verifier and a fresh review log.
 
 This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
