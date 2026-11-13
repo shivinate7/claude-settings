@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 0.114,
   "owner": "coordinator",
-  "lane": "session_013NEJL2zSLahRYoAs8dHH81",
+  "lane": "session_013NEJKzhEBcVdzQtSEy5UWE",
   "why": "Owner ask ask-mw74ru2o9t, 19:05 CST Nov 7: \"well i meant more outcomes wise this whole process sshd have bene mechanicslly held end to end\". At 13:25 CST, 14 now-steps had no lane and nothing started them; they started only because the owner asked.",
   "note": "Scope: walk the process from a found gap to a merged fix (finding, step, lane start, review, hand-off, batch, merge, close) and name the mechanism that holds each hand-over, or file the missing one. Step pr-state-is-on-the-pr (the PR ledger, which also covers ready steps) is one part. Rule outcomes-mechanize-rules is the standing ruling. Lane plan (coordinator 19:07 CST): an audit, then a decision record, then step slugs to triage. Record on draft #1711, with a wording fix on draft #1735, both in review (20:20 CST). An owner question (merge refuses a lane tip with no done review record for its head; departs from pr-review-record Q1 pick a) goes to the owner through the coordinator. Owner question posted as page item 382 (merge-unreviewed-head), 20:40 CST Nov 7. Owner picked a on item 382 at 21:26 CST Nov 7: merge --confirm refuses a lane tip whose review_state is not done for that exact head. The pick changes decision pr-review-record Q1. Owner pick 382 a: this lane builds the merge refusal (coordinator, received 21:39 CST Nov 7). Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane report (coordinator 23:01 CST Nov 11): the lane closed #1711 and #1735 as replaced by #1871 and #2067 (ruling close-replaced-at-open); the record rides the #1871 stack; this lane opens no prose PR.",
-  "updatedAt": "2026-11-11T23:05:00-06:00"
+  "updatedAt": "2026-11-13T11:56:51-06:00"
 }

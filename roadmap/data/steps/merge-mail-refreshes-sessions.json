@@ -1,14 +1,14 @@
 {
  "id": "merge-mail-refreshes-sessions",
  "title": "Each batch merge mails every live session to refresh",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1XsPHDPWTxgsd5oS5",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 09:57 CST Nov 13 (via the retrospective): \"we need to have some sort of auto update upon merge or something ... to ensure checkouts / sessions stay current\". Start and owner prompts are the only refresh points today.",
  "source": "retrospective 09:57 CST Nov 13",
- "note": "Group \"sessions stay current\": grants-read-from-main (done, #2978), fast-forward-clean-start (#3141), cloud-hooks-stale-copy (#3020), roadmap-ref-fresh-before-verdict, and this step. Shape (retrospective proposal; triage pick, undo: drop this step): at each batch merge, the merge sends one mail to every live session: \"main moved to <sha>; refresh\". Each session reruns the install refresh and fast-forwards a clean checkout (c36 shape). The same mail carries the role-text notice from step role-text-follows-ruling: one mail per merge. Rulings between merges arrive through roadmap-ref-fresh-before-verdict. Done when: a test merge mails two live sessions and both report the new sha.",
- "updatedAt": "2026-11-13T10:05:11-06:00"
+ "note": "Group \"sessions stay current\": grants-read-from-main (done, #2978), fast-forward-clean-start (#3141), cloud-hooks-stale-copy (#3020), roadmap-ref-fresh-before-verdict, and this step. Shape (retrospective proposal; triage pick, undo: drop this step): at each batch merge, the merge sends one mail to every live session: \"main moved to <sha>; refresh\". Each session reruns the install refresh and fast-forwards a clean checkout (c36 shape). The same mail carries the role-text notice from step role-text-follows-ruling: one mail per merge. Rulings between merges arrive through roadmap-ref-fresh-before-verdict. Done when: a test merge mails two live sessions and both report the new sha. Coordinator 11:49 CST Nov 13: doing, express (owner 11:47 CST: \"more mechanical than just each compaction\"). Lane session_013NEJL1XsPHDPWTxgsd5oS5. Group sessions-stay-current with #3020, #3141 and compact-refreshes-hooks.",
+ "updatedAt": "2026-11-13T11:56:51-06:00"
 }

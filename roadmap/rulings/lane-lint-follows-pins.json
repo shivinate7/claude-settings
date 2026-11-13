@@ -1,0 +1,10 @@
+{
+ "id": "lane-lint-follows-pins",
+ "at": "2026-11-13T11:53:55-06:00",
+ "title": "Lane lint follows the pinned trees, child repos too",
+ "ruling": "Owner 2026-11-13 11:53 CST, item 714 b: lane lint follows the pinned trees, and child repos change too. Otherwise a lane passes lint on its own checkout and fails CI's pinned rules on the way to main. Pins keep moving with sessions (decision action-pins-follow-sessions).",
+ "quote": "change child repos too",
+ "source": "Artifact comment from the owner, 11:53 CST Nov 13 (page item drain-lane-lint-local, 714 b). Read by triage; the \"child repos too\" reading is triage's, the acting session confirms.",
+ "status": "open",
+ "step": "lane-lint-runs-local-tools"
+}

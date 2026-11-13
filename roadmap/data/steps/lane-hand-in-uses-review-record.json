@@ -1,0 +1,14 @@
+{
+ "id": "lane-hand-in-uses-review-record",
+ "title": "Lane hand-in text says: post the review record with merge --review-record, never by hand",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident (coordinator 11:53 CST Nov 13, runner 10 11:48 CST): #3142's hand-written record used model names claude-... and did not parse; #2870 and others also read \"no record\".",
+ "source": "coordinator 11:53 CST Nov 13",
+ "note": "Add the sentence to the shared brief template (skills/project-ops brief) and the lane hand-in text. The coordinator's own brief tail now says it.",
+ "updatedAt": "2026-11-13T11:56:51-06:00"
+}
