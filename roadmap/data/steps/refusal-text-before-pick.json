@@ -1,0 +1,14 @@
+{
+ "id": "refusal-text-before-pick",
+ "title": "A pick that accepts a route around a refusal is blocked until the refusal text is read",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Two slips in one hour (Nov 13): triage and the coordinator both told lane bg-tail-loses-verdict that a red run on a git archive export was fine, before reading the guard's refusal text, which said to make no tree by hand and stop.",
+ "source": "triage and coordinator, 12:38 to 12:41 CST Nov 13",
+ "note": "Todo. Guard that would have stopped both slips: before a session sends a pick or an OK on a lane's workaround, a past-ruling check reads the refusal text the lane quoted (rule verification-cry-wolf-guard-is-spent: read the guard's record first). Check the guard record (building-guard-needs-incident): incident = both slips. The lane redid the red run in an Agent-isolated worktree, which the guard allows. Related: step worktree-add-refused-false-alarm.",
+ "updatedAt": "2026-11-13T12:41:17-06:00"
+}
