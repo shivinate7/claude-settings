@@ -482,7 +482,7 @@ PFR_OTHER_BRANCH = "notes-other"
 PFR_HELD = ("held-ancestor", "held-record-other-head", "held-off-history", "held-no-sha", "held-agent-trailer",
             "held-path-then-off-history", "held-base-then-head", "held-head-then-two-prs",
             "held-label-round", "held-label-head")
-# Reports read after the PR is known, each naming the head it reviewed: a stale round 1 FAIL at B, then a round 1 at the
+# Reports read after the PR is known, each naming the head it reviewed: a stale FAIL report at B, then a report at the
 # live head D2. The names are built in _build_pfr_history, after the commits, as the held names are.
 PFR_STALE = ("stale-fail-fresh-pass-recorded", "stale-fail-fresh-pass-unrecorded", "stale-fail-record-off-history",
              "stale-fail-own-record-fresh-pass-recorded", "stale-fail-descendant-log-before",
@@ -780,8 +780,8 @@ pfr_ask("a FAIL naming head B, then a PR for another branch, then the PR for B, 
            pfr_path("held-head-then-two-prs"), cwd=PFR_HIST)
 
 
-# A stale report: the round 1 FAIL at head B, the PR head when it was reviewed. The lane then pushed two commits, so the
-# live head D2 descends from B. A round 1 PASS at D2 with its record posted at D2 supersedes the stale FAIL. The ask
+# A stale report names head B, the PR head when it was reviewed. The lane then pushed two commits, so the
+# live head D2 descends from B. A PASS report at D2 with its record posted at D2 supersedes the stale one. The ask
 # text names the route for a head that moved: a fresh round at the live head, with the record command.
 pfr_allow("a round 1 FAIL at head B, then a round 1 PASS at its descendant D2 with its record posted at D2, then the push",
           PFR_PUSH, pfr_path("stale-fail-fresh-pass-recorded"), cwd=PFR_HIST)
