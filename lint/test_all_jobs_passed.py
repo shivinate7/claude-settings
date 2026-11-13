@@ -14,6 +14,7 @@ The rules live in lint/all_jobs_passed_rules.py. A child repo's workflow is chec
 python3 lint/all_jobs_passed_rules.py --workflow PATH
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,8 +23,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS  # noqa: E402  the one home of the checks.yml path
-from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems, needs_problems,  # noqa: E402  the one home of the rules
-                                   off_problems, scope_if_problems, shape_problems, steps_problems)
+from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems, needs_of, needs_problems,  # noqa: E402  the one home of the rules
+                                   off_problems, scope_if_problems, shape_problems, split_jobs, steps_problems)
+from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
@@ -150,6 +152,92 @@ class AllJobsPassedJob(unittest.TestCase):
 
     def test_ci_done_needs_all_jobs_passed(self):
         self.assertEqual(ci_done_problems(self.text), [])
+
+
+# R61 planned shapes, built from the real checks.yml: the push guard on each macOS job (part 1) and the nightly gate with scope
+# waiting on it (part 3). Each helper returns a file that already has its change as it is, so the cases hold after it lands.
+MAC_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+PUSH_GUARD_IF = "    if: ${{ github.event_name != 'push' }}\n"
+SCOPE_IF = "    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}\n"
+SKIPD_SCOPE_IF = ("    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
+                  "&& needs.nightly-skip.outputs.skip != 'true' }}\n    needs: nightly-skip\n")
+SKIP_JOB = """  nightly-skip:
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - id: gate
+        run: echo skip=false >> "$GITHUB_OUTPUT"
+"""
+
+
+def planned_mac_push_guard(text):
+    """`text` with the push guard as each macOS job's job-level if, placed after its `needs: scope` line."""
+    for name in MAC_JOBS:
+        head = re.compile(rf"^  {re.escape(name)}:\n    runs-on: [^\n]*\n    needs: scope\n", re.M)
+        if re.search(rf"^  {re.escape(name)}:\n    runs-on: [^\n]*\n    needs: scope\n    if: ", text, re.M):
+            continue
+        assert len(head.findall(text)) == 1, f"{name}'s head changed: this fixture must follow it"
+        text = head.sub(lambda m: m.group(0) + PUSH_GUARD_IF, text, count=1)
+    return text
+
+
+def planned_nightly_skip(text):
+    """`text` with the nightly gate job before `checks`, and scope needing it with its if reading the gate's skip output."""
+    if "\n  nightly-skip:\n" in text:
+        return text
+    assert text.count(SCOPE_IF) == 1, "scope's if changed: this fixture must follow it"
+    assert text.count("\n  checks:\n") == 1, "the checks job's key changed: this fixture must follow it"
+    text = text.replace(SCOPE_IF, SKIPD_SCOPE_IF, 1)
+    return text.replace("\n  checks:\n", "\n" + SKIP_JOB + "  checks:\n", 1)
+
+
+class MacOnceByBatchRollup(unittest.TestCase):
+    """R61 on the one required check: the push guard keeps each macOS job needed, the rollup still needs every job, and the
+    nightly gate is an off-rollup job that is not a shard. The first and third cases fail on the old rules; the rest are
+    controls that already hold, and they keep the allowance narrow."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_a_macos_job_may_keep_the_push_guard_as_its_job_level_if(self):
+        # Named failure: all-jobs-passed reads a macOS job's job-level if as a skip it must refuse, so the push guard is refused.
+        self.assertEqual(off_problems(planned_mac_push_guard(self.text)), [])
+
+    def test_the_push_guard_keeps_each_macos_job_needed_on_a_pull_request(self):
+        # Control: the push guard is true on a PR, so each macOS job stays in all-jobs-passed's needs.
+        needed, _, problems = split_jobs(planned_mac_push_guard(self.text))
+        self.assertEqual(problems, [])
+        self.assertEqual([j for j in MAC_JOBS if j not in needed], [], "a macOS job left the needed set with the push guard")
+
+    def test_the_rollup_still_needs_each_macos_job(self):
+        # Control: a macOS job's red reaches the one required check through its name in all-jobs-passed's needs.
+        rollup = needs_of(job_block(self.text, "all-jobs-passed") or "") or []
+        self.assertEqual([j for j in MAC_JOBS if j not in rollup], [], "all-jobs-passed does not need every macOS job")
+
+    def test_the_nightly_skip_is_no_rollup_member_and_scope_reads_its_skip(self):
+        # Named failure: the gate is an off-rollup job that is not a shard, and scope's if reads the gate's skip output.
+        planned = planned_nightly_skip(self.text)
+        self.assertEqual(off_problems(planned), [])
+        self.assertEqual(needs_problems(planned), [])
+        self.assertEqual(scope_if_problems(planned), [])
+
+    def test_a_macos_job_whose_if_skips_a_ready_pr_is_flagged(self):
+        # Control: an if that is false on a ready PR still makes its job off the rollup, and is named as a non-shard.
+        planned = planned_mac_push_guard(self.text).replace(PUSH_GUARD_IF, "    if: ${{ github.event_name == 'push' }}\n", 1)
+        self.assertTrue(off_problems(planned), "an if false on a ready PR passes the rollup rules")
+
+    def test_a_macos_job_level_if_that_reads_a_flag_is_flagged(self):
+        # Control: a job-level if that reads a scope flag stays refused on a macOS job; its condition belongs in the steps.
+        planned = planned_mac_push_guard(self.text).replace(
+            PUSH_GUARD_IF, "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
+        self.assertTrue(off_problems(planned) or needs_problems(planned), "a flag-reading job-level if passes the rollup rules")
 
 
 class AllJobsPassedFixtures(unittest.TestCase):

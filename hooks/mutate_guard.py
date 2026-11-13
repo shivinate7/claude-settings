@@ -2998,6 +2998,63 @@ MUTATIONS = [
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
      'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
      "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
+    # ---- lane-title-slug. A lane create_session's title opens with `Lane <branch slug>:`. guard.py lane_title_hit reads the
+    # opening with shared_names.py LANE_TITLE_OPENING, cut from LANE_TITLE_FORM with LANE_SLUG_PATTERN for the placeholder.
+    # Each mutant breaks one clause: the verdict, the refusal, the lane tag condition, the empty or missing title, the colon,
+    # the slug, the Lane word, the anchor, the leading blanks, the slug's case, or the example opening. The printed form's
+    # one mutant changes its colon in the refusal; the opening is cut from the same form, so a changed form changes it too.
+    ("lane-title-slug: the hit always allows, so a lane start with a free title is allowed",
+     '    if LANE_TITLE_OPENING.match(text):\n        return ""\n    return text[:80] or "(none)"',
+     '    return ""',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
+    ("lane-title-slug: the refusal never fires, so a lane start with a free title is allowed",
+     '    if lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
+     '    if False and lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
+    ("lane-title-slug: the lane tag condition is dropped, so a triage start with a free title is refused",
+     '    if not is_lane_create_session(tool, tool_input):\n        return ""\n    title = tool_input.get("title")',
+     '    title = tool_input.get("title")',
+     "guard", "lane-title-slug: a create_session tagged as a triage start with a free title is allowed"),
+    ("lane-title-slug: an empty title reads as no hit, so a lane start with an empty title is allowed",
+     '    return text[:80] or "(none)"',
+     '    return text[:80]',
+     "guard", "lane-title-slug: a lane start with an empty title is denied"),
+    ("lane-title-slug: a title that is not text reads as opening right, so a lane start with no title is allowed",
+     '    text = title.strip() if isinstance(title, str) else ""',
+     '    text = title.strip() if isinstance(title, str) else "Lane x: do the task"',
+     "guard", "lane-title-slug: a lane start with no title is denied"),
+    ("lane-title-slug: the opening needs no colon, so a title with no colon after the slug is allowed",
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL) + "?")',
+     "guard", "lane-title-slug: a title with no colon after the slug is denied"),
+    ("lane-title-slug: the slug may be empty, so a title with Lane, a space and no slug is allowed",
+     'LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"',
+     'LANE_SLUG_PATTERN = r"[a-z0-9]*(?:-[a-z0-9]+)*"',
+     "guard", "lane-title-slug: a title with Lane, a space and no slug is denied"),
+    ("lane-title-slug: the opening needs no Lane word, so a title that opens with the slug alone is allowed",
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     'LANE_TITLE_OPENING = re.compile("(?:" + re.escape(_FORM_HEAD) + ")?" + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     "guard", "lane-title-slug: a title with the slug and no Lane word is denied"),
+    ("lane-title-slug: the opening is searched, not matched, so a title that names the slug after its words is allowed",
+     '    if LANE_TITLE_OPENING.match(text):',
+     '    if LANE_TITLE_OPENING.search(text):',
+     "guard", "lane-title-slug: a title that names the slug after its words is denied"),
+    ("lane-title-slug: the leading blanks are not stripped, so a title that opens after leading blanks is denied",
+     '    text = title.strip() if isinstance(title, str) else ""',
+     '    text = title if isinstance(title, str) else ""',
+     "guard", "lane-title-slug: a lane start whose title opens after leading blanks is allowed"),
+    ("lane-title-slug: the slug may hold capitals, so a session number as the slug is allowed",
+     'LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"',
+     'LANE_SLUG_PATTERN = r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*"',
+     "guard", "lane-title-slug: a title with a session number as its slug is denied"),
+    ("lane-title-slug: the refusal prints the form with its colon changed, so it does not carry the printed form verbatim",
+     '    % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)',
+     '    % (LANE_TITLE_FORM.replace(":", ";"), LANE_TITLE_EXAMPLE_OPENING)',
+     "guard", "lane-title-slug: the refusal carries the printed form verbatim"),
+    ("lane-title-slug: the example opening holds a session number, so the refusal shows Lane N as its example",
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL',
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "N20" + _FORM_TAIL',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
@@ -3613,6 +3670,15 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
+    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
+    "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
+}
+# Suites a row's module never runs (step mutation-tests-for-cost). merge/test_merge.py times out at 180 s on the clean
+# source. The other three assert on guard.py's own text, which the report's ast.unparse copy drops comments from, so each
+# reads not green on the clean copy and never kills a mutant.
+GUARD_MODULE_DROPPED_SUITES = {
+    "hooks/guard.py": ["merge/test_merge.py", "hooks/test_wrappers.py", "lint/test_layout.py",
+                       "lint/test_report_guard_stamped.py"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
@@ -4382,7 +4448,7 @@ def tests_for_main(argv) -> int:
     names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
     (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
     with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
-    whole `hooks/test_guard.py`. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    whole `hooks/test_guard.py` and each suite of GUARD_MODULE_DROPPED_SUITES for it. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
     `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -4406,6 +4472,7 @@ def tests_for_main(argv) -> int:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
             names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
+            names.difference_update(GUARD_MODULE_DROPPED_SUITES.get(path, ()))
     for name in sorted(names):
         print(name)
     return 0
