@@ -75,12 +75,13 @@ refusal per turn lists the lines and joins any other reason. A rewrite after a m
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
 The progress-claim check (rule `progress-claims-cite-live-read`): on any turn, landed or not, it refuses each line of the
-last reply with a sentence that names a step, lane, batch or PR (`PR #n`, a bare `#n`) and says how far it has got ("in
-progress", "nearly done", "waiting on", "stalled" and the like), unless the same line cites a live read: get_session,
-list_events, pull_request_read, list_pull_requests, "live read", "REST", a PR URL, a read stamp (`read at HH:MM`), or
-"unmeasured", "not read", "unknown". Fences, inline code spans (also across a line break) and lines that end in `?` are
-skipped. One refusal per turn lists the lines and joins any other reason. It checks that a line cites a read, not that
-the read happened. Decision: progress-claims-cite-live-read. Cost: regex over the reply, no file, no process.
+last reply that holds a progress phrase ("in progress", "nearly done", "waiting on", "stalled" and the like, read outside
+code spans) in a sentence whose subject (a step, lane, batch, `PR #n`, a bare `#n` or a step id in a code span) sits in
+that sentence or an earlier one of the paragraph, unless the claim's block cites a named read: get_session, list_events,
+pull_request_read, list_pull_requests, "REST API" or "REST read", "live read", a PR URL, or "unmeasured", "not read",
+"unknown". A stamp alone is no read. A state word ("merged", "done") is no phrase. Fences are skipped. One refusal per
+turn lists the lines and joins any other reason. It checks that a block cites a read, not that the read happened.
+Decision: progress-claims-cite-live-read. Cost: regex over the reply, no file, no process.
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
@@ -739,47 +740,68 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
-# progress-claims-cite-live-read: a reply line that says how far a step, lane, batch or PR has got cites a live read
-# made this turn, on the same line. A claim is one sentence with a subject (step, lane, batch, `PR #n`, a bare `#n`) and a
-# progress phrase. A state word such as "merged" is no phrase. Inline code spans are masked over the whole paragraph
-# (a span may break across lines, and a `#` or `//` inside one opens nothing); their text still counts as a cite.
-# A repo path, a commit hash, a bare `PR #n` and a bare time are no live read, so DONE_REF_RE is not reused here.
-PROGRESS_SUBJECT_RE = re.compile(r"\b(?:steps?|lanes?|batch(?:es)?)\b|\bPRs?\s*#?\d+|(?<![\w/&])#\d+\b", re.I)
+# progress-claims-cite-live-read: a reply sentence that says how far a step, lane, batch or PR has got cites a named
+# live read made this turn. A claim is a sentence with a progress phrase and a subject (step, lane, batch, `PR #n`, a bare
+# `#n`, or a kebab-case step id in a code span), the subject in the sentence or in an earlier one of the paragraph. The
+# phrase is read outside code spans, the subject and the cite inside them too. A state word ("merged", "done") is no phrase:
+# the step asks how far, not what state. A paragraph is judged as a whole: soft-wrapped lines join, and a table row, list
+# item, heading or bold-labelled line starts its own block. The cite counts when it sits in the claim's block.
+# A bare time, `PR #n`, `#n`, a repo path or a commit hash is no read, so DONE_REF_RE is not reused here.
+PROGRESS_SUBJECT_RE = re.compile(
+    r"\b(?:steps?|lanes?|batch(?:es)?)\b|\bPRs?\s*#?\d+|(?<![\w/&])#\d+\b|`[a-z0-9]+(?:-[a-z0-9]+)+`", re.I)
 PROGRESS_PHRASE_RE = re.compile(
-    r"\b(?:in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:done|finished|complete|there)"
-    r"|waiting\s+(?:on|for)|in\s+flight|stalled|(?:hasn['\u2019]t|has\s+not)\s+finished)\b"
+    r"\b(?:(?<!work\s)in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:done|finished|complete|there)"
+    r"|waiting\s+(?:on|for)|in\s+flight|stalled|(?:hasn['’]t|has\s+not)\s+finished)\b"
     r"|\b\d{1,3}\s*%\s*(?:done|complete)", re.I)
 PROGRESS_READ_RE = re.compile(
     r"\b(?:get_session|list_events|pull_request_read|list_pull_requests|unmeasured|unknown)\b|\bnot\s+read\b"
-    r"|\blive\s+read\b|(?<![\w-])(?-i:REST)(?![\w-])|\bread\s+at\s+\d{1,2}:\d{2}|https?://\S*/pull/\d+", re.I)
+    r"|\blive\s+read\b|(?<![\w-])(?-i:REST)\s+(?:API|reads?)\b|https?://\S*/pull/\d+", re.I)
+PROGRESS_BLOCK_START = re.compile(r"^(?:\||#{1,6}\s|[-*+]\s|\d+[.)]\s|\*\*)")
 PROGRESS_REASON = owner_line(
     "Progress-claim guard (rule progress-claims-cite-live-read)",
-    "each line below says how far a step, lane, batch or PR has got and cites no live read made this turn; a live read "
-    "is get_session on a lane (a step's lane too), list_events, pull_request_read on a PR (a batch's PR too), a PR URL "
-    "or a read stamp such as 'read at 11:43 CST', and `unmeasured` stands in place of one; a mention of a phrase in an "
-    "inline code span is no claim") + " Lines: "
+    "each line below says how far a step, lane, batch or PR has got and cites no named live read made this turn; a live "
+    "read is get_session on a lane (a step's lane too), list_events, pull_request_read on a PR (a batch's PR too), "
+    "list_pull_requests or a PR URL, and `unmeasured` stands in place of one; a stamp or a PR number alone is no read; "
+    "a mention of a phrase in an inline code span is no claim") + " Lines: "
+
+
+def _progress_blocks(paragraph):
+    """The paragraph's line indexes in blocks: a line that starts a table row, list item, heading or bold label starts a
+    block, and a table row ends one. Other lines are soft wraps of the line before."""
+    blocks = []
+    for i, body in enumerate(paragraph):
+        if blocks and not PROGRESS_BLOCK_START.match(body) and not paragraph[i - 1].startswith("|"):
+            blocks[-1].append(i)
+        else:
+            blocks.append([i])
+    return blocks
 
 
 def _progress_claim_lines(paragraph):
-    """The lines of one paragraph (a list of bodies) that hold a progress claim with no live read on the line."""
-    block = "\n".join(paragraph)
-    plain = PROGRESS_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), block)
-    kept = PROGRESS_SPAN.sub(lambda m: " " * len(m.group(1)) + m.group(2) + " " * len(m.group(1)), block)
-    bad = []
-    for body, p_line, k_line in zip(paragraph, plain.split("\n"), kept.split("\n")):
-        if body.rstrip("*_)\"' ").endswith("?"):
-            continue
-        claim = any(
-            PROGRESS_SUBJECT_RE.search(s) and PROGRESS_PHRASE_RE.search(s)
-            for s in re.split(r"(?<=[.!?])\s+", p_line) if not s.rstrip("*_)\"' ").endswith("?"))
-        if claim and not PROGRESS_READ_RE.search(k_line):
-            bad.append(body)
+    """The lines of one paragraph (a list of bodies) that hold a progress claim with no named live read in its block."""
+    text = "\n".join(paragraph)
+    plain = PROGRESS_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    plain_lines, text_lines = plain.split("\n"), text.split("\n")
+    seen, bad = False, []
+    for block in _progress_blocks(paragraph):
+        shown, masked = "\n".join(text_lines[i] for i in block), "\n".join(plain_lines[i] for i in block)
+        cited = PROGRESS_READ_RE.search(shown)
+        start = 0
+        for end in [m.end() for m in re.finditer(r"(?<=[.!?])\s+", masked)] + [len(masked) + 1]:
+            sentence, shown_sentence = masked[start:end], shown[start:end]
+            seen = seen or bool(PROGRESS_SUBJECT_RE.search(shown_sentence))
+            phrase = PROGRESS_PHRASE_RE.search(sentence)
+            if phrase and seen and not cited and not sentence.rstrip("*_)\"' \n").endswith("?"):
+                row = block[masked.count("\n", 0, start + phrase.start())]
+                if paragraph[row] not in bad:
+                    bad.append(paragraph[row])
+            start = end
     return bad
 
 
 def progress_claim_problem(text):
-    """The refusal for reply lines that say how far a step, lane, batch or PR has got with no live read on the line,
-    else ''."""
+    """The refusal for reply lines that say how far a step, lane, batch or PR has got with no named live read in the
+    claim's block, else ''."""
     if not PROGRESS_PHRASE_RE.search(text):
         return ""
     bad, paragraph = [], []
@@ -3292,8 +3314,8 @@ def main():
             pass
         try:
             relay.append(progress_claim_problem(text))  # joined the same way
-        except Exception:
-            pass
+        except Exception as err:  # a check that could not run is UNKNOWN, never silence
+            note = " ".join(filter(None, [note, "Progress-claim guard: UNKNOWN, the check did not run (%s)." % type(err).__name__]))
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
