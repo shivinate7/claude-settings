@@ -1,0 +1,14 @@
+{
+ "id": "stamp-clock-check-everywhere",
+ "title": "Every written CST stamp is checked against the clock",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Triage stamps ran 11-16 min ahead of now-central from about 09:50 to 09:57 CST Nov 13 (audit 10:01 CST). That covered the handoff header, a push time and a runner message. The message-time hook checks send_message only, and caught one at 10:00 CST. Handoff headers, step notes and page reply stamps are not checked.",
+ "source": "triage 10:03 CST Nov 13, post-compaction audit",
+ "note": "Fix: extend the message-time check (its one home) to handoff writes and roadmap step note stamps, with the same 1-minute limit. Done when: a test writes a handoff stamped 10 minutes ahead and is refused.",
+ "updatedAt": "2026-11-13T10:02:59-06:00"
+}
