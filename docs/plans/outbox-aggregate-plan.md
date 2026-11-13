@@ -85,7 +85,7 @@ Trap: gathering into `roadmap/outbox/triage.md` clears nothing. It already holds
 ## Owner acts
 
 - a. Access to the 11 unswept repos. In the cloud, attach them to the session. Or run act 1 from the Mac.
-- b. Pick the clearing route: each child's triage clears (recommended), or a one-time override push per repo (item 490 route).
+- b. Done: the clearing route is picked (Owner answers).
 - c. Measure Mac `ls-remote` auth (session-messages.md step 2) before the mailbox is the only route.
 
 ## Refuter verdict: revise (refuter opus, 2026-11-12 15:10 CST)
@@ -98,8 +98,7 @@ The refuter held only the step text and this plan. Findings, with this lane's ch
 - P1 fails as framed. Triage commit 833b0c472 (Nov 10, "file the outbox sweep, 14 new steps and 15 folds, owner
   pick 493 a") already filed 29 claude-settings findings from home, banchi, degen and q_max. They sat in the
   children's `docs/debts/`, `notes.md`, `specs/todo.md` and roadmap steps, not in `roadmap/outbox/`. **Change:**
-  the Nov 10 sweep is the baseline. Open question for the owner: does "outbox" mean only the folder, or every
-  child home that holds a claude-settings item? The plan does not settle it.
+  the Nov 10 sweep is the baseline. The owner settled the scope (see Owner answers): the outbox folder only.
 - P6 fails. The recorded pick names no repos; the 5 came from item 490. **Change:** owner act a needs no
   grant for the 5; only access (attach) stands. P4's quote "every session writes only in its own repo, no guard
   changes" is unknown against the recorded pick; treat it as item 493's page text only.
@@ -112,10 +111,18 @@ The refuter held only the step text and this plan. Findings, with this lane's ch
   that the copied line matches.
 - Gap: act 3 files notes in `docs/debts/notes.md` through a lane, where Nov 10 filed triage steps on the record
   branch. Reason to differ: unmeasured. Until the owner picks, follow Nov 10 (steps on the record branch).
-- Unknown, to measure in act 1: were the 29 items of Nov 10 ever removed from their child homes? If not, those
-  homes have not cleared, and act 4 covers them.
+- Out of scope by the owner's answer on item 658: whether the 29 items of Nov 10 left their child homes.
+
+## Owner answers (relayed by triage, 00:51 CST Nov 13; saved on the page 00:50 CST)
+
+- Item 658, outbox scope: **b, only the outbox folder.** Owner: "children need to and will learn to put those
+  gripes in their outbox". Acts 1 to 4 read `roadmap/outbox/*.md` only. Findings in a child's debts, notes or todo
+  are out of scope. The 29 Nov 10 items are not chased.
+- Item 659, clearing route: **either works.** For the one-time push, a claude-settings session needs no
+  override. It adds the child repo to its own session (`add_repo`) and acts. So act 4 may clear by the child's
+  triage, or by a claude-settings session with the child attached. The session picks per repo by what runs.
+- Item 660, repo access: not answered yet. Act 1 waits on it.
 
 ## Next
 
-Triage puts the plan on the owner's page with two questions: what "outbox" covers, and the clearing route
-(owner act b). Act 1 on the 11 unswept repos waits on access (owner act a).
+Act 1 on the 11 unswept repos waits on item 660 (access).
