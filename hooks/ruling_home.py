@@ -35,12 +35,15 @@ already-recorded ruling cannot make it cry wolf (item 8;
 `docs/decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it."
 
-RESOLUTION, ONE GIT PROCESS PER VALUE. `git for-each-ref` lists every `refs/heads` and
-`refs/remotes` ref once per run; each home: value then asks about every ref at once with one
-`git cat-file --batch-check` call fed `<ref>:<path>` lines on stdin, never one process per ref,
-and reads the type back for each: only a `blob` answer resolves, so a directory (`tree`) never
+RESOLUTION, ONE `cat-file` PROCESS PER CALL (`resolve_paths` asks about many values in that one call, for skills/roadmap/build.py's outbox check; the Stop check asks about one value). `git for-each-ref` lists every `refs/heads` and
+`refs/remotes` ref once per run; the values then ask about every ref at once with one
+`git cat-file --batch-check` call fed `<ref>:<path>` lines on stdin, never one process per ref
+or per value, and reads the type back for each: only a `blob` answer resolves, so a directory (`tree`) never
 does. Both calls run with `--literal-pathspecs`, so a value like `*` or `:(glob)**` is looked up
-as a literal path, never expanded. A deleted path resolves through no ref.
+as a literal path, never expanded. A deleted path resolves through no ref. The batch runs in bytes,
+never text mode, and its answers split on `\n` alone, so a path or ref name holding a CR, VT, FF or
+U+2028 cannot split one answer in two and shift the later ones. A path holding `\n` cannot be one
+line of stdin: it reads as not resolved and is never sent.
 
 WHAT IT DOES ON A MISS. Blocks once: `{"decision": "block", "reason": "..."}`, naming each
 offending file and section heading and saying what a valid `home:` value is. The reason never
@@ -361,11 +364,14 @@ def _run_git(cwd, args, input_text=None):
     is missing, or the call timed out. A plain non-zero exit is returned to the caller like
     any other result, never raised here -- see _list_refs and _resolve_value for which of
     those callers turns a non-zero exit into a stand-down and which reads it as "no answer".
+    `input_text` as bytes runs git with bytes in and out; as str, in text mode.
     """
+    # bytes input means bytes in and out: text mode turns a CR in a path into a newline in the answers
+    text = {} if isinstance(input_text, bytes) else {"encoding": "utf-8", "errors": "replace"}
     try:
         return _nowindow.run(
             ["git", "--literal-pathspecs", "-C", cwd] + args,
-            input=input_text, capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT,
+            input=input_text, capture_output=True, timeout=GIT_TIMEOUT, **text,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         raise _GitFailure(str(exc)) from exc
@@ -381,31 +387,47 @@ def _list_refs(cwd):
     run = _run_git(cwd, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"])
     if run.returncode != 0:
         raise _GitFailure("for-each-ref exited %s: %s" % (run.returncode, (run.stderr or "")[:200]))
-    return [line for line in run.stdout.splitlines() if line.strip()]
+    return [line for line in run.stdout.split("\n") if line.strip()]  # "\n" alone: a ref name may hold U+2028
+
+
+def resolve_paths(cwd, refs, git_paths):
+    """{git path: True} when ANY ref's tree holds a blob (never a tree/directory) there, else False.
+
+    One `git cat-file --batch-check=%(objecttype)` call answers for every ref and every path at
+    once, fed `<ref>:<path>` lines on stdin in path-major order, rather than one process per ref
+    or per path (the performance fix this exists for). Stdin and stdout are bytes and the answer
+    splits on b"\n" alone: one line in, one line out, whatever a path or ref name holds (a CR, VT,
+    FF or U+2028 included). A path holding "\n" cannot be one stdin line, so it is left out of the
+    batch and reads False. The custom format prints the bare type
+    (`blob`, `tree`, ...) for a found object, so a whole-line `== b"blob"` test
+    is exact. Plain `--batch-check` prints `<ref>:<path> missing` for a missing object, echoing
+    the input verbatim -- a value like `nothere blob` would then put `blob` in that ECHOED text,
+    and splitting the line by whitespace and reading field [1] would misread that as a resolved
+    blob. The custom format still echoes `<input> missing` for a miss, so the same value still
+    ends a line in `... missing`, never in the four bare letters `blob` alone; only a real found
+    blob does. A non-zero exit, a short answer, or an object of any type but `blob` or missing
+    outright reads as "this path does not resolve" -- never a stand-down: see the module
+    docstring.
+    """
+    paths = list(dict.fromkeys(git_paths))
+    askable = [p for p in paths if "\n" not in p]
+    if not refs or not askable:
+        return {p: False for p in paths}
+    stdin_bytes = "".join("%s:%s\n" % (ref, p) for p in askable for ref in refs).encode("utf-8", errors="replace")
+    run = _run_git(cwd, ["cat-file", "--batch-check=%(objecttype)"], input_text=stdin_bytes)
+    if run.returncode != 0:
+        return {p: False for p in paths}
+    answers = run.stdout.split(b"\n")
+    found = {p: False for p in paths}
+    for i, p in enumerate(askable):
+        chunk = answers[i * len(refs):(i + 1) * len(refs)]
+        found[p] = any(line.strip() == b"blob" for line in chunk)
+    return found
 
 
 def _resolve_value(cwd, refs, git_path):
-    """True when ANY ref's tree holds a blob (never a tree/directory) at `git_path`.
-
-    One `git cat-file --batch-check=%(objecttype)` call answers for every ref at once, fed
-    `<ref>:<path>` lines on stdin, rather than one process per ref (the performance fix this
-    exists for). The custom format prints the bare type (`blob`, `tree`, ...) and nothing else
-    for a found object, so a whole-line `== "blob"` test is exact. Plain `--batch-check`
-    prints `<ref>:<path> missing` for a missing object, echoing the input verbatim -- a value
-    like `nothere blob` would then put `blob` in that ECHOED text, and splitting the line by
-    whitespace and reading field [1] would misread that as a resolved blob. The custom format
-    still echoes `<input> missing` for a miss, so the same value still ends a line in
-    `... missing`, never in the four bare letters `blob` alone; only a real found blob does.
-    A non-zero exit, or an object of any type but `blob` or missing outright, reads as "this
-    value does not resolve" -- never a stand-down: see the module docstring.
-    """
-    if not refs:
-        return False
-    stdin_text = "".join("%s:%s\n" % (ref, git_path) for ref in refs)
-    run = _run_git(cwd, ["cat-file", "--batch-check=%(objecttype)"], input_text=stdin_text)
-    if run.returncode != 0:
-        return False
-    return any(line.strip() == "blob" for line in run.stdout.splitlines())
+    """True when ANY ref's tree holds a blob at `git_path`: resolve_paths for one path."""
+    return resolve_paths(cwd, refs, [git_path])[git_path]
 
 
 def value_resolves(value, cwd):

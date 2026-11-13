@@ -4,6 +4,10 @@ Non-urgent notes, findings and filing requests for the triage session.
 
 - Each session keeps one file here: `roadmap/outbox/<session-slug>.md`.
 - One item per bullet. Name the step it touches. When the item carries the owner's grant, name the owner's message.
+- An owner ruling you filed in a record home gets one line, so triage's status check can read it:
+  `- <step> [ruling] -> <home>: "<exact words>" (owner, <time>)`. `<home>` is the repo path of the file on
+  main that holds the ruling, and `<exact words>` are the owner's words as that file holds them. The check
+  says held, not held or unknown for each such line. A decision id is not a path, so it reads unknown. A line with `[ruling]` that misses this format reads `unknown: malformed`.
 - Rewrite your own file to hold only what is still unfiled. Pull right before each write.
 - Triage reads this folder at each wake, files each item, and removes what it filed.
 - Send a message instead only when work is blocked on it, or the owner asked for something to be passed on.
