@@ -1817,7 +1817,7 @@ class SmallBaseMove(ScopedRepo, Env):
 
     def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
-        lints = merge.lint_steps(root, "origin/main")
+        lints = merge.lint_steps(root, "HEAD")  # this tree's own plan: a diff against main changes its steps, and the steps it skips with them
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
