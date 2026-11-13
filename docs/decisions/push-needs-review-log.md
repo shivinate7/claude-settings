@@ -47,7 +47,7 @@ Dated by: the review log format in `merge/merge.py` (`parse_review`, `REVIEW_VER
 
 - The review trail loses the round: the review log for the reviewed head is never posted, and the push makes that head stale.
 - The fix skips its fix verifier: `--fix-check` has no review log to start from.
-- A second fix on a fixed head has no fix verifier of its own (review log `pr-review-record`, one fix verifier per review log).
+- A second fix on a fixed head has no fix verifier of its own (decision `pr-review-record`, one fix verifier per review log).
 
 ## The cases
 
@@ -129,13 +129,14 @@ The cost case `a push reads git for a held report only when one is held` pins ze
 - A destination the guard cannot resolve never matches a known head, so that push passes.
 - Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_log_hit` (`except Exception: pass`; note `push-record-scan-error-fails-open`).
 - A round report pushed over without its review log cannot get its own review log once the head moved (`merge --review-record --head A` refuses). A fresh round at the live head clears it, when its review log holds the same role and round at a descendant head and is posted after the report (see "A superseded report"). The ask text names that route. A report that names no head, a log at a non-descendant head, and an unresolvable head still ask.
+- A report's PR is the latest PR known when the report is read. A report on an older PR, read after a newer PR opened, is tied to the newer PR. A fresh round's review log on its own PR then never supersedes it, so the ask stays (fails safe).
 - Ask scope: any push while a report is pending asks, an unrelated branch too (old ruled behaviour).
 
 ## The cost
 
 - One pass over the session's transcript per non-dry-run `git push` (`_transcript_events`). A line is parsed only when it holds a mark (a tool name, a notice or hand-back tag, a `gh` PR or comment call), or it is a tool result for a call already seen (one dict lookup per id). Measured 0.08 s on a synthetic 13 MB transcript of 12,000 lines (1000 Agent calls with reports, 5000 reads), merge module load included, before the head match and the indirect `gh pr create` read were added. Unmeasured since.
 - The merge module loads only when the scan finds one of three things: a report with the Done-line shape; a Done label line that holds a round or fix-check marker; a posted comment holding a `Fix check:` line. A normal push loads none.
-- The destination is read (the `symbolic-ref` and `config` reads of `push_destinations`) only when a review log holds a Fix check line.
+- The push's destinations (`push_destinations`) are read in two cases only. One: a posted review log holds a `Fix check:` line for a PR whose head branch is known. Two: at the ask, while a report is pending, a checkout is known, and a pending round report names a head. `push_destinations` reads once per hook process: none for a named refspec, 1 `git symbolic-ref` for `HEAD`, and for a bare push 1 `git symbolic-ref` and up to 2 `git config` (`push.default`, then `branch.<name>.merge` in upstream mode). A push with no pending report and no `Fix check:` line reads none.
 - The held-report rule reads git only while a report is held. A push with no held report starts no git process. Each PR event or posted review log that finds held reports reads, in the push's checkout (`_held_counts`):
   - 2 `git rev-parse` for the head (the local branch, then `origin/<branch>`), or 0 when the head is unknown;
   - the default branch by `read_default_base` (`hooks/git_reads.py`): 1 `git symbolic-ref`, then up to 5 `git rev-parse`, stopping at the first that resolves;
