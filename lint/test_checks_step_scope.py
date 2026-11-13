@@ -397,7 +397,6 @@ ALLOWED = {
     "lint/test_check_claude_md_size.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into a temp tree"),
     "lint/test_check_hook_stubs.py": (["README.md"], "committed into temp git repos"),
     "lint/test_check_record_slugs.py": (["debts/README.md", "debts/notes.md"], "folder files the check skips, named as constants"),
-    "lint/test_check_skill_model_rows.py": (["decisions/agent-model-cap.md"], "the record path is a name in a temp tree"),
     "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
