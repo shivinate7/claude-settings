@@ -20,6 +20,19 @@ CLOCK0 = int(datetime.datetime(2026, 11, 13, tzinfo=datetime.timezone.utc).times
 STALE_SECS = 1800  # a cache older than this is read in full (REVIEWED_FULL_REREAD_SECS)
 FOLDER = object()  # a damage: the state path is a folder
 ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
+REPO_NAME = "o/r"  # the repo the fixture's host names: its cache's key (reviewed_rows)
+ALPHA, BETA = "o/alpha", "o/beta"  # two repos whose hosts have no name: each is named by the full_name its bare repo route reads
+EARLY = "2026-10-01T12:00:00Z"  # before the cursor less the overlap: a warm read from the cursor never returns it
+DEPTH = 100000  # a state file this deep makes json.loads raise RecursionError
+
+
+def nested(head):
+    """A state file's text: `head`, then a list nested DEPTH deep, then the object's close."""
+    return head + "[" * DEPTH + "]" * DEPTH + "}"
+
+
+DEEP_STATE = nested('{"reviewed_cursor": ')
+DEEP_ROLE_STATE = nested('{"session": "%s", "role": "batch-runner", "reviewed_cursor": ' % tm.ROLE_SESSION)
 
 
 def when(text):
@@ -30,10 +43,30 @@ def when(text):
         return None
 
 
-def standard_comments():
-    """Full size: 60 plain comments on #8 before the overlap window (no rows), then #7's record and lint at T1."""
-    padding = [tm.review_comment(1000 + i, 8, "LGTM", created="2026-10-01T12:00:00Z") for i in range(60)]
-    return [*padding, tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1), tm.lint_of(7, tm.REVIEW_HEAD)]
+def padding():
+    """Full size: 60 plain comments on #8 before the overlap window (no rows)."""
+    return [tm.review_comment(1000 + i, 8, "LGTM", created="2026-10-01T12:00:00Z") for i in range(60)]
+
+
+def standard_comments(record=None, lint=None):
+    """The padding, then #7's record and lint at T1, or the ones given."""
+    record = record or tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS), created=T1)
+    return [*padding(), record, lint or tm.lint_of(7, tm.REVIEW_HEAD)]
+
+
+def own_record(cid, rounds=tm.REVIEW_PASS, created=T1):
+    """#7's review record at the live head, as the repo's comment list gives it."""
+    return tm.review_comment(cid, 7, tm.record_text(rounds=rounds), created=created)
+
+
+def alpha_comments():
+    """ALPHA's comments: #7's record is open."""
+    return [*padding(), own_record(1, rounds=ROUND_ONE_FAIL), tm.lint_of(7, tm.REVIEW_HEAD)]
+
+
+def beta_comments():
+    """BETA's comments: its own record is from before the cursor, and passes."""
+    return [*padding(), own_record(21, created=EARLY), tm.lint_of(7, tm.REVIEW_HEAD)]
 
 
 def record_row(cid=1):
@@ -52,7 +85,7 @@ def edited(**changes):
     """The state file's dict with this repo's cache in reviewed_read's shape, its fields changed by `changes`. The rest stays valid."""
     cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [record_row(), lint_row()]}
     cache.update(changes)
-    return {"reviewed_cursor": {".": cache}}
+    return {"reviewed_cursor": {REPO_NAME: cache}}
 
 
 # (name, content, rebuilds): the state file after one defect. content: None removes the file, FOLDER makes its path a folder, bytes or text
@@ -64,7 +97,7 @@ DAMAGES = (
     ("the state file is not UTF-8", b"\xff\xfe\x00{}", True),
     ("the top level is a list", "[]", True),
     ("reviewed_cursor is a list", lambda: {"reviewed_cursor": []}, True),
-    ("this repo's entry is a string", lambda: {"reviewed_cursor": {".": "x"}}, True),
+    ("this repo's entry is a string", lambda: {"reviewed_cursor": {REPO_NAME: "x"}}, True),
     ("floor is a number", lambda: edited(floor=5), True),
     ("cursor is not a time", lambda: edited(cursor="soon"), True),
     ("full_at is a string", lambda: edited(full_at="now"), True),
@@ -73,6 +106,7 @@ DAMAGES = (
     ("a row lacks its body", lambda: edited(rows=[without(record_row(), "body"), lint_row()]), True),
     ("a row has an unknown kind", lambda: edited(rows=[{**record_row(), "kind": "other"}, lint_row()]), True),
     ("a row id is a string", lambda: edited(rows=[record_row(), {**lint_row(), "id": "507"}]), True),
+    ("the state file is nested 100000 deep", DEEP_STATE, True),
 )
 
 
@@ -83,14 +117,22 @@ class ReviewedCursor(tm.CloudSession):
         super().setUp()
         self.clock = CLOCK0  # the Host clock: a case moves it to age the cache
 
-    def run_reviewed(self, comments, pulls=None):
+    def run_reviewed(self, comments, pulls=None, repo=REPO_NAME, full_name=None, cwd=None):
         """-> (host, out): one `merge --reviewed` over the open pulls (default: #7 at REVIEW_HEAD, created at FLOOR) and the repo's comments,
-        which the host serves as `since` filters them. The run exits 0 or the case fails."""
+        which the host serves as `since` filters them. The host names its repo by `repo`, or, when that is None, by the full_name its bare
+        repo route reads. The run exits 0 or the case fails; a crash fails the case, named by what raised it."""
         pulls = pulls or [tm.batch_pull(7, tm.REVIEW_HEAD, created_at=FLOOR)]
-        host = tm.PullsHost(pulls, {}, comments=comments, honor_since=True, now=lambda: self.clock)
-        rc, out, err = self.run_args("--reviewed", host=host)
+        host = tm.PullsHost(pulls, {}, comments=comments, honor_since=True, now=lambda: self.clock, repo=repo, full_name=full_name, cwd=cwd)
+        try:
+            rc, out, err = self.run_args("--reviewed", host=host)
+        except Exception as e:
+            self.fail(f"the run raised {type(e).__name__}: {e}")
         self.assertEqual(rc, 0, out + err)
         return host, out
+
+    def run_as(self, name, comments, cwd=None):
+        """A run of repo `name` by a host with no repo name: the name is the one its bare repo route reads."""
+        return self.run_reviewed(comments, repo=None, full_name=name, cwd=cwd)
 
     def since_of(self, host):
         """The since of the run's comment read. The run reads the comments once: every check below stands on that scope."""
@@ -115,11 +157,15 @@ class ReviewedCursor(tm.CloudSession):
         with open(self.role_file, encoding="utf-8") as f:
             return json.load(f)
 
-    def cursor(self):
-        """This repo's cache: reviewed_cursor's entry under "." (the key of a host with no repo name), or None."""
+    def caches(self):
+        """The state file's reviewed_cursor: each repo's cache by its key, or {} when there is none."""
         data = self.state()
-        cache = data.get("reviewed_cursor") if isinstance(data, dict) else None
-        return cache.get(".") if isinstance(cache, dict) else None
+        caches = data.get("reviewed_cursor") if isinstance(data, dict) else None
+        return caches if isinstance(caches, dict) else {}
+
+    def cursor(self):
+        """This repo's cache: reviewed_cursor's entry under REPO_NAME, or None."""
+        return self.caches().get(REPO_NAME)
 
     def put_state(self, content):
         """Write the state file as `content` (see DAMAGES). The file is replaced whatever it was."""
@@ -251,12 +297,12 @@ class ReviewedCursor(tm.CloudSession):
 
     def test_write_merge_role_keeps_the_reviewed_cursor(self):
         cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": [record_row(), lint_row()]}
-        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner", "reviewed_cursor": {".": cache}})
+        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner", "reviewed_cursor": {REPO_NAME: cache}})
         with self.cloud():
             tm.merge.write_merge_role("batch-runner")
         data = self.state()
         self.assertEqual((data.get("session"), data.get("role")), (tm.ROLE_SESSION, "batch-runner"), "write_merge_role did not keep the session and role")
-        self.assertEqual(data.get("reviewed_cursor"), {".": cache}, "write_merge_role dropped the reviewed_cursor key")
+        self.assertEqual(data.get("reviewed_cursor"), {REPO_NAME: cache}, "write_merge_role dropped the reviewed_cursor key")
 
     def test_the_cursor_write_keeps_the_session_and_the_role(self):
         self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner"})
@@ -267,10 +313,10 @@ class ReviewedCursor(tm.CloudSession):
 
     def test_read_merge_role_reads_a_file_with_only_the_cursor_as_no_role(self):
         cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": []}
-        self.put_state({"reviewed_cursor": {".": cache}})
+        self.put_state({"reviewed_cursor": {REPO_NAME: cache}})
         with self.cloud():
             self.assertIsNone(tm.merge.read_merge_role())
-        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner", "reviewed_cursor": {".": cache}})
+        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner", "reviewed_cursor": {REPO_NAME: cache}})
         with self.cloud():
             self.assertEqual(tm.merge.read_merge_role(), "batch-runner")
 
@@ -286,6 +332,71 @@ class ReviewedCursor(tm.CloudSession):
         host, lines = self.run_reviewed(comments)
         self.assert_full_read(host)
         self.assertEqual(lines, writable, "an unwritable state folder changed the printed lines")
+
+    def assert_second_repo_reads_in_full(self, first, second, cwd=None):
+        """Shared step of the no-name cases: ALPHA runs and leaves its cache, then BETA runs with its own early record. BETA's run reads in
+        full and prints its own record as done, never ALPHA's rows, which are open."""
+        host, _ = self.run_as(ALPHA, first, cwd)
+        self.assert_full_read(host)
+        host, out = self.run_as(BETA, second, cwd)
+        got = self.since_of(host)
+        self.assertEqual(when(got), when(FLOOR), f"{BETA} read from {ALPHA}'s cache: its since is {got}, not the floor {FLOOR}")
+        self.assertRegex(tm.list_line(self, out, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} done: ", f"{BETA}'s run did not print its own record as done")
+
+    def test_a_repo_with_no_name_in_the_run_never_reads_another_repos_cache(self):
+        self.assert_second_repo_reads_in_full(alpha_comments(), beta_comments())
+
+    def test_a_checkout_re_pointed_at_another_repo_never_reads_the_old_repos_cache(self):
+        self.assert_second_repo_reads_in_full(alpha_comments(), beta_comments(), cwd=os.path.join(self.t, "checkout"))
+
+    def test_a_run_whose_repo_has_no_name_keeps_no_cache_and_reads_in_full(self):
+        comments = standard_comments()
+        host, first = self.run_reviewed(comments, repo=None)
+        self.assert_full_read(host)
+        self.assertFalse(self.caches(), f"a run whose repo has no name wrote a cache under {sorted(self.caches())}")
+        host, second = self.run_reviewed(comments, repo=None)
+        self.assert_full_read(host)
+        self.assertEqual(second, first, "a second run whose repo has no name printed other lines than the first")
+
+    def assert_an_edit_drops_its_cached_row(self, before, after):
+        """Shared step of the marker cases: the cache holds the comments `before`. Then `after` is read: one comment, edited past the cursor, no
+        longer holds its marker on line 1. The warm run reads from the cursor and must print what a full read prints."""
+        host, _ = self.run_reviewed(before)
+        self.assert_full_read(host)
+        host, warm = self.run_reviewed(after)
+        self.assert_from_cursor(host, T1)
+        self.reset_state()
+        host, full = self.run_reviewed(after)
+        self.assert_full_read(host)
+        self.assertEqual(warm, full, "the edit that removed a marker left its cached row: the warm run printed other lines than a full read")
+
+    def test_an_edit_that_removes_the_record_marker_drops_its_cached_row(self):
+        unmarked = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS).split("\n", 1)[1], created=T1, updated=T2)
+        self.assert_an_edit_drops_its_cached_row(standard_comments(), standard_comments(record=unmarked))
+
+    def test_an_edit_that_removes_the_lint_marker_drops_its_cached_row(self):
+        lint = tm.lint_of(7, tm.REVIEW_HEAD)
+        unmarked = {**lint, "body": tm.lint_body(tm.REVIEW_HEAD).split("\n", 1)[1], "updated_at": T2}
+        self.assert_an_edit_drops_its_cached_row(standard_comments(), standard_comments(lint=unmarked))
+
+    def test_write_merge_role_survives_a_state_file_nested_too_deep(self):
+        self.put_state(DEEP_STATE)
+        with self.cloud():
+            try:
+                tm.merge.write_merge_role("batch-runner")
+            except RecursionError as e:
+                self.fail(f"write_merge_role crashed on a state file nested too deep: {e}")
+        data = self.state()
+        self.assertEqual((data.get("session"), data.get("role")), (tm.ROLE_SESSION, "batch-runner"), "write_merge_role did not record the role over a state file nested too deep")
+
+    def test_read_merge_role_reads_a_state_file_nested_too_deep_as_no_role(self):
+        self.put_state(DEEP_ROLE_STATE)
+        with self.cloud():
+            try:
+                role = tm.merge.read_merge_role()
+            except RecursionError as e:
+                self.fail(f"read_merge_role crashed on a state file nested too deep: {e}")
+        self.assertIsNone(role, "a state file nested too deep was read as a role: it is corrupt, so there is no role")
 
 
 if __name__ == "__main__":

@@ -12926,11 +12926,14 @@ class PullsHost(merge.Host):
     OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
     parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
     commit sha to its tree sha, which the same answer names under commit.tree.sha. `now` is the Host clock (Host.now), so a case pins time.
-    `honor_since` makes the comment list answer `since` as GitHub does: only the comments updated after it. Off, every comment is listed."""
+    `honor_since` makes the comment list answer `since` as GitHub does: only the comments updated after it. Off, every comment is listed.
+    `full_name` is the OWNER/NAME that the bare repo route answers, which Host.api reads for a host with no repo name (root_host reads it so);
+    None fails that read, as a checkout with no GitHub repo does. `cwd` is Host.cwd, the checkout the run is in."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None, now=time.time, honor_since=False):
-        super().__init__(list(required), base="main", minute=60, now=now, pause=lambda s: None, ignore=ignore, repo=repo)
+                 commits=None, trees=None, now=time.time, honor_since=False, full_name=None, cwd=None):
+        super().__init__(list(required), base="main", minute=60, now=now, pause=lambda s: None, ignore=ignore, repo=repo, cwd=cwd)
+        self.full_name = full_name
         self.honor_since = honor_since
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12950,6 +12953,8 @@ class PullsHost(merge.Host):
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
 
     def gh(self, args, cwd=None):
+        if args[:2] == ["api", "repos/{owner}/{repo}"]:  # Host.api with no repo name: the read that names the repo
+            return (0, json.dumps({"full_name": self.full_name})) if self.full_name else (1, "gh: Not Found (HTTP 404)")
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
         if self.count_gh and args[0] == "api":
