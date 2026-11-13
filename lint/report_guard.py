@@ -747,7 +747,7 @@ _MAIN = r"main(?![\w-])"
 # A branch-like use of main: the line end, a punctuation mark (a possessive 's included), or a function word that
 # continues the comparison comes next. A noun after it ("main window", "main menu") names a thing, not the branch.
 _MAIN_NEXT = (r"(?=\s*$|[^\w\s]|\s+(?:branch|in|on|at|for|with|and|or|but|so|because|since|while|which|that|is|was|did"
-              r"|does|had|as|by|from|to|per|here|too|now|today|yet)(?![\w-]))")
+              r"|does|had|as|by|from|to|per|too|now|today|yet)(?![\w-]))")
 _MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()" + _MAIN_NEXT
 _OWN = r"main['\u2019]s\s+own(?![\w-])"
 MAIN_CLAIM_RE = re.compile(
