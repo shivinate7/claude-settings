@@ -707,7 +707,7 @@ def in_any_session_scratchpad(where: str) -> bool:
                for i in range(len(parts) - 1))
 
 
-TREE_DENY_REASON = (
+TREE_REFUSE_REASON = (
     "Rule (shared trees): this command throws away work in a checkout that other "
     "sessions and the owner share, and no step puts it back. "
     "Remedy: copy the file to a name ending in .bak and change the copy. "

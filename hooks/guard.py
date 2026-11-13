@@ -553,7 +553,7 @@ while True:
         from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
-            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_REFUSE_REASON,  # glossary-ok: the two older names stay, only the tree one is renamed
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
             scratchpad_agent_finished, scratchpad_clear_finished, scratchpad_clear_writer, scratchpad_mark_finished,
@@ -4295,7 +4295,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         # This session's own scratchpad: private by path, so nothing shared can be lost. A relative `-C` that
         # cannot be read (an untold `cd`, an unread variable) fails closed: its folder may be any checkout.
         if unread:
-            refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
+            refuse(tool, "deny", "shared-tree", TREE_REFUSE_REASON, matched)
         if under_session_scratchpad(root, session_id, any_temp=True):   # the session id in the path is the proof, so TMPDIR may name another folder
             continue
         # The subject read. An empty subject is a silent pass. An unreadable subject is allowed
@@ -4344,7 +4344,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 continue
             ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
             continue
-        refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
+        refuse(tool, "deny", "shared-tree", TREE_REFUSE_REASON, matched)
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
