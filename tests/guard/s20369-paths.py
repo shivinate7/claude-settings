@@ -53,6 +53,11 @@ for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.
               "src/protest_handler.ts", "src/specs.md", "src/testing.py", "src/Contest.java"):
     add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
         new_string="x = 1", **B)
+# The `testing` folder is a test folder at any depth and in any case, and it holds the shared fixtures,
+# so a builder may not write there. A name that only contains `testing` (src/testing.py above) stays product code.
+for _tool in ("Write", "Edit"):
+    add("builder-test: %s of testing/x.py is refused" % _tool, "deny", rule=BT, tool=_tool,
+        file_path="testing/x.py", carries=("test-author", "Report"), **B)
 add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
 # refusal-vs-rule (builder-test-edit): a builder may write outside every repository (its own scratchpad,
 # beside PRIVREPO) and a doc in a `spec` folder. A `spec` folder holds code too, so code there still
@@ -348,6 +353,22 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# The `testing` folder is a test folder for a test-author too, at any depth and in any case. A name that only
+# contains `testing` (testing_utils/, src/testing.py) is no test folder, so it stays refused.
+add("test-author: Write of testing/shallow_clone.py is allowed", "allow", tool="Write",
+    file_path="testing/shallow_clone.py", **A)
+add("test-author: Write of lib/testing/x.py is allowed", "allow", tool="Write",
+    file_path="lib/testing/x.py", **A)
+add("test-author: Write of Testing/x.py is allowed (case folds)", "allow", tool="Write",
+    file_path="Testing/x.py", **A)
+for _path in ("hooks/guard.py", "merge/merge.py", "testing_utils/x.py", "src/testing.py"):
+    add("test-author: Write of %s is refused" % _path, "deny", rule=TA, tool="Write",
+        file_path=_path, carries=("builder", "Report"), **A)
+# Accepted cost, not a bug. Ruling: coordinator 02:47 CST Nov 8, option A, any depth like test/ and spec/.
+add("test-author: Write of numpy/testing/_private/utils.py is allowed", "allow", tool="Write",
+    file_path="numpy/testing/_private/utils.py", **A)
+add("builder-test: Write of numpy/testing/x.py is refused", "deny", rule=BT, tool="Write",
+    file_path="numpy/testing/x.py", carries=("test-author", "Report"), **B)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
 # by, so a test-author edits them and a builder never does.
 for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"):
@@ -694,6 +715,15 @@ add("builder-test: a multi-line python run with a backslash test path, deleted f
 add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
     carries=("test-author", "Report"), **B)
+
+# bash takes no value after -k or -p, so the test path after either flag is the script: a builder that drops
+# that run drops its test.
+R3_BASH_K = "      - name: Unit\n        run: bash -k tests/test_a.sh\n"
+R3_BASH_P = "      - name: Unit\n        run: bash -p tests/test_a.sh\n"
+add("builder-test: a bash -k test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_K, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a bash -p test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_P, new_string=LINT, carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with

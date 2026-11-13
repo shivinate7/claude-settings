@@ -35,6 +35,7 @@ session transcripts, not a repo.
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
 | Parallelism | `$PY $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
+| Shared trees | `$PY $P/lint/compliance_probes.py hooks $P` prints the diff of the live `settings.json` hooks (`$CLAUDE_CONFIG_DIR/settings.json` when set and not empty, else `~/.claude/settings.json`) against the parent clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy and the live file read: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked`, or `live (<dir>/settings.json)` when the variable is set | exit 0. The live hooks equal the clone's, less `SessionStart` |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
@@ -98,8 +99,8 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 | project file | no tracked `.xcodeproj`; XcodeGen writes it from `project.yml`. A tracked one is `partial` |
 | kit package | a tracked `Package.swift` holds the app logic. None is `partial` |
 | swift 6 | each project file sets `SWIFT_VERSION` 6, no `swift-tools-version` below 6, no language mode 5 |
-| ci runner | each macOS image a workflow names, matrix values too, is the pinned image (`IOS_RUNNER`) or a larger runner of it, never `macos-latest` |
-| ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app. `xcodebuild -showsdks`, `-list`, `-showBuildSettings`, `-help` and `-version` compile nothing |
+| ci runner | each macOS image a workflow names, matrix values too, is the pinned image (`IOS_RUNNER`) or a larger runner of it, never `macos-latest`. A valid `IOS_CI_EXEMPTION` form waives nothing here; a broken, untracked or unreadable one is a gap |
+| ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app. `xcodebuild -showsdks`, `-list`, `-showBuildSettings`, `-help` and `-version` compile nothing. A valid, tracked `IOS_CI_EXEMPTION` form waives the app compile only, and the item passes as `exempt: <sdk> (app compile waived)` only when the app compile is actually missing, else with its normal detail; the package tests and the pull-request workflow stay required. A broken, untracked or unreadable form is a gap |
 | slow tests | no workflow runs `make ui-test`, `make native-check`, `sim-test` or an `xcodebuild test` that covers a UI-test bundle (`-only-testing:`, or the scheme's test targets). A run the probe cannot resolve is a gap. UI tests run once per batch on the Mac |
 | test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run. Named incident, landed 2026-10-29: Restyle and Duo each patched it alone |
 | account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
@@ -108,9 +109,12 @@ The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 
 ## Words
 
-`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child. A retired word is a
-"Not" name in a row of `GLOSSARY.md`. The probe reads the child's tracked files only, and never edits
-or pushes to the child.
+`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child's change. A retired word is a
+"Not" name in a row of `GLOSSARY.md`. The probe reads what the child adds against the merge base with its
+`origin/main`. It reads the paths and the lines that its commits, work tree and untracked files add, as the check
+reads them. With a merge base, reported paths are relative to the repo top: a root in a subfolder reads the whole
+repo's change. With no `origin/main` or no merge base it reads the root's tracked files, with paths relative to the
+root. It never edits or pushes to the child.
 
 The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check_glossary.py` from the
 parent clone. It calls the check's own readers: the path read, and the read of identifiers, rule
@@ -120,7 +124,7 @@ A term of the child's own `GLOSSARY.md`, at its root, spans a retired word, as a
 Terms come only from a four-column `## Terms` table there. Another shape gives no terms.
 A child term that repeats a claude-settings term, or is the retired word, does not.
 
-The probe reads every tracked file, so it can take a minute on a large repo. The check reads hook
+A whole-tree read can take a minute on a large repo. The check reads hook
 messages in `hooks/` only. That fits the layout of claude-settings, and a child with another layout has
 no message read.
 
@@ -129,14 +133,15 @@ newline. A path hit has `-` for the line. One more line, `glossary read at <sha>
 names the parent commit whose glossary the run read. It adds `(uncommitted)` when `GLOSSARY.md` differs
 from that commit. Name the commit in the report, so a later run on a moved list is read against it.
 
-A tracked file that does not decode as text, such as a binary, is still read by its path. One note line,
-`unread: <N> files, <the first three>`, names those files. They do not make the group `unknown`.
+A committed file that does not decode as UTF-8 text, or an untracked binary, is still read by its path. One note
+line, `unread: <N> files, <the first three>`, names those files. They do not make the group `unknown`. An untracked
+file that is not UTF-8 text and not binary makes the group `unknown`, as the check does.
 
 | Exit | Group line |
 | --- | --- |
 | 0 | `words: in shape` |
 | 1 | `words: out`, one item line per hit |
-| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, no tracked file could be read, or the run passed `WORDS_DEADLINE` (`stopped at <file>, N of M read`) |
+| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, no tracked file could be read (whole-tree read), the check cannot read the diff, an untracked file that is not UTF-8 text and not binary, or the run passed `WORDS_DEADLINE` (`stopped at <file>, N of M read`) |
 
 A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
 is `unknown`, never `in shape`.
@@ -206,6 +211,15 @@ An item names the file, the line and the record. It never prints record text.
 | 2 | `restates: unknown`: the records folder cannot be read or holds no record, a tracked file of the child cannot be read, or a code fence is still open at the end of a file |
 
 Child CI runs the same probe through the action `actions/claude-md-cites`, after `actions/checkout`.
+
+## Hooks
+
+`$PY $P/lint/compliance_probes.py hooks $P` compares the `.hooks` of the parent clone's `settings.json` with the `.hooks`
+of the live file. The live file is the one `install.sh` writes: `$CLAUDE_CONFIG_DIR/settings.json` when that
+variable is set and not empty, else `~/.claude/settings.json`. `SessionStart` is dropped on
+both sides, since a cloud install rewrites it. Both sides print as key-sorted JSON, so key order is no
+difference. A difference prints as a unified diff, each line indented two spaces: `clone` is `-`, `live` is `+`.
+For in shape and out, the first line after the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where `<live>` is `~/.claude/settings.json` or `<dir>/settings.json`, the file read. The clone is the trusted side, since `install.sh` writes the live file from it. A clone with no `settings.json` is n/a. The probe is `unknown` when the live file is missing, or when either file cannot be read, is not UTF-8 or is not JSON. It is also `unknown` when either file is not a JSON object, or its `hooks` is not an object. A file with no `hooks` key compares as empty hooks.
 
 ## Copies
 
