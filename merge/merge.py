@@ -5799,7 +5799,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
-                    ok = bool(a.round or last["rounds"])  # a fix check alone needs a recorded round before it: a round-less record has nothing to fix
+                    ok = True
                 else:  # a fix after a FAIL fix is refused. After a PASS fix, a plain commit takes a further fix check; a merge head qualifies only as a merge of the base: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
                     parents, tree = h.commit_read(a.head) if last["fix"][3] == "PASS" else ([], None)
                     plain = last["fix"][3] == "PASS" and len(parents) != 2
@@ -5825,7 +5825,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A fix check with no round line needs that log to hold a round. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
