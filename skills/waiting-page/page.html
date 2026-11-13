@@ -144,6 +144,12 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .inbundle { font-weight: 600; color: var(--acc); }
 /* The lane the item waits on: the weight and colour of "goes with No. 4". It never holds the owner's answer, so it is no stake line. */
 .onlane { font-weight: 600; color: var(--acc); min-width: 0; overflow-wrap: anywhere; }
+/* The sessions an answer wakes: the top row's own muted text, and its ids in a closed disclosure that takes the row when open. */
+.onwakes { min-width: 0; overflow-wrap: anywhere; }
+.top > .wk { min-width: 0; }
+.top > .wk[open] { flex-basis: 100%; padding-bottom: 4px; }
+.wk-ids { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font: 13.5px/1.5 var(--mono); color: var(--ink); }
+.wk-ids li { min-width: 0; overflow-wrap: anywhere; }
 /* A wait on a CI run or a PR extends the lane span: same weight and accent, and its link is the one target in it. */
 .onlane.waits a { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; border-radius: 4px; }
 .onlane.waits a:hover { text-decoration-thickness: 2.5px; }
@@ -1011,7 +1017,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "wakes", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1570,6 +1576,10 @@ function receipt(it, noNote) {
 const lastOf = (it) => (it.lastAnswer && typeof it.lastAnswer === "object" && !Array.isArray(it.lastAnswer) ? it.lastAnswer : null);
 const replyOf = (it) => (typeof it.reply === "string" ? it.reply.trim() : "");
 const laneOf = (it) => (typeof it.lane === "string" ? it.lane.trim() : "");
+// The shape of a session id. hooks/own_session.py _CREATED_ID is the home; this page cannot import it, so a test reads both and checks they match.
+const SESSION_ID = /^session_[A-Za-z0-9_-]+$/;
+// The sessions an answer wakes: null when the item names none (the owner alone), "bad" when the list is not a non-empty list of whole session ids, else the list as written.
+const wakesOf = (it) => (it.wakes == null ? null : Array.isArray(it.wakes) && it.wakes.length && it.wakes.every((x) => typeof x === "string" && SESSION_ID.test(x)) ? it.wakes : "bad");
 // receipt()'s words for what was chosen. A key that is no longer in options never shows raw.
 function lastAnswerEl(it) {
   const la = lastOf(it), c = la.choice, t = fmt(la.at);
@@ -1732,6 +1742,11 @@ function buildCard(it) {
   if (lane && wt) top.append(h("span", { class: "onlane waits" }, "waits on lane " + lane + " and ", waitLink(wt)));
   else if (wt) top.append(h("span", { class: "onlane waits" }, waitLink(wt, "waits on ")));
   else if (lane) top.append(h("span", { class: "onlane" }, "waits on lane " + lane));
+  // The sessions the answer wakes: plain words in the row, the ids in a closed disclosure. A list that is not valid says so and lists nothing.
+  const wk = wakesOf(it);
+  if (wk === "bad") top.append(h("span", { class: "onwakes", id: "wakes-" + it.id }, "wake list not valid: " + it.owner + " is asked to fix it when you answer"));
+  else if (wk) top.append(h("span", { class: "onwakes", id: "wakes-" + it.id }, "your answer wakes " + wk.length + (wk.length === 1 ? " session" : " sessions")),
+    h("details", { class: "cmd-more wk", id: "wk-" + it.id }, h("summary", {}, wk.length === 1 ? "Which session" : "Which sessions"), h("ul", { class: "wk-ids" }, wk.map((x) => h("li", {}, x)))));
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
   const bad = problem(it);
   if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));

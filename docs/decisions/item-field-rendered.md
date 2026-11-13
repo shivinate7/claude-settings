@@ -18,7 +18,7 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes. Review catches it.
   - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page check (`stale_pages.py`) is the backstop.
   - Known limit: it cannot see a stored field. An item written before the rule keeps its fields, and the page warns on them.
-- The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`).
+- The fields `reply`, `lastAnswer`, `lane` and `wakes` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`, and `docs/design/wakes-on-card-notes.md` for `wakes`).
 
 Incident:
 
