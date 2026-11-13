@@ -2688,6 +2688,26 @@ class CostTests(unittest.TestCase):
                          "an ask that names a role reads no scope, so one call; got %r" % (run["models"],))
         self.assertEqual(run["children"], [], "the ask starts no child; got %r" % (run["children"],))
 
+    def test_a_plain_override_ask_the_judge_refuses_makes_one_call_and_no_grant(self):
+        # Main's plain override ask: a prompt that holds the whole word `override` goes to one judge call (override.grant_override_ask).
+        run = self.fire("yes override that", [[{"ok": False}, None]])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a prompt with the word override makes one judge call; got %r" % (run["models"],))
+        self.assertEqual((run["children"], sorted(run["files"])), ([], sorted([INBOX, REPO_SIDECAR])),
+                         "a refused plain override starts no child and writes no grant file or guard line; got %r"
+                         % ((run["children"], run["files"]),))
+
+    def test_a_plain_override_ask_the_judge_grants_makes_one_call_and_one_grant(self):
+        run = self.fire("yes override that", [[{"ok": True}, None]])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a granted plain override is one judge call; got %r" % (run["models"],))
+        self.assertEqual(run["children"], [], "the granted override starts no child; got %r" % (run["children"],))
+        self.assertIn(INBOX, run["files"], "the prompt is still saved to the inbox; got %r" % (run["files"],))
+        self.assertTrue(any(name.startswith("state/override/") for name in run["files"]),
+                        "a granted plain override writes its grant file; got %r" % (run["files"],))
+
 
 def main():
     try:
