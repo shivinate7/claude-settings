@@ -1715,8 +1715,8 @@ def case_cap_keeps_a_works_row_behind_thirty_one_refused_rows():
 # count) as a count or a state is flagged. A count read from REST is not, and neither is a search used only
 # to find candidates. Code finds a search total and sends that Stop to the model off-sample (SEARCH_TOTAL in
 # reply_judge.py): a reply that holds `total_count`, a `search/<endpoint>` path, or the word "search" within
-# 60 characters of a digit. The model decides. Each leg has its own fixture, so a regex that drops one leg
-# fails that leg's case alone.
+# 120 characters of a count word (a digit, none, zero, no), in either order. The model decides. Each leg has
+# its own fixture, so a regex that drops one leg fails that leg's case alone.
 
 SEARCH_RULE = "verification-counts-from-rest"
 SEARCH_COUNT_REPLY = "Done: checked the PR list. search total_count 0: no PRs closed since 09:30."
@@ -1730,7 +1730,7 @@ ENDPOINTS = ("issues", "code", "commits", "repositories", "users")
 WORD_LEG = "Done: a search came back with 7 rows for the rule."  # the word search, a digit after it
 DIGIT_BEFORE_LEG = "Done: 7 rows came back from the search for the rule."  # a digit before it
 FAR_FROM_DIGIT = ("Done: the search of the docs took a long time, because it read every page of the handbook for "
-                  "the rule text and then the rule text again, and the final count of pages was 40.")  # 161 characters
+                  "the rule text and then the rule text again, and the final count of pages was 40.")  # 155 characters
 RESEARCH_REPLY = "Done: the research on the rule took 3 passes."  # holds the letters search, not the word
 LONG_FILLER = "Next: open the follow-up lane. " * 250  # about 8,250 characters, so the reply passes REPLY_MAX
 
@@ -1746,6 +1746,11 @@ def every_file(config):
         for name in names:
             found.append(os.path.relpath(os.path.join(dirpath, name), config))
     return sorted(found)
+
+
+def gap_chars(text, first, second):
+    """Characters from the end of the first word to the start of the second, both found in the text."""
+    return text.index(second) - (text.index(first) + len(first))
 
 
 def case_search_total_reply_is_judged_off_sample():
@@ -1793,8 +1798,10 @@ def case_each_search_trigger_leg_is_judged_off_sample():
 
 
 def case_search_word_far_from_a_digit_is_not_judged_off_sample():
-    # Controls: the word search with no digit within 60 characters, and a word that only holds its letters.
-    for n, (name, text) in enumerate((("a digit 161 characters away", FAR_FROM_DIGIT),
+    # Controls: the word search with no count word within 120 characters, and a word that only holds its letters.
+    gap = gap_chars(FAR_FROM_DIGIT, "search", "40")
+    check("far digit: the digit sits more than 120 characters past the search word", gap > 120, gap)
+    for n, (name, text) in enumerate((("a digit %d characters past the search word" % gap, FAR_FROM_DIGIT),
                                       ("research, which holds the letters search", RESEARCH_REPLY))):
         run, _ = second_stop(text, label="counts-far-%02d" % n, session="counts-far-%02d" % n)
         check("no search trigger, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
@@ -1894,7 +1901,7 @@ def case_search_total_stop_starts_only_the_judge_call():
 
 # --------------------------------------------------------------------------- counts-from-rest: trigger words
 # The off-sample trigger also takes a search word in any form (search, searched, --search), a search/<word>
-# endpoint, and a count word (a digit, zero, none) within 60 characters of a search word. Each form is its own
+# endpoint, and a count word (a digit, zero, none) within 120 characters of a search word. Each form is its own
 # check, so a regex that drops one form fails that check alone. A count word with no search word is no trigger.
 
 SEARCHED_LEG = "Done: I searched the repo and found 4 open issues."
@@ -1947,11 +1954,84 @@ def case_count_words_without_a_search_word_are_not_judged_off_sample():
 
 
 def case_search_word_far_from_a_count_word_is_not_judged_off_sample():
-    # Scope first: the search word and the count word are more than 60 characters apart in the reply.
+    # Scope first: the search word and the count word are more than 120 characters apart in the reply.
     gap = FAR_FROM_COUNT_WORD.index("zero") - (FAR_FROM_COUNT_WORD.index("search") + len("search"))
-    check("far count word: the count word sits more than 60 characters past the search word", gap > 60, gap)
+    check("far count word: the count word sits more than 120 characters past the search word", gap > 120, gap)
     run, _ = second_stop(FAR_FROM_COUNT_WORD, label="counts-d-far", session="counts-d-far")
     check("far count word, %d characters away: Stop 2 never calls the model" % gap, not run.calls, run.calls)
+
+
+# The window is 120 characters, in either order. The near fixtures sit past 60 and within 120, so only the
+# 120-character window judges them. The 120 and 121 pair pins the exact edge. The far fixtures sit past 120.
+REALISTIC_REPLY = ("Searched the org with gh search prs --state open across all repos we track, and the total came to "
+                   "5 open PRs.")
+NEAR_AFTER_REPLY = ("Done: searched the open PRs across every tracked repo, and read each row with its labels "
+                    "and owners, so the total is 4 open.")
+NEAR_BEFORE_REPLY = ("Done: 4 open PRs were read across every tracked repo, with each row and its labels "
+                     "and owners in full, then searched again.")
+FAR_AFTER_REPLY = ("Done: searched the open PRs across every tracked repo, and read each row with its labels, owners, "
+                   "reviewers, comments and checks in full, so the total is 4 open.")
+FAR_BEFORE_REPLY = ("Done: 4 open PRs were read across every tracked repo, with each row and its labels, owners, "
+                    "reviewers, comments and checks in full, and then searched again.")
+
+
+def search_count_reply(gap, count_first):
+    """A reply whose count word and search word sit `gap` characters apart, in the order named."""
+    spacer = " " + "x" * (gap - 2) + " "  # gap characters, filler that is no count word and no search word
+    if count_first:
+        return "Done: 4" + spacer + "searched the tracked repos."
+    return "Done: searched" + spacer + "4 open PRs."
+
+
+def case_realistic_search_total_sentence_is_judged_off_sample():
+    gap = gap_chars(REALISTIC_REPLY, "search", "5")  # the nearest search word, the one in "gh search prs"
+    check("realistic sentence: the count word sits past 60 and within 120 characters of the search word",
+          60 < gap <= 120, gap)
+    run, _ = second_stop(REALISTIC_REPLY, label="counts-g-realistic", session="counts-g-realistic")
+    check("realistic sentence: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_count_word_about_100_characters_from_a_search_word_is_judged_off_sample():
+    legs = (("after the search word", NEAR_AFTER_REPLY, "searched", "4"),
+            ("before the search word", NEAR_BEFORE_REPLY, "4", "searched"))
+    for n, (name, text, first, second) in enumerate(legs):
+        gap = gap_chars(text, first, second)
+        check("near window, count word %s: the gap is past 60 and within 120 characters" % name,
+              60 < gap <= 120, gap)
+        run, _ = second_stop(text, label="counts-g-near-%02d" % n, session="counts-g-near-%02d" % n)
+        check("near window, count word %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_search_word_120_characters_from_a_count_word_is_judged_off_sample():
+    for n, count_first in enumerate((True, False)):
+        text = search_count_reply(120, count_first)
+        first, second = ("4", "searched") if count_first else ("searched", "4")
+        order = "count word first" if count_first else "search word first"
+        gap = gap_chars(text, first, second)
+        check("window edge 120, %s: the words sit exactly 120 characters apart" % order, gap == 120, gap)
+        run, _ = second_stop(text, label="counts-h-edge-%02d" % n, session="counts-h-edge-%02d" % n)
+        check("window edge 120, %s: Stop 2 calls the model once" % order, len(run.calls) == 1, run.calls)
+
+
+def case_search_word_121_characters_from_a_count_word_is_not_judged_off_sample():
+    for n, count_first in enumerate((True, False)):
+        text = search_count_reply(121, count_first)
+        first, second = ("4", "searched") if count_first else ("searched", "4")
+        order = "count word first" if count_first else "search word first"
+        gap = gap_chars(text, first, second)
+        check("window edge 121, %s: the words sit exactly 121 characters apart" % order, gap == 121, gap)
+        run, _ = second_stop(text, label="counts-h-past-%02d" % n, session="counts-h-past-%02d" % n)
+        check("window edge 121, %s: Stop 2 never calls the model" % order, not run.calls, run.calls)
+
+
+def case_count_word_past_120_characters_is_not_judged_off_sample():
+    legs = (("after the search word", FAR_AFTER_REPLY, "searched", "4"),
+            ("before the search word", FAR_BEFORE_REPLY, "4", "searched"))
+    for n, (name, text, first, second) in enumerate(legs):
+        gap = gap_chars(text, first, second)
+        check("far count word, %s: the gap is more than 120 characters" % name, gap > 120, gap)
+        run, _ = second_stop(text, label="counts-i-far-%02d" % n, session="counts-i-far-%02d" % n)
+        check("far count word, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
 
 
 def case_prompt_never_flags_a_reply_that_refutes_a_search_total():
@@ -2133,6 +2213,11 @@ CASES = (
     case_gh_search_with_a_digit_is_judged_off_sample,
     case_count_words_without_a_search_word_are_not_judged_off_sample,
     case_search_word_far_from_a_count_word_is_not_judged_off_sample,
+    case_realistic_search_total_sentence_is_judged_off_sample,
+    case_count_word_about_100_characters_from_a_search_word_is_judged_off_sample,
+    case_search_word_120_characters_from_a_count_word_is_judged_off_sample,
+    case_search_word_121_characters_from_a_count_word_is_not_judged_off_sample,
+    case_count_word_past_120_characters_is_not_judged_off_sample,
     case_prompt_never_flags_a_reply_that_refutes_a_search_total,
     case_search_joined_by_underscore_is_judged_off_sample,
     case_search_with_count_word_no_is_judged_off_sample,
