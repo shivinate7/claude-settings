@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T18:02:00Z",
+  "context": "Goal: a lane's lint result means the same as CI's.\nProblem (rule): merging main into #1938 clashes in bin/ci-job and merge/merge.py. Main has `pin_tree` (a git archive) and a `--pinned` flag set by merge's ready check; the PR has a worktree-based pinned tree with signal cleanup and a dead-run sweep. One of them has to go.\nBased on (ruling): your 11:53 CST pick of 714 b (lane lint follows the pinned trees, child repos too).\nDeparts from: main \u2014 main runs ste-lint local with a drift note; a runs it pinned and drops `--pinned`.",
+  "home": "step lane-lint-runs-local-tools",
+  "id": "pick-1938-pin-design",
+  "kind": "decision",
+  "n": 727,
+  "options": [
+    {
+      "gain": "One pinned path, no worktree sweep to maintain.",
+      "how": "ste-lint under --lint runs the pinned copy; the PR's worktree machinery is not used.",
+      "id": "archive",
+      "key": "a",
+      "label": "Keep `pin_tree`, port the per-step pins onto it, drop `--pinned` (coordinator's pick)",
+      "lose": "The PR's own worktree design is dropped."
+    },
+    {
+      "gain": "Keeps the PR as built.",
+      "how": "The PR's design replaces main's.",
+      "id": "worktree",
+      "key": "b",
+      "label": "Keep the PR's worktree machinery; retire `pin_tree` and `--pinned`",
+      "lose": "More code to keep clean (signal cleanup, dead-run sweep)."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "coordinator 12:02 CST Nov 13, lane R67-drain",
+  "repo": "shivinate7/claude-settings",
+  "short": "#1938: one pinned path, drop --pinned",
+  "shown": [
+    {
+      "id": "archive",
+      "key": "a",
+      "label": "Keep `pin_tree`, port the per-step pins onto it, drop `--pinned` (coordinator's pick)"
+    },
+    {
+      "id": "worktree",
+      "key": "b",
+      "label": "Keep the PR's worktree machinery; retire `pin_tree` and `--pinned`"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "For lane lint following pinned trees (#1938), keep main's `pin_tree` archive and drop `--pinned`?",
+  "why": "The coordinator took this pick on your 714 b; it stands unless you choose b (a third option, keeping both, breaks one home per capability)."
+}

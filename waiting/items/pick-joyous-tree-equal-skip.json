@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-13T18:03:00Z",
+  "context": "Goal: child-repo CI is fast without a test-red main going unseen.\nProblem (risk): joyous #87 drops Test, Build and Install on push to main. Your ruling 176 b (21:45 CST Nov 12) keeps non-macOS push suites until claude-settings changes the red-main check, so #87 is held. A narrower skip exists and needs your word.\nBased on (measured): 12 of 12 recent joyous merges pushed a tree equal to the PR's tested tree (runner 11 read).\nBased on (ruling): 176 b; claude-settings ci-once-per-batch (your 21:16 CST Nov 12).\nDeparts from: joyous main, which runs the push suites on every push \u2014 a skips them when the pushed tree equals the second parent's tree.",
+  "home": "joyous PR #87; your ruling 176 b",
+  "id": "pick-joyous-tree-equal-skip",
+  "kind": "decision",
+  "n": 729,
+  "options": [
+    {
+      "gain": "Push runs stop replaying trees the PR run already tested.",
+      "how": "joyous skips its push suites on a push to main when the pushed tree equals the second parent's tree (the PR's tested tree). A direct push still runs them.",
+      "id": "allow",
+      "key": "a",
+      "label": "Allow the tree-equal skip in joyous (recommended)",
+      "lose": "A merge that changes the tree after the PR run still runs the suites; nothing is lost."
+    },
+    {
+      "gain": "No change.",
+      "how": "joyous #87 stays held.",
+      "id": "keep",
+      "key": "b",
+      "label": "Keep all push suites until the red-main check changes",
+      "lose": "joyous push minutes stay as they are."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:05 CST Nov 13, runner 11 read",
+  "repo": "shivinate7/claude-settings",
+  "short": "joyous: skip push suites on an equal tree",
+  "shown": [
+    {
+      "id": "allow",
+      "key": "a",
+      "label": "Allow the tree-equal skip in joyous (recommended)"
+    },
+    {
+      "id": "keep",
+      "key": "b",
+      "label": "Keep all push suites until the red-main check changes"
+    }
+  ],
+  "status": "open",
+  "title": "In joyous, skip the push-to-main suites when the pushed tree equals the tree the PR already tested?",
+  "why": "A narrowing of your ruling 176 b needs your word; runner 11 waits on joyous only."
+}

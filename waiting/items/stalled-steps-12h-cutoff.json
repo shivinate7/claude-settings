@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T18:01:00Z",
+  "context": "Goal: stale-draft handling follows rules you made, not guessed numbers.\nProblem (rule): decision stalled-steps says a draft over 12 h with no live lane is stale. No ruling of yours sets 12 h (R37: no hard fixed numbers), and the pass that used it closed 71 PRs whose work was not on main. That pass is stopped; closes now go only through runner 10 from the ledger.\nBased on (ruling): R37; ruling pr-close-by-batch-runner (your 11:45 CST Nov 13 pick).\nDeparts from: main, where stalled-steps names 12 h \u2014 a removes the cutoff.\nMeanwhile: nothing waits; PR 3159 files it as an unruled fixed number.",
+  "home": "decision stalled-steps (PR 3159)",
+  "id": "stalled-steps-12h-cutoff",
+  "kind": "decision",
+  "n": 726,
+  "options": [
+    {
+      "gain": "No fixed number to defend; a draft's work decides, not its age.",
+      "how": "Stale drafts are judged by the evidence ledger and runner 10's closes, with no hours cutoff.",
+      "id": "drop",
+      "key": "a",
+      "label": "Drop the 12 h cutoff (recommended)",
+      "lose": "A quiet draft with no ledger row stays open until the ledger covers it."
+    },
+    {
+      "gain": "Old drafts surface on a schedule you chose.",
+      "how": "You name the hours; the decision stalled-steps carries it as your ruling.",
+      "id": "rule",
+      "key": "b",
+      "label": "Keep a cutoff and set the number",
+      "lose": "One more fixed number to maintain; today's 12 h came from no one's word."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane pr-close-record, 12:01 CST Nov 13",
+  "reply": "Settled, not a question: R37 and your 11:36 CST Nov 13 words (\"these hard static time limits are not something i approve\") already rule it. The 12 h cutoff is dropped; lane pr-close-record removes it in PR 3159. Coordinator 12:04 CST.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stale-draft 12 h cutoff: drop?",
+  "shown": [
+    {
+      "id": "drop",
+      "key": "a",
+      "label": "Drop the 12 h cutoff (recommended)"
+    },
+    {
+      "id": "rule",
+      "key": "b",
+      "label": "Keep a cutoff and set the number"
+    }
+  ],
+  "status": "closed",
+  "title": "Should the 12 h stale-draft cutoff in decision stalled-steps be dropped, or ruled on?",
+  "why": "A fixed number with no ruling needs your word or removal."
+}
