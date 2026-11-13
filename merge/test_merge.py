@@ -1610,6 +1610,12 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+def scope_line(name):
+    """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
+    with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+        m = re.search(r'^%s="([^"]*)"' % name, f.read(), re.M)
+    return m.group(1) if m else ""
+
 CHECKS_YML = ("name: checks\non: pull_request\njobs:\n"  # checks-merge-install comes first: a test that appends steps puts them in `checks`, the last job
              "  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Merge install suite\n        run: python3 hooks/x.py\n"
@@ -1660,6 +1666,46 @@ class ScopedRepo:
         for path, text in files.items():
             (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+    def scope_run(self, branch="feat", head_ref="", base=False):
+        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
+        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
+        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
+        script = os.path.join(o, ".github/scripts/ci-scope.sh")
+        if base:
+            script = os.path.join(self.t, "base-ci-scope.sh")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+        out_file = os.path.join(self.t, "scope.out")
+        if os.path.exists(out_file):
+            os.remove(out_file)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        flags = {}
+        if os.path.exists(out_file):
+            with open(out_file, encoding="utf-8") as f:
+                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        return r.returncode, flags
+
+    def scope_of(self, files):
+        """-> scope_run's answer for `files` alone: a probe branch cut from main with only those changes. The scope of a main move, read
+        before a case relies on it (P7)."""
+        self.on("probe", files, start="main")
+        return self.scope_run(branch="probe")
+
+    @staticmethod
+    def turned_on(flags):
+        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
+        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint)."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("lint_") and v != "false")
+
+    @staticmethod
+    def lints_on(flags):
+        """The lint_* flags that are on."""
+        return sorted(k for k, v in flags.items() if k.startswith("lint_") and v != "false")
 
 class SmallBaseMove(ScopedRepo, Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
@@ -1955,6 +2001,40 @@ class SmallBaseMove(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
         self.assertIn("touching only paths no job of this batch reads", out)
+
+    def assert_main_move_is_lint_only(self, files, *lints):
+        """The scope assert, before the subject (P7): the real ci-scope.sh turns on no job and no suite for main's move `files`, and exactly the
+        lint flags `lints`. The move is probed on its own branch first, so a case reads its scope before it relies on it."""
+        rc, flags = self.scope_of(files)
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the move" % rc)
+        self.assertEqual(self.turned_on(flags), [], "the move turns a job on, so it is not prose-only: %r" % flags)
+        self.assertEqual(self.lints_on(flags), sorted(lints), "the real ci-scope.sh's lint flags for the move: %r" % flags)
+
+    def test_a_main_claude_md_move_keeps_the_green_run(self):
+        """CLAUDE.md on main sets lint_ruling_kind and no job, so the move is prose-only and the green run stands."""
+        self.scoped()
+        self.assert_main_move_is_lint_only({"CLAUDE.md": "rules\n"}, "lint_ruling_kind")
+        self.on("main", {"CLAUDE.md": "rules\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
+
+    def test_a_main_test_folder_note_move_keeps_the_green_run(self):
+        """A .md under a test folder on main sets lint_red_run and no job. No suite reads it, so the green run stands."""
+        self.scoped()
+        self.assert_main_move_is_lint_only({"skills/example/tests/notes.md": "# Notes\n"}, "lint_red_run")
+        self.on("main", {"skills/example/tests/notes.md": "# Notes\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
+
+    def test_a_main_code_path_beside_a_claude_md_move_is_refused(self):
+        """The control for the lint-only moves: a job path on main is refused, even with a lint-only path beside it."""
+        self.scoped()
+        self.on("main", {"CLAUDE.md": "rules\n", "hooks/x.py": "X = 2\n"})
+        self.refused()
 
     def test_an_unreadable_merge_base_is_refused(self):
         self.scoped()
@@ -13231,8 +13311,10 @@ class ExpressPath(ScopedRepo, Env):
     FLAG_ARGV = ("7", "--confirm", "--express")
     FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
-    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
-                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
+    JOB_FLAGS_OFF = ('checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
+                     'pointer_windows checks_guard code mods guard sweep shoot')  # the script's JOBS and suite names, minus the lint flags
+    ALL_OFF_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % (JOB_FLAGS_OFF, scope_line("LINTS")))  # for stub_scope: every flag off, the lint flags too, exits 0
+    NO_LINT_PRELUDE = ('for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % JOB_FLAGS_OFF)  # for stub_scope: every job and suite flag off, no lint flag written, exits 0
 
     def setUp(self):
         super().setUp()
@@ -13253,29 +13335,6 @@ class ExpressPath(ScopedRepo, Env):
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
 
-    def scope_run(self, branch="feat", head_ref="", base=False):
-        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
-        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
-        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
-        script = os.path.join(o, ".github/scripts/ci-scope.sh")
-        if base:
-            script = os.path.join(self.t, "base-ci-scope.sh")
-            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
-        out_file = os.path.join(self.t, "scope.out")
-        if os.path.exists(out_file):
-            os.remove(out_file)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
-        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
-        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
-        flags = {}
-        if os.path.exists(out_file):
-            with open(out_file, encoding="utf-8") as f:
-                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
-        return r.returncode, flags
-
     def test_scope_run_finds_bash_through_resolve_program(self):
         """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
         bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
@@ -13288,11 +13347,6 @@ class ExpressPath(ScopedRepo, Env):
             self.scope_run()
         self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
         self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
-
-    @staticmethod
-    def turned_on(flags):
-        """The flags that are on, not counting mutation_report (it is set only for a batch branch)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
 
     def assert_prose_only(self):
         rc, flags = self.scope_run()
@@ -13387,6 +13441,58 @@ class ExpressPath(ScopedRepo, Env):
         self.assertTrue(self.host.merged, out)
         self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
 
+    def assert_lint_only_on(self, *lints):
+        """The scope assert, before a prose case relies on it (P7): the real ci-scope.sh turns on no job and no suite for the fixture's feat,
+        and exactly the lint flags `lints`."""
+        self.assert_prose_only()
+        rc, flags = self.scope_run()
+        self.assertEqual(self.lints_on(flags), sorted(lints), "the real ci-scope.sh's lint flags for the fixture: %r" % flags)
+
+    def test_a_claude_md_change_merges(self):
+        """CLAUDE.md sets lint_ruling_kind and no job. A ruled prose change with it still goes on to the merge."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "rules\n"})
+        self.assert_lint_only_on("lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_plan_record_change_merges(self):
+        """A file under docs/plans/ sets lint_plan_refuter and no job, beside the decision record's lint_ruling_kind."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"docs/plans/example.md": "# Plan\n"})
+        self.assert_lint_only_on("lint_plan_refuter", "lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_test_folder_note_merges(self):
+        """A .md under a test folder sets lint_red_run and no job: the red-run lint reads it, no suite does."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"skills/example/tests/notes.md": "# Notes\n"})
+        self.assert_lint_only_on("lint_red_run", "lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_lint_flag_still_turns_the_job_on(self):
+        """The control for the lint-only cases: a code path beside the decision record turns its job on, and the lint flag is on too.
+        A count that skips the lint flags must not skip a job."""
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertIn("lint_ruling_kind", self.lints_on(flags), "the decision record no longer sets its lint flag: %r" % flags)
+        self.assertIn("code", self.turned_on(flags), "the code path no longer turns the code job on beside a lint flag: %r" % flags)
+
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
@@ -13422,6 +13528,31 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "skills/plain-english-map/x.md")
+
+    def test_a_mods_file_beside_a_lint_flag_is_refused_naming_the_job(self):
+        """mods/* turns checks_windows, checks_macos and mods on. The decision record's lint flag rides along, and the refusal still names the job."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"mods/notes.md": "# Notes\n"})
+        rc_scope, flags = self.scope_run()
+        self.assertEqual(rc_scope, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc_scope)
+        self.assertIn("checks_windows", self.turned_on(flags), "mods/notes.md no longer turns checks_windows on: %r" % flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "mods/notes.md", "checks_windows")
+
+    def test_a_scope_script_with_no_lint_flag_is_refused_naming_each_lint(self):
+        """merge reads the lint flags from the script's LINTS line, as it reads the job flags. A script that writes every job flag and no lint
+        flag is refused as unknown, and the refusal names each lint flag the script lacks."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.NO_LINT_PRELUDE, branch="main")
+        rc_scope, flags = self.scope_run()
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual(self.lints_on(flags), [], "the stub scope script wrote a lint flag, so the case proves nothing: %r" % flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", *scope_line("LINTS").split())
 
     def test_a_missing_store_entry_is_refused(self):
         self.store(self.RULINGS)
