@@ -5,7 +5,8 @@
     "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": "sonnet",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
     "PLAYWRIGHT_SKIP_BROWSER_GC": "1",
-    "MAILBOX_REPO": "https://github.com/shivinate7/session-mailbox.git"
+    "MAILBOX_REPO": "https://github.com/shivinate7/session-mailbox.git",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "92"
   },
   "permissions": {
     "allow": [
