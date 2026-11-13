@@ -464,6 +464,8 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    because the page keeps the reply on the closed line. While the close waits, the session writes `lastAnswer` at once and keeps `answers/<id>`, so the
    page still shows the item as answered. Only `status: "closed"`, `closed` and the delete of `answers/<id>` wait. A later turn start skips the kept answer (see "Already routed"), so nothing is filed twice.
    The same session reads the `at` of each such record at each of its turn starts: no timer and no new process. It closes the item once no record has a missing `reply`, or 7 days after the oldest `at`.
+   A chat answer's close is not held, because it has no `answers/<id>` to keep. The session closes the item at once, and the waiting reply stays on the closed line.
+   Before a late close, read `answers/<id>` again. If it is gone or has a new `at`, the owner withdrew or changed it: do not close (see "Withdrawn" and "Changed").
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete

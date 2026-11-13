@@ -194,7 +194,7 @@ His reply then shows nowhere, and the line has no Reply. That is item 278's own 
     - Fold words with four parts wrap to two lines at 390.
     - The widened home `.thread .reply + .myreply` spaces siblings with a margin, against ux-gap-on-parent (guidance). It is main's rule, kept as is.
     - The owed card holds two text boxes (item 1).
-    - The hold's stated reason (keep the reply on its card) no longer holds after the "On its line" pick: the closed line keeps the reply. The hold only delays the close. Owner to decide whether to drop it.
+    - The hold's stated reason (keep the reply on its card) no longer holds after the "On its line" pick: the closed line keeps the reply. The hold only delays the close. The owner ruled on page item 542, 11:06 CST Nov 13: #2778 merges as built, and a "Close now" button becomes a new step.
 - impeccable critique, Nov 12 (single-context again: no agent tool). The detector found nothing in the static markup.
   - Open, outside this folder: main's opened line heads the item's reply "Reply from <owner>" with no time (`lineEl`), while a
     reply record's answer carries one. With option "On its line" the two sit together, so the first reads as missing its time.
