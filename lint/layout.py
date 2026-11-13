@@ -276,17 +276,20 @@ COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
 
 
-def artifacts(root, keys=None):
+def artifacts(root, keys=None, tree_only=False):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file (read through
-    `repo_keys`: origin's default branch first; at most two git starts per call), in order; [] for a repo with no
+    `repo_keys`: origin's default branch first; one git start per call), in order; [] for a repo with no
     extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path.
-    `keys` is the dict a caller already read with `repo_keys(root)`, so a caller that reads two keys starts git once."""
-    return _registry(root, (repo_keys(root) if keys is None else keys).get(ARTIFACTS), _extras(root))
+    `keys` is the dict a caller already read with `repo_keys(root)`, so a caller that reads two keys starts git once.
+    `tree_only` reads the checkout's own file (no git start): the CI check of the checkout's own registry."""
+    if keys is None:
+        keys = _tree_keys(root) if tree_only else repo_keys(root)
+    return _registry(root, keys.get(ARTIFACTS), _extras(root))
 
 
 def _registry(root, found, where):
@@ -393,7 +396,7 @@ def waiting_page(root, keys=None):
     """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
     "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. It reads the default branch's
     blob on origin (_default_branch_extras), else the checkout's own file; a fork's own file (it sets "record-branch") wins
-    whole. Cost: at most two git starts per call (one today).
+    whole. Cost: one git start per call (none for a fork or when `keys` is passed).
     `keys` is the dict a caller already read with `repo_keys(root)`: no git start, and a registry that holds no page is
     "unknown" whichever source it came from.
     "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
@@ -618,8 +621,10 @@ SHARED_RESOURCES = "shared-resources"  # the extras key: [{name, owner, prefligh
 def shared_resources(root):
     """[{name, owner, preflight, holds}] from the "shared-resources" key of `root`'s extras file, [] when
     it has none. owner is `<gh-owner>/<repo>`; preflight and holds are paths inside the owner repo. When
-    `root` is the owner, its preflight file must exist. LayoutError names the extras file and the entry."""
-    found = repo_keys(root).get(SHARED_RESOURCES)
+    `root` is the owner, its preflight file must exist. LayoutError names the extras file and the entry. It reads the
+    checkout's own file only, with no git start: its callers are the CI check and a command line, which validate the
+    file as committed, never origin's blob."""
+    found = _tree_keys(root).get(SHARED_RESOURCES)
     if found is None:
         return []
     where = _extras(root)

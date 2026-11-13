@@ -312,7 +312,7 @@ def github_repo(root, extras=_READ_EXTRAS):
     """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
     "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it
     already found; the guard passes none, so this reads the "roadmap" object through layout.repo_keys (the default
-    branch's blob on origin, else the checkout's file). Cost: at most three git starts per call (two today): the
+    branch's blob on origin, else the checkout's file). Cost: at most two git starts per call: the
     blob read, then `remote get-url`, which runs only when the extras name no repo; with extras passed, at most one."""
     if extras is _READ_EXTRAS:
         extras = _roadmap_extras(root)
