@@ -132,6 +132,11 @@ archive_refuse("a lane whose first cs-repo open pull request list is a server er
 archive_refuse("a lane whose second cs-repo open pull request list answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST403_QMAX),
                carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+# A rate limit answers 403 too, with gh's rate-limit text, and it is no answer about the repo: the refusal names no add_repo.
+# The control is the 403 above, the same repo and the same read; only the text differs, so add_repo is what the text decides.
+archive_refuse("a lane whose second cs-repo open pull request list answers a rate-limit 403 names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_RATELIMIT_QMAX),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
 archive_refuse("a lane whose first cs-repo open pull request list answers 404 names add_repo for claude-settings, not q_max",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST404_SETTINGS),
                carries=(add_repo_pin(ARCH_REPO_SETTINGS),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_QMAX,))
@@ -154,6 +159,27 @@ archive_refuse("a target with no record names no add_repo", role_path("archive-n
                carries=ARCHIVE_STEER, lacks=("add_repo",))
 archive_refuse("a lane with no cs-repo tag names no add_repo: it has no repo to add", role_path("archive-lane-no-repo"),
                fake_gh_path(ARCHOPEN), carries=("no cs-step tag or no cs-repo tag",), lacks=("add_repo",))
+# The merge tool does not load. The guard copy has no merge/ beside it, and its config directory has no rules file, so neither
+# place the tool is looked for holds it. This is the copy merge_tool_missing_case (s30130) builds. The lane has two cs-repo tags,
+# so a refusal that named every tag would show both: the refusal says retry, and names no act and no tag.
+ARCHIVE_NOTOOL_GUARD = os.path.join(ROOT, "archive-notool", "hooks", "guard.py")  # the copy the case runs in place of this repo's guard
+ARCHIVE_NOTOOL_CFG = os.path.join(ROOT, "archive-notool", "cfg")  # the config directory, with no rules file
+ARCHIVE_TAG_PINS = ("cs-repo:", "cs-step:", "cs-build:")  # the prefixes of the lane's tags, which a refusal must not spell out
+
+
+def build_archive_notool():
+    """The guard copy and its empty config directory, built the first time a case names the copy."""
+    os.makedirs(os.path.dirname(ARCHIVE_NOTOOL_GUARD), exist_ok=True)
+    os.makedirs(ARCHIVE_NOTOOL_CFG, exist_ok=True)
+    copy_guard_family(os.path.dirname(ARCHIVE_NOTOOL_GUARD))
+
+
+lazy_fixture([ARCHIVE_NOTOOL_GUARD], build_archive_notool)
+add("lane-closes-after-records: a lane whose merge tool does not load is refused as unreadable, says retry, and names no act or tag",
+    "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+    lacks=ARCHIVE_NAMED + ARCHIVE_NO_ACT + ARCHIVE_TAG_PINS + (ARCH_REPO_SETTINGS, ARCH_REPO_QMAX),
+    carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, transcript=role_path("archive-inc"), env=ROLE_ENV,
+    env_path=fake_gh_path(ARCHOPEN), session_id=ROLE_OTHER, guard=ARCHIVE_NOTOOL_GUARD, config=ARCHIVE_NOTOOL_CFG)
 archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
