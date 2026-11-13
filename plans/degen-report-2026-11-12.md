@@ -71,7 +71,7 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 |---|---|---|---|---|---|
 | D1 | Inbox hook misses page read-backs | step | step artifact-guard-matcher-names, PRs #2923-#2927 | in flight | none |
 | D2 | Local page republish has no pictures | step + new | step artifact-guard-matcher-names; rest: new step local-page-publish-route | partly in flight | none |
-| D3 | No fix-check exception for merge-forced tests | owner | pr-review-record.md:76-77, merge.py:5561-5568 | asked | none |
+| D3 | No fix-check exception for merge-forced tests | ruled | decision pr-review-record:76,125,129 (owner 2026-11-10 14:07 CST) allows one more fix verifier after a conflicted merge of main; Degen merged a lane into a lane and edited after the fix check; step fix-after-fix-check holds the rest | ruled, rest on step | none |
 | D4 | No guard on box writes in read-only audits | new | new step readonly-agent-shell-write | filed, roadmap 378ff3a35 | none |
 | D5 | No check before a "not worse than main" claim | new | new step claim-vs-main-needs-read, extends #2765 | filed, roadmap 378ff3a35 | none |
 | D6 | CI waits have no enforcer | step + new | wake: step red-job-wakes-runner (#2860); stop: new step ci-wait-stop-needs-checkin | partly in flight | none |
@@ -93,6 +93,6 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D22 | Item 20: the Pro lease blocks the Duo | owner + new | bin/sim-lease:185-186; owner ruling 2026-11-02 13:51 CST "The 18 Pro never runs beside a Duo"; stating the reason in sim-lease-tool.md needs no owner | asked | none |
 | D23 | Item 21: builder-test-edit blocks merges with test conflicts | ruled | step merge-conflict-mixed-roles (R31); a test-author owns a merge with test conflicts (builders-cannot-edit-tests.md:36-38, item 420 a) | in flight | none |
 | D24 | Item 22: live hooks differ from the clone | new | new step live-hooks-diff-probe (lint/compliance_probes.py); skip hooks.SessionStart, which a cloud install rewrites | to file | none |
-| D25 | Item 23: third merge-forced restart (evidence for D3) | owner | with D3; step fix-after-fix-check; item fix-check-chain-cap pick a clashes with pr-review-record.md:77,125 | asked | none |
+| D25 | Item 23: third merge-forced restart (evidence for D3) | ruled | decision pr-review-record:76,125,129 (owner 2026-11-10 14:07 CST) allows one more fix verifier after a conflicted merge of main; Degen merged a lane into a lane and edited after the fix check; step fix-after-fix-check holds the rest | ruled, rest on step | none |
 | D26 | Item 24: Words probe counts false alarms | owner + new | new step words-probe-skips-kept-names (report only what the check would flag); a blanket slug skip departs from decision glossary-meets-owner-halfway | asked | none |
 | D27 | Correction: coordinator borrows idle lanes instead of queuing starts | ruled + new | borrowing lanes is ruled (session-tiers.md:143,179); new step refused-start-queues-turn; app half folds into D19 | to file | none |
