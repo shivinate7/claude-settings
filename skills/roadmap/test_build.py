@@ -5020,6 +5020,55 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(len(self.joint_for(self.reported(), "session_a")), 1,
                          "a 40-hex head on a stale draft printed no joint line")
 
+    def test_a_stale_draft_naming_a_doing_step_already_in_marks_gets_no_joint_line(self):
+        # `it` is doing and a merged pull puts it in marks (landedPulls), so it reads landed but not done. A draft that
+        # names it is its live pull, not a stale one, and holds the lane. Two inputs: the step is doing under another
+        # session, and the draft's title names it; or the step is this lane's own tag, with no lane field, and the draft
+        # sits on its bare head ref. session_b is the control in both: a completed lane with its own stale draft.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        inputs = (
+            # (label, the fields of `it`, the session_a row, its draft, the lane field `it` must read)
+            ("a doing step under another session, titled for it",
+             {"status": "doing", "order": 3, "lane": "session_other"},
+             self.idle_lane("session_a", "c1"), self.stale_pull(101, "lane/c1", title="it follow-up"), "session_other"),
+            ("a doing step with no lane field, on its bare head",
+             {"status": "doing", "order": 3},
+             self.idle_lane("session_a", "it"), self.stale_pull(101, "it"), None),
+        )
+        for label, it_fields, lane_a, draft_a, lane_field in inputs:
+            with self.subTest(input=label):
+                self.land({"it": it_fields})
+                self.publish(sessions=[lane_a, self.idle_lane("session_b", "c2")],
+                             pulls=[draft_a, self.stale_pull(102, "lane/c2")],
+                             landed=[self.pull_row(2800, "it", merged=True)])
+                steps, _marks = self.steps_and_marks()
+                self.assertEqual((steps["it"].get("status"), steps["it"].get("lane")), ("doing", lane_field),
+                                 "scope: it does not read doing with the lane field under test")
+                work = build.live_work(str(self.live), steps, self.SLUG)
+                self.assertEqual(build.pull_landed_marks(self.repo, build.main_ref(self.repo, "main"), steps, work),
+                                 {"it": ["#2800"]}, "scope: the merged pull does not put it in marks")
+                entries = self.reported()
+                self.assertEqual(len(self.joint_for(entries, "session_b")), 1,
+                                 "control: the lane with no doing step printed no joint line")
+                self.assertEqual(self.joint_for(entries, "session_a"), [],
+                                 "a draft naming a doing step already in marks printed a joint line")
+
+    def test_a_review_ready_lane_is_not_held_by_its_own_stale_draft(self):
+        # A review-ready lane is idle and not ended, so its own row is live. The draft check must leave that row out
+        # (skip=sid), or the lane holds its own draft and never prints. session_b is the control: a completed lane.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        ready = self.lane("session_a", "c1", bucket=BUCKET_REVIEW_READY, idle_since=self.created_before(26 * 60), unarchived=0)
+        self.publish(sessions=[ready, self.idle_lane("session_b", "c2")],
+                     pulls=[self.stale_pull(101, "lane/c1", hours=25), self.stale_pull(102, "lane/c2")])
+        steps, _marks = self.steps_and_marks()
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertEqual(work["liveRows"].get("session_a"), ["c1"], "scope: the review-ready row does not hold c1")
+        entries = self.reported()
+        self.assertEqual(self.joint_for(entries, "session_b"), [self.JOINT % (102, "lane/c2", "session_b")],
+                         "control: the completed lane with a stale draft printed no joint line")
+        self.assertEqual(self.joint_for(entries, "session_a"), [self.JOINT % (101, "lane/c1", "session_a")],
+                         "a review-ready lane's own live row held its own stale draft")
+
     def test_a_stale_draft_whose_title_names_a_doing_step_gets_no_joint_line(self):
         # c5 is doing and the draft's title names it, so the draft is the step's live PR, not a stale one. session_b is
         # the control: its draft names no doing step.
