@@ -14630,19 +14630,19 @@ class ReviewFixForm(unittest.TestCase):
         haiku = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(model="haiku"),))
         self.assertEqual(parse_text(self, haiku).get("fix"), (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS"), "the posted haiku fix check did not parse")
 
-    def test_round_one_then_round_three_parses_when_a_fix_check_stands_in_for_round_two(self):
-        # ruling r9 (owner, 2026-11-10 15:44 CST): a fix verifier stands in for round 2, so a record may skip from round 1 to round 3 with its fix check
+    def test_round_one_then_round_three_parses_when_a_fix_verifier_stands_in_for_round_two(self):
+        # ruling r9: a fix verifier stands in for a skipped round, so a record may skip one round when its fix verifier passes
         text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS"), fix=(fix_verifier_line(),))
         rec = parse_text(self, text)
         self.assertEqual([i for i, *_ in rec["rounds"]], [1, 3], "the rounds of a round 1 to 3 record did not parse as 1 then 3")
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, "the fix check of a round 1 to 3 record did not parse")
 
-    def test_round_one_fail_then_round_three_without_a_fix_check_does_not_parse(self):
+    def test_round_one_fail_then_round_three_without_a_fix_verifier_does_not_parse(self):
         # control: the same skip with no fix check in its place is still no record
         text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS"))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a round 1 to 3 skip with no fix check parsed as a record")
 
-    def test_round_one_then_round_three_with_a_failed_fix_check_does_not_parse(self):
+    def test_round_one_then_round_three_with_a_failed_fix_verifier_does_not_parse(self):
         # control: the same skip with a PASS fix check parses, so the refusal below is for the FAIL fix check alone. parse_review keeps a skip
         # only when the fix check is PASS (decision hold-unsafe-after-round-3); a FAIL one must read as no record.
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
@@ -14650,23 +14650,23 @@ class ReviewFixForm(unittest.TestCase):
         text = record_text(rounds=rounds, fix=(fix_verifier_line(verdict="FAIL"),))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a round 1 to 3 skip with a FAIL fix check parsed as a record")
 
-    def test_a_round_one_to_round_four_skip_does_not_parse_even_with_a_fix_check(self):
-        # control: a fix check stands in for round 2 only, and a grant allows round 4 without a skip
+    def test_a_round_one_to_round_four_skip_does_not_parse_even_with_a_fix_verifier(self):
+        # control: a fix verifier covers one skipped round only, and a grant allows a later round without a skip, not across a two-round gap
         text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 4: reviewer, opus, PASS"), grant=(f"Grant: {REVIEW_GRANT_PR7}",),
                            fix=(fix_verifier_line(),))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a round 1 to round 4 skip parsed as a record")
 
-    def test_a_round_two_to_round_four_skip_does_not_parse_even_with_a_fix_check(self):
-        # control: the fix check does not stand in for round 3
+    def test_a_round_two_to_round_four_skip_does_not_parse_even_with_a_fix_verifier(self):
+        # control: a fix verifier stands in for one skipped round only, and this record skips a different one
         text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 4: reviewer, opus, PASS"),
                            grant=(f"Grant: {REVIEW_GRANT_PR7}",), fix=(fix_verifier_line(),))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a round 2 to round 4 skip parsed as a record")
 
-    def test_a_start_at_round_two_does_not_parse_even_with_a_fix_check(self):
+    def test_a_start_at_round_two_does_not_parse_even_with_a_fix_verifier(self):
         text = record_text(rounds=("Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS"), fix=(fix_verifier_line(),))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a record that starts at round 2 parsed")
 
-    def test_a_round_three_with_no_round_one_does_not_parse_even_with_a_fix_check(self):
+    def test_a_round_three_with_no_round_one_does_not_parse_even_with_a_fix_verifier(self):
         text = record_text(rounds=("Round 3: reviewer, opus, PASS",), fix=(fix_verifier_line(),))
         self.assertIsNone(review_fn(self, "parse_review")(text), "a record with round 3 and no round 1 parsed")
 
@@ -15147,8 +15147,8 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
-    def test_a_round_one_then_round_three_with_a_passing_fix_check_reads_like_a_round_three_record(self):
-        # ruling r9: such a record reads as a round 3 record does. Guard no is done. Guard yes needs its net value, and a negative one holds it.
+    def test_a_round_one_then_round_three_with_a_passing_fix_verifier_reads_like_a_round_three_record(self):
+        # ruling r9: such a record reads the same as a record with no skipped round. Guard no is done. Guard yes needs its net value, and a negative one holds it.
         cases = (("no", "not owed", "done"), ("yes", "zero", "done"), ("yes", "positive", "done"), ("yes", "not owed", "open"), ("yes", "negative", "held"))
         for guard, net, want in cases:
             with self.subTest(guard=guard, net=net):
@@ -16170,7 +16170,7 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
-    ONE_THEN_THREE = ("1:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS")  # the --round values of a round 1 FAIL then a round 3: the path a fix verifier stands in for round 2 on (ruling r9)
+    ONE_THEN_THREE = ("1:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS")  # the --round values of a FAIL then a PASS that skips one round: the path a fix verifier stands in for the skipped round on (ruling r9)
 
     def fix_arg(self, verdict="PASS"):
         """The --fix-check value of a fix verifier on the fix row's model, whose fix diff starts at the earlier head."""
@@ -16182,22 +16182,22 @@ class ReviewNoRestart(ReviewEnv):
         self.assertEqual(out, "", "a refused record printed to stdout")
         self.assertNotIn("Traceback", err)
 
-    def test_a_round_one_fail_then_round_three_after_a_passing_fix_check_is_accepted(self):
-        # ruling r9: round 1 FAIL, a PASS fix check, then round 3 is one record, and it reads done on guard no
+    def test_a_round_one_fail_then_round_three_after_a_passing_fix_verifier_is_accepted(self):
+        # ruling r9: an earlier FAIL and a PASS fix verifier make one record with the skipping record, and it reads done on guard no
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
         self.assertEqual(record_state(self, posted_body(self, out), head=self.head()), "done", "the posted round 1 to 3 record does not read done")
 
     def test_a_round_one_then_round_three_with_no_earlier_record_is_turned_away(self):
-        # control: the same record after an earlier round 1 FAIL is accepted, so the refusal is for the missing earlier record
+        # control: the same record after an earlier FAIL is accepted, so the refusal is for the missing earlier record
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with())
         self.assert_turned_away(rc, out, err)
 
-    def test_a_round_one_then_round_three_with_no_fix_check_is_turned_away(self):
+    def test_a_round_one_then_round_three_with_no_fix_verifier_is_turned_away(self):
         # control: the same record with its fix check is accepted, so the refusal is for the missing fix check
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with(earlier))
@@ -16205,7 +16205,7 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE), host=self.host_with(earlier))
         self.assert_turned_away(rc, out, err)
 
-    def test_a_round_one_then_round_three_with_a_failed_fix_check_is_turned_away(self):
+    def test_a_round_one_then_round_three_with_a_failed_fix_verifier_is_turned_away(self):
         # control: the same record with a PASS fix check is accepted, so the refusal is for the FAIL fix check
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with(earlier))
@@ -16214,7 +16214,7 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_turned_away(rc, out, err)
 
     def test_a_round_one_then_round_three_after_an_earlier_round_one_pass_is_turned_away(self):
-        # control: the same record after an earlier round 1 FAIL is accepted, so the refusal is for the earlier round 1 PASS
+        # control: the same record after an earlier FAIL is accepted, so the refusal is for the earlier PASS
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg()), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
@@ -16223,8 +16223,8 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_turned_away(rc, out, err)
 
     def test_a_round_one_then_round_three_after_an_earlier_record_with_a_round_two_is_turned_away(self):
-        # control: the same record after an earlier record that holds only a round 1 FAIL is accepted. The newest earlier record here also holds
-        # round 2, so its round 1 FAIL is not its top round and cannot stand in for round 2: the writer refuses the skip (the skip check reads the top round).
+        # control: the same record after an earlier record that holds only one FAIL is accepted. The newest earlier record here also holds a
+        # further FAIL, so its top round is that further FAIL and the lower one cannot stand in for the skipped round: the writer refuses the skip (the skip check reads the top round).
         argv = self.review_argv(*self.ONE_THEN_THREE, fix=self.fix_arg())
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
         rc, out, err = self.run_args(*argv, host=self.host_with(earlier))
@@ -16239,7 +16239,7 @@ class ReviewNoRestart(ReviewEnv):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
         return self.run_args(*self.review_argv(*rounds, fix=self.fix_arg()), host=self.host_with(earlier))
 
-    def test_a_fix_check_restart_refusal_says_to_repeat_the_earlier_rounds(self):
+    def test_a_fix_verifier_restart_refusal_says_to_repeat_the_earlier_rounds(self):
         # control: the earlier rounds repeated under the same fix check are accepted, so the refusal is for the lower top round alone
         rc, out, err = self.fix_restart(("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"))
         self.assert_accepted(rc, out, err)
@@ -16247,7 +16247,7 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_turned_away(rc, out, err)
         self.assertRegex(err, re.compile("repeat the earlier rounds", re.I), "the refusal under a fix check does not say to repeat the earlier rounds:\n" + err)
 
-    def test_a_fix_check_restart_refusal_does_not_send_the_lane_to_a_new_branch_or_a_new_pr(self):
+    def test_a_fix_verifier_restart_refusal_does_not_send_the_lane_to_a_new_branch_or_a_new_pr(self):
         rc, out, err = self.fix_restart(("1:reviewer:sonnet:PASS",))
         self.assert_turned_away(rc, out, err)
         self.assertNotRegex(err, re.compile("new branch", re.I), "the refusal under a fix check sends the lane to a new branch:\n" + err)
