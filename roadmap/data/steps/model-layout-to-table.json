@@ -1,14 +1,14 @@
 {
  "id": "model-layout-to-table",
  "title": "Land the owner's model and effort per role as rows in decision agent-model-cap",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2Cjj9QtsasmPimG8J",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 13:51 CST Nov 13, item 747 (ruling own-747-role-layout).",
  "source": "owner 13:51 CST Nov 13, item 747",
- "note": "Ready, no lane yet. Rows: coordinator sonnet high; arbiter opus medium; consultant opus medium; triage sonnet high; lanes that change a guard or check sonnet high; lanes that change product code or a design sonnet medium; docs lanes sonnet low; batch runner sonnet medium. A record-writer rewrites the table rows in place; a builder changes any hook or code that reads the table, test-author red first. Wait for the owner's word on item 752 before the coordinator row (he may want Opus there until brief-from-step's judge lands). Past rulings not read: agent-model-cap, R33 (restart-plan.md:332), the \"separate sessions\" row.",
- "updatedAt": "2026-11-13T13:52:06-06:00"
+ "note": "Ready, no lane yet. Rows: coordinator sonnet high; arbiter opus medium; consultant opus medium; triage sonnet high; lanes that change a guard or check sonnet high; lanes that change product code or a design sonnet medium; docs lanes sonnet low; batch runner sonnet medium. A record-writer rewrites the table rows in place; a builder changes any hook or code that reads the table, test-author red first. Wait for the owner's word on item 752 before the coordinator row (he may want Opus there until brief-from-step's judge lands). Past rulings not read: agent-model-cap, R33 (restart-plan.md:332), the \"separate sessions\" row. Lane session_013NEJL2Cjj9QtsasmPimG8J (coordinator 13:55 CST, Sonnet, medium until the table lands); the coordinator row is held for item 752. Overlaps named in its brief: lane-session-row guard lane (session_013NEJL2m6PvqQJRsGM69scD), builder.md pin lane (session_013NEJL4Rt4fYfwvrGdu1mx7), steps agent-model-cap-names-closes-lint and operating-model-role-handoffs.",
+ "updatedAt": "2026-11-13T13:53:18-06:00"
 }
