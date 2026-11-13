@@ -1,0 +1,88 @@
+PR	evidence	body_read	step	reason
+1147	superseded	unknown	timing-tests	subset of 2081
+1314	main	unknown	mcp-merge-unguarded	main already has matcher entries (settings.json:253) and scan test (lint/test_settings_matcher.py)
+1377	judgment	unknown	challenger-page-against	older design (against field + refute_item.py); owner may want its auto-refuter script instead of "spawn one Sonnet agent" in SKILL
+1417	superseded	unknown	ready-checks-use-pinned-tools	ancestor of 1938 (lane-lint-runs-local-tools rebuild, itself pending owner pick on design vs main's --pinned)
+1461	superseded	unknown	lane-lint-runs-local-tools	inside 1938; fold into 1938 rebuild
+1509	main	unknown	notes-fix-large-3	script-file test-write reader on main (8705f9a93)
+1517	superseded	unknown	notes-fix-guard-2	subset of 1826
+1520	superseded	unknown	notes-fix-large-3	inside 1618
+1552	main	unknown	review-rounds-rework	on main already (review_guard_marked etc); close after 1789 rebuilt without its "lands with PR #1552" line
+1555	superseded	unknown	notes-fix-large-3	inside 1618
+1585	superseded	unknown	notes-fix-large-3	superseded by 2167
+1598	main	unknown	notes-fix-large-3	reader on main
+1616	judgment	unknown	fix-check-after-notes-commit	contradicts main (one fix verifier per record; no WIDE/chain); only slice wanted: fix check whose head differs from record Head by record/notes files only (compare_files) - coordinator pick whether wanted, may be in 2365/1789 rebuilds
+1647	main	unknown	notes-fix-large-3	main has python/node reader; extra forms (bash, source, ./f, uv run, python -m, pwsh -File) re-file as debt if wanted
+1692	superseded	unknown	sim-lease-gaps	contained in 2061
+1706	superseded	unknown	notes-fix-large-3	subset of 2115
+1707	superseded	unknown	notes-fix-large-3	subset of 1722/2115; adds false debt review-record-mcp-edit-unjudged
+1708	superseded	unknown	merge-lock-expired-delete-race	ancestor of 1729 and 2148
+1722	superseded	unknown	notes-fix-large-3	superseded by 2115
+1729	superseded	unknown	merge-lock-expired-delete-race	ancestor of 2148
+1743	superseded	unknown	silent-undo-reads-retire-run	ancestor of 1753
+1748	superseded	unknown	lane-finds-triage	opposite of owner ruling R22 point 3 (brief names a role, never a session id); superseded by 2709
+1751	superseded	unknown	review-record-provenance	patch-equivalent inside 2440 except 2 commits; closes if 2440 rebuild goes ahead
+1758	superseded	unknown	notes-fix-large-3	subset of 2115
+1829	superseded	unknown	same group	superseded by 1951
+1831	superseded	unknown	lane-lint-unshallow	carried by 1916 rebuild (1916 contains 1831 head via merge commit 86a899f60); closes only because 1916 carries it - main lacks unshallow_for_lint
+1835	judgment	unknown	stall-watch-quiet-lint	same change rebuilt in 2800 (keep, fan-prose-small-homes)
+1836	superseded	unknown	lane-lint-runs-local-tools	inside 1938; fold into 1938 rebuild
+1839	superseded	unknown	same group	superseded by 1951
+1844	main	unknown	lane-lint-hook-suites	on main already with later fixes
+1848	superseded	unknown	runner-repos-in-parallel	superseded by 2071 rebuild
+1871	superseded	unknown	process-held-end-to-end	inside 2067
+1873	judgment	unknown	same group	1839 plus one provenance-label commit; re-apply label in 1951 rebuild only if guard/kind freeze survives
+1881	superseded	unknown	same group	superseded by 1951
+1892	superseded	unknown	same group	superseded by 1951
+1900	superseded	unknown	runner-repos-in-parallel	superseded by 2071 rebuild
+1951	superseded	unknown	fail-record-ancestor-head	OVERRIDES earlier 1951 rebuild row: contained in 2365; the 2365 rebuild lane carries the core
+1958	superseded	unknown	timing-tests	subset of 2081
+1971	superseded	unknown	pr-backlog-clear	inside 2123
+1975	superseded	unknown	bg-tail-loses-verdict	ancestor of 2015
+1995	superseded	unknown	runner-repos-in-parallel	superseded by 2071 rebuild
+2001	main	unknown	lane-lint-guard-suite-install	earlier layers on main in other form; new guard-suite-in-lane-lint layer contradicts main (job scope is linted job only; GUARD_SHARD jobs; touched-tests HEAVY); closing loses debts lane-lint-guard-browser-skip + notes: re-file against main design if wanted
+2002	superseded	unknown	timing-tests	subset of 2081
+2033	superseded	unknown	sim-lease-gaps	contained in 2061
+2052	superseded	unknown	(env-walk group)	subset of 2171
+2097	main	unknown	guard-relative-write-escape	core on main; rest contradicts main; debts other-git-option-unread, other-python-dynamic-unread may need re-filing
+2099	judgment	unknown	git-write-after-failed-cd	2144 (rebuild, notes-fix-large-3) carries all 2099 commits except 2 redundant ones; restate c16ae94ca Drops-lines trailers on 2144 rebuild if needed
+2129	superseded	unknown	notes-fix-large-3	subset of 2167
+2164	superseded	unknown	bg-tail-loses-verdict	ancestor of 2015
+2200	superseded	unknown	review-record-past-head	subset of 2365
+2276	superseded	unknown	bg-tail-loses-verdict	ancestor of 2015
+2277	superseded	unknown	review-record-past-head	subset of 2365
+2301	superseded	unknown	bg-tail-loses-verdict	ancestor of 2015
+2321	superseded	unknown	bg-tail-loses-verdict	ancestor of 2015
+2347	superseded	unknown	notes-fix-page	ancestor of 2982 (outside group, rebuild: re-shard 5-leg shoot job vs main's checks-waiting-page split); 2982 carries it
+2463	superseded	unknown	lane-push-frozen-in-batch	superseded by 3019; its debt docs/debts/push-batch-mutant-merge-dir.md not in 3019 (unknown if still real)
+2491	main	unknown	merge-route-author-paths	already on main (e2aec35ac; guard.py merge_route_paths, mutant, tests/guard s23264)
+2500	superseded	unknown	close-replaced-at-open	stale earlier copy of 2667; overlaps fully
+2549	superseded	unknown	artifact-guard-matcher-names	older rival of 2927; 2927 covers 15 tools vs 6, conflicts in 8 files; its two gaps go to 2927 rebase
+2675	superseded	unknown	fan-prose-handoffs	superseded by 2696
+2693	main	unknown	agent-asks-become-refusals	ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-write)
+2714	superseded	unknown	agent-asks-become-refusals	ancestor of 2885 (stands only if 2885 stays keep)
+2723	superseded	unknown	fan-prose-handoffs	ancestor chain to 2753
+2727	superseded	unknown	fan-prose-debts	superseded by 2948 (outside group, 2 conflicts with main); becomes keep if 2948 closes
+2733	superseded	unknown	fan-code-workflows	ancestor of 2920
+2735	superseded	unknown	fan-prose-debts	ancestor of 2757
+2744	superseded	unknown	fan-prose-handoffs	ancestor of 2753
+2748	superseded	unknown	fan-prose-unmapped-5	inside 2913
+2750	superseded	unknown	fan-code-handoffs	ancestor of 2774 and 2824; superseded by 2824
+2770	superseded	unknown	fan-code-workflows	ancestor of 2920
+2783	superseded	unknown	fan-prose-debts	ancestor of 2872 (outside group, 1 conflict); becomes keep if 2872 closes
+2833	superseded	unknown	fan-prose-unmapped-5	inside 2913
+2836	superseded	unknown	stop-checks-one-message	contained in 2864
+2845	superseded	unknown	pr-state-is-on-the-pr	ancestor of 2869 and 2871 (siblings); close holds only while one of 2869/2871 is keep; else 2845 becomes keep. 2871 adds --lane-lint --integration, which the Nov 10 01:07 ruling rules out: ruling check before merge
+2875	superseded	unknown	fan-code-workflows	ancestor of 2920
+2886	superseded	unknown	md-midline-comment-gap	superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-decision protocol); if owner wants spawn-time refusal, keep (merges clean; add rule-list entry); 2693 close stands with it
+2915	superseded	unknown	prose-tending-contract	ancestor of 3003
+2923	superseded	unknown	artifact-guard-matcher-names	commit 1 of 5, superseded by 2927
+2924	superseded	unknown	artifact-guard-matcher-names	commits 1-2 of 5, superseded by 2927
+2925	superseded	unknown	artifact-guard-matcher-names	commits 1-3 of 5, superseded by 2927
+2926	superseded	unknown	artifact-guard-matcher-names	commits 1-4 of 5, superseded by 2927
+2938	superseded	unknown	challenger-page-against	inside 2987
+2941	superseded	unknown	guard-false-alarm-cull	superseded by 3036
+2996	superseded	unknown	prose-tending-contract	ancestor of 3003
+3021	superseded	unknown	ci-linux-windows-once	subset of 3088
+3033	superseded	unknown	guard-false-alarm-cull	inside 3032
+3042	superseded	unknown	ci-linux-windows-once	subset of 3088
