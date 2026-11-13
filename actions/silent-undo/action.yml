@@ -5,7 +5,9 @@ description: >
   the pull request head against the pull request base. Fails closed: a read that cannot run
   (a shallow clone, a base that cannot be read) is UNKNOWN and red, never green. A run with no
   pull request base is skipped. The escape is a `Drops-lines: <path> -- <reason>` trailer in a
-  commit message of the branch. The caller needs actions/checkout with fetch-depth 0 so the
+  commit message of the branch, or the same line in the last paragraph of the pull request body,
+  which the check reads from the event file (GITHUB_EVENT_PATH), never from a step env. The caller
+  needs actions/checkout with fetch-depth 0 so the
   history reaches the base. The step uses the local origin/<base> when it exists and fetches
   only when it is missing.
 runs:

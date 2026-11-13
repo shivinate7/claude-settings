@@ -2018,6 +2018,26 @@ def records_proof(wt, base_ref):
             git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+CI_JOB_BODY_VARS = ("CI_JOB_PR_BODY_FILE", "GITHUB_EVENT_PATH")  # the two ways bin/ci-job reads the PR body; a caller's copy of either is never the PR's
+
+@contextlib.contextmanager
+def ci_job_env(env, pr_body):
+    """The env for one `bin/ci-job` run, the one home of how the PR body reaches it: `env` (default: this process's) without any inherited body
+    variable, plus CI_JOB_PR_BODY_FILE naming a UTF-8 temp file that holds `pr_body` (an env string past 128 KB does not exec on Linux, and
+    a 65536-character body can be 256 KB). bin/ci-job gives each lint step that body in its own event file (GITHUB_EVENT_PATH), as CI does.
+    The file is removed on exit. Cost: one small temp file per ci-job run."""
+    base = os.environ if env is None else env
+    out = {k: v for k, v in base.items() if k not in CI_JOB_BODY_VARS}
+    fd, path = tempfile.mkstemp(prefix="merge-body-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(pr_body.encode("utf-8", "surrogatepass"))  # a lone surrogate stays invalid UTF-8, so ci-job reads the file as unknown, never as another body
+        out["CI_JOB_PR_BODY_FILE"] = path
+        yield out
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
@@ -2204,9 +2224,11 @@ def python_suite_hits(source, rel, paths, read=None, depth=1):
                     break
     return False
 
-def lint_steps(root, base_ref, env=None):
-    """-> the names of the `checks` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
-    c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
+def lint_steps(root, base_ref, env=None, pr_body=""):
+    """-> the names of the `checks` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice.
+    The plan reads the PR body as the run does (`ci_job_env`), so a step that holds the body expression plans the same way."""
+    with ci_job_env(env, pr_body) as run_env:
+        c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", base_ref], cwd=root, env=run_env, timeout=120)
     if c:
         raise Unread(f"the lint steps cannot be listed (exit {c}) {BASE_CITE}")
     return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
@@ -2271,7 +2293,7 @@ def hit_suites(root, paths, skip):
 
 _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
 
-def small_base_move(wt, base_ref, sha, before_run=None):
+def small_base_move(wt, base_ref, sha, before_run=None, pr_body=""):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T. A read that
     could not run gives a `why` of UnreadText: no finding, so no refusal.
     It stands with no run at all when main's diff from the merge base M is empty (the merge of sha and T is sha's tree). Otherwise
@@ -2280,11 +2302,12 @@ def small_base_move(wt, base_ref, sha, before_run=None):
     for main's paths, and on that merge the `checks` lint steps pass and so does each other suite of the `checks` jobs (CHECKS_SUITE_JOBS) that names one of
     main's paths (hit_suites). Anything unread refuses. The worktree goes back to its HEAD.
     Cost per call: about 10 git starts, one ci-scope.sh run, two ci-job runs (a plan, and the lints at two starts per
-    step) and one start per hit suite; one temp output file, and one ci-job log, kept only on a failure."""
+    step) and one start per hit suite; one temp output file, and one ci-job log, kept only on a failure.
+    `pr_body` is the PR's body: both ci-job runs read it as CI does (`ci_job_env`), so a lint that needs the body's excuse line passes here as it did in CI."""
     c, tip = git(wt, "rev-parse", base_ref)
     if c:
         return False, UnreadText(f"cannot read {base_ref}")
-    key = (wt, sha, tip)
+    key = (wt, sha, tip, pr_body)
     if key in _SMALL_MOVES:
         return _SMALL_MOVES[key]
     c, m = git(wt, "merge-base", sha, tip)
@@ -2328,7 +2351,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
             return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
         # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
-        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k not in CI_JOB_BODY_VARS}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
         c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
@@ -2340,14 +2363,15 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         if before_run:
             before_run(LINT_SECONDS)  # extends the merge lock past the run, or stops with a NetStop
         # --base is the base tip, as a pull request run reads its base: it checks the merge against main as it is now
-        c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
+        with ci_job_env({**env, "VERDICT_LOG": log}, pr_body) as run_env:
+            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", base_ref], cwd=wt, env=run_env, timeout=LINT_SECONDS)
         if c:
             keep = True
             bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]
             return False, f"the lints of the merge are not all PASS ({'; '.join(bad[:3]) or 'exit ' + str(c)}; full output: {log})"
         try:
             # the records page is left out: it is derived from the records, which are matched, and the generator proves it on the merge
-            suites = hit_suites(wt, sorted(theirs - {RECORDS_PAGE}), lint_steps(wt, base_ref, env))
+            suites = hit_suites(wt, sorted(theirs - {RECORDS_PAGE}), lint_steps(wt, base_ref, env, pr_body))
         except Unread as e:
             return False, UnreadText(str(e))
         except Stop as e:
@@ -2373,16 +2397,17 @@ def small_base_move(wt, base_ref, sha, before_run=None):
             with contextlib.suppress(OSError):
                 os.remove(f)
 
-def holds_base(wt, base_ref, sha, before_run=None, raise_unread=False):
+def holds_base(wt, base_ref, sha, before_run=None, raise_unread=False, pr_body=""):
     """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
     (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
     the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base).
-    raise_unread: a read that could not run raises Unread with the same text, for a caller that keeps a claim on it."""
+    raise_unread: a read that could not run raises Unread with the same text, for a caller that keeps a claim on it.
+    pr_body: the PR's body, for the small-move proof's lint runs."""
     held = ancestor(wt, base_ref, sha)
     if held:
         return None, None
     if held is False:
-        ok, why = small_base_move(wt, base_ref, sha, before_run)
+        ok, why = small_base_move(wt, base_ref, sha, before_run, pr_body)
         if ok:
             return None, why
         tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
@@ -3118,17 +3143,20 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None):
+def ci_job_run(wt, *args, pr_body="", notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
+    `pr_body` reaches ci-job through `ci_job_env`, and each step gets it in an event file: a step that reads the PR body (silent-undo) sees what CI gives it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
-    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2 with at least one `unknown` line, none of which names the PR body
+    (a missing tool is a lift's business; an unread body says nothing the flag can excuse).
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        with ci_job_env(env, pr_body) as run_env:
+            c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=run_env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
         return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
     lines = out.splitlines()
@@ -3140,7 +3168,9 @@ def ci_job_run(wt, *args, notes=None):
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
-        return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
+        unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
+        about_body = any(re.search(r"pull_request\.body|CI_JOB_PR_BODY", l) for l in unknown)
+        return "unknown", unknown or [f"(no unknown line read; ci-job exit {c})"], log, bool(unknown) and not about_body
     return "unknown", [f"ci-job exited {c}"], log, False
 
 TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
@@ -3329,13 +3359,14 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
+    pr_body = ""  # a commit or ref has no PR body
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
         info = host.pr(n)
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
-        head = info["head"]
+        head, pr_body = info["head"], info.get("body", "")
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
@@ -3371,7 +3402,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         if target.isdigit() and info.get("body"):  # after the worktree above, whose fetch the check's git reads need
             check_review_ranges(root, host, info, base, info["body"])
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", pr_body=pr_body, notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
     finally:
@@ -3718,7 +3749,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
-            stale, stands = holds_base(wt, f"origin/{base}", info["head"])
+            stale, stands = holds_base(wt, f"origin/{base}", info["head"], pr_body=info.get("body", ""))
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
@@ -3772,13 +3803,14 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again."):
+def run_ready_checks(wt, n, base, checks, pr_body, remedy="Fix it on the branch, push, and run --confirm again."):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
+    `pr_body` is the PR's body as Host.pr read it, as lane_lint passes it: a step that reads the PR body (silent-undo) sees what CI gives it.
     `remedy` is the route the refusal names: the draft step's by default, the batch's own for `--batch-build --ready`.
     A FAIL is a LintFail, so `--batch-build --ready` can blame the lanes it names; an unknown is a plain Stop."""
     args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    state, lines, log, _ = ci_job_run(wt, *args)
+    state, lines, log, _ = ci_job_run(wt, *args, pr_body=pr_body)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
         message = "\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
@@ -3803,16 +3835,16 @@ def draft_step(root, cfg, n, host, info):
         tmp, wt = open_worktree(root, info, base)
         try:
             if not default:
-                run_ready_checks(wt, n, base, checks)
+                run_ready_checks(wt, n, base, checks, info.get("body", ""))
             else:
                 claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
                 if claim:
                     if checks:
-                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                        run_ready_checks(wt, n, base, checks, info.get("body", ""))  # before the remedy: it has the session mark ready by hand, past the checks
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None), pr_body=info.get("body", ""))
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
                 if stands:
@@ -3820,7 +3852,7 @@ def draft_step(root, cfg, n, host, info):
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+                    run_ready_checks(wt, n, base, checks, info.get("body", ""))  # on the page commit when there is one, so what is checked is what is pushed
                 if rebuilt:
                     push_branch(wt, info["branch"])
                     say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
@@ -3927,7 +3959,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
-        stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
+        stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait, pr_body=info.get("body", ""))
         if stale:
             raise Stop(stale + " This run claimed nothing.")
         if stands:
@@ -4051,7 +4083,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if proof == "stale":
                     stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again. {RECORDS_CITE}")
                 try:  # the base moved during the wait: the green run did not test it
-                    stale, stands = holds_base(wt, base_ref, sha, host.before_wait, raise_unread=True)
+                    stale, stands = holds_base(wt, base_ref, sha, host.before_wait, raise_unread=True, pr_body=info.get("body", ""))
                 except Unread as e:
                     unproven("the base read could not run", str(e))
                 if stale:
@@ -5216,7 +5248,7 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
         return
     tmp, wt = add_worktree(root, fetch_branch(root, branch, FREEZE_CITE))
     try:
-        run_ready_checks(wt, pr, base, checks, f"Below, each lane this FAIL names gets its drop command when its blame was stored, or the `--blame` route when the blame write was refused. "
+        run_ready_checks(wt, pr, base, checks, "", remedy=f"Below, each lane this FAIL names gets its drop command when its blame was stored, or the `--blame` route when the blame write was refused. "
                          f"With none named, fix it in a lane and run `merge --batch-build {name} --ready` again; a change to a lane goes to the next batch.")
     finally:
         drop_worktree(root, tmp, wt)

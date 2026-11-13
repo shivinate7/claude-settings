@@ -51,7 +51,14 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. The pull request body is data, never an expression: a step env or
+# run: line that holds ${{ github.event.pull_request.body }} reads unknown. A step reads the body from its event file, as CI gives it:
+# pr_body() reads the UTF-8 file named by env CI_JOB_PR_BODY_FILE (the merge tool's way: an env string past 128 KB does not exec on
+# Linux, and a 65536-character body can be 256 KB), else None. With CI_JOB_PR_BODY_FILE named, each step gets its own temp event
+# file holding {"pull_request": {"body": <the body>}} in its GITHUB_EVENT_PATH; a file that cannot be read gives an event file with
+# no pull request, which the step's reader takes as unknown, never as an empty body. With no body file, GITHUB_EVENT_PATH is the
+# caller's own, as on a runner.
+# Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -97,7 +104,7 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
+import concurrent.futures, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -190,6 +197,20 @@ def condition(text, pr):
     if not re.fullmatch(r"[\sTF()]*(?:(?:and|or|not)[\sTF()]*)*", expr):
         return None
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
+
+
+def pr_body(environ=None):
+    """The pull request body, the one home of that read: the UTF-8 file named by CI_JOB_PR_BODY_FILE.
+    -> None when no file is named or the named one cannot be read."""
+    environ = os.environ if environ is None else environ
+    path = environ.get("CI_JOB_PR_BODY_FILE")
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8", newline="") as f:  # strict: bytes that are not UTF-8 are unreadable, not a changed body
+            return f.read()
+    except (OSError, ValueError):
+        return None
 
 
 def expand(value, values):
@@ -453,8 +474,9 @@ def plan(step, pr, values, top, lint=False, pinned=False):
         if val is None:
             return "unknown", "env %s needs an expression this runner cannot read: %s" % (name, raw), None, None, None
         env[name] = val
-    if EXPR.search(body):
-        return "unknown", "run: holds an expression this runner cannot read", None, None, None
+    exprs = EXPR.findall(body)
+    if exprs:
+        return "unknown", "run: holds an expression this runner cannot read: %s" % ", ".join(dict.fromkeys(exprs)), None, None, None
     shell = step_key(step, "shell")
     if shell not in SHELLS:
         return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
@@ -494,15 +516,21 @@ def lint_workers():
 
 def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
     """Run one step through bin/verdict, its output appended to `log`: (state, the step's one line). ctx: (top, base,
-    values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output.
+    values, pinned, event): event is the body's event file content, or None to keep the caller's GITHUB_EVENT_PATH.
+    A parallel step gets a log of its own, so the reads from its start offset see only its output.
     suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
-    top, base, values, pinned = ctx
+    top, base, values, pinned, event = ctx
     err_line("start: %s\n" % name)
     with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
                                      encoding="utf-8", newline="\n") as f:
         marked = preamble_marked(detail, shell[0]) if suite else None
         f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else marked or detail)
         script = f.name
+    event_file = None
+    if event is not None:
+        with tempfile.NamedTemporaryFile("w", prefix="ci-job-event-", suffix=".json", delete=False, encoding="utf-8") as f:
+            json.dump(event, f)
+            event_file = f.name
     try:
         start = os.path.getsize(log) if os.path.exists(log) else 0
         kept = []
@@ -511,6 +539,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
                              stderr=subprocess.STDOUT, text=True,
                              env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
+                                  **({"GITHUB_EVENT_PATH": event_file} if event_file else {}),
                                   **env, "VERDICT_LOG": log}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                 if line.startswith("verdict: still running"):
@@ -523,6 +552,8 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
         unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
     finally:
         os.remove(script)
+        if event_file:
+            os.remove(event_file)
     first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
                  "(verdict printed no verdict line)")
     if known_action(step) == "code-check":
@@ -664,6 +695,10 @@ def main(argv):
                 no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+    event = None  # the event file each step gets when a body file is named; else GITHUB_EVENT_PATH is the caller's own
+    if "CI_JOB_PR_BODY_FILE" in os.environ:
+        read_body = pr_body()
+        event = {"pull_request": {"body": read_body}} if read_body is not None else {}  # {}: unread, so the step's reader says unknown
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
@@ -699,7 +734,7 @@ def main(argv):
     planned = [plan(st, bool(base), values, top, lint) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
-    ctx = (top, base, values, pinned)
+    ctx = (top, base, values, pinned, event)
     workers = lint_workers() if lint and not dry else 1
     pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
     logdir = tempfile.mkdtemp(prefix="ci-job-lint-") if pool else None  # each parallel step's own log, until it is added to the run's
