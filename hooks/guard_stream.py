@@ -14,6 +14,7 @@ from guard_core import (
     segment_tokens, split_segments,
 )
 from guard_env import _substitutions
+from guard_merge import merge_module
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -230,9 +231,9 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def check_stage(segment: str, background: bool) -> str:
+def check_stage(segment: str, background: bool, flags=CHECK_FLAGS, ci_job: bool = True) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+    only in the background, and not at all when `ci_job` is False. `flags` names the merge flags that count."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
@@ -241,11 +242,11 @@ def check_stage(segment: str, background: bool) -> str:
         return ""
     index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
-        return basename(tokens[index]) if background else ""
+        return basename(tokens[index]) if background and ci_job else ""
     if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
             tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
-        return CHECK_COMMANDS[0] if background else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+        return CHECK_COMMANDS[0] if background and ci_job else ""
+    if "--confirm" in tokens or not any(flag in tokens for flag in flags):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
 
@@ -291,6 +292,50 @@ CHECK_TAIL_REASON = (
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
     "full log and prints the verdict itself."
+)
+
+
+# A BACKGROUND `merge --lane-lint` WITH TOO SHORT A TOOL TIMEOUT. The lint waits for one ci-job run
+# (LINT_SECONDS) and then for GitHub to show the pushed head (PUSHED_HEAD_WAIT_MINUTES). A background call
+# without a `timeout` above their sum is stopped at the Bash default of 30 minutes and gives no verdict. The
+# bound is read from the merge tool's own constants, never copied. A `timeout` wrapper in the command text
+# does not set the tool's limit. When the constants cannot be read the bound is unknown, and unknown is no refusal.
+LANE_LINT_FLAGS = ("--lane-lint",)
+
+
+def lane_lint_bound_ms():
+    """The lint's own bound in milliseconds, read from the merge tool, else None when it cannot be read."""
+    module = merge_module()
+    try:
+        seconds = module.LINT_SECONDS + module.PUSHED_HEAD_WAIT_MINUTES * 60
+    except (AttributeError, TypeError):  # no tool, no constants, or a constant that is not a number: unknown
+        return None
+    return seconds * 1000 if type(seconds) is int else None
+
+
+def lane_lint_timeout_hit(stripped: str, background: bool, timeout) -> str:
+    """The matched text when a background call runs `merge --lane-lint` with a tool timeout (ms) at or below the
+    lint's bound or none at all, else ''. A foreground run, another merge flag, `--confirm` and ci-job are not read."""
+    if not background:
+        return ""
+    stage = next((hit for hit in (check_stage(seg, True, LANE_LINT_FLAGS, ci_job=False)
+                                  for seg in split_segments(stripped)) if hit), "")
+    if not stage:
+        return ""
+    bound = lane_lint_bound_ms()
+    if bound is None:
+        return ""
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > bound:
+        return ""
+    return stage + " --lane-lint"
+
+
+# A template: the call site fills in the bound that lane_lint_bound_ms() read, so the text never copies a number.
+LANE_LINT_TIMEOUT_REASON = (
+    "this background lane lint can outlast the tool's default time limit, which stops it with no verdict "
+    "(decision background-check-through-verdict). "
+    "Remedy: set this tool call's `timeout`, in milliseconds, above the lint's own bound of %d ms (%d s), "
+    "which is the merge tool's lint run limit plus its pushed-head wait."
 )
 
 
