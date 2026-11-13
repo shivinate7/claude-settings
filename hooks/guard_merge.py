@@ -1837,12 +1837,17 @@ STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a
 # mark. A bare label needs `,` or `:` or a dash spaced on both sides before the time, and then an optional
 # `YYYY-MM-DD` date. Or it needs a `Mon D` date after the zone, then a `:`. Any other bare form is prose and
 # passes: `Deadline 15:00 CST for the merge`, `Done at 12:53 CST - see PR`, `Coordinator 13:40 CST: pick 1 taken`.
+# A bracketed label closes at its bracket, so words after `]` or `)` are prose; only a time right after the bracket
+# stamps it. A `Mon D` date takes a real month name only. Named limit: `label H:MM CST: text` passes as prose
+# (existing tests pin `Coordinator 13:40 CST: pick 1 taken`).
 _STAMP_LABEL = r"[^\s,:]+(?:\s+[^\s,:]+){0,3}"
+_STAMP_BRACKET_LABEL = r"[^\s,:\])]+(?:\s+[^\s,:\])]+){0,3}"
 _STAMP_TIME = r"\d{1,2}:\d{2}(?::\d{2})?\s+(?:CST|CDT)\b"
+_STAMP_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
 _STAMP_HEADER = re.compile(
-    _MARKDOWN_LEAD + r"(?:[\[(]\s*" + _STAMP_LABEL + r"(?:[,:]|\s[-\u2014\u2013]|(?=\s))"
+    _MARKDOWN_LEAD + r"(?:[\[(]\s*" + _STAMP_BRACKET_LABEL + r"(?:[\])]?(?:[,:]|\s[-\u2014\u2013])|(?=\s)|[\])](?=\s+" + _STAMP_TIME + r"))"
     r"|" + _STAMP_LABEL + r"(?:[,:]|\s[-\u2014\u2013])"
-    r"|" + _STAMP_LABEL + r"\s(?=" + _STAMP_TIME + r"\s+[A-Za-z]{3}\s+\d{1,2}\s*:))\s*"
+    r"|" + _STAMP_LABEL + r"\s(?=" + _STAMP_TIME + r"\s+" + _STAMP_MONTH + r"\s+\d{1,2}\s*:))\s*"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
