@@ -134,64 +134,64 @@ def all_forms(body, path):
 
 
 # A record for the live head is allowed, whatever its form, in the MCP form and in every Bash form.
-mcp_post("review-record: a record at the live head is allowed, MCP add_issue_comment", review_log(), "allow")
-mcp_post("review-record: a full-size record with its footer is allowed, MCP add_issue_comment", REVIEW_FULL, "allow")
+mcp_post("review-log: a record at the live head is allowed, MCP add_issue_comment", review_log(), "allow")
+mcp_post("review-log: a full-size record with its footer is allowed, MCP add_issue_comment", REVIEW_FULL, "allow")
 for _label, _command in all_forms(review_log(), os.path.join(GHRECORDDIR, "ok.md")):
-    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+    bash_post("review-log: a record at the live head is allowed, %s" % _label, _command, "allow")
 
 # A comment with no marker is not judged, so it is allowed, and it makes no gh read (checked below).
-mcp_post("review-record: a comment with no marker is allowed, MCP add_issue_comment", "Round 1 ran. No review record yet.", "allow")
-mcp_post("review-record: a comment that names the record without its marker is allowed",
-         "review-record is the form, see the decision.", "allow")
-mcp_post("review-record: an empty comment is allowed, MCP add_issue_comment", "", "allow")
-bash_post("review-record: a lone quote in a comment with no marker is allowed", PR_CMD + " --body \"Don't merge yet\"", "allow")
+mcp_post("review-log: a comment with no marker is allowed, MCP add_issue_comment", "Round 1 ran. No review log yet.", "allow")
+mcp_post("review-log: a comment that names the record without its marker is allowed",
+         "review-log is the form, see the decision.", "allow")
+mcp_post("review-log: an empty comment is allowed, MCP add_issue_comment", "", "allow")
+bash_post("review-log: a lone quote in a comment with no marker is allowed", PR_CMD + " --body \"Don't merge yet\"", "allow")
 
 # A record for a head other than the live one is refused. The refusal prints the render command for the live head.
-mcp_post("review-record: a wrong head tail is refused, MCP add_issue_comment", review_log(head=REVIEW_TAIL), "deny",
+mcp_post("review-log: a wrong head tail is refused, MCP add_issue_comment", review_log(head=REVIEW_TAIL), "deny",
          rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
 for _label, _command in all_forms(review_log(head=REVIEW_TAIL), os.path.join(GHRECORDDIR, "wrong_tail.md")):
-    bash_post("review-record: a wrong head tail is refused, %s" % _label, _command, "deny",
+    bash_post("review-log: a wrong head tail is refused, %s" % _label, _command, "deny",
               rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
-mcp_post("review-record: a stale record is refused, MCP add_issue_comment", review_log(head=REVIEW_OLD), "deny",
+mcp_post("review-log: a stale record is refused, MCP add_issue_comment", review_log(head=REVIEW_OLD), "deny",
          rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
-bash_post("review-record: a stale record is refused, gh pr comment --body-file",
+bash_post("review-log: a stale record is refused, gh pr comment --body-file",
           "%s --body-file %s" % (PR_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
 # A body the shell builds from a file is judged by that file: a command substitution reads it, and so does a piped cat.
-bash_post("review-record: a stale record read by a command substitution is refused, gh pr comment --body $(cat)",
+bash_post("review-log: a stale record read by a command substitution is refused, gh pr comment --body $(cat)",
           "%s --body \"$(cat %s)\"" % (PR_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
-bash_post("review-record: a stale record piped in is refused, cat | gh pr comment -F -",
+bash_post("review-log: a stale record piped in is refused, cat | gh pr comment -F -",
           "cat %s | %s -F -" % (os.path.join(GHRECORDDIR, "stale.md"), PR_CMD), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
 # A piped body the guard cannot read at all is allowed, with a note (checked below). Its command names no file.
-bash_post("review-record: a plain stdin body the guard cannot read is allowed, some_cmd | gh pr comment -F -",
+bash_post("review-log: a plain stdin body the guard cannot read is allowed, some_cmd | gh pr comment -F -",
           "some_cmd | %s -F -" % PR_CMD, "allow")
 
 # A record for another pull request is refused.
-mcp_post("review-record: a record for another pull request is refused, MCP add_issue_comment", review_log(n=REVIEW_PR + 1),
+mcp_post("review-log: a record for another pull request is refused, MCP add_issue_comment", review_log(n=REVIEW_PR + 1),
          "deny", rule=REVIEW_RULE, number=REVIEW_PR)
-bash_post("review-record: a record for another pull request is refused, gh pr comment --body",
+bash_post("review-log: a record for another pull request is refused, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, review_log(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
-bash_post("review-record: a record for another pull request is refused, gh api -f body=",
+bash_post("review-log: a record for another pull request is refused, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, review_log(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
 
 # A body that holds the marker but does not parse is refused, from its empty state to its near misses.
-mcp_post("review-record: a marker with no record is refused, MCP add_issue_comment", REVIEW_MARKER_TEXT, "deny", rule=REVIEW_RULE)
+mcp_post("review-log: a marker with no record is refused, MCP add_issue_comment", REVIEW_MARKER_TEXT, "deny", rule=REVIEW_RULE)
 # A body is a record only when its first line is the marker (merge/merge.py parse_review). Prose that names it lower down is a comment.
-mcp_post("review-record: a marker in prose below the first line is allowed, MCP add_issue_comment", REVIEW_PROSE, "allow")
-bash_post("review-record: a marker in prose below the first line is allowed, gh pr comment --body",
+mcp_post("review-log: a marker in prose below the first line is allowed, MCP add_issue_comment", REVIEW_PROSE, "allow")
+bash_post("review-log: a marker in prose below the first line is allowed, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, REVIEW_PROSE), "allow")
-mcp_post("review-record: a record with a round skipped is refused, MCP add_issue_comment", REVIEW_SKIPPED_ROUND,
+mcp_post("review-log: a record with a round skipped is refused, MCP add_issue_comment", REVIEW_SKIPPED_ROUND,
          "deny", rule=REVIEW_RULE)
-bash_post("review-record: a record with no Head line is refused, gh pr comment -b", "%s -b '%s'" % (PR_CMD, REVIEW_NO_HEAD),
+bash_post("review-log: a record with no Head line is refused, gh pr comment -b", "%s -b '%s'" % (PR_CMD, REVIEW_NO_HEAD),
           "deny", rule=REVIEW_RULE)
-bash_post("review-record: a record with a 39-digit Head is refused, gh api -f body=",
+bash_post("review-log: a record with a 39-digit Head is refused, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE)
 # Two bodies in one call. gh rejects a repeated `-f body=`, but the guard judges every marked body it reads. A good record
 # and a stale one are refused whichever comes first, so a check that reads only the first or only the last body fails here.
 TWO_BODIES = "%s -f 'body=%s' -f 'body=%s'"
-bash_post("review-record: a good record then a stale one in one call is refused, gh api -f body= twice",
+bash_post("review-log: a good record then a stale one in one call is refused, gh api -f body= twice",
           TWO_BODIES % (API_CMD, review_log(), review_log(head=REVIEW_OLD)), "deny", rule=REVIEW_RULE,
           carries=(REVIEW_RENDER,))
-bash_post("review-record: a stale record then a good one in one call is refused, gh api -f body= twice",
+bash_post("review-log: a stale record then a good one in one call is refused, gh api -f body= twice",
           TWO_BODIES % (API_CMD, review_log(head=REVIEW_OLD), review_log()), "deny", rule=REVIEW_RULE,
           carries=(REVIEW_RENDER,))
 
@@ -216,39 +216,39 @@ PIN_FORM_LABELS = ("gh pr comment --body", "gh pr comment -b", "gh pr comment --
                    "gh api -f body=", "gh api -F body=@", "gh pr comment --edit-last --body")
 
 # Prose after the CI line is refused on each form that posts it.
-mcp_post("review-record: prose after the CI line is refused, MCP add_issue_comment", REVIEW_TRAILING, "deny", rule=REVIEW_RULE)
+mcp_post("review-log: prose after the CI line is refused, MCP add_issue_comment", REVIEW_TRAILING, "deny", rule=REVIEW_RULE)
 for _label, _command in every_form(REVIEW_TRAILING, TRAILING_PATH):
     if _label in PIN_FORM_LABELS:
-        bash_post("review-record: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE)
+        bash_post("review-log: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE)
 
 # Prose after the CI line is refused on every Bash form, edits included, and each refusal also names the form text. Its message
 # carries the `---` line and the footer.
 for _label, _command in every_form(REVIEW_TRAILING, TRAILING_PATH):
-    bash_post("review-record: prose after the CI line is refused and names the form, %s" % _label, _command, "deny",
+    bash_post("review-log: prose after the CI line is refused and names the form, %s" % _label, _command, "deny",
               rule=REVIEW_RULE, carries=FORM_TEXT)
-mcp_post("review-record: prose after the CI line is refused and names the form, MCP add_issue_comment", REVIEW_TRAILING,
+mcp_post("review-log: prose after the CI line is refused and names the form, MCP add_issue_comment", REVIEW_TRAILING,
          "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 # The malformed bodies in the add and post cases also name the form text: the same judge refuses them.
-mcp_post("review-record: a marker with no record is refused and names the form, MCP add_issue_comment", REVIEW_MARKER_TEXT,
+mcp_post("review-log: a marker with no record is refused and names the form, MCP add_issue_comment", REVIEW_MARKER_TEXT,
          "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
-mcp_post("review-record: a record with a round skipped is refused and names the form, MCP add_issue_comment",
+mcp_post("review-log: a record with a round skipped is refused and names the form, MCP add_issue_comment",
          REVIEW_SKIPPED_ROUND, "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
-bash_post("review-record: a record with no Head line is refused and names the form, gh pr comment -b",
+bash_post("review-log: a record with no Head line is refused and names the form, gh pr comment -b",
           "%s -b '%s'" % (PR_CMD, REVIEW_NO_HEAD), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
-bash_post("review-record: a record with a 39-digit Head is refused and names the form, gh api -f body=",
+bash_post("review-log: a record with a 39-digit Head is refused and names the form, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 
 # ALLOW CONTROLS on every form. A body that is not a record by form is allowed: a record with its footer, the marker in
 # prose below line 1, and a code fence then the marker. A bare record at the live head is allowed on the edit forms too.
-mcp_post("review-record: a record with its footer is allowed, MCP add_issue_comment", REVIEW_FOOTED, "allow")
-mcp_post("review-record: a code fence, then the marker, is allowed, MCP add_issue_comment", REVIEW_FENCED, "allow")
+mcp_post("review-log: a record with its footer is allowed, MCP add_issue_comment", REVIEW_FOOTED, "allow")
+mcp_post("review-log: a code fence, then the marker, is allowed, MCP add_issue_comment", REVIEW_FENCED, "allow")
 for _label, _command in edit_forms(review_log(), os.path.join(GHRECORDDIR, "ok.md")):
-    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+    bash_post("review-log: a record at the live head is allowed, %s" % _label, _command, "allow")
 for _body, _file, _what in ((REVIEW_FOOTED, "footed.md", "a record with its footer"),
                             (REVIEW_PROSE, "prose.md", "the marker in prose below the first line"),
                             (REVIEW_FENCED, "fenced.md", "a code fence, then the marker")):
     for _label, _command in every_form(_body, os.path.join(GHRECORDDIR, _file)):
-        bash_post("review-record: %s is allowed, %s" % (_what, _label), _command, "allow")
+        bash_post("review-log: %s is allowed, %s" % (_what, _label), _command, "allow")
 
 
 # THE ISSUE WORD AND THE ANSI-C QUOTING. `gh issue comment` posts to the same pull request, and merge --reviewed reads issue
@@ -275,18 +275,18 @@ def ansi_c(text):
 # `gh issue comment` is judged as `gh pr comment` is: prose after the CI line is refused on every form. Each refusal names the
 # form, as the gh pr comment refusal does.
 for _label, _command in issue_forms(REVIEW_TRAILING, TRAILING_PATH):
-    bash_post("review-record: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE,
+    bash_post("review-log: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE,
               carries=FORM_TEXT)
 # A record for an older head is refused on gh issue comment, with the render line.
-bash_post("review-record: a stale record is refused, gh issue comment --body-file",
+bash_post("review-log: a stale record is refused, gh issue comment --body-file",
           "%s --body-file %s" % (ISSUE_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE,
           carries=(REVIEW_RENDER,))
 # ALLOW CONTROLS for gh issue comment: a bare record at the live head is allowed on every form, as on gh pr comment.
 for _label, _command in issue_forms(review_log(), os.path.join(GHRECORDDIR, "ok.md")):
-    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+    bash_post("review-log: a record at the live head is allowed, %s" % _label, _command, "allow")
 
 # `gh issue comment N --edit-last` edits the comment, and is judged on its form before any read, as a post is.
-bash_post("review-record: prose after the CI line is refused, gh issue comment 12 --edit-last --body",
+bash_post("review-log: prose after the CI line is refused, gh issue comment 12 --edit-last --body",
           "%s --edit-last --body '%s'" % (ISSUE_CMD, REVIEW_TRAILING), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 
 
@@ -316,92 +316,92 @@ RECORD_OCT = {"<": r"\074", ">": r"\076"}
 RECORD_FIRST = REVIEW_MARKER_TEXT + "\n"     # the record's first line, and the lines after it
 RECORD_REST = review_log()[len(RECORD_FIRST):]
 
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C backslash-quote and an apostrophe in prose, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C backslash-quote and an apostrophe in prose, gh issue comment --body",
            ansi_word(review_log(), None, r"\'Lane note: it\'s after the record.\n"), "deny")
-ansi_issue("review-record: a record with its footer is allowed, ANSI-C backslash-quote and an apostrophe, gh issue comment --body",
+ansi_issue("review-log: a record with its footer is allowed, ANSI-C backslash-quote and an apostrophe, gh issue comment --body",
            ansi_word(review_log(), None, r"---\nGenerated with Claude Code, it\'s free\n"), "allow")
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C hex escapes, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C hex escapes, gh issue comment --body",
            ansi_word(review_log(), RECORD_HEX, r"Lane note: \x41fter the record.\n"), "deny")
-ansi_issue("review-record: a bare record in ANSI-C hex escapes is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record in ANSI-C hex escapes is allowed, gh issue comment --body",
            ansi_word(review_log(), RECORD_HEX), "allow")
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C unicode escapes, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C unicode escapes, gh issue comment --body",
            ansi_word(review_log(), RECORD_UNI, r"Lane note: After the record.\n"), "deny")
-ansi_issue("review-record: a bare record in ANSI-C unicode escapes is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record in ANSI-C unicode escapes is allowed, gh issue comment --body",
            ansi_word(review_log(), RECORD_UNI), "allow")
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C octal escapes, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C octal escapes, gh issue comment --body",
            ansi_word(review_log(), RECORD_OCT, r"Lane note: \101fter the record.\n"), "deny")
-ansi_issue("review-record: a bare record in ANSI-C octal escapes is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record in ANSI-C octal escapes is allowed, gh issue comment --body",
            ansi_word(review_log(), RECORD_OCT), "allow")
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C tab escape, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C tab escape, gh issue comment --body",
            ansi_word(review_log(), None, r"Lane note:\tafter the record.\n"), "deny")
-ansi_issue("review-record: a record with its footer is allowed, ANSI-C tab escape, gh issue comment --body",
+ansi_issue("review-log: a record with its footer is allowed, ANSI-C tab escape, gh issue comment --body",
            ansi_word(review_log(), None, r"---\nGenerated\twith Claude Code\n"), "allow")
-ansi_issue("review-record: prose before a NUL cut is refused, gh issue comment --body",
+ansi_issue("review-log: prose before a NUL cut is refused, gh issue comment --body",
            ansi_word(review_log(), None, r"Lane note after the record.\n\0---\nGenerated with Claude Code\n"), "deny")
-ansi_issue("review-record: a bare record before a NUL cut is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record before a NUL cut is allowed, gh issue comment --body",
            ansi_word(review_log(), None, r"\0Lane note after the cut.\n"), "allow")
-ansi_issue("review-record: prose after the CI line is refused, ANSI-C word then double quotes, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, ANSI-C word then double quotes, gh issue comment --body",
            ansi_word(RECORD_FIRST) + '"' + RECORD_REST + "Lane note after the record.\n" + '"', "deny")
-ansi_issue("review-record: a bare record in an ANSI-C word then double quotes is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record in an ANSI-C word then double quotes is allowed, gh issue comment --body",
            ansi_word(RECORD_FIRST) + '"' + RECORD_REST + '"', "allow")
-ansi_issue("review-record: prose after the CI line is refused, double quotes then ANSI-C word, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, double quotes then ANSI-C word, gh issue comment --body",
            '"' + RECORD_FIRST + '"' + ansi_word(RECORD_REST + "Lane note after the record.\n"), "deny")
-ansi_issue("review-record: a bare record in double quotes then an ANSI-C word is allowed, gh issue comment --body",
+ansi_issue("review-log: a bare record in double quotes then an ANSI-C word is allowed, gh issue comment --body",
            '"' + RECORD_FIRST + '"' + ansi_word(RECORD_REST), "allow")
-ansi_issue("review-record: prose after the CI line is refused, a // inside the ANSI-C word, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, a // inside the ANSI-C word, gh issue comment --body",
            ansi_word(review_log(), None, "//Lane note after the record.\n"), "deny")
-ansi_issue("review-record: a record with its footer is allowed, a // inside the ANSI-C word, gh issue comment --body",
+ansi_issue("review-log: a record with its footer is allowed, a // inside the ANSI-C word, gh issue comment --body",
            ansi_word(review_log(), None, "---\n//x and /* y\n"), "allow")
-ansi_issue("review-record: prose after the CI line is refused, a /* inside the ANSI-C word, gh issue comment --body",
+ansi_issue("review-log: prose after the CI line is refused, a /* inside the ANSI-C word, gh issue comment --body",
            ansi_word(review_log(), None, "/*Lane note after the record.\n"), "deny")
-ansi_issue("review-record: a record with its footer is allowed, a /* inside the ANSI-C word, gh issue comment --body",
+ansi_issue("review-log: a record with its footer is allowed, a /* inside the ANSI-C word, gh issue comment --body",
            ansi_word(review_log(), None, "---\nSee /*x and // y\n"), "allow")
 
 # The guard judges a `$'...'` body on its decoded text, so prose after the CI line is refused in that form too, as in plain quotes.
-bash_post("review-record: prose after the CI line is refused, gh pr comment --body with ANSI-C quoting",
+bash_post("review-log: prose after the CI line is refused, gh pr comment --body with ANSI-C quoting",
           "%s --body %s" % (PR_CMD, ansi_c(REVIEW_TRAILING)), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
-bash_post("review-record: prose after the CI line is refused, gh api -X PATCH -f with ANSI-C quoting",
+bash_post("review-log: prose after the CI line is refused, gh api -X PATCH -f with ANSI-C quoting",
           "%s -f %s" % (API_EDIT_CMD, ansi_c("body=" + REVIEW_TRAILING)), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 # ALLOW CONTROLS for the ANSI-C forms: a bare record at the live head is allowed on the post and both gh api routes, the marker in
 # prose below line 1 is allowed, and a plain ANSI-C text body is allowed.
-bash_post("review-record: a record at the live head is allowed, gh pr comment --body with ANSI-C quoting",
+bash_post("review-log: a record at the live head is allowed, gh pr comment --body with ANSI-C quoting",
           "%s --body %s" % (PR_CMD, ansi_c(review_log())), "allow")
-bash_post("review-record: a record at the live head is allowed, gh api -f with ANSI-C quoting",
+bash_post("review-log: a record at the live head is allowed, gh api -f with ANSI-C quoting",
           "%s -f %s" % (API_CMD, ansi_c("body=" + review_log())), "allow")
-bash_post("review-record: a record at the live head is allowed, gh api -X PATCH -f with ANSI-C quoting",
+bash_post("review-log: a record at the live head is allowed, gh api -X PATCH -f with ANSI-C quoting",
           "%s -f %s" % (API_EDIT_CMD, ansi_c("body=" + review_log())), "allow")
-bash_post("review-record: the marker in prose below the first line is allowed, gh pr comment --body with ANSI-C quoting",
+bash_post("review-log: the marker in prose below the first line is allowed, gh pr comment --body with ANSI-C quoting",
           "%s --body %s" % (PR_CMD, ansi_c(REVIEW_PROSE)), "allow")
-bash_post("review-record: a plain ANSI-C text body is allowed, gh pr comment --body $'plain text'",
+bash_post("review-log: a plain ANSI-C text body is allowed, gh pr comment --body $'plain text'",
           "%s --body $'plain text'" % PR_CMD, "allow")
 
 # The guard does not resolve a shell variable, so a body held in one is not judged: a named limit, allowed on purpose.
-bash_post("review-record: a body in a shell variable is allowed, a named limit, gh pr comment --body \"$BODY\"",
+bash_post("review-log: a body in a shell variable is allowed, a named limit, gh pr comment --body \"$BODY\"",
           "%s --body \"$BODY\"" % PR_CMD, "allow")
 
 # MORE NAMED LIMITS. The guard judges a body written in the command, or in a file a form names. Three forms keep the body out of
 # its reach, so a malformed record is allowed on each: a command substitution, a JSON file read by --input, and a full URL.
-bash_post("review-record: a body from a command substitution is allowed, a named limit, gh pr comment --body \"$(printf ...)\"",
+bash_post("review-log: a body from a command substitution is allowed, a named limit, gh pr comment --body \"$(printf ...)\"",
           PR_CMD + " --body \"$(printf '%s' '" + REVIEW_TRAILING + "')\"", "allow")
-bash_post("review-record: a body in a JSON file read by --input is allowed, a named limit, gh api --input",
+bash_post("review-log: a body in a JSON file read by --input is allowed, a named limit, gh api --input",
           "%s --input %s" % (API_CMD, os.path.join(GHRECORDDIR, "trailing.json")), "allow")
-bash_post("review-record: a full-URL gh api post with a malformed record is allowed, a named limit, gh api https://...",
+bash_post("review-log: a full-URL gh api post with a malformed record is allowed, a named limit, gh api https://...",
           "gh api https://api.github.com/repos/y/x/issues/%d/comments -f 'body=%s'" % (REVIEW_PR, REVIEW_TRAILING), "allow")
 
 # A marked body in a heredoc is judged as a quoted body is: the text between the `<<'EOF'` line and the `EOF` line. A `#` inside a
 # quoted body is text, not a shell comment, so the judge reads on past it.
-bash_post("review-record: prose after the CI line is refused, a heredoc body, gh pr comment --body-file -",
+bash_post("review-log: prose after the CI line is refused, a heredoc body, gh pr comment --body-file -",
           "%s --body-file - <<'EOF'\n%sEOF\n" % (PR_CMD, REVIEW_TRAILING), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 # The `#` opens a line of prose after the CI line. A reader that cuts a quoted body at a `#` sees a bare record, and allows it.
 HASH_TRAILING = REVIEW_TRAILING.replace("Lane note after the record.\n", "# Lane note after the record.\n")
-bash_post("review-record: prose after the CI line is refused, a # at a line start in a quoted body, gh pr comment --body",
+bash_post("review-log: prose after the CI line is refused, a # at a line start in a quoted body, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, HASH_TRAILING), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 # The Grant line holds `#12` at a word start. A reader that cuts at that `#` leaves `Grant: ` with no round line after it, and refuses.
 GRANT_TEXT = "#%d, item 219 a, owner, 2026-11-04 17:44 CST" % REVIEW_PR
 GRANT_ROUNDS = [(1, "reviewer", "claude-sonnet-5-5", "FAIL"), (2, "reviewer", "claude-sonnet-5-5", "PASS"),
                 (3, "reviewer", "claude-sonnet-5-5", "PASS"), (4, "reviewer", "claude-sonnet-5-5", "PASS")]
 GRANT_BODY = review_form().review_body(REVIEW_PR, REVIEW_LIVE, "normal", "yes", GRANT_ROUNDS, "not owed", grant=GRANT_TEXT)
-bash_post("review-record: a granted record with a # in its Grant line is allowed, gh pr comment --body",
+bash_post("review-log: a granted record with a # in its Grant line is allowed, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, GRANT_BODY), "allow")
 
 
@@ -496,61 +496,61 @@ def review_fixtures_check():
 
 FIXTURELESS_CHECKS.add(review_fixtures_check)
 REVIEW_LOG_CHECKS = []  # (label, check) pairs, appended to LOG_CHECKS_EXTRA where that list is defined (below the archive section)
-REVIEW_LOG_CHECKS.append(("review-record:the bodies the cases post parse as their names say", review_fixtures_check))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, MCP add_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:the bodies the cases post parse as their names say", review_fixtures_check))
+REVIEW_LOG_CHECKS.append(("review-log:a marked post at the live head makes one gh read, MCP add_issue_comment",
                          review_reads(MCP_COMMENT, mcp_input(review_log()), "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh pr comment --body",
+REVIEW_LOG_CHECKS.append(("review-log:a marked post at the live head makes one gh read, gh pr comment --body",
                          review_reads("Bash", {"command": "%s --body '%s'" % (PR_CMD, review_log())}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP add_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:a marker in prose below the first line makes no gh read, MCP add_issue_comment",
                          review_reads(MCP_COMMENT, mcp_input(REVIEW_PROSE), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, gh pr comment --body",
+REVIEW_LOG_CHECKS.append(("review-log:a marker in prose below the first line makes no gh read, gh pr comment --body",
                          review_reads("Bash", {"command": "%s --body '%s'" % (PR_CMD, REVIEW_PROSE)}, "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a post with no pull request number makes two gh reads, gh pr comment --body",
+REVIEW_LOG_CHECKS.append(("review-log:a post with no pull request number makes two gh reads, gh pr comment --body",
                          review_reads("Bash", {"command": "gh pr comment --body '%s'" % review_log()}, "allow", 2,
                                       cwd=GHRECORDBRANCH, path_dirs=(GIT_PATH,))))
-REVIEW_LOG_CHECKS.append(("review-record:a post that names a branch makes two gh reads, gh pr comment --body",
+REVIEW_LOG_CHECKS.append(("review-log:a post that names a branch makes two gh reads, gh pr comment --body",
                          review_reads("Bash", {"command": "gh pr comment feat --body '%s'" % review_log()}, "allow", 2)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post with a wrong head tail makes one gh read, and is refused",
+REVIEW_LOG_CHECKS.append(("review-log:a marked post with a wrong head tail makes one gh read, and is refused",
                          review_reads(MCP_COMMENT, mcp_input(review_log(head=REVIEW_TAIL)), "deny", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read",
-                         review_reads(MCP_COMMENT, mcp_input("Round 1 ran. No review record yet."), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a live-head read that fails allows the post and notes it on stderr",
+REVIEW_LOG_CHECKS.append(("review-log:a comment with no marker makes no gh read",
+                         review_reads(MCP_COMMENT, mcp_input("Round 1 ran. No review log yet."), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-log:a live-head read that fails allows the post and notes it on stderr",
                          review_note(MCP_COMMENT, mcp_input(review_log()), GHRECORDBROKEN + os.pathsep + PY_PATH)))
-REVIEW_LOG_CHECKS.append(("review-record:an unreadable body file allows the post and notes it on stderr",
+REVIEW_LOG_CHECKS.append(("review-log:an unreadable body file allows the post and notes it on stderr",
                          review_note("Bash", {"command": "%s --body-file %s" % (PR_CMD, os.path.join(GHRECORDDIR, "missing.md"))},
                                      GHRECORD + os.pathsep + PY_PATH)))
-REVIEW_LOG_CHECKS.append(("review-record:a plain stdin body the guard cannot read is allowed and noted on stderr, gh pr comment -F -",
+REVIEW_LOG_CHECKS.append(("review-log:a plain stdin body the guard cannot read is allowed and noted on stderr, gh pr comment -F -",
                          review_note("Bash", {"command": "some_cmd | %s -F -" % PR_CMD}, GHRECORD + os.pathsep + PY_PATH)))
 # The issue word costs what the pull request word costs: one read per marked post at a number, and two with no number in a repo.
-REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh issue comment --body",
+REVIEW_LOG_CHECKS.append(("review-log:a marked post at the live head makes one gh read, gh issue comment --body",
                          review_reads("Bash", {"command": "%s --body '%s'" % (ISSUE_CMD, review_log())}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh issue comment 12 --edit-last --body",
+REVIEW_LOG_CHECKS.append(("review-log:a marked post at the live head makes one gh read, gh issue comment 12 --edit-last --body",
                          review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_log())}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post with a wrong head tail makes one gh read, gh issue comment 12 --edit-last",
+REVIEW_LOG_CHECKS.append(("review-log:a marked post with a wrong head tail makes one gh read, gh issue comment 12 --edit-last",
                          review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_log(head=REVIEW_TAIL))},
                                       "deny", 1)))
 # An edit in place names a comment, not a pull request: the PATCH route reads no head.
-REVIEW_LOG_CHECKS.append(("review-record:a well-formed record in a PATCH makes no gh read, gh api -X PATCH",
+REVIEW_LOG_CHECKS.append(("review-log:a well-formed record in a PATCH makes no gh read, gh api -X PATCH",
                          review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, review_log())}, "allow", 0)))
 # The update tool names a comment, not a pull request, so the guard finds the pull request from the comment (one read) and
 # reads its live head (a second read). A marked update is judged as a post is; its two reads are the cost pr-review-record states.
-mcp_post("review-record: a record at the live head is allowed, MCP update_issue_comment", review_log(), "allow",
+mcp_post("review-log: a record at the live head is allowed, MCP update_issue_comment", review_log(), "allow",
          comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a full-size record with its footer is allowed, MCP update_issue_comment", REVIEW_FULL, "allow",
+mcp_post("review-log: a full-size record with its footer is allowed, MCP update_issue_comment", REVIEW_FULL, "allow",
          comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a comment with no marker is allowed, MCP update_issue_comment", "Round 1 ran. No review record yet.",
+mcp_post("review-log: a comment with no marker is allowed, MCP update_issue_comment", "Round 1 ran. No review log yet.",
          "allow", comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow",
+mcp_post("review-log: a marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow",
          comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment", review_log(head=REVIEW_TAIL), "deny",
+mcp_post("review-log: a wrong head tail is refused, MCP update_issue_comment", review_log(head=REVIEW_TAIL), "deny",
          rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a stale record is refused, MCP update_issue_comment", review_log(head=REVIEW_OLD), "deny",
+mcp_post("review-log: a stale record is refused, MCP update_issue_comment", review_log(head=REVIEW_OLD), "deny",
          rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a record for another pull request is refused, MCP update_issue_comment", review_log(n=REVIEW_PR + 1),
+mcp_post("review-log: a record for another pull request is refused, MCP update_issue_comment", review_log(n=REVIEW_PR + 1),
          "deny", rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
+mcp_post("review-log: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
+mcp_post("review-log: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
 
 
@@ -573,17 +573,17 @@ def comment_read_check():
     return True, "the comment read names pull request %d" % REVIEW_PR
 
 
-REVIEW_LOG_CHECKS.append(("review-record:the record fake answers the comment read with the pull request the comment sits on",
+REVIEW_LOG_CHECKS.append(("review-log:the record fake answers the comment read with the pull request the comment sits on",
                          comment_read_check))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update at the live head makes two gh reads, MCP update_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:a marked update at the live head makes two gh reads, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_log(), comment_id=REVIEW_COMMENT), "allow", 2)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail makes two gh reads, and is refused, MCP update_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:a marked update with a wrong head tail makes two gh reads, and is refused, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_log(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 2)))
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:a comment with no marker makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review log yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-log:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update whose comment cannot be read is allowed and noted on stderr, MCP update_issue_comment",
+REVIEW_LOG_CHECKS.append(("review-log:a marked update whose comment cannot be read is allowed and noted on stderr, MCP update_issue_comment",
                          review_note(MCP_UPDATE, mcp_input(review_log(), comment_id=REVIEW_COMMENT),
                                      GHRECORDBROKEN + os.pathsep + PY_PATH)))
 

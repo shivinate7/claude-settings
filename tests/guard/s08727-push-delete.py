@@ -1017,9 +1017,10 @@ push_case("main, a push of main from a feature branch asks", "origin main", "ask
 push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 # A space beside a refspec name is no branch. git's ref-name check refuses " main" and "main ", so no push of either reaches
-# main, and the guard allows each. names_default_branch strips the space, so an escaped space, which the reader keeps in the
-# name, reaches that strip and asks. A quoted space never reaches it: push_text blanks quoted text, so the two quoted forms
-# are controls that allow already.
+# main, and the guard allows each. names_default_branch does not strip: it compares the name as given, so an escaped space,
+# which the reader keeps in the name, is not a default name and allows. The only strip is the MCP call site (hooks/guard.py,
+# `branch.strip()` before names_default_branch), which takes a branch argument, not a refspec. A quoted space never reaches
+# the name: push_text blanks quoted text, so the two quoted forms are controls that allow already.
 push_case("a refspec with an escaped leading space allows, git refuses that ref", "origin \\ main", "allow")
 push_case("a refspec with an escaped trailing space allows, git refuses that ref", "origin main\\ ", "allow")
 push_case('a quoted refspec " main" allows, its text is blanked before the reader', 'origin " main"', "allow")
