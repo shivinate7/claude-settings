@@ -16,6 +16,11 @@ RO_AGENT = "a3e9c0d17b52f4a68"          # an agent's id on the payload, in the s
 RO_TEMP = os.path.join(ROOT, "tmp")     # the temp folder these cases read (TEMP_DIR), so the scratchpads sit under it
 RO_SCRATCH = os.path.join(RO_TEMP, FAKE_SESSION, "scratchpad")         # this session's own scratchpad
 RO_OTHER_SCRATCH = os.path.join(RO_TEMP, OTHER_SESSION, "scratchpad")  # another session's scratchpad
+# The same two folders as a shell command names them. os.path.join puts backslashes in a Windows path, and the
+# tokenizer and bash read a backslash as an escape, so a command carries the forward-slash form (slash, s00442).
+# The cwd stays native.
+RO_SCRATCH_CMD = slash(RO_SCRATCH)
+RO_OTHER_SCRATCH_CMD = slash(RO_OTHER_SCRATCH)
 RO_PROBE = "/tmp/ro-probe.txt"          # a write target that is neither a scratchpad nor a null device
 RO_WRITE = "echo x > " + RO_PROBE
 TEMP_DIR = RO_TEMP
@@ -106,7 +111,7 @@ ro_refuse("readonly-shell-write: a lone apostrophe in a heredoc body does not hi
 
 # Another session's scratchpad is not this session's own: the exemption names the calling session only.
 ro_refuse("readonly-shell-write: a redirect into another session's scratchpad is refused",
-          "echo x > " + os.path.join(RO_OTHER_SCRATCH, "ro-other.txt"), session=FAKE_SESSION)
+          "echo x > " + RO_OTHER_SCRATCH_CMD + "/ro-other.txt", session=FAKE_SESSION)
 
 # ---- A2. A subshell, a command substitution, or arithmetic that runs commands: a write inside is a write of the call.
 # Why: a group ( ) runs its text as commands, so a redirect or touch in it writes a file even when the outer call reads.
@@ -147,7 +152,7 @@ ro_refuse("readonly-shell-write: an ssh remote command's touch is refused", 'ssh
 ro_refuse("readonly-shell-write: an ssh remote command's mktemp is refused", "ssh host mktemp")
 ro_refuse("readonly-shell-write: an ssh remote command's tee to a file is refused", "ssh host 'ls | tee /tmp/y'")
 ro_refuse("readonly-shell-write: an ssh touch of this session's scratchpad path is refused, the path is remote",
-          'ssh host "touch %s/x"' % RO_SCRATCH, session=FAKE_SESSION)
+          'ssh host "touch %s/x"' % RO_SCRATCH_CMD, session=FAKE_SESSION)
 
 # ---- C. Every read-only role in agent_brief.READ_ONLY is judged, whatever its case or plugin prefix.
 for _role in (RO_ROLES or ["reviewer"]):   # a broken home still gets one case, which goes red
@@ -208,13 +213,13 @@ ro_allow("readonly-shell-write: a redirect to /dev/tty is the terminal, not a fi
 
 # ---- E. Allowed for a read-only agent: writes into its own scratchpad, the session that owns it.
 ro_allow("readonly-shell-write: a read-only agent's redirect into its own scratchpad is allowed",
-         "echo x > " + os.path.join(RO_SCRATCH, "ro-own.txt"), session=FAKE_SESSION)
+         "echo x > " + RO_SCRATCH_CMD + "/ro-own.txt", session=FAKE_SESSION)
 ro_allow("readonly-shell-write: a tee into its own scratchpad is allowed",
-         "ls | tee " + os.path.join(RO_SCRATCH, "ro-own-tee.txt"), session=FAKE_SESSION)
+         "ls | tee " + RO_SCRATCH_CMD + "/ro-own-tee.txt", session=FAKE_SESSION)
 ro_allow("readonly-shell-write: touch of a file in its own scratchpad is allowed",
-         "touch " + os.path.join(RO_SCRATCH, "ro-own-touch.txt"), session=FAKE_SESSION)
+         "touch " + RO_SCRATCH_CMD + "/ro-own-touch.txt", session=FAKE_SESSION)
 ro_allow("readonly-shell-write: mktemp of a template in its own scratchpad is allowed",
-         "mktemp " + os.path.join(RO_SCRATCH, "ro-own.XXXXXX"), session=FAKE_SESSION)
+         "mktemp " + RO_SCRATCH_CMD + "/ro-own.XXXXXX", session=FAKE_SESSION)
 ro_allow("readonly-shell-write: a relative redirect from a cwd inside its own scratchpad is allowed",
          "echo x > out.txt", cwd=os.path.join(RO_SCRATCH, "notes"), session=FAKE_SESSION)
 
