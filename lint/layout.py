@@ -230,6 +230,25 @@ def candidates(root, name):
     return (first,) if first == then else (first, then)
 
 
+def named_candidates(name, kind):
+    """Every path a call that names the repo `name` (`owner/name`, any case; None names none) may treat as kind `kind`.
+    A repo that legacy-repos lists gets its own path, then the layout's legacy spelling, then the layout path. A repo it does
+    not list gets the layout path only: a call from another checkout cannot read that repo's rollout, so no legacy spelling is
+    a home for it. A call that names no repo gets the legacy spelling and the layout path. It reads the layout file only, never
+    a checkout's extras file. Duplicates are dropped."""
+    listed = legacy_repos().get(name.lower()) if name else None
+    spellings = (None, None)
+    if name is None:
+        spellings = (None, legacy(kind))
+    elif listed is not None:
+        spellings = (listed.get(kind), legacy(kind))
+    found = []
+    for where in (*spellings, layout()["kinds"][kind]["path"]):
+        if where and where.strip("/") not in found:
+            found.append(where.strip("/"))
+    return tuple(found)
+
+
 def _safe(found, where):
     """`found` when it is a relative path inside the repo, else LayoutError."""
     parts = found.replace("\\", "/").split("/")
