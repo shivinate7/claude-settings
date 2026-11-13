@@ -1,0 +1,16 @@
+{
+ "id": "rulings-reach-main",
+ "title": "Each owner ruling reaches main soon after it is given, not only when its lane merges",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "retrospective: owner's earlier words on ruling homes"
+ ],
+ "why": "Rulings stored in roadmap/rulings/ on the record branch are invisible to main's guards and to other repos until a lane writes each into a decision record on main (owner 22:03 CST Nov 12: \"but i thought roadmaps live on a branch that doesnt reach main? kinda odd?\").",
+ "source": "owner chat with triage 22:03 CST Nov 12",
+ "note": "Triage offered a small records-only PR per batch of rulings; owner 22:03 CST: \"doesnt sound like a bad idea, message retrospective im sure its transcript has my thoughts on this\". Asked the retrospective at 22:04 CST for his earlier words on where rulings live; the shape waits on its answer.",
+ "updatedAt": "2026-11-12T22:04:36-06:00"
+}
