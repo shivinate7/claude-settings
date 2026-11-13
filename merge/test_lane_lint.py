@@ -2940,8 +2940,8 @@ class ReviewLogLint(CiJobStub, tm.ReviewEnv):
         self.use_ci_job(PASSING, 0)
         head = self.head()
         earlier = tm.record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"), head=head)
-        self.host.review_comments = lambda since: {7: [earlier]}  # an earlier record on this pull request reached round 2
-        rc, out, err = self.record("7", "--review-record", *self.flags())  # round 1 again: a restart
+        self.host.review_comments = lambda since: {7: [earlier]}  # the earlier record has two passing rounds on this pull request
+        rc, out, err = self.record("7", "--review-record", *self.flags())  # one passing round, after an earlier record with two, is a restart
         self.assertEqual(self.lint_calls(), [], "the lint ran before the restart refusal: " + out + err)
         self.assertNotEqual(rc, 0, "a record that restarts the review printed a record: " + out + err)
         self.assertNotIn(tm.REVIEW_MARKER, out, "the record printed on a restart refusal: " + out)
