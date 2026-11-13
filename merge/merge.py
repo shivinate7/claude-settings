@@ -1594,6 +1594,8 @@ class Host:
 
     BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a failed run, a cancelled run). The CI alarm reads the same file and the failed-run clear; a cancelled run never alarms
 
+    base_root = None  # the checkout whose origin/<base> the revert clear reads; base_verdict sets it, as `gh`'s cwd (self.cwd) may be none and base_state keeps the two-argument shape every host shares
+
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown. The detail of a green verdict names each red run a revert cleared (below), else it is empty.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
@@ -1658,10 +1660,10 @@ class Host:
 
             def revert_of(r):  # the live revert of r's head on origin/<base>, or None. Every revert line of the base's history is read once, so a head git does not hold only finds none
                 if "recs" not in reverts:
-                    if not self.cwd:
+                    if not self.base_root:
                         raise Stop("no checkout to read the reverts on the base with, so the revert clear is unknown (decision no-merge-onto-red-main)")
                     try:
-                        reverts["recs"] = read_log(self.cwd, "-F", "--grep=This reverts commit", f"origin/{base}")
+                        reverts["recs"] = read_log(self.base_root, "-F", "--grep=This reverts commit", f"origin/{base}")
                     except (ValueError, subprocess.TimeoutExpired, OSError) as e:
                         raise Stop(f"reading the reverts on origin/{base} failed, so the revert clear is unknown (decision no-merge-onto-red-main): {e}")
                     reverts["undone"] = revert_map(reverts["recs"])
@@ -3564,6 +3566,7 @@ def base_verdict(root, host, base):
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", " ".join(str(e).split())
+    host.base_root = root
     return host.base_state(base, flows)
 
 def red_base(root, host, base, red_ok=""):
