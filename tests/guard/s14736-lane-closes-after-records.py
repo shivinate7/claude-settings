@@ -103,14 +103,36 @@ def one_message(lines):
     return json.dumps({"type": first["type"], "message": {"role": first["message"]["role"], "content": content}})
 
 
-def arch_batch_transcript(count, one_line):
+def arch_result_text(target, wrapped):
+    """The lane record of `target` as its get_session result holds it: bare, or inside the nonce wrapper that a read of
+    another session's text comes back in."""
+    body = role_record(ARCH_LANE_TAGS, target)
+    return role_wrapped(body) if wrapped else body
+
+
+def arch_batch_transcript(count, one_line, wrapped=False):
     """The own record, then `count` get_session calls for the first targets in one message, their results in the next,
-    and the archive call of every target in the one after. `one_line` writes each message as one line."""
+    and the archive call of every target in the one after. `one_line` writes each message as one line. `wrapped` puts
+    each result inside its nonce wrapper."""
     gets = [role_use("b%d" % i, GET_SESSION, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS[:count], 1)]
-    results = [role_result("b%d" % i, role_record(ARCH_LANE_TAGS, t)) for i, t in enumerate(ARCH_BATCH_TARGETS[:count], 1)]
+    results = [role_result("b%d" % i, arch_result_text(t, wrapped)) for i, t in enumerate(ARCH_BATCH_TARGETS[:count], 1)]
     archives = [role_use("a%d" % i, ARCHIVE_TOOL, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS, 1)]
     lines = role_call("r0", RUNNER_TAGS)
     for message in (gets, results, archives):
+        lines += [one_message(message)] if one_line else message
+    return lines
+
+
+def arch_same_message_transcript(one_line):
+    """The own record, the get_session calls of the first two targets in one message, their wrapped results in the next,
+    then the third target's get_session and its archive in one message. The transcript ends there: a result comes after
+    the call that asked for it, so when the archive is checked the transcript holds no record of the third target yet."""
+    gets = [role_use("b%d" % i, GET_SESSION, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS[:2], 1)]
+    results = [role_result("b%d" % i, arch_result_text(t, True)) for i, t in enumerate(ARCH_BATCH_TARGETS[:2], 1)]
+    last = [role_use("b3", GET_SESSION, {"session_id": ARCH_BATCH_TARGETS[2]}),
+            role_use("a3", ARCHIVE_TOOL, {"session_id": ARCH_BATCH_TARGETS[2]})]
+    lines = role_call("r0", RUNNER_TAGS)
+    for message in (gets, results, last):
         lines += [one_message(message)] if one_line else message
     return lines
 
@@ -120,6 +142,12 @@ ARCH_STEER_FIXTURES = {
     "archive-batch-one-line": arch_batch_transcript(3, True),
     "archive-batch-absent-lines": arch_batch_transcript(2, False),
     "archive-batch-absent-one-line": arch_batch_transcript(2, True),
+    "archive-batch-wrapped-lines": arch_batch_transcript(3, False, wrapped=True),
+    "archive-batch-wrapped-one-line": arch_batch_transcript(3, True, wrapped=True),
+    "archive-batch-wrapped-absent-lines": arch_batch_transcript(2, False, wrapped=True),
+    "archive-batch-wrapped-absent-one-line": arch_batch_transcript(2, True, wrapped=True),
+    "archive-batch-wrapped-same-message-lines": arch_same_message_transcript(False),
+    "archive-batch-wrapped-same-message-one-line": arch_same_message_transcript(True),
     # A lane whose record names a step and no repo: the tags reason, and the steer it carries.
     "archive-tags-no-repo": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG]),
 }
@@ -159,6 +187,34 @@ archive_refuse("a batch of two get_session calls in one message, then the archiv
                lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
 archive_refuse("a batch of two get_session calls in one message, then the archive of a third target with none, is refused (one line per message)",
                archive_steer_path("archive-batch-absent-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+# The same batch with each result inside its nonce wrapper, as a read of another session's text comes back. The reader
+# takes the wrapper block by block, so each target's record is read from its own result in both transcript shapes.
+# Green on arrival: the current reader already takes the wrapper, so these pin the steer's batch for the real shape.
+for shape, fixture in (("one line per block", "archive-batch-wrapped-lines"), ("one line per message", "archive-batch-wrapped-one-line")):
+    for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+        archive_allow("a batch of three wrapped get_session calls in one message, archived in the next (%s): target %d of 3 is allowed"
+                      % (shape, index), archive_steer_path(fixture), fake_gh_path(ARCHCLOSED), target=target)
+# The scope of the wrapped batch: each target's open pull request refuses its archive, which holds only when each wrapped
+# record was read for its own target.
+for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+    archive_refuse("a batch of three wrapped get_session calls in one message, archived in the next: target %d of 3 is refused for its open pull request"
+                   % index, archive_steer_path("archive-batch-wrapped-lines"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN,
+                   lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, target=target)
+# A wrapped target whose get_session is absent from the batch still denies, in both transcript shapes.
+archive_refuse("a batch of two wrapped get_session calls in one message, then the archive of a third target with none, is refused (one line per block)",
+               archive_steer_path("archive-batch-wrapped-absent-lines"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+archive_refuse("a batch of two wrapped get_session calls in one message, then the archive of a third target with none, is refused (one line per message)",
+               archive_steer_path("archive-batch-wrapped-absent-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+# A target's get_session in the same message as its archive: the result comes after the archive, so no record of the target
+# is read when the archive is checked. The two earlier targets' wrapped reads are in the transcript, and the refusal is for the third.
+archive_refuse("a wrapped get_session of a target in the same message as its archive, with no result yet, is refused (one line per block)",
+               archive_steer_path("archive-batch-wrapped-same-message-lines"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+archive_refuse("a wrapped get_session of a target in the same message as its archive, with no result yet, is refused (one line per message)",
+               archive_steer_path("archive-batch-wrapped-same-message-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
                lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
 # The tags reason names the same batch steer: fix the tags, then get_session on each target in one message, then archive.
 archive_refuse("a lane whose record has no cs-repo tag is refused, and the remedy names one message, then the next",
