@@ -15727,7 +15727,7 @@ class ReviewNoRestart(ReviewEnv):
     and prints nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
-    GRANT = "#7, item 1 a, owner, 2026-11-08 06:08 CST"  # the owner's grant of round 4, bound to this pull request
+    GRANT = "#7, item 1 a, owner, 2026-11-08 06:08 CST"  # the owner's grant of a fourth review pass, bound to this pull request
     THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the --round values of rounds 1-3, all FAIL
 
     def host_with(self, *bodies):
@@ -15757,8 +15757,8 @@ class ReviewNoRestart(ReviewEnv):
         self.assertEqual(rc, 0, "a record the rule allows was refused:\n" + out + err)
         parse_text(self, posted_body(self, out))
 
-    def test_a_fresh_round_one_after_an_earlier_fix_check_pass_is_refused(self):
-        # the #3060 incident: a round 1 record posted at the new head after a PASS fix check on an earlier record
+    def test_a_fresh_round_one_after_an_earlier_fix_verifier_pass_is_refused(self):
+        # the #3060 incident: a record that restarts at the first pass, posted at the new head after a PASS fix verifier on an earlier record
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, haiku, PASS",), fix=(fix_verifier_line(head=self.EARLIER_FIX_FROM),))
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:haiku:PASS"), host=self.host_with(earlier))
         self.assert_refused(rc, out, err)
@@ -15788,7 +15788,7 @@ class ReviewNoRestart(ReviewEnv):
                                      host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
-    def test_a_fix_check_after_the_full_earlier_rounds_is_accepted(self):
+    def test_a_fix_verifier_after_the_full_earlier_rounds_is_accepted(self):
         # the earlier record has no Fix check line, so a record that repeats its three rounds and names its head as the fix base is allowed
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
         fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
