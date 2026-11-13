@@ -72,6 +72,9 @@ CITE = re.compile(r"\bcites\s+(\S+)")
 RECORD_ID = re.compile(r"[A-Za-z0-9_-]+")
 COPY = re.compile(r"\bcopy of (\S+?):\s(.*?)\s*$")
 TRAILING = ".,;:)"
+RULE_HOME = re.compile(r"rule:([a-z0-9][a-z0-9-]*)")  # a rule home, as lint/check_ruling_kind.py home_problem reads it
+RULE_ANCHOR = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")  # copy of check_ruling_kind.ANCHOR_RE: that file runs on import, so it cannot be imported
+RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")  # copy of check_ruling_kind.RULE_FILES
 
 
 def _closed():
@@ -123,6 +126,18 @@ def _clean(word):
     return word.rstrip(TRAILING).strip("`'\"").rstrip(TRAILING)
 
 
+def _rule_anchors(root):
+    """Every rule id anchored in the rule files under root."""
+    ids = set()
+    for rel in RULE_FILES:
+        try:
+            with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as handle:
+                ids.update(RULE_ANCHOR.findall(handle.read()))
+        except (OSError, UnicodeDecodeError):
+            pass
+    return ids
+
+
 def _home_held(line, reads):
     found = HOME.search(line)
     if not found:
@@ -131,6 +146,9 @@ def _home_held(line, reads):
     value = home._unwrap(found.group(1))
     if value == home.PROCESS_ONLY:
         return TRUE
+    rule = RULE_HOME.fullmatch(value)
+    if rule:  # ruling_home.value_resolves has no rule: form (a Stop guard, left as is); check_ruling_kind accepts it, so the runner reads it here
+        return TRUE if rule.group(1) in _rule_anchors(reads.root) else STALE
     step = guard.STEP_HOME.fullmatch(value)
     if step:
         value = guard.STEP_PATH % step.group(1)
