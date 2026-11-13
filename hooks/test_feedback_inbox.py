@@ -3437,8 +3437,8 @@ def model_failure_retry_checks(label, first, reason=None):
     `first` is the stub option for it (error=, answer= or raises=), and `reason`, when given, is the text
     its note carries in brackets; None checks only the note's prefix, for a case whose cause text the
     builder chooses. The note flags nothing and blocks nothing. The item stays unjudged, so the next Stop
-    calls the model for it again, and a good answer marks it. The retry is a lane choice pending the
-    owner (decision owner-feedback-inbox)."""
+    calls the model for it again, and a good answer marks it. The retry follows owner ruling, 10:57 CST
+    Nov 13, item 664 (decision owner-feedback-inbox)."""
     root = repeat_repo(label, step=True)
     cfg, sid = new_cfg(), label
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3470,9 +3470,8 @@ def model_failure_retry_checks(label, first, reason=None):
 def case_repeat_model_error_leaves_items_unjudged_and_retries():
     """Any Stop where the model gave no usable verdict, an invoke_model error or an off-shape answer
     (judge() returns why), leaves the new items out of the turn state's `judged`, so the next Stop
-    retries them. An item that got a verdict is judged as today.
-    Lane choice pending the owner: no ruling found covers the retry or what counts as a model error
-    (decision owner-feedback-inbox).
+    retries them. An item that got a verdict is judged. The retry follows owner ruling, 10:57 CST Nov 13,
+    item 664 (decision owner-feedback-inbox).
     This case is an invoke_model error. The first Stop makes one call, flags nothing, blocks nothing
     and says one systemMessage line. The item is not marked and not in `judged`. The next Stop calls
     the model once for it, and a good answer marks it."""
@@ -3480,24 +3479,25 @@ def case_repeat_model_error_leaves_items_unjudged_and_retries():
 
 
 def case_repeat_off_shape_answer_leaves_items_unjudged_and_retries():
-    """An off-shape answer is a model error, so it takes the same lane choice pending the owner as
-    case_repeat_model_error_leaves_items_unjudged_and_retries. This case: the model replies, but the
-    answer's `repeats` is not a list (REPEAT_SHAPE), so judge() returns why "odd answer". The same
-    steps follow: one note, the item unmarked and not in `judged`, and the next Stop judges it."""
+    """An off-shape answer gives no usable verdict, so it takes the same retry as
+    case_repeat_model_error_leaves_items_unjudged_and_retries (owner ruling, 10:57 CST Nov 13, item 664).
+    This case: the model replies, but the answer's `repeats` is not a list (REPEAT_SHAPE), so judge()
+    returns why "odd answer". The same steps follow: one note, the item unmarked and not in `judged`,
+    and the next Stop judges it."""
     model_failure_retry_checks("repeat-offshape", dict(answer=json.dumps({"repeats": "none"})), "odd answer")
 
 
 def case_repeat_raise_leaves_items_unjudged_and_retries():
     """The model call raises before any verdict, so the Stop keeps the items out of `judged`. The next
-    Stop calls the model for them again. Lane choice pending the owner: the retry (decision
-    owner-feedback-inbox)."""
+    Stop calls the model for them again. The retry follows owner ruling, 10:57 CST Nov 13, item 664
+    (decision owner-feedback-inbox)."""
     model_failure_retry_checks("repeat-raise", dict(raises="pipe broke"), "pipe broke")
 
 
 def case_repeat_mark_failure_after_verdict_keeps_items_judged():
-    """An exception in mark_items, after the model gave a verdict, keeps the items judged. No ruling is
-    cited for this split. Green on the code this branch starts from, by design: it pins
-    the split that the fix must keep. The stub makes the inbox's temp file a directory, so the guard's
+    """An exception in mark_items, after the model gave a verdict, keeps the items judged. Judging is
+    checked first and marking second, so a mark failure does not resend the items (owner ruling,
+    10:57 CST Nov 13, item 666). The stub makes the inbox's temp file a directory, so the guard's
     write in mark_items raises (IsADirectoryError on Linux, PermissionError on Windows)."""
     root = repeat_repo("repeat-mark-fail", step=True)
     cfg, sid = new_cfg(), "repeat-mark-fail"
@@ -3518,24 +3518,24 @@ def case_repeat_mark_failure_after_verdict_keeps_items_judged():
 
 def case_repeat_malformed_entry_leaves_items_unjudged_and_retries():
     """An answer entry that is not an object gives no verdict. The item stays unjudged, with one note
-    line, and the next Stop retries it. Lane choice pending the owner: the retry (decision
-    owner-feedback-inbox)."""
+    line, and the next Stop retries it. The retry follows owner ruling, 10:57 CST Nov 13, item 664
+    (decision owner-feedback-inbox)."""
     answer = json.dumps({"repeats": ["%s inbox:s1" % ITEM_ID]})
     model_failure_retry_checks("repeat-malformed", dict(answer=answer))
 
 
 def case_repeat_unknown_ref_leaves_items_unjudged_and_retries():
     """A well-formed entry that names a ref which is not a candidate gives no verdict. The item stays
-    unjudged, with one note line, and the next Stop retries it. Lane choice pending the owner: the
-    retry (decision owner-feedback-inbox)."""
+    unjudged, with one note line, and the next Stop retries it. The retry follows owner ruling,
+    10:57 CST Nov 13, item 664 (decision owner-feedback-inbox)."""
     answer = json.dumps({"repeats": [{"id": ITEM_ID, "ref": "roadmap:no-such-step"}]})
     model_failure_retry_checks("repeat-unknown-ref", dict(answer=answer))
 
 
 def case_repeat_unknown_id_leaves_items_unjudged_and_retries():
     """A well-formed entry that names an id which is not a new item gives no verdict. The item stays
-    unjudged, with one note line, and the next Stop retries it. Lane choice pending the owner: the
-    retry (decision owner-feedback-inbox)."""
+    unjudged, with one note line, and the next Stop retries it. The retry follows owner ruling,
+    10:57 CST Nov 13, item 664 (decision owner-feedback-inbox)."""
     answer = json.dumps({"repeats": [{"id": "fb-0958-9", "ref": REPEAT_REF}]})
     model_failure_retry_checks("repeat-unknown-id", dict(answer=answer))
 
@@ -3568,16 +3568,17 @@ def two_failing_stops_checks(label, first, second):
 
 def case_repeat_two_failing_stops_retry_then_third_judges():
     """Two failing Stops in a row each make one model call, and the item stays unjudged after both.
-    The two failures are a raise, then an unknown ref. Lane choice pending the owner: the retry
-    (decision owner-feedback-inbox)."""
+    The two failures are a raise, then an unknown ref. The retry follows owner ruling, 10:57 CST Nov 13,
+    item 664 (decision owner-feedback-inbox)."""
     two_failing_stops_checks("repeat-two-fail", dict(raises="pipe broke"),
                              dict(answer=json.dumps({"repeats": [{"id": ITEM_ID, "ref": "roadmap:no-such-step"}]})))
 
 
 def case_repeat_two_model_errors_retry_then_third_judges():
     """Control for case_repeat_two_failing_stops_retry_then_third_judges: two invoke_model errors in a row.
-    The retry on an invoke_model error is already in the code, so this case is green by design. Lane
-    choice pending the owner: the retry (decision owner-feedback-inbox)."""
+    Its retry is the one the code runs for an invoke_model error, so a red on the sibling case points at
+    the raise or unknown-ref path, not at the two-Stop flow. The retry follows owner ruling, 10:57 CST
+    Nov 13, item 664 (decision owner-feedback-inbox)."""
     two_failing_stops_checks("repeat-two-error", dict(error="timed out after 45 s"),
                              dict(error="timed out after 45 s"))
 
@@ -3588,10 +3589,10 @@ def prompt_item_ids(prompt):
 
 
 def case_repeat_stop_sends_at_most_repeat_batch_items():
-    """One Stop sends at most REPEAT_BATCH new items in its prompt. The cap of 20 is a lane choice
-    pending the owner, with no ruling found (decision owner-feedback-inbox). The test reads the
-    constant from the guard, with 20 as the fallback. The items a Stop sends are judged. The rest stay
-    out of `judged` and go in the next Stop's one call."""
+    """One Stop sends at most REPEAT_BATCH new items in its prompt. The cap of 20 follows owner ruling,
+    10:57 CST Nov 13, item 665 (decision owner-feedback-inbox). The test reads the constant from the
+    guard, with 20 as the fallback. The items a Stop sends are judged. The rest stay out of `judged` and
+    go in the next Stop's one call."""
     cap = getattr(guard_module(), "REPEAT_BATCH", 20)
     ids = ["fb-0958-%d" % n for n in range(1, cap + 6)]
     root = repeat_repo("repeat-batch", step=True)
