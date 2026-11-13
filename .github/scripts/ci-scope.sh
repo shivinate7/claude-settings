@@ -8,7 +8,7 @@
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on a ready pull request from a `batch-` branch (the integration PR: its run is the
-# all-flags run that the push skip reads, .github/scripts/push-skip.py), on an unreadable diff, on a change to this
+# all-flags run that the push skip reads, actions/push-skip/push-skip.py), on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u

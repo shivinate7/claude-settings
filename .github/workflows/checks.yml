@@ -63,11 +63,12 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: python3 .github/scripts/nightly-skip.py
 
-  # The push skip job (R62, step ci-linux-windows-once; decision test-strategy-reset). It says skip when the push commit's tree equals the
-  # tree of a batch-* PR head whose ready run passed all-jobs-passed (.github/scripts/push-skip.py): that run already ran every job, the
-  # Windows full shards included. Scope waits on it, so a skip reaches every job through needs and the run is a completed success:
-  # nothing is cancelled, since a cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything.
-  # Push only; no other event runs it. Reads per push: the PR list, then per integration PR head its commit and its check runs (unmeasured).
+  # The push skip job (decision push-skip-on-proven-tree; R62, step ci-linux-windows-once). It says skip when the push commit's tree
+  # equals the head tree of a PR the commit belongs to (a batch-* PR, or a merged lone-lane PR) whose run was full: all-jobs-passed and
+  # every suite job succeeded, no suite step skipped by scope (the shared action actions/push-skip). That run already ran every job.
+  # Scope waits on it, so a skip reaches every job through needs and the run is a completed success: nothing is cancelled, since a
+  # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. The nightly is the check on
+  # what a PR run scoped out. Push only; no other event runs it. Reads per push: the PR list, per head its commit, and per matching head its runs (unmeasured).
   push-skip:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
@@ -77,6 +78,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
+      actions: read
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
@@ -86,13 +88,13 @@ jobs:
 
       - name: Decide whether the push can skip
         id: decide
-        shell: bash
+        uses: $/actions/push-skip
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.sha }}
           PUSH_TREE: ${{ github.event.head_commit.tree_id }}
-        run: python3 .github/scripts/push-skip.py
+          EVENT: ${{ github.event_name }}
 
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
