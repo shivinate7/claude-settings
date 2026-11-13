@@ -5316,6 +5316,67 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         line = "It did not fail on it.2 failures are pre-existing."
         self.assert_blocked(line, line)
 
+    def test_pe_red_not_yet_and_yet_to_hedges_are_no_claim(self):
+        # A negator before "yet" sits in the claim's clause, so the claim is exempt. The clause cut at "yet" separates the
+        # negator from the claim, so each hedge is refused.
+        rows = [
+            # Catches: "not" before "yet confirmed" is cut from the claim after "yet", so the hedge is refused.
+            "I have not yet confirmed the failure is pre-existing.",
+            # Catches: "yet to" is cut at "yet", so the negator "yet to" never reaches the claim after it.
+            "I have yet to confirm the failure is pre-existing.",
+            # Catches: "not" before "yet confirmed as" is cut from the claim after "yet", so the hedge is refused.
+            "The failure is not yet confirmed as pre-existing.",
+            # Catches: "not" before "yet been shown" is cut from the claim after "yet", so the hedge is refused.
+            "The failure has not yet been shown to be pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_yet_before_say_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "say" cuts the clause, so "cannot" never reaches the claim after it.
+        self.assert_allowed("I cannot yet say the failure is pre-existing.")
+
+    def test_pe_red_yet_before_known_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "known" cuts the clause ("known" is no participle), so "not" never reaches the claim.
+        self.assert_allowed("The failure is not yet known to be pre-existing.")
+
+    def test_pe_red_yet_before_know_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "know" cuts the clause, so "don't" never reaches the claim after it.
+        self.assert_allowed("We don't yet know the failure is pre-existing.")
+
+    def test_pe_red_yet_before_sure_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the adjective "sure" cuts the clause, so "not" never reaches the claim after it.
+        self.assert_allowed("I am not yet sure whether the failure is pre-existing.")
+
+    def test_pe_red_yet_before_that_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "that" cuts the clause, so "no" never reaches the claim after it.
+        self.assert_allowed("I have no proof yet that the failure is pre-existing.")
+
+    def test_pe_red_as_yet_is_a_hedge_not_a_claim(self):
+        # Catches: "as" before "yet", then "yet" itself, cut the clause, so "not" never reaches the claim after them.
+        self.assert_allowed("I have not established as yet that the failure is pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_by_a_later_be_verb(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_when_while_follows(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red while main is red.")
+
+    def test_pe_red_as_being_is_no_clause_cut(self):
+        # Catches: "as" before "being" opens a clause, so the negator "did not" never reaches the claim after it.
+        self.assert_allowed("I did not confirm the failure as being pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_and_unrelated_is_no_clause_cut(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and unrelated to my change.")
+
+    def test_pe_red_dotted_pascal_name_in_a_claim_ends_no_clause(self):
+        # Catches: the period in Console.WriteLine cuts the clause, so "is pre-existing" loses the "not" before it.
+        self.assert_allowed("I have not confirmed the failure in Console.WriteLine is pre-existing.")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_pe_green_brief_control_on_main_at_sha_passes(self):

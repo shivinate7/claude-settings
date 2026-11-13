@@ -376,6 +376,12 @@ class ClauseCutTests(unittest.TestCase):
         self.assertEqual(sentence[found[1].start:found[1].end], claim, "clauses: the clause after the glued period is wrong")
         self.assertFalse(found[1].negated, "negated: the negator before the glued period reaches the claim in %r" % sentence)
 
+    def test_a_dot_inside_a_file_or_version_name_cuts_no_clause(self):
+        # Catches: every period with no space after it cuts a clause, so report_guard.py and v1.2 split in two.
+        for sentence in ("Lint fails in report_guard.py on main too.", "It fails at v1.2 on main too."):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(len(parse(sentence)), 1, "clauses: a dot inside a token cut the clause")
+
     def test_a_glued_period_after_a_code_span_ends_a_clause(self):
         # Catches: a period after a code span cuts no clause, so "did not" reaches the claim after it. The span is masked.
         sentence = "It did not fail on `main`.The failure is pre-existing."
@@ -401,6 +407,17 @@ class ClauseCutTests(unittest.TestCase):
     def test_a_glued_period_before_a_digit_after_a_letter_ends_a_clause(self):
         # Catches: a period between a letter and a digit cuts no clause, so "did not" reaches the claim after it.
         self.assert_glued_cut("It did not fail on it.2 failures are pre-existing.", "2 failures are pre-existing")
+
+    def test_a_dotted_pascal_name_cuts_no_clause(self):
+        # Catches: the period in a dotted name (Console.WriteLine, Foo.Bar) cuts the clause, so the name splits in two.
+        for sentence, reason in (("I could not push because Console.WriteLine returned 403.",
+                                  "because Console.WriteLine returned 403"),
+                                 ("I could not push because Foo.Bar is red.", "because Foo.Bar is red")):
+            with self.subTest(sentence=sentence):
+                found = parse(sentence)
+                self.assertEqual(len(found), 2, "clauses: the dotted name cut the clause")
+                self.assertEqual(sentence[found[1].start:found[1].end], reason, "clauses: the reason clause is wrong")
+
 
 class LeadOpensClauseTests(unittest.TestCase):
     """_clause.lead_opens_clause: whether a lead-in word opens a clause of its own. "as" and "yet" double as other words,
@@ -573,6 +590,11 @@ class ReasonTests(unittest.TestCase):
                          "reasons: one because clause gives no reason")
         self.assertEqual(clause.reasons("I can't merge PR 12 because the branch is protected. Also because the CI is red."),
                          ["the branch is protected", "the CI is red"], "reasons: the second sentence's reason is lost")
+
+    def test_a_dotted_pascal_name_stays_inside_its_reason(self):
+        # Catches: the period in a dotted name ends the reason, so "Console" alone is read and no verb reaches it.
+        self.assertEqual(clause.reasons("I could not push because Console.WriteLine returned 403."),
+                         ["Console.WriteLine returned 403"], "reasons: the dotted name cut the reason")
 
     def test_a_plain_name_stays_inside_its_reason_control(self):
         # Control: the same reason with no dot reads whole on the current code, and stays whole.
