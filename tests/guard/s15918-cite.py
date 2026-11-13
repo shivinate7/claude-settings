@@ -1,5 +1,6 @@
 # section 15918
 FAMILY = "cite"
+# =========================================================================== 5d. cite by id
 #
 # `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
 # path, the word "decisions", a read of a record and a record's own file stay allowed.
