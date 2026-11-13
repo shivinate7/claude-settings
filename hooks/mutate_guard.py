@@ -4510,12 +4510,18 @@ def lint_suites_main(argv) -> int:
     return 0
 
 
+SUITE_TIMEOUT = 3600  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+
+
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
     """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines,
     ERROR lines from `mutate_shared.diagnostic_lines`).
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
-    to know whether stage 1 ran the required case."""
+    to know whether stage 1 ran the required case.
+
+    A suite that outlives SUITE_TIMEOUT is killed, and the return is (None, [], [], ["CRASHED: suite timed
+    out after <N>s"]). A timeout is a crash: not a kill, and not a survivor."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
@@ -4531,12 +4537,16 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
+    timeout = SUITE_TIMEOUT  # read at call time, so a test can patch the module constant
     with tempfile.TemporaryFile() as errors:
-        result = _nowindow.run(
-            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-        )
+        try:
+            result = _nowindow.run(
+                # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+                [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+                env=env, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return None, [], [], ["CRASHED: suite timed out after %ss" % timeout]
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
@@ -4712,6 +4722,10 @@ def run_mutant(sources, work: str, entry):
     when not None, is why this mutant did not run on this platform at all: the caller reports it
     and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
     judges it against its target's clean-layout control (`run_controls`).
+
+    A suite that timed out (`run_suite` returns code None) is run once only: stage 2 reads that result
+    and does not run the hung suite again. The result then carries a seventh field, "crashed: suite timed
+    out", which `run_mutants` reads as the UNKNOWN reason. A crash is neither a kill nor a survivor.
     """
     label, old, new, target, required, only_on = mutation_parts(entry)
     if required is None:
@@ -4723,8 +4737,19 @@ def run_mutant(sources, work: str, entry):
     copy_path = lay_out(sources, work, target, label, old, new)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red, seen = mutate_shared.staged_suite_seen(
-        lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
+    timed_out = []  # the timed-out result, once a run has hung: later calls return it, never run the suite again
+
+    def run_once(only):
+        if timed_out:
+            return timed_out[0]
+        result = run_suite(suite, variable, copy_path, config_dir, only)
+        if result[0] is None:
+            timed_out.append(result)
+        return result
+
+    code, red, seen = mutate_shared.staged_suite_seen(run_once, required)
+    if code is None:
+        return label, code, red, required, None, seen, "crashed: suite timed out"
     return label, code, red, required, None, seen
 
 
