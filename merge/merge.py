@@ -4596,12 +4596,13 @@ LOST_WORK_DONE_HOURS = 6  # a done record older than this, in no batch: state a 
 LOST_WORK_IDLE_HOURS = 12  # a lane idle longer than this with no record: state c
 LOST_WORK_REFS = "refs/lost-work/"  # a private namespace for the branch list: --prune here cannot reach the refs/remotes/origin/pull/* that holds_head fetches
 
-def lost_work_branches(h, open_refs, open_numbers=()):
+def lost_work_branches(h, open_refs):
     """-> (branches, why): each branch of origin that state f lists, as {name, sha, ahead, age_h}, by name; `why` is None, or the reason the list was not read
     (then no branch). f: ahead of the base, and none of these: the base, an `archive/` branch, a batch integration branch (BATCH_PREFIX), a branch with an
-    `archive/<name>` copy (its work was filed away), a branch named by an open pull request's head ref (`open_refs`), a branch whose tip an open pull
-    request (`open_numbers`) already holds. One fetch (Host.fetch_lost_work_refs), three for-each-refs (the branches the base does not hold, the archive
-    copies, the pull request heads), one rev-list walk of the open pull request heads, then one rev-list count per branch left; no gh call."""
+    `archive/<name>` copy (its work was filed away), a branch named by an open pull request's head ref (`open_refs`), a branch whose tip a pull request
+    of any state (open, closed or merged) holds, read from its refs/pull/N/head. One fetch (Host.fetch_lost_work_refs), three for-each-refs (the branches
+    the base does not hold, the archive copies, the pull request heads), one rev-list walk of every pull request head past the base, then one rev-list
+    count per branch left; no gh call. One walk, because a `git branch --contains` per branch timed out on thousands of branches."""
     root = h.cwd or "."
     fetched = h.fetch_lost_work_refs()
     if fetched[0]:
@@ -4618,12 +4619,12 @@ def lost_work_branches(h, open_refs, open_numbers=()):
     code, listed = git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/pull/")
     if code:
         return [], f"git could not list the pull request heads: {' '.join(listed.split())[:300]}"
-    open_heads = [r for r in listed.splitlines() if r.rpartition("/")[2].isdigit() and int(r.rpartition("/")[2]) in open_numbers]
-    held = set()  # every commit an open pull request holds: a branch tip in it is already under review. One walk, not one read per branch
-    if open_heads:
-        code, walked = git(root, "rev-list", "--stdin", input="\n".join(open_heads) + "\n")
+    pull_heads = [r for r in listed.splitlines() if r.rpartition("/")[2].isdigit()]
+    held = set()  # every commit past the base that a pull request of any state holds: a branch tip in it was already put up for review. One walk, not one read per branch
+    if pull_heads:
+        code, walked = git(root, "rev-list", "--stdin", input="\n".join(pull_heads + [f"^{LOST_WORK_REFS}{h.base}"]) + "\n")
         if code:
-            return [], f"git could not read the commits the open pull requests hold: {' '.join(walked.split())[:300]}"
+            return [], f"git could not read the commits the pull requests hold: {' '.join(walked.split())[:300]}"
         held = set(walked.split())
     found = []
     for line in out.splitlines():
@@ -4739,7 +4740,7 @@ def lost_work_rows(h, pulls, facts, failed, live, found=None):
         unknown = unknown or any(key == "unknown" for key, _text in rows)
         if found is not None:
             found += [{"pr": n, "key": key, "step": step_of(ref), "sha": d["head"]["sha"]} for key, _text in rows]
-    branches, branch_why = lost_work_branches(h, {d["head"]["ref"] for d in pulls}, {d["number"] for d in pulls})
+    branches, branch_why = lost_work_branches(h, {d["head"]["ref"] for d in pulls})
     if branch_why:
         out.append(f"lost-work branches unknown: {branch_why}; owner {LOST_WORK_UNKNOWN_OWNER}")
         unknown = True
