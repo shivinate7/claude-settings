@@ -9,6 +9,9 @@ never the network: PUSH_TREE, the push commit's tree sha, and PRS_JSON, a JSON l
 The wiring cases read checks.yml: the push-skip job decides in a step with id decide, outputs skip, is push-only, and scope
 needs it, so every other job skips through needs as nightly-skip does for scope.
 
+The live cases answer the GitHub reads through FakeGitHub, by URL, as the API does. A ready batch head skips the push only when
+every suite job of checks.yml succeeded on that head's ready run, not only when all-jobs-passed passed.
+
     python3 lint/test_push_skip.py
 """
 import contextlib
@@ -21,13 +24,14 @@ import shutil
 import subprocess
 import sys
 import unittest
+import urllib.parse
 import uuid
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import CHECKS, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
-from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
+from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,10 +39,21 @@ PUSH_SKIP = os.path.join(ROOT, ".github", "scripts", "push-skip.py")
 RUN_FOLDER = _test_temp.run_folder()  # one run folder per test run; teardown removes it
 
 JOB = "push-skip"
+REPO = "owner/repo"
 TREE = "a" * 40  # the push commit's tree
 OTHER_TREE = "b" * 40
 BATCH = "batch-lane-x"
 SCRIPT_MISSING = "push-skip.py is missing at .github/scripts/push-skip.py, so no decision sets the push skip"
+
+# The suite jobs: the jobs a ready pull request run is meant to run, read from checks.yml by the one reader (split_jobs, whose
+# needed list is all-jobs-passed's needs). Bookkeeping is not a suite: scope decides, push-skip and nightly-skip never run on a
+# pull request, and all-jobs-passed and ci-done are the fan-in. A new suite job in checks.yml is in SUITE_JOBS with no edit here.
+with open(CHECKS, encoding="utf-8") as _handle:
+    CHECKS_TEXT = _handle.read()
+NEEDED_JOBS, OFF_ON_PR, _SPLIT_PROBLEMS = split_jobs(CHECKS_TEXT)
+BOOKKEEPING = {"scope", ALL_JOBS_PASSED_JOB, FAN_IN, PUSH_SKIP_JOB, NIGHTLY_SKIP_JOB}
+SUITE_JOBS = sorted(name for name in NEEDED_JOBS if name not in BOOKKEEPING)
+ALL_RUN_JOBS = sorted(all_jobs(CHECKS_TEXT))  # every job of checks.yml is one check run on a pull request run
 
 
 def pr(tree=TREE, branch=BATCH, conclusion="success", status="completed"):
@@ -142,9 +157,77 @@ def load_script():
     return module
 
 
-def check_run(conclusion="success", status="completed", started_at=EARLY):
-    """One all-jobs-passed check run in the shape the GitHub read returns."""
-    return {"name": ROLLUP_NAME, "status": status, "conclusion": conclusion, "started_at": started_at}
+def check_run(conclusion="success", status="completed", started_at=EARLY, name=ROLLUP_NAME):
+    """One check run in the shape the GitHub read returns: all-jobs-passed by default, or the job `name` of a suite."""
+    return {"name": name, "status": status, "conclusion": conclusion, "started_at": started_at}
+
+
+def ready_head_runs(changes=None, extra=()):
+    """The check runs of a ready batch head, one per job of checks.yml, as GitHub lists them: every job succeeded, and the jobs that
+    never run on a pull request are skipped. `changes` maps a job name to the check_run keyword arguments it gets instead, or to None
+    to leave that job's run out. `extra` adds runs of the same names, such as a re-run."""
+    runs = {name: check_run(name=name, conclusion="skipped" if name in OFF_ON_PR else "success") for name in ALL_RUN_JOBS}
+    for name, change in (changes or {}).items():
+        if change is None:
+            runs.pop(name, None)
+        else:
+            runs[name] = check_run(name=name, **change)
+    return list(runs.values()) + list(extra)
+
+
+class FakeGitHub:
+    """The GitHub reads push-skip makes, answered by URL the way the API answers them: the batch head's pull request list, its
+    commit, and its check runs. check_name filters the runs, and per_page (default 30) and page cut them. `fail` is raised by every
+    check-runs read. A URL no case expects goes to `unexpected`, which the case asserts empty."""
+
+    def __init__(self, runs, fail=None):
+        self.runs = runs
+        self.fail = fail
+        self.unexpected = []
+
+    def __call__(self, url, token):
+        parts = urllib.parse.urlsplit(url)
+        prefix = "/repos/%s/" % REPO
+        path = parts.path[len(prefix):] if parts.path.startswith(prefix) else parts.path
+        query = urllib.parse.parse_qs(parts.query)
+        if path == "commits/%s/pulls" % SHA:
+            return [{"head": {"ref": BATCH, "sha": HEAD}}]
+        if path == "git/commits/%s" % HEAD:
+            return {"tree": {"sha": TREE}}
+        if path == "commits/%s/check-runs" % HEAD:
+            if self.fail is not None:
+                raise self.fail
+            runs = self.runs
+            if "check_name" in query:
+                runs = [run for run in runs if run["name"] == query["check_name"][0]]
+            per_page = int(query.get("per_page", ["30"])[0])
+            page = int(query.get("page", ["1"])[0])
+            return {"check_runs": runs[(page - 1) * per_page:page * per_page]}
+        self.unexpected.append(path)
+        return {}
+
+
+class LiveHead(unittest.TestCase):
+    """main() on the live reads, each answered by FakeGitHub: no network, no stand-in. Returns the one skip value written and the text
+    printed."""
+
+    def skip_on(self, runs=None, fake=None):
+        self.assertTrue(os.path.isfile(PUSH_SKIP), SCRIPT_MISSING)
+        module = load_script()
+        fake = fake if fake is not None else FakeGitHub(runs)
+        out = os.path.join(RUN_FOLDER, "output-%s" % uuid.uuid4().hex)
+        env = {"GH_TOKEN": "t", "REPO": REPO, "HEAD_SHA": SHA, "PUSH_TREE": TREE, "GITHUB_OUTPUT": out}
+        printed = io.StringIO()
+        with mock.patch.object(module._nightly_skip(), "api_get", side_effect=fake), contextlib.redirect_stdout(printed):
+            code = module.main(env)
+        self.assertEqual(fake.unexpected, [], "the script read a path no case expects, so the case cannot judge it")
+        self.assertEqual(code, 0, "main exits %d, so the push job fails on the decision" % code)
+        skips = []
+        if os.path.isfile(out):
+            with open(out, encoding="utf-8") as f:
+                skips = [line.strip()[len("skip="):] for line in f if line.startswith("skip=")]
+        self.assertEqual(len(skips), 1, "one skip line must be written, got %s" % skips)
+        return skips[0], printed.getvalue()
 
 
 class ReadStub:
@@ -202,10 +285,12 @@ class RollupResult(unittest.TestCase):
 
 class ReadHeads(unittest.TestCase):
     def github_answers(self, runs):
+        # The head's suite runs are green here, so the all-jobs-passed runs given decide the read alone (the suite read is in SuiteRunsOfTheHead).
+        suites = [check_run(name=name) for name in SUITE_JOBS]
         return {
             "commits/%s/pulls" % SHA: [{"head": {"ref": BATCH, "sha": HEAD}}, {"head": {"ref": "lane-y", "sha": LANE_HEAD}}],
             "git/commits/%s" % HEAD: {"tree": {"sha": TREE}},
-            "commits/%s/check-runs" % HEAD: {"check_runs": runs},
+            "commits/%s/check-runs" % HEAD: {"check_runs": list(runs) + suites},
         }
 
     def read(self, answers):
@@ -292,6 +377,80 @@ class LiveReadErrors(unittest.TestCase):
         self.assertEqual(skips, ["skip=false"], "an incomplete read of a batch head's commit must write skip=false")
         self.assertEqual(code, 0, "an incomplete read of a batch head's commit must exit 0")
         self.assertIn("unknown", text.lower(), "an incomplete read of a batch head's commit must say unknown")
+
+
+class SuiteRunsOfTheHead(LiveHead):
+    """The live read of a ready batch head's check runs. The push skips only when every suite job of checks.yml succeeded on that
+    head's ready run, and all-jobs-passed alone does not decide it. Each case gives the head's runs to FakeGitHub."""
+
+    def test_a_head_whose_every_suite_job_succeeded_skips_the_push(self):
+        runs = ready_head_runs()
+        self.assertGreater(len(runs), 30, "the head must hold more check runs than GitHub's default page of 30, so the read must reach past it")
+        value, text = self.skip_on(runs)
+        self.assertEqual(value, "true", "every suite job succeeded on the ready run and the jobs off a pull request are skipped: skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_a_head_whose_suite_jobs_were_all_skipped_does_not_skip_the_push_though_all_jobs_passed_is_green(self):
+        value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"} for name in SUITE_JOBS}))
+        self.assertEqual(value, "false", "every suite job skipped on the ready run, so no suite ran on this tree: skip=false")
+
+    def test_one_suite_job_skipped_among_successes_does_not_skip_the_push(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
+        self.assertEqual(value, "false", "%s skipped on the ready run while the other suites succeeded: skip=false" % name)
+
+    def test_one_suite_job_still_queued_does_not_skip_the_push(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        value, _ = self.skip_on(ready_head_runs({name: {"conclusion": None, "status": "queued", "started_at": None}}))
+        self.assertEqual(value, "false", "%s is still queued on the ready run, so its suite has not passed: skip=false" % name)
+
+    def test_one_suite_job_missing_from_the_ready_run_does_not_skip_the_push(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        value, _ = self.skip_on(ready_head_runs({name: None}))
+        self.assertEqual(value, "false", "%s has no run on the ready run, so its suite never ran: skip=false" % name)
+
+    def test_a_suite_job_that_failed_or_was_cancelled_does_not_skip_the_push(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        for conclusion in ("failure", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                value, _ = self.skip_on(ready_head_runs({name: {"conclusion": conclusion}}))
+                self.assertEqual(value, "false", "%s ended %s on the ready run: skip=false" % (name, conclusion))
+
+    def test_a_suite_job_re_run_to_failure_does_not_skip_the_push_on_its_older_success(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        runs = ready_head_runs({name: {"conclusion": "failure", "started_at": LATE}}, extra=[check_run(name=name, started_at=EARLY)])
+        value, _ = self.skip_on(runs)
+        self.assertEqual(value, "false", "%s was re-run and the newer run failed, so the older success stands for nothing: skip=false" % name)
+
+    def test_every_suite_job_of_checks_yml_is_required_for_the_skip(self):
+        self.assertTrue(SUITE_JOBS, "the reader derived no suite job from checks.yml, so this case would prove nothing")
+        for name in SUITE_JOBS:
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
+                self.assertEqual(value, "false", "%s is a suite job of checks.yml but skipping it still gives skip=true" % name)
+
+    def test_a_head_with_no_check_runs_does_not_skip_the_push(self):
+        value, _ = self.skip_on([])
+        self.assertEqual(value, "false", "a head with no check runs has no run that passed: skip=false")
+
+    def test_a_draft_batch_head_whose_runs_were_all_skipped_does_not_skip_the_push(self):
+        draft = ready_head_runs({name: {"conclusion": "skipped"} for name in ALL_RUN_JOBS})
+        value, _ = self.skip_on(draft)
+        self.assertEqual(value, "false", "the draft run skipped every job, and a skipped run is no result: skip=false")
+
+    def test_a_cancelled_all_jobs_passed_does_not_skip_the_push_though_every_suite_job_succeeded(self):
+        value, _ = self.skip_on(ready_head_runs({ALL_JOBS_PASSED_JOB: {"conclusion": "cancelled"}}))
+        self.assertEqual(value, "false", "all-jobs-passed was cancelled on the ready run, so the run did not pass: skip=false")
+
+    def test_a_check_run_read_that_fails_does_not_skip_the_push(self):
+        value, text = self.skip_on(fake=FakeGitHub(ready_head_runs(), fail=http.client.IncompleteRead(b"partial")))
+        self.assertEqual(value, "false", "the check-runs read failed, so the suite evidence is unknown: skip=false")
+        self.assertIn("unknown", text.lower(), "the check-runs read failed, so the script must say unknown")
 
 
 class PushSkipWiring(unittest.TestCase):
