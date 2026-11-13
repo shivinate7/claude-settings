@@ -20,7 +20,7 @@ The owner could not see or overrule 19 picks. A pick that stands is only safe wh
 
 - Only a coordinator's send is judged: the session's own record, read from the transcript, holds the tag `cs-build:coordinator`. A lane's send passes.
 - The remedy names the page writer and the waiting-page skill. It does not name the lane as a way round.
-- Cost: a message with no marker reads no transcript. A marker message from a session with an own id costs one own-record read and one transcript read. When the transcript names no writer, it adds the layout's extras-file read. No file written, no process, no timer (rule `outcomes-mechanize-rules`).
+- Cost: a message with no marker reads no transcript. A marker message from a session with an own id costs one own-record read and one transcript read (not pinned: the spy case counts file opens, 0 with no marker and 2 with one). When the transcript names no writer, it adds the layout's extras-file read. No file written, no process, no timer (rule `outcomes-mechanize-rules`).
 - The scanner reads line by line, so a lone quote, backtick or comment opener in prose hides no marker (rule `building-scanner-respects-strings`). A fence with no closing line hides nothing, and a one-line span such as "```a``` note" opens no fence.
 
 Gaps:
