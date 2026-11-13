@@ -1,0 +1,14 @@
+{
+ "id": "ci-alarm-reads-reverts",
+ "title": "The CI alarm (actions/ci-alarm) also reads reverts: it does not open an alarm for a run the merge tool now lifts",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "An alarm for a run the merge tool has already lifted wakes the batch runner for nothing, and an alarm that cries wolf gets ignored.",
+ "source": "Lane red-main-owner-two-picks (session_013NEJL3KFBPuQT45U4xo8mE) 14:50 CST Nov 13, via the coordinator 14:51; owner 745 b (merges resume when the revert merges); ruling R53 (a CI or merge alarm goes to the batch runner).",
+ "note": "Filed 14:51 CST Nov 13 as a TRIAGE PICK, not an owner ruling: no past ruling answers whether the alarm reads reverts (R53 says only that each CI or merge alarm wakes the batch runner; steps ci-alarm-reads-by-event and ci-alarm-read-fail-unknown are the nearest). Pick: yes, as its own lane; the lane (#3267 code, #3268 decision) starts nothing on it. Undo: close the lane and keep the alarm as is. Risk to check: the lane's own note revert-clear-masks-older-break (a revert clearing an older break). Shared tool, so it changes the alarm for every repo, with no per-repo exception. A check's verdict changes: test-author red case first, builder, reviewer. Lane's reading unread by triage.",
+ "updatedAt": "2026-11-13T14:51:14-06:00"
+}
