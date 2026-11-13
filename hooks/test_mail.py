@@ -1781,6 +1781,75 @@ class StatusCommand(MailCase):
                          "status of a taken message ran a write git call: %r" % calls)
         self.assertEqual(store.tip(), before, "status of a taken message moved the mail ref")
 
+    def test_slash_id_of_an_open_nested_message_is_refused_not_open(self):
+        store = self.store()
+        mid = "0a1b2c3d4ec1"
+        folder = "pc/box-one/acme-widgets/sess-x"
+        store.seed(folder, mid, "request", "cloud/sess-a", "Body marker: slash-open\n")
+        self.assertEqual(store.files("mail/%s/" % folder), ["mail/%s/%s.md" % (folder, mid)],
+                         "control: the seeded message is not under its nested folder")
+        caller = self.machine("c", store, session="sess-c")
+        bare = self.status(caller, mid)
+        self.assertEqual(bare.stdout.strip(), "open", "control: the bare id did not read open: exit %d: %s"
+                         % (bare.returncode, combined(bare)))
+        tail = "sess-x/%s" % mid
+        status = self.status(caller, tail)
+        self.assertIn("bad address or id", combined(status), "status of the slash id %r did not say bad address or id: "
+                      "exit %d: %s" % (tail, status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 2, "status of the slash id %r exited %d, expected 2" % (tail, status.returncode))
+        self.assertNotIn("open", status.stdout, "status of the slash id %r printed open: %r" % (tail, status.stdout))
+
+    def test_slash_id_of_a_taken_nested_message_is_refused_not_taken(self):
+        store = self.store()
+        mid = "0a1b2c3d4ec2"
+        folder = "pc/box-one/acme-widgets/sess-x"
+        store.seed(folder, mid, "request", "cloud/sess-a", "Body marker: slash-taken\n", folder="done",
+                   tail="Taken-by: cloud/sess-c %s 0a0b0c10\n" % PINNED_STAMP)
+        self.assertEqual(store.files("done/%s/" % folder), ["done/%s/%s.md" % (folder, mid)],
+                         "control: the seeded done file is not under its nested folder")
+        caller = self.machine("c", store, session="sess-c")
+        bare = self.status(caller, mid)
+        self.assertEqual(bare.stdout.strip(), "taken %s by cloud/sess-c" % PINNED_STAMP,
+                         "control: the bare id did not read taken with its taker: exit %d: %s"
+                         % (bare.returncode, combined(bare)))
+        tail = "sess-x/%s" % mid
+        status = self.status(caller, tail)
+        self.assertIn("bad address or id", combined(status), "status of the slash id %r did not say bad address or id: "
+                      "exit %d: %s" % (tail, status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 2, "status of the slash id %r exited %d, expected 2" % (tail, status.returncode))
+        self.assertNotIn("taken", status.stdout, "status of the slash id %r printed taken: %r" % (tail, status.stdout))
+
+    def test_bare_id_of_a_nested_open_and_taken_message_still_reads_open_and_taken(self):
+        store = self.store()
+        folder = "pc/box-one/acme-widgets/sess-x"
+        open_mid, taken_mid = "0a1b2c3d4ec3", "0a1b2c3d4ec4"
+        store.seed(folder, open_mid, "request", "cloud/sess-a", "Body marker: bare-open\n")
+        store.seed(folder, taken_mid, "request", "cloud/sess-a", "Body marker: bare-taken\n", folder="done",
+                   tail="Taken-by: cloud/sess-c %s 0a0b0c11\n" % PINNED_STAMP)
+        caller = self.machine("c", store, session="sess-c")
+        opened = self.status(caller, open_mid)
+        self.assertEqual(opened.stdout.strip(), "open", "the bare id of a nested open message did not read open: exit %d: %s"
+                         % (opened.returncode, combined(opened)))
+        self.assertEqual(opened.returncode, 0, "the bare id of a nested open message exited %d, expected 0" % opened.returncode)
+        taken = self.status(caller, taken_mid)
+        self.assertEqual(taken.stdout.strip(), "taken %s by cloud/sess-c" % PINNED_STAMP,
+                         "the bare id of a nested taken message did not read taken with its taker: exit %d: %s"
+                         % (taken.returncode, combined(taken)))
+        self.assertEqual(taken.returncode, 0, "the bare id of a nested taken message exited %d, expected 0" % taken.returncode)
+
+    def test_empty_id_is_refused_with_bad_address_or_id_exit_2(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4ec5", "request", "cloud/sess-a", "Body marker: empty-id\n")
+        self.assertEqual(store.files("mail/cloud/sess-b/"), ["mail/cloud/sess-b/0a1b2c3d4ec5.md"],
+                         "control: the seeded message is not in the store")
+        caller = self.machine("c", store, session="sess-c")
+        status = self.status(caller, "")
+        self.assertIn("bad address or id", combined(status), "status of an empty id did not say bad address or id: exit %d: %s"
+                      % (status.returncode, combined(status)))
+        self.assertEqual(status.returncode, 2, "status of an empty id exited %d, expected 2" % status.returncode)
+        self.assertNotIn("open", status.stdout, "status of an empty id printed open: %r" % status.stdout)
+        self.assertNotIn("taken", status.stdout, "status of an empty id printed taken: %r" % status.stdout)
+
 
 class SettingsDefault(unittest.TestCase):
     """The mailbox store is a default of every session: settings.json `env` names it, so no session sets it by hand."""
