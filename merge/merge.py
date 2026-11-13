@@ -4190,12 +4190,12 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record (owner item 741, 2026-11-13 13:29 CST): a passing round, or a
+    The done rules follow roles-review-cap-three and the decision pr-review-record: a passing round, or a
     passing sonnet fix check, ends the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix
     check PASS counts as that round passing (every fix check runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS
     or absent; or Kind is delete-only, Guard or check is no and the first round is done; or Kind is docs-only with no round. Net value negative holds
     the change. A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a delete-only done names it.
-    A failed round is open. After a failed round 2 the builder's third try runs round 3 (a granted round 4 follows it): a failed final round
+    A failed round is open. The builder's third try runs the final round (a Grant line adds one more after it): a failed final round
     is done when Guard or check is no, or when Net value is zero or positive, and open while a guard or check change owes its net value.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
     rounds say. A PASS counts as the last recorded round passing, even when that round failed. With no round recorded it is open."""
@@ -4218,12 +4218,12 @@ def review_state(rec, head):
         return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
-    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # round 3, or a granted round 4, is the final round
+    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # REVIEW_LAST_ROUND is the final round, and a Grant line adds one
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
     passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
     lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
-    if passed and not bad:  # a passing round or fix check ends the review, a guard or check change too (owner item 741)
+    if passed and not bad:  # a passing round or fix check ends the review, a guard or check change too
         return "done", lead
     if top >= final:  # a passing final round is done above, so this reads a failed one
         if rec["guard"] == "no":
