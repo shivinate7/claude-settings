@@ -442,20 +442,26 @@ class IdleLanesCli(unittest.TestCase):
                       "the held tail does not say a lane with no unarchived_epoch field still archives: %r" % out)
 
 
-class SessionTiersArchiveBullet(unittest.TestCase):
+class SessionRolesArchiveBullet(unittest.TestCase):
     """The session-tiers decision's archiving-lanes bullet carries the get_session epoch rule in one sentence."""
 
     ANCHOR = "The batch runner runs get_session on each listed lane alone, then archives it."
+    SKIPS = "It skips and names in its report each case that needs judgment"
+    EPOCH_RULE = ("The batch runner also skips and names a lane whose get_session shows ccr.external_metadata.unarchived_epoch above 0; "
+                  "the live file can lag, and a lane with no field still archives.")
 
     def test_the_archiving_bullet_has_one_sentence_on_the_epoch_rule(self):
         text = DECISION.read_text(encoding="utf-8")
         anchor_lines = [line for line in text.splitlines() if self.ANCHOR in line]
-        # Scope first: the anchor is on one line, the archiving bullet. The epoch sentence is looked for on that line only.
+        # Scope first: the anchor is on one line, the archiving bullet. Each later check reads that line only.
         self.assertEqual(len(anchor_lines), 1, "scope: the archiving anchor is on %d lines of the session-tiers decision, not one" % len(anchor_lines))
-        sentences = [s for s in re.split(r"(?<=\.)\s+", anchor_lines[0]) if "unarchived_epoch" in s]
-        self.assertEqual(len(sentences), 1, "the archiving bullet names unarchived_epoch in %d sentences, not one: %r" % (len(sentences), anchor_lines[0]))
-        for phrase in ("ccr.external_metadata.unarchived_epoch", "above 0", "skip", "get_session", "not the live file", "1 of 1700"):
-            self.assertIn(phrase, sentences[0], "the epoch sentence lacks %r: %r" % (phrase, sentences[0]))
+        line = anchor_lines[0]
+        self.assertIn(self.SKIPS, line, "scope: the archiving bullet lacks the skip-and-name sentence: %r" % line)
+        self.assertIn(self.EPOCH_RULE, line, "the archiving bullet lacks the epoch sentence: %r" % line)
+        self.assertGreater(line.index(self.EPOCH_RULE), line.index(self.SKIPS),
+                           "the epoch sentence does not follow the skip-and-name sentence: %r" % line)
+        sentences = [s for s in re.split(r"(?<=\.)\s+", line) if "unarchived_epoch" in s]
+        self.assertEqual(len(sentences), 1, "the archiving bullet names unarchived_epoch in %d sentences, not one: %r" % (len(sentences), line))
 
 
 if __name__ == "__main__":
